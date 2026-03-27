@@ -369,18 +369,16 @@ STALENESS_DISCOUNTS = {"Fresh": 0.0, "Aging": 0.15, "Stale": 0.30, "Expired": 0.
 
 GAIN_TAX_PCT       = 0.10
 # ── CAPITAL DEPLOYMENT LIMITS ─────────────────────────────────────────────
-# VALIDATION MODE: 20% tradeable / 80% reserve.
-# Intentionally conservative — allows trade execution testing without
-# deploying serious capital. Flip to 80/20 once execution is validated.
+# PRODUCTION: 80% tradeable / 20% reserve.
+# Validation phase (20/80) completed. Flipped per T-01.
 #
-# TODO (post-validation): flip to TRADEABLE_PCT=0.80 / IDLE_RESERVE_PCT=0.20
-# TODO (post-validation): implement idle reserve → BIL sweep
+# TODO (T-02): implement idle reserve → BIL sweep
 #   - Buy BIL (T-bill ETF) with IDLE_RESERVE_PCT of portfolio cash
 #   - Sync on every session after cash reconcile from Alpaca
 #   - Log ledger entry type 'BIL' on buy/sell
 #   - Exclude BIL from position count and P&L tracking
-IDLE_RESERVE_PCT   = 0.80
-TRADEABLE_PCT      = 0.20
+IDLE_RESERVE_PCT   = 0.20
+TRADEABLE_PCT      = 0.80
 MAX_POSITION_PCT   = float(os.environ.get('MAX_POSITION_PCT', '0.10'))
 MAX_SECTOR_CAP_PCT = float(os.environ.get('MAX_SECTOR_PCT', '25'))
 MONTHLY_INFRA_COST = 20.0

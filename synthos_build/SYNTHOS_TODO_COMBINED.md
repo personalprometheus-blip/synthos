@@ -8,7 +8,7 @@
 
 | # | Item | Priority | Notes |
 |---|---|---|---|
-| T-01 | Flip `TRADEABLE_PCT=0.80` / `IDLE_RESERVE_PCT=0.20` | HIGH | Post-validation only. Currently conservative defaults. |
+| ~~T-01~~ | ~~Flip `TRADEABLE_PCT=0.80` / `IDLE_RESERVE_PCT=0.20`~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — Flipped in `agent1_trader.py`. `TRADEABLE_PCT=0.80`, `IDLE_RESERVE_PCT=0.20`. BIL sweep (T-02) still outstanding. |
 | T-02 | Implement idle reserve → BIL sweep | HIGH | Cash held idle instead of swept to BIL. Cash sync from Alpaca is live; BIL logic is the remaining step. |
 | T-03 | Subtract BIL position value from cash before storing | MEDIUM | After BIL sweep is implemented. Required so tradeable math stays correct. See `reconcile_with_alpaca()`. |
 | T-04 | Gmail SMTP path — activate via command portal | LOW | Currently a placeholder. Toggle when Gmail credentials are configured. |
@@ -105,7 +105,7 @@
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 2 | T-01, T-02 (T-06, T-11, T-13 resolved) |
+| HIGH | 1 | T-02 (T-01, T-06, T-11, T-13 resolved) |
 | MEDIUM | 7 | T-03, T-05, T-07, T-08, T-10, T-15, T-16 (T-14 resolved) |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
