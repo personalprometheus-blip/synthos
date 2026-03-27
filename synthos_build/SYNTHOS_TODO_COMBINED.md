@@ -101,12 +101,20 @@
 
 ---
 
+## synthos_monitor.py / company node
+
+| # | Item | Priority | Notes |
+|---|---|---|---|
+| T-21 | Pi comparison log — analyze differences between Pis | MEDIUM | Build a cross-Pi comparison report: signal decisions, member weight divergence, portfolio performance, validation rates, trade outcomes. Surfaces which Pis are behaving differently and why. Feeds Patches morning digest. |
+
+---
+
 ## Summary by Priority
 
 | Priority | Count | Items |
 |---|---|---|
 | HIGH | 0 | all resolved (T-01, T-02, T-06, T-11, T-13) |
-| MEDIUM | 5 | T-07, T-08, T-10, T-15, T-16 (T-03, T-05, T-14 resolved) |
+| MEDIUM | 6 | T-07, T-10, T-15, T-16, T-21 (T-08 resolved) |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
 ---

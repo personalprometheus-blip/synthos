@@ -309,6 +309,31 @@ SEED_ITEMS = [
     ),
 
     make_suggestion(
+        title       = "T-21: Build cross-Pi comparison log and behavioral analysis report",
+        description = (
+            "As the fleet grows beyond one retail Pi, there is no mechanism to compare "
+            "how different Pis are behaving — which signals they acted on, how their "
+            "member weights have diverged, relative portfolio performance, interrogation "
+            "validation rates, and trade outcome differences. "
+            "Build a comparison report that: "
+            "(1) Collects heartbeat + daily report data already sent to synthos_monitor.py per Pi; "
+            "(2) Adds per-Pi signal decision tracking (MIRROR/WATCH/SKIP rates, adjusted score distribution); "
+            "(3) Adds member weight divergence — same politician, different weight on different Pis; "
+            "(4) Compares portfolio performance (realized P&L, win rate, deployed %) across Pis; "
+            "(5) Tracks interrogation validation rates per Pi (% VALIDATED vs UNVALIDATED); "
+            "(6) Surfaces anomalies: a Pi consistently diverging from peers warrants investigation. "
+            "Output: a structured comparison JSON at /api/pi-comparison on synthos_monitor.py, "
+            "and a summary section in Patches' morning digest. "
+            "Requires: all retail Pis already POST heartbeat + daily report to monitor — "
+            "comparison log extends this existing data stream, no new Pi-side code needed."
+        ),
+        category     = "observability",
+        scope        = "system_wide",
+        priority     = "medium",
+        target_files = ["synthos_build/synthos_monitor.py"],
+    ),
+
+    make_suggestion(
         title       = "INC-009: Add company agent TDA classifications to TOOL_DEPENDENCY_ARCHITECTURE.md",
         description = (
             "TOOL_DEPENDENCY_ARCHITECTURE.md classifies tool types (Bootstrap, Runtime, "

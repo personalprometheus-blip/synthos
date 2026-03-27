@@ -135,6 +135,7 @@ _None at this time._
 | **BB-01** | ~~Document COMPANY_SUBSCRIPTION and MIN_SIGNAL_THRESHOLD in SYSTEM_MANIFEST~~ | ~~SYSTEM_MANIFEST.md~~ | **RESOLVED 2026-03-27** |
 | ~~**BB-02**~~ | ~~Interrogation peer side not built~~ | ~~agent2_research.py~~ | **RESOLVED 2026-03-27** — interrogation_listener.py built; started by boot_sequence.py on retail node boot. |
 | **BB-03** | Company-side news feed receiver | company agent | Scout POSTs to MONITOR_URL/api/news-feed but no company agent handles it. Endpoint doesn't exist yet. |
+| **T-21** | Pi comparison log — cross-Pi behavioral analysis | synthos_monitor.py / Patches | Compare signal decisions, member weight divergence, portfolio performance, validation rates, and trade outcomes across all retail Pis. Surfaces which Pis are behaving differently and why. Feeds Patches morning digest. |
 
 ### LOW PRIORITY — Deferred
 
