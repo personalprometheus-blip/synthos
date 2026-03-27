@@ -1,0 +1,346 @@
+================================================================
+SYNTHOS — VERSION MANIFEST
+================================================================
+System Version: 1.1
+Last Updated:   2026-03-22 (session 3)
+
+IMPORTANT: All files should share the same version number.
+When you receive an update, check this file first to confirm
+which version you are running and which files changed.
+
+----------------------------------------------------------------
+PYTHON ENGINE (on Pi: /home/pi/synthos/)
+----------------------------------------------------------------
+database.py               Core database — all tables and helpers
+agent1_trader.py          The Trader — execution agent
+agent2_research.py        The Daily — research and signal discovery
+agent3_sentiment.py       The Pulse — sentiment and cascade detection
+cleanup.py                Nightly database maintenance
+heartbeat.py              Dead man switch heartbeat writer
+health_check.py           Post-reboot health verification
+shutdown.py               Graceful pre-maintenance shutdown
+patch.py                  Non-volatile update system
+watchdog.py               Crash monitor, auto-restart, support email
+install.py                Guided installer with web UI for end users
+boot_sequence.py          Boot coordinator — runs all startup steps
+sync.py                   Dev sync utility — file updates from Claude
+portal.py                 Web portal — kill switch, trade approvals, status
+
+----------------------------------------------------------------
+MONITOR SERVER (on monitor Pi: /home/pi/synthos-monitor/)
+----------------------------------------------------------------
+synthos_monitor.py         Flask monitor server — heartbeats, console,
+                          daily reports, SendGrid alerts
+
+----------------------------------------------------------------
+DOCUMENTATION
+----------------------------------------------------------------
+deadman_switch.md         Dead man switch setup (now uses monitor server)
+api_security.md           API key security guide
+pi_maintenance.md         Pi maintenance scripts reference
+
+----------------------------------------------------------------
+VERSION HISTORY
+----------------------------------------------------------------
+v1.0  2026-03-21  Initial release — full system complete
+                  Watchdog, crash monitoring, auto-restart
+                  All three agents functional on Mac and Pi
+                  Database self-tests passing
+                  Alpaca paper trading connected
+                  Congress.gov API connected
+                  Claude API connected
+
+v1.1  2026-03-22  Framing audit critical items addressed
+
+  heartbeat.py
+    - Replaced Google Sheets / Apps Script dead man switch
+    - Now POSTs to Synthos Monitor server (MONITOR_URL in .env)
+    - New .env keys: MONITOR_URL, MONITOR_TOKEN, PI_ID, PI_LABEL, PI_EMAIL
+    - Falls back gracefully if monitor unreachable
+
+  agent1_trader.py
+    - Added SUPERVISED MODE (framing C2/C3) — now the default
+      Claude queues trade proposals to .pending_approvals.json
+      Portal reads file and presents trades for user approval
+      Approved trades execute on next session run
+    - Added AUTONOMOUS MODE gate (framing C4)
+      OPERATING_MODE=AUTONOMOUS requires AUTONOMOUS_UNLOCK_KEY in .env
+      Agent refuses to run in autonomous mode without key
+    - Added KILL SWITCH check (framing C1/C5)
+      Reads .kill_switch file at session start
+      If present: halts all activity, logs event, exits cleanly
+      Portal writes this file; user can also touch it manually
+    - Added LAYER 1 PROTECTIVE EXIT with email (framing M1)
+      Urgent flags from The Pulse now trigger immediate position close
+      SendGrid email sent to user with full reasoning (SENDGRID_API_KEY,
+      ALERT_FROM, USER_EMAIL in .env)
+    - New .env keys: OPERATING_MODE, AUTONOMOUS_UNLOCK_KEY,
+                     SENDGRID_API_KEY, ALERT_FROM, USER_EMAIL
+
+  synthos_monitor.py
+    - Added /report POST endpoint — receives daily performance reports
+    - Added /api/reports GET — returns latest report per Pi
+    - Reports include: portfolio value, realized P&L, trades, wins/losses
+
+  portal.py  (NEW FILE)
+    - Web portal served on port 5001
+    - Basic auth enforcement via PORTAL_PASSWORD in .env
+    - Kill switch button — engages/clears .kill_switch file (framing C1/C5)
+    - Supervised mode trade approval queue (framing C2/C3)
+    - Autonomous mode unlock gate (framing C4)
+    - Advanced settings panel — position sizing, confidence threshold,
+      staleness cutoff, close session mode, spousal weight
+    - /api/settings POST — saves settings to .env
+    - Live status: portfolio, positions, P&L, urgent flags, heartbeat
+    - Auto-refreshes every 60s
+    - Add to crontab: @reboot sleep 90 && python3 /home/pi/synthos/portal.py &
+    - Access at: http://raspberrypi.local:5001
+
+  install.py
+    - page_capital() added — step 5 of 6, configurable starting capital (framing m6)
+    - page_disclaimer() added — step 6 of 6, required acceptance checkbox (framing m1)
+    - Alerts page dead man switch section updated — live monitor server fields
+      (MONITOR_URL, MONITOR_TOKEN, PI_ID) replace Google Sheets stub
+    - Steps renumbered: 6 total (personal → api-keys → alerts → capital → disclaimer → install)
+
+  boot_sequence.py
+    - Added portal.py to required files list
+    - Added step7_portal() — starts portal in background, logs URL
+    - Steps renumbered 1–7
+
+  health_check.py
+    - Heartbeat now calls write_heartbeat() from heartbeat.py
+      (posts to monitor server) instead of inline Google Sheets write
+
+  agent1_trader.py (additional changes beyond session 1)
+    - Sends heartbeat to monitor server at end of every session
+    - On close session: POSTs daily report to /report endpoint
+      (portfolio value, P&L, trades, wins/losses, open positions)
+
+  deadman_switch.md
+    - Complete rewrite for monitor server architecture
+    - Google Sheets / Apps Script instructions removed
+    - Cloudflare Tunnel and port forwarding options documented
+    - Migration path from v1.0 documented
+
+  api_security.md
+    - Complete rewrite — all v1.1 .env keys documented
+    - Both Pi and monitor Pi .env sections
+    - Operating mode and kill switch security model documented
+    - Git ignore list updated for new files
+
+  pi_maintenance.md
+    - Complete rewrite for v1.1
+    - Full crontab including portal boot line
+    - Boot sequence steps documented
+    - Portal section added
+    - Directory structure updated
+    - Useful commands reference added
+
+  README.md  (NEW FILE)
+    - GitHub README with quick start (git clone + first_run.sh + install)
+    - Architecture overview, agent table, exit hierarchy
+    - Requirements, files table, legal section
+
+  Session 3 changes:
+  agent1_trader.py
+    - Portal settings wired in: MIN_CONFIDENCE, MAX_STALENESS, SPOUSAL_WEIGHT,
+      MAX_SECTOR_CAP_PCT, CLOSE_SESSION_MODE all read from env, filter signals
+    - MAX_POSITION_PCT now dynamic from env (default 0.10)
+    - Pending approvals TTL: PENDING_APPROVAL entries expire after 48h
+    - P&L now logged on profit-taking exits
+    - Heartbeat POST to monitor after every session
+    - Daily report POST to /report endpoint on close session
+
+  agent2_research.py
+    - Heartbeat POST to monitor server at session completion
+
+  agent3_sentiment.py
+    - Heartbeat POST to monitor server at session completion
+
+  portal.py
+    - Basic auth enforced via PORTAL_PASSWORD in .env
+    - Settings panel loads live values from .env on page render
+    - RSS feed manager added to settings panel
+    - MAX_POSITION_PCT round-trip bug fixed (form=integer%, env=decimal)
+    - All settings wired end-to-end: portal → .env → agent behavior
+
+  install.py
+    - Step counters corrected throughout (1 of 6 through 7 of 7)
+    - Google API packages removed from REQUIRED_PACKAGES
+    - flask and sendgrid added to REQUIRED_PACKAGES
+    - google_sheet_id hidden input removed from alerts page
+    - Review page now shows monitor server URL instead of sheet ID
+    - generate_deadman_script() dead function removed (180 lines)
+    - Apps Script generation replaced with monitor server status note
+
+  database.py
+    - _run_migrations() added — safe ALTER TABLE migrations on every startup
+    - Handles v1.0→v1.1 column additions without breaking existing DBs
+
+----------------------------------------------------------------
+NEW .env KEYS IN v1.1 (add to all Pi .env files)
+----------------------------------------------------------------
+# Heartbeat / Monitor
+MONITOR_URL=http://your-monitor-pi:5000
+MONITOR_TOKEN=your_secret_token
+PI_ID=synthos-pi-1
+PI_LABEL=Customer Name
+PI_EMAIL=customer@example.com
+
+# Operating mode (framing 4.1 — SUPERVISED is default)
+OPERATING_MODE=SUPERVISED
+AUTONOMOUS_UNLOCK_KEY=           # leave blank until onboarding call
+
+# Protective exit email (framing 5.3)
+SENDGRID_API_KEY=your_sendgrid_key
+ALERT_FROM=alerts@yourdomain.com
+USER_EMAIL=customer@example.com
+
+# Portal
+PORTAL_PORT=5001
+PORTAL_PASSWORD=             # leave blank for open access on local network
+PORTAL_SECRET_KEY=           # generated by installer — do not share
+
+----------------------------------------------------------------
+SESSION 4 CHANGES
+----------------------------------------------------------------
+  agent2_research.py
+    - Bug fixed: duplicate sector= kwarg in upsert_signal removed
+    - WATCH signal re-evaluation implemented
+      needs_reeval flag set on WATCH decision
+      Step 4 re-runs Claude on up to 10 flagged signals per run
+
+  health_check.py
+    - Bug fixed: total variable was undefined after previous session edit
+
+  synthos_monitor.py
+    - State persistence: save_registry() / load_registry() added
+    - Pi list now survives monitor server restarts
+    - Registry saved to .monitor_registry.json after every heartbeat + delete
+
+  portal.py
+    - Login page: proper HTML form replaces browser basic auth dialog
+    - Logout button in header
+    - /logs endpoint: tabbed log viewer for all agent logs, no SSH needed
+    - Portal process now monitored by watchdog (auto-restart if it crashes)
+    - PORTAL_SECRET_KEY wired in for session persistence across restarts
+
+  generate_unlock_key.py  (NEW FILE — operator use only)
+    - Interactive onboarding tool: generates account-bound HMAC keys
+    - Logs consent record to consent_log.jsonl (append-only audit trail)
+    - Records: customer name/email, Alpaca key prefix, topics covered,
+      recording consent, operator name, call duration
+    - Outputs ready-to-send email with unlock key
+    - Framing section 4.2 / C4 now complete end-to-end
+
+  install.py
+    - PORTAL_PASSWORD and PORTAL_SECRET_KEY added to .env template
+    - secrets import added for token generation
+    - generate_deadman_script dead function fully removed
+
+  api_security.md
+    - PORTAL_SECRET_KEY documented
+
+  README.md
+    - Portal section updated with logs viewer and autonomous mode docs
+    - Files table updated with all new files
+
+----------------------------------------------------------------
+SESSION 5 CHANGES
+----------------------------------------------------------------
+  agent2_research.py
+    - Bug fixed: duplicate sector= kwarg in Tier 1 upsert_signal call
+
+  .gitignore  (NEW FILE)
+    - Comprehensive — secrets, runtime state, logs, Python cache, OS files
+
+  user_guide.html  (NEW FILE)
+    - Print-ready HTML user guide (print to PDF from browser)
+    - 9 sections: What Synthos Is, How It Works, Installation, Portal,
+      Operating Modes, Capital, Maintenance, Troubleshooting, Disclaimers
+    - Architecture flow diagram, exit hierarchy ladder, full tables
+    - Screen + print CSS, IBM Plex typography
+
+  synthos_framing_v1.1.md  (NEW FILE)
+    - Updated text version of framing doc with two fixes applied:
+      [LLC NAME] → Synthos Resurgens LLC
+      "continuously" → "regularly" in Agent 2 table row
+    - Apply these changes to actual synthos_framing.docx manually
+
+  README.md
+    - One-liner setup command: git clone ... && cd synthos && bash first_run.sh
+    - Portal section updated with logs viewer and autonomous mode docs
+    - Files table updated with all new files
+
+  synthos_tracker.html
+    - Tasks 6, 8, 10, 11, 17, 21, 22 marked complete
+    - All framing critical items now complete
+
+  install.py
+    - PORTAL_PASSWORD and PORTAL_SECRET_KEY added to .env template
+    - secrets import added
+
+----------------------------------------------------------------
+FRAMING AUDIT STATUS — v1.1
+----------------------------------------------------------------
+  All critical items: COMPLETE
+  C1/C5  Kill switch built and wired
+  C2/C3  Supervised mode built, portal approval queue
+  C4     Autonomous unlock built, key generation tool built
+  M1     Protective exit email via SendGrid
+
+  All minor items: COMPLETE
+  m1  Disclaimer acknowledgment at install
+  m2  "regularly monitors" fix applied
+  m6  Capital configuration at install
+  m7  [LLC NAME] fix applied
+
+  Remaining (legal/business, not code):
+  M2  Attorney review of profit flow model
+  M3  Stripe/licensing (v1.1 commercial build)
+  T15 Signup automation (v1.1 commercial build)
+
+----------------------------------------------------------------
+UPGRADE INSTRUCTIONS
+----------------------------------------------------------------
+When you receive updated files:
+
+  1. Check this manifest — note which files changed
+  2. Copy new files to /home/pi/synthos/ (no version suffixes)
+  3. Add new .env keys listed above
+  4. Run: python3 patch.py --status
+  5. Or use patch.py for safe automatic updates:
+     python3 patch.py --dir /path/to/update/folder/
+  6. Update this manifest with the new version and date
+
+NEVER manually edit signals.db, .env, or credentials.json
+NEVER overwrite these files during an update — they are your
+trade history, API keys, and authentication credentials.
+
+================================================================
+
+----------------------------------------------------------------
+FINAL AUDIT PASS
+----------------------------------------------------------------
+  All 19 Python files — syntax clean
+  All 25 DB methods called by agents — verified present in DB class
+  Database self-test — all 8 assertions pass
+  daily_digest parsing — error/warning/event categorization verified
+  digest_agent triage + todo dedup — logic verified
+  portal settings round-trip — MAX_POSITION_PCT 10↔0.10 correct
+  pending approvals TTL — expiry and preserve logic verified
+
+  Bugs fixed in audit:
+  - 9 env keys undocumented in api_security.md — FIXED
+  - 15 env keys missing from install.py .env template — FIXED
+    (portal settings, SMS keys, OPERATOR_EMAIL, SECRET_TOKEN)
+  - deadman_apps_script.gs stale file archived from outputs
+  - digest_agent.py and uninstall.py added to MIGRATION_GUIDE
+
+  Acceptable non-issues:
+  - sys.exit() in top-level except blocks — intentional fatal handlers
+  - quorum references in uninstall.py — correct, it cleans up legacy paths
+
+  STATUS: DEPLOY READY
+  All files in outputs are the final versions for Mac setup.
