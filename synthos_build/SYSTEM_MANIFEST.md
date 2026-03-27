@@ -280,6 +280,7 @@ required_files:
 | `scoop.py` | Customer communication — alert delivery, retry queue | Runtime |
 | `vault.py` | License compliance and customer status | Runtime |
 | `timekeeper.py` | System resource scheduler — slot management, deadlock prevention | Runtime |
+| `strongbox.py` | Backup Manager — encrypted R2 backups, retention, verify, restore orchestration | Runtime |
 | `db_helpers.py` | Company Pi shared DB utilities — all agent writes go through here | Data |
 
 ### Runtime State Files (company_node)
@@ -416,6 +417,7 @@ company_node:
   ${SYNTHOS_HOME}/agents/scoop.py
   ${SYNTHOS_HOME}/agents/vault.py
   ${SYNTHOS_HOME}/agents/timekeeper.py
+  ${SYNTHOS_HOME}/agents/strongbox.py
   ${SYNTHOS_HOME}/utils/db_helpers.py
   ${SYNTHOS_HOME}/data/company.db
 
@@ -920,6 +922,7 @@ v1.1:
 | `scoop.py` | active | company_node only |
 | `vault.py` | active | company_node only |
 | `timekeeper.py` | active | company_node only |
+| `strongbox.py` | active | company_node only |
 | `db_helpers.py` | active | company_node only |
 | `seed_backlog.py` | active | company_node only |
 | `first_run.sh` | experimental | hardcodes `/home/pi/synthos` — pre-parameterization bootstrap artifact; scheduled for refactor to use `SYNTHOS_HOME` |

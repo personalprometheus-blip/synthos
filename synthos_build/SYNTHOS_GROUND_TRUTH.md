@@ -77,6 +77,7 @@ hardware. It operates across three node types with explicit separation of concer
 | `scoop.py` | Runtime | `${SYNTHOS_HOME}/agents/` | Customer communication — alert delivery, retry queue |
 | `vault.py` | Security | `${SYNTHOS_HOME}/agents/` | License compliance and customer status |
 | `timekeeper.py` | Runtime | `${SYNTHOS_HOME}/agents/` | System resource scheduler — slot management, deadlock prevention |
+| `strongbox.py` | Runtime | `${SYNTHOS_HOME}/agents/` | Backup Manager — encrypted R2 backups, 30-day retention, verify, restore orchestration |
 | `db_helpers.py` | Data | `${SYNTHOS_HOME}/utils/` | Company Pi shared DB utilities — all agent writes go through here |
 | `seed_backlog.py` | Bootstrap | `${SYNTHOS_HOME}/` | Seeds initial suggestion backlog for agent bootstrap |
 

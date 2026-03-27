@@ -62,8 +62,8 @@
 
 | # | Item | Priority | Notes |
 |---|---|---|---|
-| T-13 | Strongbox (`strongbox.py`) not yet implemented | HIGH | Canonical backup agent. Spec written; file listed in manifest but not yet built. Vault handles interim backup. |
-| T-14 | Session-end trigger mechanism for post-trading backup | MEDIUM | Strongbox implementation blocker. Three options identified: (a) heartbeat-derived signal, (b) `agent_status` polling, (c) explicit signal from Bolt/Scout/Pulse. Decision deferred to Strongbox spec. |
+| ~~T-13~~ | ~~Strongbox (`strongbox.py`) not yet implemented~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — `strongbox.py` implemented as Agent 12 (Backup Manager). Covers: company.db backup, staged retail Pi archive processing, Cloudflare R2 upload + retention (30 days), integrity verification, restore orchestration, Scoop alerts. See file for full details. |
+| ~~T-14~~ | ~~Session-end trigger mechanism for post-trading backup~~ | ~~MEDIUM~~ | **RESOLVED 2026-03-27** — Resolved by decision: daily 2am cron schedule is the primary trigger for Phase 1. Session-end triggering deferred; when implemented, `synthos_heartbeat.py` will include a backup payload in its POST to the company Pi. Documented in `strongbox.py` header. |
 | T-15 | IP allowlisting (`config/allowed_ips.json`) — deferred | MEDIUM | Will block SSH from unexpected IPs. Deferred until IP list is stable and SSH access is confirmed from all locations. |
 
 ---
@@ -105,8 +105,8 @@
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 4 | T-01, T-02, T-11, T-13 (T-06 resolved) |
-| MEDIUM | 8 | T-03, T-05, T-07, T-08, T-10, T-14, T-15, T-16 |
+| HIGH | 3 | T-01, T-02, T-11 (T-06, T-13 resolved) |
+| MEDIUM | 7 | T-03, T-05, T-07, T-08, T-10, T-15, T-16 (T-14 resolved) |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
 ---
