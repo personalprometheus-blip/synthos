@@ -345,6 +345,54 @@ def step9_initial_seed():
         return step("Data seed", False, str(e))
 
 
+def step10_seed_suggestions():
+    """
+    Step 10 — Seed suggestions.json backlog on company node first boot.
+    Only runs when COMPANY_MODE=true. Skipped silently on retail nodes.
+    No-op if suggestions.json already has entries.
+    """
+    log.info("Step 10/10 — Suggestions backlog (company node only)")
+
+    if os.environ.get('COMPANY_MODE', '').lower() != 'true':
+        return step("Suggestions backlog", True, "skipped — not company node")
+
+    suggestions_path = os.path.join(PROJECT_DIR, 'data', 'suggestions.json')
+    seed_path        = os.path.join(PROJECT_DIR, 'seed_backlog.py')
+
+    if not os.path.exists(seed_path):
+        return step("Suggestions backlog", True, "seed_backlog.py not found — skipping")
+
+    # Check if already seeded
+    if os.path.exists(suggestions_path):
+        try:
+            import json as _json
+            with open(suggestions_path) as _f:
+                existing = _json.load(_f)
+            if isinstance(existing, list) and len(existing) > 0:
+                return step("Suggestions backlog", True,
+                            f"already seeded ({len(existing)} suggestions)")
+        except Exception:
+            pass  # unreadable file — let seed_backlog handle it
+
+    # File missing or empty — seed it
+    log.info("suggestions.json empty or missing — running seed_backlog.py --write")
+    try:
+        result = subprocess.run(
+            [sys.executable, seed_path, '--write'],
+            capture_output=True, text=True,
+            cwd=PROJECT_DIR, timeout=30,
+        )
+        if result.returncode == 0:
+            return step("Suggestions backlog", True, "seeded successfully")
+        else:
+            detail = result.stderr.strip().split('\n')[-1][:80] if result.stderr else "non-zero exit"
+            return step("Suggestions backlog", False, f"seed_backlog failed: {detail}")
+    except subprocess.TimeoutExpired:
+        return step("Suggestions backlog", False, "seed_backlog timed out after 30s")
+    except Exception as e:
+        return step("Suggestions backlog", False, str(e))
+
+
 def write_boot_heartbeat():
     """Write boot event to database and Google Sheets if configured."""
     try:
@@ -389,6 +437,7 @@ def run():
     portal_ok = step7_portal()
     mon_ok    = step8_monitor()
     seed_ok   = step9_initial_seed()
+    sugg_ok   = step10_seed_suggestions()
 
     # Tally results
     passed = sum(1 for s in BOOT_STEPS if s['passed'])

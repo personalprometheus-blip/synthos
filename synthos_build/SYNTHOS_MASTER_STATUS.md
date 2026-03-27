@@ -129,10 +129,10 @@ _None at this time._
 | ID | Item | File | Notes |
 |----|------|------|-------|
 | T-07 | Installer web UI needs auth + HTTPS | install_retail.py | Unprotected currently. Planned future release. |
-| T-08 | Wire seed_backlog.py into company installer | install_retail.py | Operator must run manually today. |
+| ~~T-08~~ | ~~Wire seed_backlog.py into company installer~~ | ~~boot_sequence.py~~ | **RESOLVED 2026-03-27** — step10_seed_suggestions() in boot_sequence.py; COMPANY_MODE guard |
 | T-10 | first_run.sh hardcodes /home/pi/synthos | first_run.sh | Needs dynamic path per ADDENDUM 1 §1 rules. |
 | T-15/T-16 | IP allowlisting activation | sentinel.py / config/allowed_ips.json | Deferred — needs stable IP inventory + SSH confirmed from all locations. |
-| **BB-01** | Document COMPANY_SUBSCRIPTION and MIN_SIGNAL_THRESHOLD in SYSTEM_MANIFEST | SYSTEM_MANIFEST.md | New v1.2 env vars not yet in manifest env schema. |
+| **BB-01** | ~~Document COMPANY_SUBSCRIPTION and MIN_SIGNAL_THRESHOLD in SYSTEM_MANIFEST~~ | ~~SYSTEM_MANIFEST.md~~ | **RESOLVED 2026-03-27** |
 | **BB-02** | Interrogation peer side not built | agent2_research.py | Scout broadcasts UDP; no agent listens and ACKs yet. Signals will always be UNVALIDATED until this is built. Known/acceptable for now. |
 | **BB-03** | Company-side news feed receiver | company agent | Scout POSTs to MONITOR_URL/api/news-feed but no company agent handles it. Endpoint doesn't exist yet. |
 
@@ -178,7 +178,7 @@ These items were explicitly scoped out of the v1.2 build brief. Do not implement
 | Company-side learning from news feed | The `/api/news-feed` POST from Scout has no consumer. Company agent to process and learn from signal history — future sprint. |
 | Pulse changes | agent3_sentiment.py untouched in v1.2. No changes needed yet. |
 | Live trading deployment | PAPER mode only. `⚠️ UNDER REVIEW` markers placed throughout Bolt. Project lead flips PAPER→LIVE only after extended paper validation. |
-| Strongbox → company installer wiring (T-08) | seed_backlog.py must be wired manually for now. |
+| ~~Strongbox → company installer wiring (T-08)~~ | ~~seed_backlog.py must be wired manually for now.~~ **RESOLVED 2026-03-27** |
 | License key full validation | At install, key format checked only. Full HMAC+registry validation at first boot via boot_sequence.py. |
 
 ---
@@ -220,7 +220,7 @@ These items were explicitly scoped out of the v1.2 build brief. Do not implement
 | restore.sh | ✓ Built |
 | Company Pi fast restore tested | ⚠ Not tested end-to-end |
 | suggestions.json initialized | ⚠ Pending (NEXT_BUILD_SEQUENCE Step 4) |
-| seed_backlog.py wired (T-08) | ⚠ Manual step only |
+| seed_backlog.py wired (T-08) | ✓ Auto-runs on company node boot via boot_sequence.py step 10 |
 | /api/news-feed endpoint | ⚠ Not built — no consumer agent yet |
 
 ### Monitor Node
@@ -334,7 +334,7 @@ These are the immediate next steps in priority order. Do not skip ahead.
 | 6 | Resolve INC-004: verify retail utils/ directory exists or strike from arch docs | Claude Code | Needs `ls` on Pi |
 | 7 | Build /api/news-feed consumer on company node (BB-03) | Claude Code | Needs explicit scope instruction |
 | 8 | Build interrogation ACK receiver (BB-02) | Claude Code | Needs second Pi or explicit instruction to build stub |
-| 9 | Wire seed_backlog.py into company installer (T-08) | Claude Code | Low risk, can do anytime |
+| ~~9~~ | ~~Wire seed_backlog.py into company installer (T-08)~~ | ~~Claude Code~~ | **DONE** |
 | 10 | Fix first_run.sh hardcoded path (T-10) | Claude Code | Low risk, small change |
 
 ---
