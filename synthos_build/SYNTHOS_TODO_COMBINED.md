@@ -9,8 +9,8 @@
 | # | Item | Priority | Notes |
 |---|---|---|---|
 | ~~T-01~~ | ~~Flip `TRADEABLE_PCT=0.80` / `IDLE_RESERVE_PCT=0.20`~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — Flipped in `agent1_trader.py`. `TRADEABLE_PCT=0.80`, `IDLE_RESERVE_PCT=0.20`. BIL sweep (T-02) still outstanding. |
-| T-02 | Implement idle reserve → BIL sweep | HIGH | Cash held idle instead of swept to BIL. Cash sync from Alpaca is live; BIL logic is the remaining step. |
-| T-03 | Subtract BIL position value from cash before storing | MEDIUM | After BIL sweep is implemented. Required so tradeable math stays correct. See `reconcile_with_alpaca()`. |
+| ~~T-02~~ | ~~Implement idle reserve → BIL sweep~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — `sync_bil_reserve()` added to `agent1_trader.py`. Runs every session as Step 2b after reconcile. Buys/sells BIL notional orders to maintain `IDLE_RESERVE_PCT` (20%) of total liquid. Excluded from position count and P&L. `BIL_REBALANCE_THRESHOLD=$10`. |
+| ~~T-03~~ | ~~Subtract BIL position value from cash before storing~~ | ~~MEDIUM~~ | **RESOLVED 2026-03-27** — Fixed in `reconcile_with_alpaca()` cash sync: `DB cash = alpaca_free_cash + BIL_market_value` so `tradeable = total_liquid * TRADEABLE_PCT` stays correct. Uses `get_position_safe()` (404-tolerant) to avoid log noise when no BIL held. |
 | T-04 | Gmail SMTP path — activate via command portal | LOW | Currently a placeholder. Toggle when Gmail credentials are configured. |
 
 ---
@@ -105,8 +105,8 @@
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 1 | T-02 (T-01, T-06, T-11, T-13 resolved) |
-| MEDIUM | 7 | T-03, T-05, T-07, T-08, T-10, T-15, T-16 (T-14 resolved) |
+| HIGH | 0 | all resolved (T-01, T-02, T-06, T-11, T-13) |
+| MEDIUM | 6 | T-05, T-07, T-08, T-10, T-15, T-16 (T-03, T-14 resolved) |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
 ---

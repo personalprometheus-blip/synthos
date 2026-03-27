@@ -372,13 +372,10 @@ GAIN_TAX_PCT       = 0.10
 # PRODUCTION: 80% tradeable / 20% reserve.
 # Validation phase (20/80) completed. Flipped per T-01.
 #
-# TODO (T-02): implement idle reserve → BIL sweep
-#   - Buy BIL (T-bill ETF) with IDLE_RESERVE_PCT of portfolio cash
-#   - Sync on every session after cash reconcile from Alpaca
-#   - Log ledger entry type 'BIL' on buy/sell
-#   - Exclude BIL from position count and P&L tracking
 IDLE_RESERVE_PCT   = 0.20
 TRADEABLE_PCT      = 0.80
+BIL_TICKER              = "BIL"   # iShares 0-3 Month Treasury Bond ETF
+BIL_REBALANCE_THRESHOLD = 10.0    # min dollar delta to trigger a BIL rebalance
 MAX_POSITION_PCT   = float(os.environ.get('MAX_POSITION_PCT', '0.10'))
 MAX_SECTOR_CAP_PCT = float(os.environ.get('MAX_SECTOR_PCT', '25'))
 MONTHLY_INFRA_COST = 20.0
@@ -539,6 +536,39 @@ class AlpacaClient:
 
     def cancel_order(self, order_id):
         return self._request("delete", f"/v2/orders/{order_id}")
+
+    def get_position_safe(self, ticker):
+        """
+        Return a position dict or None if the ticker is not held.
+        Unlike get_position(), a 404 is treated as 'not held' rather than
+        an error — avoids noisy retries when BIL has not been purchased yet.
+        """
+        url = f"{self.base_url}/v2/positions/{ticker}"
+        try:
+            r = requests.get(url, headers=self.headers, timeout=15)
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            log.warning(f"get_position_safe({ticker}): {e}")
+            return None
+
+    def _submit_notional(self, ticker, notional, side):
+        """Submit a dollar-amount market order — used for BIL sweep."""
+        if TRADING_MODE == "PAPER":
+            log.info(f"[PAPER] Would {side} ${notional:.2f} notional of {ticker}")
+        payload = {
+            "symbol":        ticker,
+            "notional":      str(round(notional, 2)),
+            "side":          side,
+            "type":          "market",
+            "time_in_force": "day",
+        }
+        result = self._request("post", "/v2/orders", json=payload)
+        if result:
+            log.info(f"Notional order: {side} ${notional:.2f} {ticker} — id={result.get('id','?')}")
+        return result
 
     def close_position(self, ticker):
         """Liquidate entire position."""
@@ -720,6 +750,75 @@ def check_profit_taking(pos, current_price):
     return triggered[-1] if triggered else None
 
 
+def sync_bil_reserve(db, alpaca):
+    """
+    Maintain IDLE_RESERVE_PCT (20%) of total liquid capital in BIL.
+    Runs every session after cash reconciliation.
+
+    total_liquid = free_cash (Alpaca) + current BIL market value
+    target_bil   = total_liquid * IDLE_RESERVE_PCT
+    delta        = target_bil - current_bil_value
+
+    Buys or sells BIL when |delta| >= BIL_REBALANCE_THRESHOLD ($10).
+    BIL is excluded from position count and P&L tracking — it is not
+    opened via open_position() and does not appear in get_open_positions().
+    Buy/sell events are logged with type 'BIL_BUY' / 'BIL_SELL'.
+    """
+    try:
+        account = alpaca.get_account()
+        if not account:
+            log.warning("[BIL] Cannot sync — Alpaca account unreachable")
+            return
+
+        free_cash = float(account.get('cash', 0))
+        bil_pos   = alpaca.get_position_safe(BIL_TICKER)
+        bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
+
+        total_liquid = free_cash + bil_value
+        target_bil   = round(total_liquid * IDLE_RESERVE_PCT, 2)
+        delta        = round(target_bil - bil_value, 2)
+
+        log.info(
+            f"[BIL] Liquid: ${total_liquid:.2f} | "
+            f"Current: ${bil_value:.2f} | Target: ${target_bil:.2f} | "
+            f"Delta: ${delta:+.2f}"
+        )
+
+        if abs(delta) < BIL_REBALANCE_THRESHOLD:
+            log.info(f"[BIL] Within ${BIL_REBALANCE_THRESHOLD} threshold — no rebalance")
+            return
+
+        if delta > 0:
+            # Buy more BIL — cap at available free cash (leave $1 buffer)
+            buy_amount = min(delta, max(0.0, free_cash - 1.0))
+            if buy_amount < BIL_REBALANCE_THRESHOLD:
+                log.warning(f"[BIL] Insufficient free cash to rebalance (free: ${free_cash:.2f})")
+                return
+            order = alpaca._submit_notional(BIL_TICKER, buy_amount, "buy")
+            if order:
+                db.log_event("BIL_BUY", agent="The Trader",
+                             details=f"Bought ${buy_amount:.2f} of BIL — reserve rebalance")
+                log.info(f"[BIL] Buy order placed: ${buy_amount:.2f}")
+        else:
+            # Sell BIL to free up cash
+            sell_amount = abs(delta)
+            if sell_amount >= bil_value * 0.99:
+                order = alpaca.close_position(BIL_TICKER)
+                if order:
+                    db.log_event("BIL_SELL", agent="The Trader",
+                                 details=f"Sold all BIL (${bil_value:.2f}) — reserve rebalance")
+                    log.info(f"[BIL] Sold entire BIL position (${bil_value:.2f})")
+            else:
+                order = alpaca._submit_notional(BIL_TICKER, sell_amount, "sell")
+                if order:
+                    db.log_event("BIL_SELL", agent="The Trader",
+                                 details=f"Sold ${sell_amount:.2f} of BIL — reserve rebalance")
+                    log.info(f"[BIL] Sell order placed: ${sell_amount:.2f}")
+
+    except Exception as e:
+        log.error(f"[BIL] sync_bil_reserve error (non-fatal): {e}")
+
+
 def reconcile_with_alpaca(db, alpaca):
     """
     Compare DB open positions against Alpaca.
@@ -733,19 +832,24 @@ def reconcile_with_alpaca(db, alpaca):
             log.warning("Could not fetch Alpaca positions for reconciliation")
             return
 
-        # ── CASH SYNC ─────────────────────────────────────────────────────
-        # Pull actual cash from Alpaca and update DB — overrides cold-start
-        # seed value (STARTING_CAPITAL). Without this, all position sizing
-        # is calculated against a phantom balance.
-        # TODO: once BIL sweep is implemented, subtract BIL position value
-        #       from cash before storing so tradeable math stays correct.
+        # ── CASH SYNC (T-03) ──────────────────────────────────────────────
+        # Pull free cash from Alpaca and add back any BIL position value so
+        # DB cash represents total liquid capital. This keeps tradeable math
+        # correct: tradeable = (free_cash + BIL_value) * TRADEABLE_PCT = 80%
+        # of total liquid deployed in equities, 20% parked in BIL.
         try:
             account = alpaca.get_account()
             if account:
                 alpaca_cash = float(account.get('cash', 0))
                 if alpaca_cash > 0:
-                    db.update_portfolio(cash=alpaca_cash)
-                    log.info(f"[CASH SYNC] Portfolio cash updated from Alpaca: ${alpaca_cash:.2f}")
+                    bil_pos   = alpaca.get_position_safe(BIL_TICKER)
+                    bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
+                    total_liquid = alpaca_cash + bil_value
+                    db.update_portfolio(cash=total_liquid)
+                    log.info(
+                        f"[CASH SYNC] DB cash = ${total_liquid:.2f} "
+                        f"(free: ${alpaca_cash:.2f} + BIL: ${bil_value:.2f})"
+                    )
                 else:
                     log.warning("[CASH SYNC] Alpaca returned $0 cash — skipping update")
         except Exception as e:
@@ -832,6 +936,12 @@ def run(session="open"):
 
     # ── STEP 2: Reconcile positions
     reconcile_ok = reconcile_with_alpaca(db, alpaca)
+
+    # ── STEP 2b: BIL reserve sweep
+    # Maintains IDLE_RESERVE_PCT (20%) of total liquid in BIL (T-bills).
+    # Skipped only if reconciliation found orphan/ghost positions.
+    if reconcile_ok is not False:
+        sync_bil_reserve(db, alpaca)
 
     # ── STEP 3: Check urgent flags from The Pulse
     urgent_flags = db.get_urgent_flags()
