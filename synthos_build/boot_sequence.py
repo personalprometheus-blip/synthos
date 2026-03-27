@@ -345,6 +345,47 @@ def step9_initial_seed():
         return step("Data seed", False, str(e))
 
 
+def step_interrogation_listener():
+    """
+    Step — Start interrogation listener in background.
+    Listens on UDP 5556 for Scout's HAS_DATA_FOR_INTERROGATION broadcasts.
+    Sends INTERROGATION_ACK on port 5557 when a signal passes validation.
+    Non-fatal: if listener fails to start, Scout marks all signals UNVALIDATED
+    and Bolt falls back to WATCH — trading continues safely.
+    """
+    log.info("Step — Interrogation listener")
+    listener_path = os.path.join(PROJECT_DIR, 'interrogation_listener.py')
+    if not os.path.exists(listener_path):
+        return step("Interrogation listener", True,
+                    "interrogation_listener.py not found — skipping (signals will be UNVALIDATED)")
+    try:
+        # Check if already running
+        result = subprocess.run(
+            ['pgrep', '-f', 'interrogation_listener.py'],
+            capture_output=True, text=True,
+        )
+        if result.stdout.strip():
+            return step("Interrogation listener", True,
+                        f"already running (pid={result.stdout.strip().splitlines()[0]})")
+
+        log_path = os.path.join(LOG_DIR, 'interrogation.log')
+        with open(log_path, 'a') as logf:
+            proc = subprocess.Popen(
+                [sys.executable, listener_path],
+                stdout=logf, stderr=logf,
+                cwd=PROJECT_DIR,
+            )
+        time.sleep(1)
+        if proc.poll() is None:
+            return step("Interrogation listener", True,
+                        f"started (pid={proc.pid}) — UDP {os.environ.get('INTERROGATION_PORT', 5556)}")
+        else:
+            return step("Interrogation listener", False,
+                        "exited immediately — check interrogation.log")
+    except Exception as e:
+        return step("Interrogation listener", False, str(e))
+
+
 def step10_seed_suggestions():
     """
     Step 10 — Seed suggestions.json backlog on company node first boot.
@@ -436,6 +477,7 @@ def run():
     wd_ok     = step6_watchdog()
     portal_ok = step7_portal()
     mon_ok    = step8_monitor()
+    intg_ok   = step_interrogation_listener()
     seed_ok   = step9_initial_seed()
     sugg_ok   = step10_seed_suggestions()
 

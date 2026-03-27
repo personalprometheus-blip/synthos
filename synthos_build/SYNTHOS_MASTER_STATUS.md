@@ -133,7 +133,7 @@ _None at this time._
 | T-10 | first_run.sh hardcodes /home/pi/synthos | first_run.sh | Needs dynamic path per ADDENDUM 1 §1 rules. |
 | T-15/T-16 | IP allowlisting activation | sentinel.py / config/allowed_ips.json | Deferred — needs stable IP inventory + SSH confirmed from all locations. |
 | **BB-01** | ~~Document COMPANY_SUBSCRIPTION and MIN_SIGNAL_THRESHOLD in SYSTEM_MANIFEST~~ | ~~SYSTEM_MANIFEST.md~~ | **RESOLVED 2026-03-27** |
-| **BB-02** | Interrogation peer side not built | agent2_research.py | Scout broadcasts UDP; no agent listens and ACKs yet. Signals will always be UNVALIDATED until this is built. Known/acceptable for now. |
+| ~~**BB-02**~~ | ~~Interrogation peer side not built~~ | ~~agent2_research.py~~ | **RESOLVED 2026-03-27** — interrogation_listener.py built; started by boot_sequence.py on retail node boot. |
 | **BB-03** | Company-side news feed receiver | company agent | Scout POSTs to MONITOR_URL/api/news-feed but no company agent handles it. Endpoint doesn't exist yet. |
 
 ### LOW PRIORITY — Deferred
@@ -209,7 +209,7 @@ These items were explicitly scoped out of the v1.2 build brief. Do not implement
 | Signal news feed | ✓ (v1.2) |
 | Option B decision logic | ✓ (v1.2) |
 | 5yr price history in Bolt | ✓ (v1.2) |
-| Interrogation validation | ⚠ UNVALIDATED only (peer side not built) |
+| Interrogation validation | ✓ interrogation_listener.py running on boot |
 | Live trading | ⛔ NOT AUTHORIZED — paper only |
 
 ### Company Node
