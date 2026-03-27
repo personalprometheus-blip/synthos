@@ -44,7 +44,7 @@ hardware. It operates across three node types with explicit separation of concer
 | `shutdown.py` | Maintenance | `${CORE_DIR}` | Graceful pre-maintenance shutdown; flushes writes |
 | `cleanup.py` | Maintenance | `${CORE_DIR}` | Nightly database maintenance |
 | `portal.py` | Runtime | `${CORE_DIR}` | Web portal — kill switch, approvals, settings, logs, live status |
-| `install.py` | Bootstrap | `${CORE_DIR}` | 7-step guided installer with web UI |
+| `install_retail.py` | Bootstrap | `${CORE_DIR}` | 7-step guided retail installer with web UI — canonical installer |
 | `patch.py` | Repair | `${CORE_DIR}` | Non-volatile update system — safe file replacement with backup |
 | `sync.py` | Maintenance | `${CORE_DIR}` | Dev sync utility — file updates from Claude/GitHub |
 | `license_validator.py` | Security | `${CORE_DIR}` | License key validation — checked on every boot |

@@ -27,7 +27,7 @@
 
 | Class | Description | Examples |
 |---|---|---|
-| **Bootstrap** | Run once at install or first boot; establish preconditions | `install.py`, `boot_sequence.py` |
+| **Bootstrap** | Run once at install or first boot; establish preconditions | `install_retail.py`, `boot_sequence.py` |
 | **Runtime** | Run continuously or on schedule during normal operation | `watchdog.py`, `synthos_heartbeat.py`, `portal.py` |
 | **Maintenance** | Run on schedule to preserve system integrity | `health_check.py`, `cleanup.py`, `shutdown.py`, `sync.py` |
 | **Repair** | Run on failure or operator trigger to restore valid state | `patches.py`, `patch.py`, `uninstall.py` |
@@ -88,7 +88,7 @@ All tools except Data-class must conform to this contract without exception.
 
 | Phase | Trigger | Permitted Classes |
 |---|---|---|
-| **Install** | Operator runs `install.py` | Bootstrap, Security, Data |
+| **Install** | Operator runs `install_retail.py` | Bootstrap, Security, Data |
 | **Boot** | `@reboot` cron fires `boot_sequence.py` | Bootstrap, Maintenance, Security, Data |
 | **Runtime** | Cron schedule or `boot_sequence.py` subprocess | Runtime, Security, Observability, Data |
 | **Maintenance window** | Scheduled cron (e.g., Saturday 3:55 AM) | Maintenance, Data |

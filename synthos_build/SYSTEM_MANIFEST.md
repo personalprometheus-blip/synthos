@@ -167,7 +167,7 @@ required_files:
     - synthos_heartbeat.py
     - portal.py
     - patch.py
-    - install.py
+    - install_retail.py
     - sync.py
   security:
     - license_validator.py
@@ -261,7 +261,8 @@ required_files:
 | `synthos_heartbeat.py` | Dead man switch heartbeat writer — POSTs to monitor server | Runtime |
 | `portal.py` | Web portal — kill switch, trade approvals, settings, log viewer, live status | Runtime |
 | `patch.py` | Non-volatile update system — safe file replacement with backup | Repair |
-| `install.py` | Guided installer with web UI — 7-step setup wizard | Bootstrap |
+| `install_retail.py` | Guided retail installer with web UI — 7-step setup wizard; canonical installer | Bootstrap |
+| `install.py` | DEPRECATED — superseded by `install_retail.py`; never committed; do not use | Bootstrap |
 | `sync.py` | Dev sync utility — file updates from Claude/GitHub | Maintenance |
 | `license_validator.py` | License key validation — checked on every boot before agents start | Security |
 | `health_check.py` | Invoked by installer VERIFYING state and by boot_sequence.py | Maintenance |
@@ -391,7 +392,7 @@ retail_node:
   ${CORE_DIR}/synthos_heartbeat.py
   ${CORE_DIR}/portal.py
   ${CORE_DIR}/patch.py
-  ${CORE_DIR}/install.py
+  ${CORE_DIR}/install_retail.py
   ${CORE_DIR}/sync.py
   ${CORE_DIR}/license_validator.py
   ${CORE_DIR}/uninstall.py
@@ -480,7 +481,7 @@ watchdog.py
   ├── database.py               (crash log writes)
   └── [spawns agent subprocesses]
 
-install.py
+install_retail.py
   ├── health_check.py           (VERIFYING state trigger)
   └── database.py               (schema bootstrap)
 
@@ -592,7 +593,7 @@ Keys marked `[R]` = required. Keys marked `[O]` = optional. Column `Node` identi
 
 ```yaml
 install:
-  trigger:       Operator runs install.py
+  trigger:       Operator runs install_retail.py
   tool_classes:  Bootstrap, Security, Data
   sequence:
     1. PREFLIGHT    — apt layer validation (python3, pip, git, sqlite3, cron)
@@ -904,7 +905,8 @@ v1.1:
 | `synthos_heartbeat.py` | active | |
 | `portal.py` | active | |
 | `patch.py` | active | |
-| `install.py` | active | |
+| `install_retail.py` | active | canonical retail installer |
+| `install.py` | deprecated | never committed to repo; superseded by install_retail.py |
 | `sync.py` | active | |
 | `license_validator.py` | active | |
 | `uninstall.py` | active | |

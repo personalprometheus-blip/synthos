@@ -27,7 +27,7 @@
 
 | # | Item | Priority | Notes |
 |---|---|---|---|
-| T-06 | Rename `install.py` → `install.py.deprecated` | HIGH | `install_retail.py` is now canonical. Old installer still present; operators may run it by mistake. |
+| ~~T-06~~ | ~~Rename `install.py` → `install.py.deprecated`~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — `install.py` was never committed to the repo. All docs (SYSTEM_MANIFEST.md, TOOL_DEPENDENCY_ARCHITECTURE.md, SYNTHOS_GROUND_TRUTH.md) updated to reference `install_retail.py` as canonical; `install.py` marked deprecated in FILE_STATUS. |
 | T-07 | Authentication and HTTPS for installer web UI | MEDIUM | Currently unprotected. Planned for a future release. |
 
 ---
@@ -105,7 +105,7 @@
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 5 | T-01, T-02, T-06, T-11, T-13 |
+| HIGH | 4 | T-01, T-02, T-11, T-13 (T-06 resolved) |
 | MEDIUM | 8 | T-03, T-05, T-07, T-08, T-10, T-14, T-15, T-16 |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
