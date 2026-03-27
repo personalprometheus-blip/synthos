@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Environment / secrets
+.env
+company.env
+*.env
+
+# Install state
+.install_complete
+.install_progress.json
+
+# Logs
+logs/*.log
+logs/crash_reports/
+
+# Runtime state
+.kill_switch
+.pending_approvals.json
+signals_backup.db
