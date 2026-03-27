@@ -77,7 +77,7 @@ Synthos is a distributed system with three tiers:
     │  SERVICES:                              │
     │  • Command Interface (5002)             │
     │  • Installer Delivery (5003)            │
-    │  • Heartbeat Receiver (5004)            │
+    │  (heartbeat receiver: monitor_node:5000) │
     │  ─────────────────────────────────────  │
     │  Runs: 24/7                             │
     │  Scheduler priority:                    │
@@ -416,9 +416,9 @@ POST /heartbeat
 }
 ```
 
-**Sends to:** Company Pi at `HEARTBEAT_URL` (env var, defaults to None for offline mode)
+**Sends to:** monitor_node at `MONITOR_URL` (env var, defaults to None for offline mode)
 
-**Customer can disable:** Remove `HEARTBEAT_URL` from .env → heartbeat still runs (no-op)
+**Customer can disable:** Remove `MONITOR_URL` from .env → heartbeat still runs (no-op)
 
 ---
 
@@ -450,7 +450,7 @@ POST /heartbeat
 ├── services/
 │   ├── command_interface.py       # Flask app (port 5002)
 │   ├── installer_service.py       # Flask app (port 5003)
-│   ├── heartbeat_receiver.py      # Flask app (port 5004)
+│   # heartbeat_receiver.py — DEPRECATED (never built); heartbeat received by synthos_monitor.py on monitor_node:5000
 │   └── config_manager.py
 │
 ├── data/
@@ -784,16 +784,11 @@ Bash option:
     -H "Content-Type: application/json" | bash
 ```
 
-**Service: Heartbeat Receiver (port 5004, internal only)**
+**Heartbeat Receiver — DEPRECATED on company_node**
 
-```
-POST /heartbeat
-
-Validates: pi_id + token
-Writes: heartbeats table
-Responds: 200 OK or error
-Triggers: Mail Agent if alerts needed
-```
+> `heartbeat_receiver.py` (port 5004) was never implemented. The authoritative heartbeat receiver
+> is `synthos_monitor.py` on the **monitor_node** at port 5000. Retail Pis POST to `MONITOR_URL`.
+> See `HEARTBEAT_RESOLUTION.md` for the full decision record.
 
 ### 3.6 Database Locking & Guardians
 
@@ -1293,9 +1288,9 @@ TRADING_MODE=SUPERVISED  # or AUTONOMOUS
 POSITION_SIZE=5000       # dollars per trade
 CONFIDENCE_THRESHOLD=75  # percent
 
-# Optional: heartbeat to Company Pi
-HEARTBEAT_URL=http://admin-pi-4b.local:5004
-HEARTBEAT_TOKEN=abc123def456xyz
+# Optional: heartbeat to monitor_node
+MONITOR_URL=http://monitor-pi.local:5000
+MONITOR_TOKEN=abc123def456xyz
 PI_ID=retail-pi-01
 PI_LABEL=Customer Name
 PI_EMAIL=customer@example.com
@@ -1317,7 +1312,7 @@ SENDGRID_FROM=alerts@yourcompany.com
 # Services
 COMMAND_PORT=5002
 INSTALLER_PORT=5003
-HEARTBEAT_PORT=5004
+# HEARTBEAT_PORT=5004 — DEPRECATED; heartbeat_receiver.py was never built; see HEARTBEAT_RESOLUTION.md
 
 # Scheduler
 SCHEDULER_TIMEOUT_SEC=120
@@ -1358,7 +1353,7 @@ GITHUB_REPO=personalprometheus-blip/synthos
 | Company Pi breached | Attacker gets heartbeat logs, bug reports, not customer API keys (stored locally) |
 | Anthropic API key exposed | Attacker can make trades via compromised Retail Pi, but only to that Pi's Alpaca account |
 | Database SQL injection | Use parameterized queries (all DB calls) |
-| Man-in-the-middle (heartbeat) | Validate HEARTBEAT_TOKEN before logging; use HTTPS tunnel |
+| Man-in-the-middle (heartbeat) | Validate MONITOR_TOKEN before logging; use HTTPS tunnel |
 
 **Best practices:**
 - All .env files: `chmod 600` (read-only by owner)

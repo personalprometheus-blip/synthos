@@ -2710,6 +2710,125 @@ async function uploadFiles(files) {
 </html>"""
 
 
+# ── NEWS FEED ──────────────────────────────────────────────────────────────
+
+def get_news_feed_data(limit=100):
+    """Fetch recent news feed entries from the database."""
+    try:
+        from database import get_db
+        return get_db().get_news_feed(limit=limit)
+    except Exception as e:
+        log.warning(f"get_news_feed_data error: {e}")
+        return []
+
+
+NEWS_FEED_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60">
+<title>Synthos — News Feed</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#faf8f4;--card:#fff;--border:#e8e0d0;--text:#1a1612;--muted:#7a7060;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:0.9rem;min-height:100vh}
+  header{display:flex;justify-content:space-between;align-items:center;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--card)}
+  .wordmark{font-family:var(--mono);font-size:0.8rem;letter-spacing:0.15em;text-transform:uppercase;font-weight:600}
+  .nav a{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-decoration:none;color:var(--muted);margin-left:20px}
+  .nav a:hover{color:var(--text)}
+  .page-title{padding:20px 28px 8px;font-family:var(--mono);font-size:0.85rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)}
+  .subtitle{padding:0 28px 16px;font-size:0.78rem;color:var(--muted)}
+  .table-wrap{overflow-x:auto;padding:0 28px 40px}
+  table{width:100%;border-collapse:collapse;font-size:0.83rem}
+  th{font-family:var(--mono);font-size:0.68rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);padding:8px 12px;text-align:left;border-bottom:2px solid var(--border);white-space:nowrap}
+  td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  tr:hover td{background:#f5f2ec}
+  .score-HIGH{color:#1a6b3c;font-weight:600}
+  .score-MEDIUM{color:#7a5c00;font-weight:600}
+  .score-LOW{color:#7a3020;font-weight:600}
+  .score-NOISE{color:var(--muted)}
+  .ticker{font-family:var(--mono);font-weight:600}
+  .ts{font-family:var(--mono);font-size:0.75rem;color:var(--muted);white-space:nowrap}
+  .empty{text-align:center;padding:60px 0;color:var(--muted);font-family:var(--mono);font-size:0.8rem;letter-spacing:0.1em}
+  .refresh-note{font-family:var(--mono);font-size:0.7rem;color:var(--muted);text-align:right;padding:0 28px 8px}
+</style>
+</head>
+<body>
+<header>
+  <div class="wordmark">SYNTHOS NEWS FEED</div>
+  <div class="nav">
+    <a href="/">&#8592; Portal</a>
+    <a href="/news">&#8635; Refresh</a>
+    <a href="/logout">Sign out</a>
+  </div>
+</header>
+<div class="page-title">Signal Activity Feed</div>
+<div class="subtitle">All signals evaluated by Scout — including WATCH and DISCARD decisions. Auto-refreshes every 60s.</div>
+<div class="refresh-note">Showing last {count} entries &middot; last updated {updated}</div>
+<div class="table-wrap">
+{table_content}
+</div>
+</body></html>"""
+
+
+@app.route('/news')
+@login_required
+def news_feed_page():
+    """News feed — all signals evaluated by Scout (QUEUE, WATCH, DISCARD)."""
+    rows = get_news_feed_data(limit=100)
+    now_str = datetime.now(ET).strftime('%Y-%m-%d %H:%M ET')
+
+    if not rows:
+        table_content = '<div class="empty">NO SIGNAL ACTIVITY YET</div>'
+    else:
+        header = (
+            '<table>'
+            '<thead><tr>'
+            '<th>Timestamp</th>'
+            '<th>Member</th>'
+            '<th>Ticker</th>'
+            '<th>Signal Score</th>'
+            '<th>Sentiment</th>'
+            '<th>Headline</th>'
+            '</tr></thead><tbody>'
+        )
+        body_rows = []
+        for r in rows:
+            ts        = (r.get('timestamp') or r.get('created_at') or '')[:16]
+            member    = r.get('congress_member') or '—'
+            ticker    = r.get('ticker') or '—'
+            score     = (r.get('signal_score') or 'NOISE').upper()
+            sentiment = r.get('sentiment_score')
+            headline  = r.get('raw_headline') or '—'
+            sent_str  = f"{sentiment:+.2f}" if sentiment is not None else '—'
+            body_rows.append(
+                f'<tr>'
+                f'<td class="ts">{ts}</td>'
+                f'<td>{member}</td>'
+                f'<td class="ticker">{ticker}</td>'
+                f'<td class="score-{score}">{score}</td>'
+                f'<td>{sent_str}</td>'
+                f'<td>{headline[:120]}</td>'
+                f'</tr>'
+            )
+        table_content = header + ''.join(body_rows) + '</tbody></table>'
+
+    html = NEWS_FEED_HTML.replace('{count}', str(len(rows)))
+    html = html.replace('{updated}', now_str)
+    html = html.replace('{table_content}', table_content)
+    return html
+
+
+@app.route('/api/news-feed')
+@login_required
+def api_news_feed():
+    """JSON endpoint — Scout writes here; also readable by company Pi."""
+    rows = get_news_feed_data(limit=100)
+    return jsonify({'entries': rows, 'count': len(rows)})
+
+
 # ── START ──────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     log.info(f"Synthos Portal starting on port {PORT}")

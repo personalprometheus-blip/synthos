@@ -18,6 +18,7 @@ import sqlite3
 import os
 import sys
 import time
+import json
 import logging
 from datetime import datetime, timedelta
 from contextlib import contextmanager
@@ -345,6 +346,32 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
     decision_note   TEXT
 );
 
+-- ── MEMBER WEIGHTS ──────────────────────────────────────────────────────
+-- Per-member signal reliability scores updated after each trade closes.
+CREATE TABLE IF NOT EXISTS member_weights (
+    congress_member TEXT    PRIMARY KEY,
+    win_count       INTEGER NOT NULL DEFAULT 0,
+    loss_count      INTEGER NOT NULL DEFAULT 0,
+    weight          REAL    NOT NULL DEFAULT 1.0,  -- floor 0.5, ceiling 1.5
+    last_updated    TEXT
+);
+
+-- ── NEWS FEED ────────────────────────────────────────────────────────────
+-- All signals seen by Scout, good and bad, before Bolt acts.
+-- Displayed in portal /news page. Cleared after 30 days by cleanup.
+CREATE TABLE IF NOT EXISTS news_feed (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp        TEXT    NOT NULL,
+    congress_member  TEXT,
+    ticker           TEXT,
+    signal_score     TEXT,                  -- adjusted score: HIGH/MEDIUM/LOW/NOISE
+    sentiment_score  REAL,
+    raw_headline     TEXT,
+    metadata         TEXT,                  -- JSON blob
+    source           TEXT,                  -- CONGRESS / RSS
+    created_at       TEXT    NOT NULL
+);
+
 -- ── INDEXES ────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_signals_status        ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker        ON signals(ticker);
@@ -354,6 +381,8 @@ CREATE INDEX IF NOT EXISTS idx_system_log_event      ON system_log(event);
 CREATE INDEX IF NOT EXISTS idx_urgent_flags_ack      ON urgent_flags(acknowledged);
 CREATE INDEX IF NOT EXISTS idx_approvals_status      ON pending_approvals(status);
 CREATE INDEX IF NOT EXISTS idx_approvals_queued      ON pending_approvals(queued_at);
+CREATE INDEX IF NOT EXISTS idx_news_feed_created     ON news_feed(created_at);
+CREATE INDEX IF NOT EXISTS idx_news_feed_ticker      ON news_feed(ticker);
 """
 
 
@@ -436,6 +465,15 @@ class DB:
             "ALTER TABLE signals ADD COLUMN needs_reeval INTEGER NOT NULL DEFAULT 0",
             # v1.1 — add label column to urgent_flags if missing
             "ALTER TABLE urgent_flags ADD COLUMN label TEXT",
+            # v1.2 — member weight tracking and interrogation fields on signals
+            "ALTER TABLE signals ADD COLUMN price_history_used TEXT",
+            "ALTER TABLE signals ADD COLUMN interrogation_status TEXT",
+            "ALTER TABLE signals ADD COLUMN entry_signal_score TEXT",
+            # v1.2 — trade-entry context fields on positions
+            "ALTER TABLE positions ADD COLUMN entry_sentiment_score REAL",
+            "ALTER TABLE positions ADD COLUMN entry_signal_score TEXT",
+            "ALTER TABLE positions ADD COLUMN price_history_used TEXT",
+            "ALTER TABLE positions ADD COLUMN interrogation_status TEXT",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -530,7 +568,9 @@ class DB:
             return [dict(r) for r in rows]
 
     def open_position(self, ticker, company, sector, entry_price, shares,
-                      trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None):
+                      trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
+                      entry_sentiment_score=None, entry_signal_score=None,
+                      interrogation_status=None, price_history_used=None):
         """
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
@@ -545,11 +585,15 @@ class DB:
                 INSERT INTO positions
                     (id, ticker, company, sector, entry_price, current_price,
                      shares, trail_stop_amt, trail_stop_pct, vol_bucket,
-                     pnl, status, opened_at, signal_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?)
+                     pnl, status, opened_at, signal_id,
+                     entry_sentiment_score, entry_signal_score,
+                     interrogation_status, price_history_used)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?)
             """, (pos_id, ticker, company, sector, entry_price, entry_price,
                   shares, trail_stop_amt, trail_stop_pct, vol_bucket,
-                  self.now(), signal_id))
+                  self.now(), signal_id,
+                  entry_sentiment_score, entry_signal_score,
+                  interrogation_status, price_history_used))
 
         self.update_portfolio(cash=new_cash)
         self.add_ledger_entry(
@@ -731,6 +775,88 @@ class DB:
             """, (note, note, self.now(), signal_id))
         log.info(f"Signal {signal_id} annotated by Pulse: Tier {tier} — {summary[:60]}")
 
+    # ── MEMBER WEIGHTS ─────────────────────────────────────────────────────
+
+    def get_member_weight(self, congress_member):
+        """
+        Return weight record for a congress member.
+        Returns dict with weight, win_count, loss_count.
+        Default weight is 1.0 for unknown members.
+        """
+        if not congress_member:
+            return {'weight': 1.0, 'win_count': 0, 'loss_count': 0}
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT weight, win_count, loss_count FROM member_weights WHERE congress_member=?",
+                (congress_member,)
+            ).fetchone()
+        return dict(row) if row else {'weight': 1.0, 'win_count': 0, 'loss_count': 0}
+
+    def update_member_weight_after_trade(self, congress_member, pnl_dollar):
+        """
+        Update win/loss counts and recompute weight after a trade closes.
+        Weight formula: clamp(win_count / total * 2, 0.5, 1.5)
+        Requires >= 5 trades before adjusting from 1.0.
+        Called by Bolt after every close_position().
+        """
+        if not congress_member:
+            return
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT win_count, loss_count FROM member_weights WHERE congress_member=?",
+                (congress_member,)
+            ).fetchone()
+            if row:
+                wins   = row['win_count']   + (1 if pnl_dollar > 0 else 0)
+                losses = row['loss_count']  + (1 if pnl_dollar < 0 else 0)
+            else:
+                wins   = 1 if pnl_dollar > 0 else 0
+                losses = 1 if pnl_dollar < 0 else 0
+
+            total  = wins + losses
+            weight = 1.0 if total < 5 else max(0.5, min(1.5, (wins / total) * 2))
+
+            c.execute("""
+                INSERT INTO member_weights
+                    (congress_member, win_count, loss_count, weight, last_updated)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(congress_member) DO UPDATE SET
+                    win_count    = excluded.win_count,
+                    loss_count   = excluded.loss_count,
+                    weight       = excluded.weight,
+                    last_updated = excluded.last_updated
+            """, (congress_member, wins, losses, round(weight, 4), self.now()))
+        log.info(f"Member weight: {congress_member} {wins}W/{losses}L → {weight:.3f}")
+
+    # ── NEWS FEED ──────────────────────────────────────────────────────────
+
+    def write_news_feed_entry(self, congress_member, ticker, signal_score,
+                               sentiment_score, raw_headline, metadata, source):
+        """
+        Write a signal to the news_feed table for portal display.
+        Called by Scout for every signal processed — QUEUE, WATCH, and DISCARD alike.
+        """
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO news_feed
+                    (timestamp, congress_member, ticker, signal_score, sentiment_score,
+                     raw_headline, metadata, source, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (
+                self.now(), congress_member, ticker, signal_score, sentiment_score,
+                raw_headline,
+                json.dumps(metadata) if metadata else None,
+                source, self.now()
+            ))
+
+    def get_news_feed(self, limit=50):
+        """Return recent news feed entries for portal display, newest first."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM news_feed ORDER BY created_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
     def acknowledge_signal(self, signal_id):
         """Trader acknowledges it has acted on a signal."""
         with self.conn() as c:
@@ -772,6 +898,16 @@ class DB:
                 corroboration_note=COALESCE(?, corroboration_note)
                 WHERE id=?
             """, (self.now(), reason, signal_id))
+
+    def get_signal_by_id(self, signal_id):
+        """Return a single signal row as dict, or None if not found."""
+        if not signal_id:
+            return None
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT * FROM signals WHERE id=?", (signal_id,)
+            ).fetchone()
+            return dict(row) if row else None
 
     # ── LEDGER ─────────────────────────────────────────────────────────────
 
@@ -1133,11 +1269,15 @@ class DB:
                 "DELETE FROM system_log WHERE event != 'HEARTBEAT' AND timestamp < ?",
                 (cutoff_180,)
             )
+            r5 = c.execute(
+                "DELETE FROM news_feed WHERE created_at < ?", (cutoff_30,)
+            )
 
         log.info(
             f"Cleanup: removed {r1.rowcount} discarded signals, "
             f"{r2.rowcount} scan log entries, "
-            f"{r3.rowcount + r4.rowcount} old system log entries (180d retention)"
+            f"{r3.rowcount + r4.rowcount} old system log entries, "
+            f"{r5.rowcount} news feed entries (30d retention)"
         )
 
         # Compact the database

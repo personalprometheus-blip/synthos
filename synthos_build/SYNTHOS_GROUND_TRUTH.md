@@ -177,7 +177,7 @@ SYSTEM_MANIFEST has no `services/` entry for the company_node at all.
 |------|------|------------|
 | `command_interface.py` | 5002 | **Unregistered.** Fully specified in arch (7-page dashboard). Not in manifest FILE_REGISTRY or FILE_STATUS. |
 | `installer_service.py` | 5003 | **Unregistered.** Fully specified in arch (Cloudflare-exposed). Not in manifest. |
-| `heartbeat_receiver.py` | 5004 | **Unregistered.** Specified in arch. Not in manifest. Note: manifest assigns heartbeat reception to `synthos_monitor.py` on monitor_node (port 5000). The arch gives it to a dedicated service on company_node (port 5004). This is a direct conflict — see Section 5. |
+| `heartbeat_receiver.py` | 5004 | **RESOLVED 2026-03-27.** Deprecated — never built. Authoritative heartbeat receiver is `synthos_monitor.py` on monitor_node:5000. See `HEARTBEAT_RESOLUTION.md`. Registered as `deprecated` in SYSTEM_MANIFEST FILE_STATUS. |
 | `config_manager.py` | — | **Unregistered.** Named in arch directory tree with no description. No manifest entry. |
 
 ### 3E. COMPANY NODE UTILITIES — Documented in arch, absent from manifest
@@ -212,40 +212,24 @@ SYSTEM_MANIFEST has no `services/` entry for the company_node at all.
 
 ## 5. ARCHITECTURAL INCONSISTENCIES
 
-### INC-001 — HEARTBEAT RECEIVER: Node Conflict (HIGH)
-**Description:** Two documents assign the heartbeat receiver to different nodes with different ports.
-- SYSTEM_MANIFEST NODE_DEFINITIONS `monitor_node`: heartbeat receiver on port **5000**, handled by `synthos_monitor.py`
-- SYNTHOS_TECHNICAL_ARCHITECTURE §3.2 `company_node`: dedicated `heartbeat_receiver.py` on port **5004**
-- SYSTEM_MANIFEST has no `company_node` services section at all.
+### INC-001 — HEARTBEAT RECEIVER: Node Conflict — **RESOLVED 2026-03-27**
+**Description:** Two documents assigned the heartbeat receiver to different nodes with different ports.
 
-**Impact:** Retail Pi's `synthos_heartbeat.py` uses `MONITOR_URL` env key to POST heartbeats. Which server is the actual target? Both cannot be correct. If both nodes exist, which is authoritative?
-
-**Recommendation:** Decide canonical architecture. If monitor_node and company_node are the same physical Pi, reconcile into one node definition. If they are separate, define explicit routing for heartbeats.
+**Resolution:** monitor_node is the authoritative heartbeat receiver (`synthos_monitor.py`, port 5000). `heartbeat_receiver.py` (port 5004) on company_node was never built and is formally deprecated. `HEARTBEAT_URL` env var is deprecated; canonical env var is `MONITOR_URL`. All affected documents corrected. See `HEARTBEAT_RESOLUTION.md` for full decision record.
 
 ---
 
-### INC-002 — COMPANY NODE ENTIRELY ABSENT FROM MANIFEST (HIGH)
-**Description:** SYSTEM_MANIFEST NODE_DEFINITIONS defines three node types: `retail_node`, `monitor_node`, `company_node`. The `company_node` section lists required agents. However:
-- The `services/` directory (`command_interface.py`, `installer_service.py`, `heartbeat_receiver.py`, `config_manager.py`) is never registered in FILE_REGISTRY or FILE_STATUS.
-- The `utils/` directory (`scheduler_core.py`, `db_guardian.py`) is never registered.
-- The `config/` directory (`agent_policies.json`, `market_calendar.json`, `priorities.json`) is never registered.
+### INC-002 — COMPANY NODE ENTIRELY ABSENT FROM MANIFEST — **RESOLVED 2026-03-27**
+**Description:** company_node `services/`, `utils/`, and `config/` directories were not registered in FILE_REGISTRY or FILE_STATUS.
 
-**Impact:** The company_node is partially specified in the manifest (agents only) and fully specified in the tech arch. Builds against the manifest alone will produce an incomplete company Pi.
-
-**Recommendation:** Add `services/`, `utils/`, and `config/` sections to company_node in FILE_REGISTRY and FILE_STATUS.
+**Resolution:** MANIFEST_PATCH.md applied to SYSTEM_MANIFEST.md — all company_node services, utilities, config files, and runtime state artifacts registered. `heartbeat_receiver.py` registered as deprecated.
 
 ---
 
-### INC-003 — SUGGESTIONS.JSON HAS NO SCHEMA OR LOCATION (HIGH)
-**Description:** `suggestions.json` is the central accountability and enforcement pipeline:
-- TOOL_DEPENDENCY_ARCHITECTURE: "Nonconformance findings are written as suggestions to `suggestions.json` with category `arch_violation`"
-- SYNTHOS_TECHNICAL_ARCHITECTURE Part 11: entire agent escalation model writes to and reads from this file
+### INC-003 — SUGGESTIONS.JSON HAS NO SCHEMA OR LOCATION — **RESOLVED 2026-03-27**
+**Description:** `suggestions.json` had no path, schema, FILE_REGISTRY entry, or FILE_STATUS entry.
 
-It has no entry in FILE_REGISTRY, no defined path in SYSTEM_PATHS, no schema definition in any document, and no FILE_STATUS entry.
-
-**Impact:** The enforcement model and accountability model are both non-functional without this file. Blueprint, Patches, and all company agents depend on it.
-
-**Recommendation:** Define path (recommend `${SYNTHOS_HOME}/suggestions.json` for company_node), create SUGGESTIONS_SCHEMA.md (referenced in SYSTEM_MANIFEST doc list but not included in source documents), and register in FILE_REGISTRY.
+**Resolution:** `SUGGESTIONS_JSON_SPEC.md` written — full lifecycle model, authority model, mutation rules, validation rules, and schema. Path defined: `${SYNTHOS_HOME}/data/suggestions.json`. Registered in FILE_REGISTRY, FILE_LOCATIONS, FILE_STATUS, and SYSTEM_PATHS via MANIFEST_PATCH.
 
 ---
 
@@ -262,25 +246,17 @@ Two interpretations:
 
 ---
 
-### INC-005 — POST_DEPLOY_WATCH.JSON: REFERENCED BUT UNDEFINED (MEDIUM)
-**Description:** SYSTEM_MANIFEST §11 Rollback states: "watchdog may trigger autonomous rollback if `rollback_trigger` condition met in `post_deploy_watch.json`". This file has no:
-- Path definition in SYSTEM_PATHS
-- Schema definition anywhere
-- FILE_STATUS entry
-- FILE_REGISTRY entry
+### INC-005 — POST_DEPLOY_WATCH.JSON: REFERENCED BUT UNDEFINED — **RESOLVED 2026-03-27**
+**Description:** `post_deploy_watch.json` was referenced in SYSTEM_MANIFEST rollback rules but had no path, schema, or registry entries.
 
-**Impact:** Watchdog's autonomous rollback logic is non-functional without a defined schema and path for this file. Any rebuild of `watchdog.py` cannot implement this feature without guessing.
-
-**Recommendation:** Define path (recommend `${SYNTHOS_HOME}/post_deploy_watch.json`), define schema, register in manifest.
+**Resolution:** `POST_DEPLOY_WATCH_SPEC.md` written — full lifecycle model, authority model (Blueprint creates, Patches updates, Watchdog evaluates), mutation rules, validation rules, and schema. Path defined: `${SYNTHOS_HOME}/data/post_deploy_watch.json`. Registered in SYSTEM_PATHS, FILE_REGISTRY, FILE_LOCATIONS, and FILE_STATUS via MANIFEST_PATCH.
 
 ---
 
-### INC-006 — USER/SETTINGS.JSON: PROTECTED FILE NOT IN MANIFEST PROTECTION LIST (MEDIUM)
-**Description:** SYNTHOS_TECHNICAL_ARCHITECTURE §4.3 explicitly lists `user/settings.json` as a protected file that "cannot be updated." SYSTEM_MANIFEST UPGRADE_RULES protected files table does NOT include it. The manifest only protects: `.env`, `signals.db`, `backup/`, `consent_log.jsonl`, `.known_good/`.
+### INC-006 — USER/SETTINGS.JSON: PROTECTED FILE NOT IN MANIFEST PROTECTION LIST — **RESOLVED 2026-03-27**
+**Description:** `user/settings.json` was not listed in SYSTEM_MANIFEST UPGRADE_RULES protected files table.
 
-**Impact:** An automated update system built from the manifest alone would not protect `user/settings.json`. Customer portal preferences could be overwritten during an upgrade.
-
-**Recommendation:** Add `${USER_DIR}/settings.json` to the manifest UPGRADE_RULES protected files table.
+**Resolution:** Added via MANIFEST_PATCH §PATCH 5: `${USER_DIR}/settings.json — Portal preferences; customer-owned; must never be overwritten by updates`.
 
 ---
 
@@ -367,10 +343,9 @@ COMPANY_CONFIG_DIR:     "${SYNTHOS_HOME}/config"
 ${USER_DIR}/settings.json   — Portal preferences; customer-owned
 ```
 
-**Resolve INC-001 (heartbeat receiver node conflict):**
-Decision required: is monitor_node a separate Pi from company_node, or are they the same?
-- If SAME: consolidate to one node definition; one heartbeat service; one port.
-- If DIFFERENT: SYSTEM_MANIFEST must define clear routing. Which node does `MONITOR_URL` point to?
+**INC-001 (heartbeat receiver node conflict): RESOLVED 2026-03-27**
+monitor_node is the authoritative heartbeat receiver. heartbeat_receiver.py (port 5004) deprecated.
+See HEARTBEAT_RESOLUTION.md.
 
 ### 6B. DOCUMENT CORRECTIONS REQUIRED
 
@@ -385,9 +360,9 @@ Decision required: is monitor_node a separate Pi from company_node, or are they 
 
 | File | Priority | Description |
 |------|----------|-------------|
-| `SUGGESTIONS_SCHEMA.md` | HIGH | Schema definition for `suggestions.json` — referenced in manifest doc list but not included in source documents |
-| `suggestions.json` | HIGH | Initialize empty on company_node first boot |
-| `post_deploy_watch.json` | HIGH | Define schema and initialize with safe defaults |
+| ~~`SUGGESTIONS_SCHEMA.md`~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — Superseded by `SUGGESTIONS_JSON_SPEC.md` (full spec, not just schema) |
+| `suggestions.json` | HIGH | Initialize as empty array `[]` on company_node — see NEXT_BUILD_SEQUENCE.md Step 4 |
+| ~~`post_deploy_watch.json`~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — `POST_DEPLOY_WATCH_SPEC.md` written; file created at first Blueprint deployment |
 | `user/settings.json` | MEDIUM | Define schema; currently referenced as protected but has no formal definition |
 
 ### 6D. FILES TO RESOLVE (verify disk state before acting)
@@ -428,19 +403,24 @@ Company agents need explicit classification. Proposed:
 |----------|-------|-------|
 | Active files (confirmed) | 43 | Retail: 16 core + 3 agents; Monitor: 1; Company: 10 agents + 1 data; Operator: 1; Shell: 4; Docs/Legal: ~8 |
 | Active runtime state artifacts | 9 | `.env`, `signals.db`, sentinels, registries, etc. |
-| Implied / missing files (critical) | 2 | `suggestions.json`, `post_deploy_watch.json` |
-| Implied / missing files (company services) | 4 | Entire `services/` directory unregistered |
-| Implied / missing files (company utils/config) | 7 | Unregistered utility and config files |
-| Implied / missing files (retail utils) | 3 | Status ambiguous — verify disk |
+| Implied / missing files (critical) | 0 | RESOLVED — `suggestions.json` and `post_deploy_watch.json` now fully specified and registered |
+| Implied / missing files (company services) | 0 | RESOLVED — Entire `services/` directory registered via MANIFEST_PATCH |
+| Implied / missing files (company utils/config) | 0 | RESOLVED — All utility and config files registered via MANIFEST_PATCH |
+| Implied / missing files (retail utils) | 3 | Status ambiguous — verify disk (INC-004 still open) |
 | Defunct / flagged for cleanup | 4 | `deadman_apps_script.gs`, `first_run.sh` (experimental), `digest_agent.py` (likely dead), retail `scheduler.py` (ghost) |
 | Architectural inconsistencies | 9 | INC-001 through INC-009 |
-| High-severity inconsistencies | 3 | INC-001 (heartbeat node conflict), INC-002 (company node absent from manifest), INC-003 (suggestions.json undefined) |
+| High-severity inconsistencies resolved | 3 | INC-001 (heartbeat), INC-002 (company node manifest), INC-003 (suggestions.json) — all resolved 2026-03-27 |
+| Medium-severity inconsistencies resolved | 2 | INC-005 (post_deploy_watch.json), INC-006 (settings.json protection) — resolved 2026-03-27 |
+| Remaining open inconsistencies | 4 | INC-004 (retail utils/ ambiguous), INC-007 (TDA log path), INC-008, INC-009 |
 
 ---
 
-**Status:** Ground truth extracted. System is coherent at the retail_node level.
-         Company_node and monitor_node have significant documentation gaps that must be
-         resolved before a conformance-clean rebuild can proceed.
+**Status — updated 2026-03-27:** Architectural stabilization phase complete.
+  All HIGH-severity inconsistencies (INC-001, INC-002, INC-003) resolved.
+  All MEDIUM-severity inconsistencies related to runtime state artifacts (INC-005, INC-006) resolved.
+  Company_node documentation is now complete. Retail_node remains coherent.
+  Remaining open: INC-004 (retail utils/ — verify disk), INC-007 (TDA log path), INC-008, INC-009.
 
-**Next step:** Resolve INC-001 (heartbeat receiver node conflict) — this is the single
-              most load-bearing architectural decision currently unresolved.
+**Next step:** Begin build sequence per NEXT_BUILD_SEQUENCE.md.
+              Immediate: apply Step 3 cross-document consistency validation, then initialize
+              `suggestions.json` on company_node and queue utility module build suggestions.

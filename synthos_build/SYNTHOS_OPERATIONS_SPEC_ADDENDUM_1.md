@@ -184,7 +184,7 @@ with certificates issued by Vault.
 ### 4.2 IP Isolation During Testing
 
 During development and testing, only known IP addresses may communicate with
-the Company Pi's heartbeat receiver and validation endpoints.
+the monitor_node's heartbeat receiver (synthos_monitor.py, port 5000) and company Pi validation endpoints.
 
 **Allowed IPs list** (stored in `config/allowed_ips.json`):
 ```json

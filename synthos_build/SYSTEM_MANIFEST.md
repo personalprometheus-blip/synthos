@@ -554,6 +554,8 @@ Keys marked `[R]` = required. Keys marked `[O]` = optional. Column `Node` identi
 | `MAX_SECTOR_PCT` | integer | `25` | retail | Max % in one sector before penalty |
 | `MAX_STALENESS` | enum | — | retail | `Fresh` / `Aging` / `Stale` / `Expired` |
 | `MIN_CONFIDENCE` | enum | — | retail | `HIGH` / `MEDIUM` / `LOW` |
+| `MIN_SIGNAL_THRESHOLD` | decimal | `0.1` | retail | Adjusted numeric score floor; signals below this are discarded before queue (v1.2) |
+| `COMPANY_SUBSCRIPTION` | bool | `false` | retail | When `true`, Scout POSTs signal data to company Pi `/api/news-feed` after each run (v1.2) |
 | `RSS_FEEDS_JSON` | json | — | retail | JSON array of `[name, url, tier]` — custom RSS feeds |
 | `SPOUSAL_WEIGHT` | enum | — | retail | `reduced` / `skip` / `equal` |
 
@@ -958,6 +960,8 @@ v1.1:
 | `SUGGESTIONS_JSON_SPEC.md` | active | engineering reference |
 | `POST_DEPLOY_WATCH_SPEC.md` | active | engineering reference |
 | `BLUEPRINT_SAFETY_CONTRACT.md` | active | engineering reference |
+| `HEARTBEAT_RESOLUTION.md` | active | engineering reference — heartbeat conflict resolved 2026-03-27 |
+| `NEXT_BUILD_SEQUENCE.md` | active | engineering reference — current phase build order |
 | `MANIFEST_PATCH.md` | active | engineering reference — applied 2026-03-27 |
 
 ---

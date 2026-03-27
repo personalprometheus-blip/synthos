@@ -44,14 +44,16 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
-ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
-ALPACA_SECRET     = os.environ.get('ALPACA_SECRET_KEY', '')
-ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
-TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
-ET                = ZoneInfo("America/New_York")
-CLAUDE_MODEL      = "claude-sonnet-4-20250514"
-MAX_RETRIES       = 3
+ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY', '')
+ALPACA_API_KEY       = os.environ.get('ALPACA_API_KEY', '')
+ALPACA_SECRET        = os.environ.get('ALPACA_SECRET_KEY', '')
+ALPACA_BASE_URL      = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+ALPACA_DATA_URL      = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+TRADING_MODE         = os.environ.get('TRADING_MODE', 'PAPER')
+MIN_SIGNAL_THRESHOLD = float(os.environ.get('MIN_SIGNAL_THRESHOLD', '0.1'))
+ET                   = ZoneInfo("America/New_York")
+CLAUDE_MODEL         = "claude-sonnet-4-20250514"
+MAX_RETRIES          = 3
 
 # ── OPERATING MODE ────────────────────────────────────────────────────────
 # SUPERVISED: Claude queues proposals, user approves each one before execution
@@ -69,10 +71,11 @@ ALERT_FROM        = os.environ.get('ALERT_FROM', '')
 USER_EMAIL        = os.environ.get('USER_EMAIL', '')       # recipient for trade alerts
 
 # Safety check — refuse to run if config is ambiguous
+# ⚠️ UNDER REVIEW — live trading deployment not yet authorized
 if TRADING_MODE not in ('PAPER', 'LIVE'):
     print(f"ERROR: Invalid TRADING_MODE '{TRADING_MODE}'. Must be PAPER or LIVE.")
     sys.exit(1)
-if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:
+if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:  # ⚠️ UNDER REVIEW — live trading deployment not yet authorized
     print("ERROR: TRADING_MODE=LIVE but ALPACA_BASE_URL points to paper endpoint.")
     sys.exit(1)
 
@@ -627,10 +630,62 @@ def build_learning_context(db):
     return "RECENT OUTCOMES (learning):\n" + "\n".join(lines)
 
 
+def fetch_price_history_5yr(ticker):
+    """
+    Fetch 5yr daily OHLCV summary for ticker from Alpaca Data API.
+    Returns a summary dict, or None on failure.
+    Caller must del the result after use — data is not persisted.
+    """
+    try:
+        end   = datetime.now(ET)
+        start = end - timedelta(days=365 * 5 + 10)
+        url   = (
+            f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"
+            f"?timeframe=1Day"
+            f"&start={start.strftime('%Y-%m-%dT00:00:00Z')}"
+            f"&end={end.strftime('%Y-%m-%dT00:00:00Z')}"
+            f"&limit=1500"
+            f"&feed=iex"
+        )
+        headers = {
+            "APCA-API-KEY-ID":     ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET,
+        }
+        r = requests.get(url, headers=headers, timeout=20)
+        if r.status_code != 200:
+            log.warning(f"[5YR] Data API returned {r.status_code} for {ticker}")
+            return None
+        bars = r.json().get('bars', [])
+        if len(bars) < 2:
+            return None
+        closes  = [b['c'] for b in bars]
+        volumes = [b['v'] for b in bars]
+        recent_52w = bars[-252:] if len(bars) >= 252 else bars
+        return {
+            "ticker":         ticker,
+            "bars_fetched":   len(bars),
+            "last_close":     round(closes[-1], 2),
+            "close_5yr_ago":  round(closes[0], 2),
+            "change_pct_5yr": round((closes[-1] - closes[0]) / closes[0] * 100, 1) if closes[0] else 0,
+            "high_52w":       round(max(b['h'] for b in recent_52w), 2),
+            "low_52w":        round(min(b['l'] for b in recent_52w), 2),
+            "avg_vol_90d":    int(round(sum(volumes[-90:]) / min(len(volumes), 90), 0)),
+            "change_pct_1yr": (
+                round((closes[-1] - closes[-252]) / closes[-252] * 100, 1)
+                if len(closes) >= 252 and closes[-252] else None
+            ),
+        }
+    except Exception as e:
+        log.warning(f"[5YR] fetch_price_history_5yr({ticker}) failed: {e}")
+        return None
+
+
 def analyze_signal_with_claude(signal, portfolio, positions, session, db, alpaca):
     """
-    Ask Claude to analyze a queued signal and decide: MIRROR / WATCH / SKIP.
-    Returns (decision, reasoning)
+    Analyze a queued signal and decide: MIRROR / WATCH / SKIP.
+    Option B rules determine the entry decision based on adjusted_signal_score,
+    pulse sentiment, and interrogation status. Claude provides reasoning context.
+    Returns (decision, reasoning, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label)
     """
     total_value    = portfolio['cash'] + sum(
         p['entry_price'] * p['shares'] for p in positions
@@ -688,6 +743,38 @@ def analyze_signal_with_claude(signal, portfolio, positions, session, db, alpaca
         pulse_pre_trade,
     ]))
 
+    # ── OPTION B: Rule-based entry decision ───────────────────────────────
+    # Decision is determined by adjusted_signal_score, pulse state, and
+    # interrogation_status — not by Claude's free-form judgment.
+    # Claude still provides reasoning for transparency and audit trail.
+    adj_score            = (signal.get('entry_signal_score') or signal.get('confidence', 'MEDIUM')).upper()
+    interrogation_status = signal.get('interrogation_status', 'UNVALIDATED')
+    cascade_detected     = ticker in urgent_tickers
+    pulse_negative       = cascade_detected or bool(pulse_pre_trade)
+
+    if adj_score == 'HIGH' and not pulse_negative and not kill_switch_active():
+        option_b_decision = 'MIRROR'
+    elif adj_score in ('MEDIUM', 'LOW') or pulse_negative or interrogation_status == 'UNVALIDATED':
+        option_b_decision = 'WATCH'
+    else:
+        option_b_decision = 'WATCH'  # default conservative
+
+    # ── 5YR PRICE HISTORY for Claude context (deleted after call) ─────────
+    price_hist = fetch_price_history_5yr(ticker)
+    if price_hist:
+        _1yr = price_hist['change_pct_1yr']
+        _1yr_str = f"{_1yr:+.1f}%" if _1yr is not None else 'N/A'
+        price_hist_section = (
+            f"\nPRICE HISTORY ({ticker}):\n"
+            f"  5yr change:    {price_hist['change_pct_5yr']:+.1f}%"
+            f"  (${price_hist['close_5yr_ago']} -> ${price_hist['last_close']})\n"
+            f"  1yr change:    {_1yr_str}\n"
+            f"  52w range:     ${price_hist['low_52w']} - ${price_hist['high_52w']}\n"
+            f"  Avg vol (90d): {price_hist['avg_vol_90d']:,}\n"
+        )
+    else:
+        price_hist_section = ""
+
     learning = build_learning_context(db)
     is_cold  = len(positions) == 0 and portfolio.get('realized_gains', 0) == 0
 
@@ -705,20 +792,25 @@ Capital preservation first. More wins than losses is the goal, not big wins.
 PORTFOLIO ({tier_rules['label']} tier):
   Total: ${total_value:.2f} | Tradeable: ${tradeable:.2f} | Deployed: {deployed_pct*100:.1f}% (max {tier_rules['max_deployed']*100:.0f}%)
   Open positions: {len(positions)}/{tier_rules['max_positions']} | Month gains: ${portfolio.get('realized_gains',0):.2f}
-  {'🚀 COLD START MODE: First run — only Tier 1 HIGH confidence, max 1 position.' if is_cold else ''}
+  {'COLD START MODE: First run — only Tier 1 HIGH confidence, max 1 position.' if is_cold else ''}
 
 SESSION: {session.upper()} — {session_guidance}
 
 SIGNAL:
-  Ticker: {ticker} | Source: {signal.get('source')} (Tier {signal.get('source_tier')}) | Confidence: {signal.get('confidence')}
+  Ticker: {ticker} | Source: {signal.get('source')} (Tier {signal.get('source_tier')}) | Base confidence: {signal.get('confidence')}
+  Adjusted score: {adj_score} | Interrogation: {interrogation_status}
   Politician: {signal.get('politician','?')} | Staleness: {signal.get('staleness','?')} (discount: {staleness_disc*100:.0f}%)
   Headline: "{signal.get('headline','')}"
-
+{price_hist_section}
 PROPOSED TRADE:
   Position size: ${max_trade:.2f} ({adj_pos_pct*100:.1f}% of tradeable after staleness discount)
   Shares: {shares:.4f} @ ${price:.2f}
   Trailing stop: ${trail_amt:.2f} ({trail_pct:.1f}%) — {vol_label} (ATR x {VOLATILITY_BUCKETS.get("mid",{}).get("multiplier",1.1)})
   Sector exposure: {sector_pct:.1f}% in {sig_sector} {'⚠ approaching cap' if sector_pct > MAX_SECTOR_CAP_PCT * 0.8 else ''}
+
+ENTRY DECISION (Option B rules — pre-determined): {option_b_decision}
+  MIRROR criteria: adjusted_score==HIGH AND no pulse warning AND no kill switch
+  WATCH criteria:  adjusted_score==MEDIUM/LOW OR pulse warning OR interrogation==UNVALIDATED
 
 {pulse_warning}
 
@@ -726,28 +818,19 @@ PROPOSED TRADE:
 
 PROFIT RULES (for awareness): sell ⅓ at 8% gain, ½ at 15%, ¾ at 25%.
 
-Analyze: signal quality, timing, session fit, sector, pulse warnings, cold start rules if applicable.
+The entry decision above has been determined by Option B rules. Provide analysis of signal
+quality, price history, timing, and sector fit. Your reasoning will be logged for audit.
 
 End with exactly:
-DECISION: MIRROR
-or
-DECISION: WATCH
-or
-DECISION: SKIP"""
+DECISION: {option_b_decision}"""
 
     response = call_claude(prompt, max_tokens=1000)
+    del price_hist  # release from memory — not persisted
+
     if not response:
-        return "SKIP", "Claude unavailable"
+        return option_b_decision, "Claude unavailable", price, atr, shares, max_trade, trail_amt, trail_pct, vol_label
 
-    decision = "WATCH"
-    for line in response.strip().split('\n'):
-        if line.startswith("DECISION:"):
-            d = line.replace("DECISION:", "").strip().upper()
-            if d in ("MIRROR", "WATCH", "SKIP"):
-                decision = d
-            break
-
-    return decision, response, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label
+    return option_b_decision, response, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label
 
 
 # ── POSITION MANAGEMENT ───────────────────────────────────────────────────
@@ -978,13 +1061,20 @@ def run(session="open"):
                 log.warning(f"LAYER 1 EXIT: Closing {pos['ticker']} — {reason}")
                 order = alpaca.close_position(pos['ticker'])
                 if order is not None:
-                    pnl = db.close_position(pos['id'], current_price, exit_reason="PROTECTIVE_EXIT")
+                    pnl = db.close_position(pos['id'], current_price, exit_reason="PULSE_EXIT")
                     db.acknowledge_urgent_flag(flag_info['id'])
                     db.log_event(
-                        "PROTECTIVE_EXIT", agent="The Trader",
+                        "PULSE_EXIT", agent="The Trader",
                         details=f"{pos['ticker']} — {reason}",
                         portfolio_value=current_price * pos['shares'],
                     )
+                    # Update member weight for the politician behind this signal
+                    try:
+                        _sig = db.get_signal_by_id(pos.get('signal_id'))
+                        if _sig and _sig.get('politician'):
+                            db.update_member_weight_after_trade(_sig['politician'], pnl)
+                    except Exception as _mw_e:
+                        log.debug(f"Member weight update skipped: {_mw_e}")
                     # Send immediate email notification (framing 5.3 / M1)
                     send_protective_exit_email(
                         ticker=pos['ticker'],
@@ -1029,6 +1119,7 @@ def run(session="open"):
 
                 order = alpaca.submit_order(ticker=ticker, qty=shares, side="buy")
                 if order:
+                    _appr_sig = db.get_signal_by_id(sig_id) or {}
                     db.open_position(
                         ticker=ticker,
                         company=approval.get('company'),
@@ -1039,6 +1130,9 @@ def run(session="open"):
                         trail_stop_pct=trail_pct,
                         vol_bucket=vol_label,
                         signal_id=sig_id,
+                        entry_signal_score=_appr_sig.get('entry_signal_score', approval.get('confidence')),
+                        entry_sentiment_score=_appr_sig.get('sentiment_score'),
+                        interrogation_status=_appr_sig.get('interrogation_status'),
                     )
                     alpaca.submit_order(
                         ticker=ticker, qty=shares, side="sell",
@@ -1066,7 +1160,14 @@ def run(session="open"):
                 if result:
                     proceeds = sell_shares * current_price
                     remaining = pos['shares'] - sell_shares
-                    db.close_position(pos['id'], current_price, exit_reason="PROFIT_TAKE")
+                    _pt_pnl = db.close_position(pos['id'], current_price, exit_reason="PROFIT_TAKE")
+                    # Update member weight for the politician behind this signal
+                    try:
+                        _sig = db.get_signal_by_id(pos.get('signal_id'))
+                        if _sig and _sig.get('politician'):
+                            db.update_member_weight_after_trade(_sig['politician'], _pt_pnl)
+                    except Exception as _mw_e:
+                        log.debug(f"Member weight update skipped: {_mw_e}")
                     if remaining > 0.0001:
                         # Reopen with remaining shares
                         _, _, vol_label = calculate_trail_stop(
@@ -1177,6 +1278,7 @@ def run(session="open"):
                     else:
                         # ── AUTONOMOUS MODE (framing 4.2)
                         # Execute immediately per pre-authorized rules
+                        # ⚠️ UNDER REVIEW — live trading deployment not yet authorized
                         order = alpaca.submit_order(
                             ticker=signal['ticker'], qty=shares, side="buy"
                         )
@@ -1194,6 +1296,9 @@ def run(session="open"):
                                 trail_stop_pct=trail_pct,
                                 vol_bucket=vol_label,
                                 signal_id=signal['id'],
+                                entry_signal_score=signal.get('entry_signal_score', signal.get('confidence')),
+                                entry_sentiment_score=signal.get('sentiment_score'),
+                                interrogation_status=signal.get('interrogation_status'),
                             )
                             alpaca.submit_order(
                                 ticker=signal['ticker'],
