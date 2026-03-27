@@ -334,6 +334,7 @@ required_files:
 | `qpull.sh` | Quick git pull utility | Maintenance |
 | `qpush.sh` | Quick git push utility | Maintenance |
 | `setup_tunnel.sh` | Cloudflare tunnel setup | Bootstrap |
+| `restore.sh` | Company Pi fast restore — decrypt, extract, set permissions, start agents | Repair |
 
 ### Services (monitor_node)
 
@@ -929,6 +930,7 @@ v1.1:
 | `qpull.sh` | active | |
 | `qpush.sh` | active | |
 | `setup_tunnel.sh` | active | |
+| `restore.sh` | active | company_node only — operator-invoked disaster recovery |
 | `synthos_framing_v1_1.md` | active | text reference only — master is synthos_framing.docx |
 | `api_security.md` | active | |
 | `deadman_switch.md` | active | |

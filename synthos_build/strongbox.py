@@ -210,11 +210,18 @@ def _create_company_archive(tmp_dir: Path) -> Path:
     archive_path = tmp_dir / f"synthos_backup_{COMPANY_PI_ID}_{date_str}.tar.gz"
 
     with tarfile.open(archive_path, "w:gz") as tar:
-        tar.add(COMPANY_DB, arcname="company.db")
-        # Include agents directory (source code is recoverable, but having it
-        # with the DB snapshot makes restore more straightforward)
+        tar.add(COMPANY_DB, arcname="data/company.db")
+        # user/ — contains .env (API keys, COMPANY_MODE flag) and settings.json.
+        # Required by restore.sh step c: "Restores .env from encrypted backup."
+        if USER_DIR.exists():
+            tar.add(USER_DIR, arcname="user")
+        # agents/ — source code snapshot; makes restore self-contained
         if AGENT_DIR.exists():
             tar.add(AGENT_DIR, arcname="agents")
+        # config/ — agent policies, market calendar, priorities
+        config_dir = SYNTHOS_HOME / "config"
+        if config_dir.exists():
+            tar.add(config_dir, arcname="config")
 
     log.info("Company archive created: %s (%.1f KB)",
              archive_path.name, archive_path.stat().st_size / 1024)
@@ -429,7 +436,7 @@ def verify_backups(status: dict) -> None:
                     members = tar.getnames()
 
                 expected_files = (
-                    ["company.db"] if pi_id == COMPANY_PI_ID
+                    ["data/company.db", "user/.env"] if pi_id == COMPANY_PI_ID
                     else ["signals.db"]
                 )
                 missing = [f for f in expected_files if not any(

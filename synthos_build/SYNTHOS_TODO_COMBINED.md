@@ -53,7 +53,7 @@
 | # | Item | Priority | Notes |
 |---|---|---|---|
 | T-10 | `first_run.sh` hardcodes `/home/pi/synthos` path | MEDIUM | Known issue flagged in manifest. Out of scope for installers. Separate refactor task required. |
-| T-11 | Company restore workflow (`restore.sh`) does not exist | HIGH | Addendum 3.1 references it. Strongbox (Agent 12) owns this when implemented. |
+| ~~T-11~~ | ~~Company restore workflow (`restore.sh`) does not exist~~ | ~~HIGH~~ | **RESOLVED 2026-03-27** — `restore.sh` implemented per Addendum 3.1 §3.1. Accepts encrypted (.enc) or pre-decrypted archive; decrypts via Fernet; extracts to `~/synthos-company/`; restores company.db and .env; sets permissions; installs Python deps; registers Strongbox cron; starts all company agents. Also fixed `strongbox.py` archive to include `user/` and `config/` (required for restore step c). |
 | T-12 | License key validation at install time | LOW | Installer collects key but cannot validate (no Vault at install time). Validation deferred to `boot_sequence.py` on first boot. Decided/acceptable — not a silent failure. |
 
 ---
@@ -105,7 +105,7 @@
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 3 | T-01, T-02, T-11 (T-06, T-13 resolved) |
+| HIGH | 2 | T-01, T-02 (T-06, T-11, T-13 resolved) |
 | MEDIUM | 7 | T-03, T-05, T-07, T-08, T-10, T-15, T-16 (T-14 resolved) |
 | LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
 
