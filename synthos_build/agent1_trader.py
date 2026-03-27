@@ -673,10 +673,20 @@ def analyze_signal_with_claude(signal, portfolio, positions, session, db, alpaca
     trail_amt, trail_pct, vol_label = calculate_trail_stop(atr, price, sig_sector)
     shares = round(max_trade / price, 4)
 
-    # Urgent flags from The Pulse
+    # Urgent flags from The Pulse (open positions)
     urgent_flags = db.get_urgent_flags()
     urgent_tickers = {f['ticker'] for f in urgent_flags}
-    pulse_warning = f"⚠ URGENT PULSE FLAG on {ticker}" if ticker in urgent_tickers else ""
+
+    # Pre-trade sentiment from The Pulse (written to corroboration_note by agent3_sentiment.py)
+    corroboration_note = signal.get('corroboration_note', '') or ''
+    pulse_pre_trade = (
+        f"⚠ PRE-TRADE PULSE WARNING: {corroboration_note}"
+        if '[PULSE' in corroboration_note else ''
+    )
+    pulse_warning = '\n'.join(filter(None, [
+        f"⚠ URGENT PULSE FLAG on {ticker}" if ticker in urgent_tickers else '',
+        pulse_pre_trade,
+    ]))
 
     learning = build_learning_context(db)
     is_cold  = len(positions) == 0 and portfolio.get('realized_gains', 0) == 0

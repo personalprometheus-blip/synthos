@@ -461,19 +461,21 @@ def run():
             tier, tier_label, cascade_detected, summary = detect_cascade(
                 put_call, put_call_avg, insider_data, volume_data
             )
+            db.log_scan(
+                ticker=ticker,
+                put_call_ratio=put_call,
+                put_call_avg30d=put_call_avg,
+                insider_net=insider_data.get("net_dollar"),
+                volume_vs_avg=volume_data.get("today_vs_avg"),
+                seller_dominance=volume_data.get("seller_dominance"),
+                cascade_detected=cascade_detected,
+                tier=tier,
+                event_summary=f"PRE-TRADE CHECK: {summary}",
+            )
             if tier <= 2:
                 log.warning(f"Pre-trade warning: {ticker} (signal {sig['id']}) — {tier_label}: {summary}")
-                db.log_scan(
-                    ticker=ticker,
-                    put_call_ratio=put_call,
-                    put_call_avg30d=put_call_avg,
-                    insider_net=insider_data.get("net_dollar"),
-                    volume_vs_avg=volume_data.get("today_vs_avg"),
-                    seller_dominance=volume_data.get("seller_dominance"),
-                    cascade_detected=cascade_detected,
-                    tier=tier,
-                    event_summary=f"PRE-TRADE CHECK: {summary}",
-                )
+                # Write finding back to signal so The Trader can see it in its Claude prompt
+                db.annotate_signal_pulse(sig['id'], tier, summary)
             time.sleep(1)
 
     portfolio = db.get_portfolio()

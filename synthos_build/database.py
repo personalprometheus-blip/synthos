@@ -711,6 +711,26 @@ class DB:
 
         log.info(f"Signal {signal_id} ({sig['ticker']}) queued for trader")
 
+    def annotate_signal_pulse(self, signal_id, tier, summary):
+        """
+        The Pulse writes its pre-trade sentiment finding to the signal record.
+        Appends to corroboration_note so The Daily's existing note is preserved.
+        The Trader reads this note in analyze_signal_with_claude().
+        """
+        note = f"[PULSE Tier {tier}] {summary}"
+        with self.conn() as c:
+            c.execute("""
+                UPDATE signals SET
+                    corroboration_note = CASE
+                        WHEN corroboration_note IS NULL OR corroboration_note = ''
+                        THEN ?
+                        ELSE corroboration_note || ' | ' || ?
+                    END,
+                    updated_at = ?
+                WHERE id = ?
+            """, (note, note, self.now(), signal_id))
+        log.info(f"Signal {signal_id} annotated by Pulse: Tier {tier} — {summary[:60]}")
+
     def acknowledge_signal(self, signal_id):
         """Trader acknowledges it has acted on a signal."""
         with self.conn() as c:
