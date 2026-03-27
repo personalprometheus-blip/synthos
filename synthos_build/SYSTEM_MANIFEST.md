@@ -30,8 +30,8 @@
 ```yaml
 system_name:      Synthos
 system_version:   1.1
-manifest_version: 2.0
-last_updated:     2026-03-24
+manifest_version: 2.1
+last_updated:     2026-03-27
 description: >
   Synthos is a distributed, offline-capable algorithmic trading assistant
   deployed on Raspberry Pi hardware. It operates across two node types:
@@ -79,6 +79,15 @@ runtime_files:
   pending_approvals:      "${SYNTHOS_HOME}/.pending_approvals.json"
   monitor_registry:       "${SYNTHOS_HOME}/.monitor_registry.json"
   consent_log:            "${SYNTHOS_HOME}/consent_log.jsonl"
+
+  # Architectural stabilization additions — 2026-03-27
+  suggestions_file:       "${SYNTHOS_HOME}/data/suggestions.json"
+  suggestions_archive:    "${SYNTHOS_HOME}/data/suggestions_archive.json"
+  post_deploy_watch:      "${SYNTHOS_HOME}/data/post_deploy_watch.json"
+  company_services_dir:   "${SYNTHOS_HOME}/services"
+  company_utils_dir:      "${SYNTHOS_HOME}/utils"
+  company_config_dir:     "${SYNTHOS_HOME}/config"
+  blueprint_staging_dir:  "${SYNTHOS_HOME}/.blueprint_staging"
 
 node_specific:
   retail_node:
@@ -193,7 +202,13 @@ required_files:
     - .monitor_registry.json
 
 ports:
-  heartbeat_receiver: 5000 (configurable via PORT)
+  heartbeat_receiver: 5000 (configurable via PORT env var; this is the AUTHORITATIVE heartbeat port)
+
+note_on_company_node_port_5004: >
+  SYNTHOS_TECHNICAL_ARCHITECTURE §3.2 references a heartbeat_receiver.py on company_node at port 5004.
+  This is DEPRECATED. It was a design artifact that was never built. The authoritative heartbeat
+  receiver is synthos_monitor.py on monitor_node at port 5000. See HEARTBEAT_RESOLUTION.md.
+  The MONITOR_URL env var on retail Pis points to monitor_node:5000 exclusively.
 ```
 
 ### company_node
@@ -266,6 +281,47 @@ required_files:
 | `timekeeper.py` | System resource scheduler — slot management, deadlock prevention | Runtime |
 | `db_helpers.py` | Company Pi shared DB utilities — all agent writes go through here | Data |
 
+### Runtime State Files (company_node)
+
+| File | Description | Tool Class | Node |
+|---|---|---|---|
+| `data/suggestions.json` | Central improvement and enforcement tracking — all suggestion lifecycle states | Data (runtime state artifact) | company_node |
+| `data/suggestions_archive.json` | Completed/superseded suggestions older than 90 days — archived by Patches weekly | Data (runtime state artifact) | company_node |
+| `data/post_deploy_watch.json` | Post-deployment monitoring record — governs rollback eligibility; read by retail Watchdog | Data (runtime state artifact) | company_node |
+
+### Services (company_node)
+
+| File | Description | Tool Class | Port |
+|---|---|---|---|
+| `services/command_interface.py` | Command portal Flask app — project lead dashboard, pending changes, approval UI | Runtime | 5002 |
+| `services/installer_service.py` | Installer delivery Flask app — Cloudflare-exposed; serves install scripts to customers | Bootstrap | 5003 |
+| `services/config_manager.py` | Configuration management service — runtime config reads/writes for company agents | Runtime | — |
+
+**Note on heartbeat_receiver.py (port 5004):** This file is listed in SYNTHOS_TECHNICAL_ARCHITECTURE §3.2 but is DEPRECATED as a company_node service. The authoritative heartbeat receiver is `synthos_monitor.py` on the monitor_node at port 5000. See HEARTBEAT_RESOLUTION.md for full decision record.
+
+### Utilities (company_node)
+
+| File | Description | Tool Class |
+|---|---|---|
+| `utils/scheduler_core.py` | Request/Grant logic for Timekeeper — imported by timekeeper.py only | Data |
+| `utils/db_guardian.py` | Lock management and conflict detection for company.db — imported by all company agents | Data |
+| `utils/api_client.py` | Anthropic, GitHub, SendGrid API client — shared across company agents | Data |
+| `utils/logging.py` | Structured logging factory — shared across company agents | Data |
+
+### Config Files (company_node)
+
+| File | Description | Class |
+|---|---|---|
+| `config/agent_policies.json` | Who runs when — scheduling and priority rules per agent | runtime config |
+| `config/market_calendar.json` | Trading hours and market session definitions | runtime config |
+| `config/priorities.json` | Task urgency ranking for Timekeeper slot assignment | runtime config |
+
+### Staging Workspace (company_node)
+
+| Path | Description | Class |
+|---|---|---|
+| `.blueprint_staging/` | Blueprint's exclusive workspace — never committed to git; cleaned at each run start | Repair |
+
 ### Operator Tools
 
 | File | Description | Tool Class |
@@ -297,6 +353,12 @@ required_files:
 | `AGENT_ROSTER.md` | Company Pi agent roles and accountability model | engineering |
 | `SUGGESTIONS_SCHEMA.md` | Suggestions.json schema definition | engineering |
 | `COMMAND_PORTAL_SPEC.md` | Command portal specification | engineering |
+| `SUGGESTIONS_JSON_SPEC.md` | Full specification for suggestions.json — lifecycle, authority, schema | engineering |
+| `POST_DEPLOY_WATCH_SPEC.md` | Full specification for post_deploy_watch.json — lifecycle, authority, schema | engineering |
+| `BLUEPRINT_SAFETY_CONTRACT.md` | Blueprint's non-negotiable deployment safety rules | engineering |
+| `HEARTBEAT_RESOLUTION.md` | Decision record resolving monitor_node vs company_node heartbeat conflict | engineering |
+| `NEXT_BUILD_SEQUENCE.md` | Ordered build sequence for current phase | engineering |
+| `MANIFEST_PATCH.md` | Paste-in additions for SYSTEM_MANIFEST.md — applied 2026-03-27 | engineering |
 
 ### Legal / Business
 
@@ -355,6 +417,30 @@ company_node:
   ${SYNTHOS_HOME}/agents/timekeeper.py
   ${SYNTHOS_HOME}/utils/db_helpers.py
   ${SYNTHOS_HOME}/data/company.db
+
+  # Runtime state artifacts — added 2026-03-27
+  ${SYNTHOS_HOME}/data/suggestions.json
+  ${SYNTHOS_HOME}/data/suggestions_archive.json
+  ${SYNTHOS_HOME}/data/post_deploy_watch.json
+
+  # Services
+  ${SYNTHOS_HOME}/services/command_interface.py
+  ${SYNTHOS_HOME}/services/installer_service.py
+  ${SYNTHOS_HOME}/services/config_manager.py
+
+  # Utilities
+  ${SYNTHOS_HOME}/utils/scheduler_core.py
+  ${SYNTHOS_HOME}/utils/db_guardian.py
+  ${SYNTHOS_HOME}/utils/api_client.py
+  ${SYNTHOS_HOME}/utils/logging.py
+
+  # Config
+  ${SYNTHOS_HOME}/config/agent_policies.json
+  ${SYNTHOS_HOME}/config/market_calendar.json
+  ${SYNTHOS_HOME}/config/priorities.json
+
+  # Blueprint workspace
+  ${SYNTHOS_HOME}/.blueprint_staging/
 
 operator_only:
   generate_unlock_key.py    # NOT deployed to any Pi
@@ -785,6 +871,7 @@ v1.1:
 | `${DATA_DIR}/backup/` | Backup copies of signals.db |
 | `consent_log.jsonl` | Append-only audit trail — operator machine only |
 | `${SYNTHOS_HOME}/.known_good/` | Watchdog rollback snapshot |
+| `${USER_DIR}/settings.json` | Portal preferences; customer-owned; must never be overwritten by updates |
 
 ### Database Migrations
 
@@ -846,9 +933,29 @@ v1.1:
 | `user_guide.html` | active | customer-facing |
 | `synthos_design_brief.md` | active | internal reference |
 | `deadman_apps_script.gs` | deprecated | archived — replaced by monitor server architecture in v1.1 |
+| `data/suggestions.json` | active | company_node — runtime state; schema: SUGGESTIONS_JSON_SPEC.md |
+| `data/suggestions_archive.json` | active | company_node — runtime state; created by Patches on first archive |
+| `data/post_deploy_watch.json` | active | company_node — runtime state; schema: POST_DEPLOY_WATCH_SPEC.md |
+| `services/command_interface.py` | active | company_node — port 5002 |
+| `services/installer_service.py` | active | company_node — port 5003 |
+| `services/heartbeat_receiver.py` | deprecated | company_node (was proposed, never built) — superseded by synthos_monitor.py on monitor_node; see HEARTBEAT_RESOLUTION.md |
+| `services/config_manager.py` | active | company_node |
+| `utils/scheduler_core.py` | active | company_node |
+| `utils/db_guardian.py` | active | company_node |
+| `utils/api_client.py` | active | company_node |
+| `utils/logging.py` | active | company_node |
+| `config/agent_policies.json` | active | company_node — runtime config |
+| `config/market_calendar.json` | active | company_node — runtime config |
+| `config/priorities.json` | active | company_node — runtime config |
+| `.blueprint_staging/` | active | company_node — ephemeral workspace; never committed to git |
+| `SUGGESTIONS_JSON_SPEC.md` | active | engineering reference |
+| `POST_DEPLOY_WATCH_SPEC.md` | active | engineering reference |
+| `BLUEPRINT_SAFETY_CONTRACT.md` | active | engineering reference |
+| `MANIFEST_PATCH.md` | active | engineering reference — applied 2026-03-27 |
 
 ---
 
-**Version:** 2.0
-**Last Updated:** 2026-03-24
+**Version:** 2.1
+**Last Updated:** 2026-03-27
 **Supersedes:** VERSION_MANIFEST.txt v1.1
+**Patch Applied:** MANIFEST_PATCH.md v1.0 — architectural stabilization additions (SYSTEM_PATHS, FILE_REGISTRY, FILE_LOCATIONS, FILE_STATUS, UPGRADE_RULES, NODE_DEFINITIONS)
