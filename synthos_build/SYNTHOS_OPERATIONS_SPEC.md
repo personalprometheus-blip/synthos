@@ -1,16 +1,27 @@
 # SYNTHOS OPERATIONS SPECIFICATION
 ## System-Wide Operating Model
 
-**Version:** 1.0
+**Version:** 3.0
 **Date:** March 2026
 **Status:** Active — governs all agents
 **Audience:** All agents + project lead
+**Supersedes:** v2.0 (SYNTHOS_OPERATIONS_SPEC_1_.md)
+
+---
+
+## CHANGE LOG (v2.0 → v3.0)
+
+| Change | Detail |
+|--------|--------|
+| Agent renaming | "Bolt's decision quality" → ExecutionAgent; all retail agent references updated |
+| First-run assumption removed | Maturity gate criteria and agent references reframed for ongoing operation |
+| Web access layer reference | Section 10 added — points to Addendum 2 |
 
 ---
 
 ## 1. PURPOSE
 
-This document governs how Synthos operates as a system week to week. It covers the deployment pipeline, weekly cadence, morning report, the maturity gate between paper trading and live trading, and Vault's backup responsibilities.
+This document governs how Synthos operates as a system week to week. It covers the deployment pipeline, weekly cadence, morning report, the maturity gate between paper trading and live trading, Strongbox's backup responsibilities, and the web access layer.
 
 Individual agents have their own workflow specs. This document sits above those — it defines the rhythm everything operates within.
 
@@ -23,9 +34,9 @@ Individual agents have their own workflow specs. This document sits above those 
 | Device | Role | Notes |
 |--------|------|-------|
 | Pi 4B | Company Pi — operations, agents, monitoring | Always-on, 24/7 |
-| Pi 2W | Retail Pi simulation — dev + beta combined | Only device; can't fully separate dev from beta yet |
+| Pi 2W | Retail Pi simulation — dev + beta combined | Only device; dev and beta testing share this hardware in Phase 1 |
 
-The Pi 2W is doing double duty in Phase 1. This means the deployment pipeline is partially theoretical until Phase 2 hardware arrives. Dev and beta testing happen on the same device. Blueprint and Patches are aware of this constraint.
+The Pi 2W is doing double duty in Phase 1. The deployment pipeline is partially theoretical until Phase 2 hardware arrives. Blueprint and Patches are aware of this constraint.
 
 ### 2.2 Expanded (Phase 2)
 
@@ -41,7 +52,7 @@ Phase 2 begins when additional hardware is acquired. The deployment pipeline bec
 ### 2.3 Future Considerations
 
 - Physical Pi hardware is a feature for early customers — tangible, theirs, they control it
-- SD card failure is a known reliability risk — mitigated by Vault's encrypted cloud backups
+- SD card failure is a known reliability risk — mitigated by Strongbox's encrypted cloud backups
 - At approximately 20–30 customers, logistics of managing individual devices may warrant a hybrid cloud model
 - No action required now — Fidget will flag when cost/complexity warrants the conversation
 
@@ -67,7 +78,9 @@ Dev Pi 2W (sandbox testing)
 
 **Pre-trading:** Beta and customer Pis may receive the same Friday push simultaneously. Moving fast is appropriate.
 
-**Post-trading:** Beta Pis receive the push first. Customer Pis follow after a 24-hour validation window. Catching a regression on beta before it hits paying customers is worth the extra day.
+**Post-trading:** Beta Pis receive the push first. Customer Pis follow after a 24-hour validation window.
+
+**Agent continuity on update:** When updated agent code is deployed, all three retail agents (ExecutionAgent, DisclosureResearchAgent, MarketSentimentAgent) read existing database state on their next run. No re-initialization occurs. Trade history, open positions, signal scores, and configuration are preserved. Updates change agent logic, not the state those agents operate on.
 
 ---
 
@@ -102,7 +115,6 @@ Dev Pi 2W (sandbox testing)
 - Patches watches for regressions, crash patterns, unexpected behavior
 - Blueprint is on standby for event-triggered hot-fixes
 - **Sunday morning deadline:** Any regression that cannot be resolved by Sunday morning triggers a full rollback of Friday's changes. Monday starts on the previous known-good state.
-- If the weekend is clean: Blueprint begins triage on next week's approved suggestion queue
 
 ---
 
@@ -110,11 +122,15 @@ Dev Pi 2W (sandbox testing)
 
 ### 5.1 What It Is
 
-A single configuration flag that switches the entire system from pre-trading to post-trading mode. When flipped, Blueprint, Patches, Vault, and Watchdog all adjust their behavior.
+A single configuration flag that switches the entire system from pre-trading to post-trading mode. When flipped, Blueprint, Patches, Strongbox, Vault, and Watchdog all adjust their behavior.
+
+**Strongbox** adjusts backup behavior: post-trading mode triggers increased backup frequency, stricter retention enforcement, and automated restore verification.
+
+**Vault** adjusts security posture: post-trading mode enforces stricter license validation (no grace period on cache expiry, immediate halt on revoked keys), tighter key enforcement behavior, and more aggressive audit logging.
 
 ```json
 {
-  "trading_mode": "pre-trading"  // or "post-trading"
+  "trading_mode": "pre-trading"
 }
 ```
 
@@ -127,7 +143,7 @@ Criteria for flipping (suggested, not exhaustive):
 - No CRITICAL regressions in the last 30 days
 - Backup and rollback procedures have been tested and verified
 - At least one beta customer has been running successfully
-- The project lead is satisfied with Bolt's decision quality
+- The project lead is satisfied with ExecutionAgent's signal handling and trade quality across multiple market conditions
 
 ### 5.3 What Changes When It Flips
 
@@ -148,14 +164,12 @@ Criteria for flipping (suggested, not exhaustive):
 
 **Patches writes it. Scoop delivers it.**
 
-Patches already watches the whole system for problems — log patterns, crash data, agent health, suggestion queue depth. It is the right agent to synthesize the system state into a daily briefing. Individual agents narrating their own work invites self-serving summaries.
+Patches already watches the whole system for problems — log patterns, crash data, agent health, suggestion queue depth. It is the right agent to synthesize system state into a daily briefing. Individual agents narrating their own work invites self-serving summaries.
 
 ### 6.2 Delivery
 
 - **Email digest** via Scoop — delivered to the project lead every morning at 8am ET
 - **Command portal** — same content available in the dashboard for reference
-
-The email is the primary channel. It is designed to be readable in under 3 minutes, on a phone, before the market opens.
 
 ### 6.3 Report Structure
 
@@ -175,6 +189,8 @@ Ready for Friday push: YES / NO / PARTIAL
 All Pis online: YES / NO (list any silent Pis)
 Agent errors this week: [count and summary]
 Token spend vs. last week: [+/- %]
+Backup status: OK / STALE (list any Pis with backup age >48h)
+IP allowlist status: OK / MISMATCH (from Librarian audit)
 
 ━━━ MANAGER NOTES ━━━
 [Each manager with something worth surfacing gets 1–2 sentences]
@@ -194,73 +210,26 @@ Weekend risk: LOW / MEDIUM / HIGH
 
 ---
 
-## 7. VAULT: ENCRYPTED CUSTOMER BACKUPS
+## 7. STRONGBOX: ENCRYPTED CUSTOMER BACKUPS
 
-### 7.1 Responsibility
+*(Unchanged from v2.0. Strongbox is the canonical backup owner.)*
 
-Vault owns customer backup integrity. This is a natural extension of its existing role — it already manages customer compliance, key validity, and data integrity. Encrypted backups of customer Pi data fit that mandate.
-
-When Vault's backup responsibilities grow complex enough to warrant a dedicated agent, the project lead will initiate that handoff. The trigger is when backup management starts competing with Vault's core compliance work for time and attention.
-
-### 7.2 What Gets Backed Up
-
-| Data | Backup? | Notes |
-|------|---------|-------|
-| `signals.db` | ✅ Yes | Trading history, positions, signals |
-| `/user/.env` | ✅ Yes (encrypted) | API keys, customer settings — critical for restore |
-| `/user/settings.json` | ✅ Yes | Portal preferences |
-| `/user/agreements/` | ❌ No | Static legal docs, not customer-specific |
-| `logs/` | ✅ Yes (compressed) | Useful for debugging post-failure |
-| `data/backup/` | ❌ No | Already a backup — don't backup the backup |
-
-### 7.3 Encryption
-
-Customer `.env` files contain API keys and trading credentials. These must be encrypted before leaving the Pi.
-
-- Encryption key is held by the project lead, not stored on the Pi or in the backup
-- Vault uses the key to encrypt before upload, project lead uses it to decrypt for restore
-- If a customer Pi needs to be restored, the project lead performs the decryption step — Vault cannot self-serve a restore
-
-### 7.4 Schedule and Storage
-
-- **Frequency:** Daily backup, triggered at 2am ET (off-hours, low system load)
-- **Storage:** Cloud object storage (Cloudflare R2 recommended — no egress fees, S3-compatible API, already in the Synthos infrastructure stack)
-- **Retention:** 30 days of daily backups per customer Pi
-- **Naming:** `backup/{pi_id}/{date}/synthos_backup_{pi_id}_{date}.tar.gz.enc`
-
-### 7.5 Failure Handling
-
-| Failure | Vault Does |
-|---------|------------|
-| Storage provider down | Queue backup, retry every 30 min for 4 hours, alert Scoop if still failing |
-| Pi unreachable | Skip, log, include in morning report |
-| Encryption fails | Halt backup entirely, alert command portal — never upload unencrypted data |
-| Backup older than 48 hours | Flag in morning report as CRITICAL |
-
-### 7.6 Restore Process
-
-When a customer Pi fails and needs restore:
-
-1. Project lead identifies Pi ID and requests restore
-2. Vault retrieves encrypted backup from cloud storage
-3. Project lead decrypts the backup (Vault cannot do this — key stays with project lead)
-4. Fresh Pi is flashed with Pi OS Lite
-5. Synthos is installed via the standard installer
-6. Backup is extracted to `/home/pi/synthos/`
-7. Pi boots, agents resume from last known state
+See SYNTHOS_OPERATIONS_SPEC_1_.md §7 for full detail on schedule, encryption model, failure handling, and restore process.
 
 ---
 
 ## 8. AGENT ACCOUNTABILITY IN OPERATIONS
 
-All agents operate as managers, not task executors. This applies to operations as much as implementation.
+All agents operate as managers, not task executors.
 
 - **Patches** is accountable for knowing what is wrong before the project lead does
 - **Blueprint** is accountable for the code it ships — not just "I ran the task"
-- **Vault** is accountable for backup integrity — a missing backup is Vault's failure, not an infrastructure problem
+- **Strongbox** is accountable for backup integrity — a missing or stale backup is Strongbox's failure
 - **Fidget** is accountable for flagging cost anomalies before they become surprises
 - **Sentinel** is accountable for knowing if any customer Pi goes silent
 - **Scoop** is accountable for the morning report actually reaching the project lead
+- **Vault** is accountable for key validity and for IP allowlist distribution to retail Pis
+- **Librarian** is accountable for detecting any iptables configuration that deviates from the approved allowlist
 
 When something fails, the question is not "what broke" but "which manager missed it and why."
 
@@ -268,20 +237,36 @@ When something fails, the question is not "what broke" but "which manager missed
 
 ## 9. WHAT CHANGES AS THE SYSTEM MATURES
 
-This spec is written for Phase 1 reality. As the system grows, these areas will need revisiting:
-
 | Trigger | What to Revisit |
 |---------|-----------------|
 | 3+ Pi 2Ws acquired | Deploy pipeline becomes fully real — update Section 3 |
 | First beta customer onboarded | Beta validation window activates |
 | Maturity gate flipped | Post-trading rules activate across all agents |
-| Vault backup work competes with compliance | Spin off dedicated Backup agent |
+| Web portal live | End-user account provisioning activates (see Addendum 2) |
 | 20+ customer Pis | Evaluate hybrid cloud model for reliability at scale |
 | Fidget flags sustained cost increase | Re-evaluate token optimization priorities |
+| Strongbox backup volume exceeds R2 free tier | Re-evaluate storage cost and retention policy |
 
 ---
 
-**Document Version:** 1.0
+## 10. WEB ACCESS LAYER
+
+The web access layer governs how end users and company employees access the system through a domain-hosted login portal. It is fully specified in:
+
+**SYNTHOS_ADDENDUM_2_WEB_ACCESS.md**
+
+Key operational implications:
+
+- End users do not connect directly to retail Pi IPs
+- All user sessions are proxied through the web layer
+- Pis communicate outbound only, to the approved IP list
+- Two user classes exist: Company Employees and End Users (see Addendum 2 for provisioning model)
+- Vault manages the user registry in coordination with the web access layer
+
+---
+
+**Document Version:** 3.0
 **Status:** Active
 **Owned by:** Project lead
+**Supersedes:** SYNTHOS_OPERATIONS_SPEC_1_.md v2.0
 **Next review:** When Phase 2 hardware acquired, or maturity gate is flipped
