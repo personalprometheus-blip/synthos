@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 *.pyo
+src/__pycache__/
 
 # Database files
 *.db
