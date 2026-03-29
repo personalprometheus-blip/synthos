@@ -182,13 +182,13 @@ required_files:
     - sync.py
     - uninstall.py
   security:
-    - license_validator.py
+    # license_validator.py — DEFERRED_FROM_CURRENT_BASELINE; not yet built; not a current required artifact
   config:
     - allowed_outbound_ips.json
   runtime_state:
     - user/.env
     - data/signals.db
-    - data/license_cache.json
+    # data/license_cache.json — DEFERRED_FROM_CURRENT_BASELINE; written by license_validator.py when built
 
 ports:
   portal: 5001 (configurable via PORTAL_PORT)
@@ -266,7 +266,7 @@ required_files:
 | `patch.py` | Non-volatile update system — safe file replacement with backup | Repair |
 | `install.py` | Guided installer with web UI — 7-step setup wizard | Bootstrap |
 | `sync.py` | Dev sync utility — file updates from GitHub | Maintenance |
-| `license_validator.py` | License key validation — checked on every boot before agents start | Security |
+| `license_validator.py` | DEFERRED_FROM_CURRENT_BASELINE — retail entitlement gate; not yet built; not a required artifact in current release | Security |
 | `uninstall.py` | Full system removal — cleans legacy paths, unregisters cron | Repair |
 
 ### Company Pi Agents
@@ -328,11 +328,11 @@ retail_node:
   ${CORE_DIR}/patch.py
   ${CORE_DIR}/install.py
   ${CORE_DIR}/sync.py
-  ${CORE_DIR}/license_validator.py
+  # ${CORE_DIR}/license_validator.py — DEFERRED_FROM_CURRENT_BASELINE; not required in current release
   ${CORE_DIR}/uninstall.py
   ${USER_DIR}/.env
   ${DATA_DIR}/signals.db
-  ${DATA_DIR}/license_cache.json
+  # ${DATA_DIR}/license_cache.json — DEFERRED_FROM_CURRENT_BASELINE; future artifact
   ${DATA_DIR}/backup/
   ${LOG_DIR}/
   ${SNAPSHOT_DIR}/
@@ -363,7 +363,7 @@ operator_only:
 
 ```
 boot_sequence.py
-  ├── license_validator.py       (SECURITY gate)
+  ├── license_validator.py       (DEFERRED_FROM_CURRENT_BASELINE — not wired; future retail entitlement gate)
   ├── health_check.py            (MAINTENANCE — must pass before agents start)
   │     └── database.py
   ├── watchdog.py                (RUNTIME — started in background, 90s delay)
@@ -373,7 +373,7 @@ boot_sequence.py
 agent1_trader.py  (ExecutionAgent)
   ├── database.py                (signal reads, trade writes, agent_status writes)
   ├── synthos_heartbeat.py       (session-end POST to Company Pi)
-  └── license_validator.py       (periodic re-check)
+  # └── license_validator.py   (DEFERRED_FROM_CURRENT_BASELINE — periodic re-check; not yet implemented)
 
 agent2_research.py  (DisclosureResearchAgent)
   ├── database.py                (signal upserts, config reads for last timestamp)

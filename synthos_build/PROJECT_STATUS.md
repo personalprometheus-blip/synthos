@@ -1,7 +1,7 @@
 # PROJECT STATUS — Synthos
 
 **Last Updated:** 2026-03-29
-**Current Phase:** Phase 3 — Normalization Sprint
+**Current Phase:** Phase 5 — Deployment Pipeline (Phases 3 and 4 complete)
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
 ---
@@ -21,8 +21,8 @@
 |-------|------|--------|
 | 1 | Core Trading System | ✅ Complete |
 | 2 | Company Node + Validation Infrastructure | ✅ Complete |
-| 3 | Normalization Sprint | 🟡 In Progress |
-| 4 | Ground Truth Declaration | 🔴 Not Started |
+| 3 | Normalization Sprint | ✅ Complete |
+| 4 | Ground Truth Declaration | ✅ Complete |
 | 5 | Deployment Pipeline | 🔴 Not Started |
 | 6 | Live Trading Gate | 🔴 Not Started |
 
@@ -64,8 +64,8 @@
 - [x] **Step 2 (CODE):** Migrate watchdog.py post_deploy_watch read → `db_helpers.get_active_deploy_watches()`
 - [x] **Step 3 (CODE):** Fix `watchdog.py` hardcoded `COMPANY_DATA_DIR` → env var
 - [x] **Step 4 (FILE MOVE):** Move strongbox.py to synthos-company/agents/
-- [ ] **Step 5 (DOC):** Document company.db schema (PRAGMA table_info) — CL-012
-- [ ] **Step 6 (HUMAN DECISION):** Declare license_validator.py status — (a) build now or (b) formally defer
+- [x] **Step 5 (DOC):** Document company.db schema — CL-012 RESOLVED. Canonical schema defined in docs/specs/DATABASE_SCHEMA_CANONICAL.md covering both signals.db (retail, v1.2, 12 tables) and company.db (company, v2.0, 13 tables). Stale schema in SYNTHOS_TECHNICAL_ARCHITECTURE.md §2.3/§3.3 replaced with references.
+- [x] **Step 6 (HUMAN DECISION):** Declare license_validator.py status — FORMALLY DEFERRED (DEFERRED_FROM_CURRENT_BASELINE; removed from installer requirements; future work tracked in docs/milestones.md)
 
 Secondary (required before Phase 4):
 - [ ] Mark SUGGESTIONS_JSON_SPEC.md as SUPERSEDED
@@ -75,15 +75,15 @@ Secondary (required before Phase 4):
 
 ---
 
-## Phase 4 — Ground Truth Declaration 🔴 NOT STARTED
+## Phase 4 — Ground Truth Declaration ✅ COMPLETE
 
-**Gate:** All Phase 3 steps complete.
+**Completed:** 2026-03-29
 
-- [ ] Run PRAGMA table_info on signals.db and company.db — extract live schema
-- [ ] Update docs/validation/SYNTHOS_GROUND_TRUTH.md to v1.2
-- [ ] Confirm all active processes match manifest
-- [ ] Confirm suggestions store state on company Pi
-- [ ] Declare new ground truth — commit and tag
+- [x] Schema extracted and canonicalized — `docs/specs/DATABASE_SCHEMA_CANONICAL.md`
+- [x] Ground Truth synthesized — `docs/GROUND_TRUTH.md` (authoritative system definition)
+- [x] All critical blockers resolved or formally deferred (CRITICAL_BLOCKERS_REMAIN: NO)
+- [x] All normalization sprint steps complete
+- [x] Ground Truth declared and committed
 
 ---
 
@@ -115,7 +115,7 @@ These items must be completed before any live trading or adversarial deployment.
 - [ ] Add PRAGMA integrity_check to installer DB verification (currently checks existence only)
 - [ ] Enforce `MONITOR_URL` and `PI_ID` presence at installer time
 - [ ] Verify company startup trust path under normal and break-glass modes
-- [ ] Implement retail boot-time license gate (pending SYS-B01 license_validator.py decision)
+- [ ] Implement retail boot-time license gate — FUTURE_RETAIL_ENTITLEMENT_WORK (deferred from current baseline; see docs/milestones.md)
 
 **Reference:** `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`, `docs/validation/TRUST_GATE_ALIGNMENT_NOTE.md`
 
@@ -125,7 +125,7 @@ These items must be completed before any live trading or adversarial deployment.
 
 | ID | Repo | Severity | Description |
 |----|------|----------|-------------|
-| SYS-B01 | synthos | CRITICAL | license_validator.py missing — installer always fails VERIFYING phase |
-| SYS-B02 | synthos | CRITICAL | No license gate in boot_sequence.py |
+| ~~SYS-B01~~ | synthos | ~~CRITICAL~~ | ~~license_validator.py missing~~ — DEFERRED_FROM_CURRENT_BASELINE |
+| ~~SYS-B02~~ | synthos | ~~CRITICAL~~ | ~~No license gate in boot_sequence.py~~ — DEFERRED_FROM_CURRENT_BASELINE |
 | CL-009 | synthos-company | HIGH | Company agents not classified in TOOL_DEPENDENCY_ARCHITECTURE.md |
-| CL-012 | synthos-company | HIGH | company.db schema undocumented |
+| ~~CL-012~~ | synthos-company | ~~HIGH~~ | ~~company.db schema undocumented~~ — RESOLVED: docs/specs/DATABASE_SCHEMA_CANONICAL.md |

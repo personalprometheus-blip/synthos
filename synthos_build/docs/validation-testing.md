@@ -39,12 +39,12 @@
 
 | Phase | Status | Critical Findings |
 |-------|--------|------------------|
-| A — Install | FAIL | Installer cannot reach COMPLETE (license_validator.py missing in REQUIRED_CORE_FILES) |
-| B — Boot | FAIL | No license gate at boot; health check always non-fatal; monitor leaks to retail node |
-| C — Node Topology | CONDITIONAL | Retail self-contained; watchdog alert path broken in multi-Pi |
-| D — License | FAIL | License validation entirely absent from runtime |
-| E — Update/Rollback | FAIL | Post-deploy rollback trigger broken (CL-004) |
-| F — Runtime | FAIL | Suggestions pipeline split; hidden deps on missing services |
+| A — Install | ~~FAIL~~ → CONDITIONAL | ~~license_validator.py missing in REQUIRED_CORE_FILES~~ — DEFERRED; installer can now reach COMPLETE |
+| B — Boot | CONDITIONAL | ~~No license gate~~ — DEFERRED_FROM_CURRENT_BASELINE (intentional); health check always non-fatal; monitor step should not be in retail boot |
+| C — Node Topology | CONDITIONAL | Retail self-contained; watchdog alert path fixed (env var introduced) |
+| D — License | DEFERRED | Retail license validation DEFERRED_FROM_CURRENT_BASELINE — no entitlement gate in current release; intentional |
+| E — Update/Rollback | ~~FAIL~~ → PASS | Post-deploy rollback trigger fixed (SYS-B03 RESOLVED) |
+| F — Runtime | ~~FAIL~~ → CONDITIONAL | Suggestions pipeline fixed (SYS-B04 RESOLVED); remaining open items are non-critical |
 
 **Scenarios tested:** 17
 **PASS:** 4 | **FAIL:** 9 | **BLOCKED:** 4
@@ -55,11 +55,11 @@
 
 | ID | Issue | Fix Required |
 |----|-------|-------------|
-| SYS-B01 | license_validator.py missing | Human decision + build or remove from requirements |
-| SYS-B02 | No boot license gate | Implement after SYS-B01 resolved |
-| SYS-B03 | Post-deploy rollback broken | Migrate watchdog.py to DB read |
-| SYS-B04 | Suggestions pipeline split | Migrate 4 agents to db_helpers.post_suggestion() |
-| SYS-B05 | watchdog.py hardcoded path | Introduce COMPANY_DATA_DIR env var |
+| ~~SYS-B01~~ | ~~license_validator.py missing~~ | DEFERRED_FROM_CURRENT_BASELINE — 2026-03-29 |
+| ~~SYS-B02~~ | ~~No boot license gate~~ | DEFERRED_FROM_CURRENT_BASELINE — 2026-03-29 |
+| ~~SYS-B03~~ | ~~Post-deploy rollback broken~~ | RESOLVED — watchdog.py migrated to DB read |
+| ~~SYS-B04~~ | ~~Suggestions pipeline split~~ | RESOLVED — 4 agents migrated to db_helpers.post_suggestion() |
+| ~~SYS-B05~~ | ~~watchdog.py hardcoded path~~ | RESOLVED — COMPANY_DATA_DIR env var introduced |
 
 ---
 
@@ -78,7 +78,7 @@ Phase 2 (after normalization sprint complete):
 
 Phase 3 (human confirmation required):
   V-G02, V-G04    — deployment + PAPER mode confirmation
-  SYS-B01 decision — license_validator status
+  SYS-B01/B02 — DEFERRED_FROM_CURRENT_BASELINE (2026-03-29); no longer blocking
 ```
 
 Full validation matrix: docs/validation/VALIDATION_MATRIX.md

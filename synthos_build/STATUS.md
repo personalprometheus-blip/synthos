@@ -39,7 +39,7 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 ~~**Step 3:** Fix watchdog.py COMPANY_DATA_DIR hardcode~~ ✅ DONE
 ~~**Step 4:** Move strongbox.py to synthos-company/agents/~~ ✅ DONE
 **Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
-**Step 6 (human):** Declare license_validator.py status — build now or defer
+~~**Step 6 (human):** Declare license_validator.py status — build now or defer~~ ✅ DONE — FORMALLY DEFERRED (see RETAIL_LICENSE_DEFERRAL_NOTE.md)
 
 ---
 
@@ -71,11 +71,11 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 ## Blockers
 | ID | Severity | Description |
 |----|----------|-------------|
-| SYS-B01 | CRITICAL | `license_validator.py` missing — installer always fails VERIFYING |
-| SYS-B02 | CRITICAL | No boot-time license gate — key never validated at runtime |
+| ~~SYS-B01~~ | ~~CRITICAL~~ | ~~`license_validator.py` missing~~ — DEFERRED_FROM_CURRENT_BASELINE |
+| ~~SYS-B02~~ | ~~CRITICAL~~ | ~~No boot-time license gate~~ — DEFERRED_FROM_CURRENT_BASELINE |
 | ~~SYS-B03~~ | ~~CRITICAL~~ | ~~Post-deploy rollback broken~~ — RESOLVED |
 | ~~SYS-B04~~ | ~~CRITICAL~~ | ~~Suggestions pipeline split~~ — RESOLVED |
-| SYS-B05 | HIGH | `watchdog.py` hardcoded `COMPANY_DATA_DIR` — breaks multi-Pi deployment |
+| ~~SYS-B05~~ | ~~HIGH~~ | ~~`watchdog.py` hardcoded `COMPANY_DATA_DIR`~~ — RESOLVED |
 | SYS-B06 | HIGH | Installer core/ vs flat layout mismatch |
 | SYS-B07 | HIGH | `update-staging` branch absent — deploy pipeline non-executable |
 
@@ -87,6 +87,15 @@ Full blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
 - **Full enforcement is not implemented:** no company boot sequence exists to evaluate the gate before runtime services start
 - Boot-time company integrity gate is tracked as a pre-release security gate task (Phase 6 / PROJECT_STATUS.md)
 - This gap does not block the normalization sprint
+
+---
+
+## Backup Model
+
+- **Policy:** Monthly full baseline snapshot + nightly incremental chain (local-only)
+- **Retention:** 6-month full baseline; incremental chain deleted on each new baseline
+- **Status:** Policy defined (`docs/specs/BACKUP_STRATEGY_INITIAL.md`); implementation pending
+- **Deferred:** Networked / off-device backup, cloud, encryption — future evaluation only
 
 ---
 

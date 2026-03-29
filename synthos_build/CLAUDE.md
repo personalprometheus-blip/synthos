@@ -27,7 +27,7 @@ Phase 3 — System Validation + Normalization Sprint
 - **Tests** → tests/
 
 ## Critical Known Issues (read before touching any code)
-1. `license_validator.py` is MISSING — installer always fails VERIFYING; no license gate at boot (SYS-B01/B02)
+1. Retail license validation — DEFERRED_FROM_CURRENT_BASELINE (SYS-B01/B02 formally closed by deferral). `license_validator.py` is not built; removed from installer requirements; boot has no entitlement gate. This is intentional and documented. Future work tracked in docs/milestones.md.
 2. Suggestions pipeline — RESOLVED (Steps 1-3): vault/sentinel/librarian/watchdog now write via db_helpers
 3. Post-deploy rollback — RESOLVED (Step 2): watchdog now reads from db_helpers
 4. `watchdog.py` COMPANY_DATA_DIR — RESOLVED (Step 3): now reads from env var

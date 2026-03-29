@@ -159,9 +159,9 @@ Synthos is a distributed system with three tiers:
 ```
 1. Customer powers on Pi 2W, connects to network
 2. Navigates to https://your-tunnel.com/install
-3. Enters license key (from command interface)
+3. Enters license key (from command interface) — key collected and stored; validation deferred
 4. Installer script pulls current synthos from GitHub
-5. Validates key, runs 7-step setup wizard
+5. Runs 7-step setup wizard (key validation — DEFERRED_FROM_CURRENT_BASELINE; not enforced in current release)
 6. Pi reboots, agents start
 7. Agents check for existing state before initializing (see §2.5)
 ```
@@ -206,7 +206,7 @@ ${SYNTHOS_HOME}/
 │   ├── database.py                # SQLite helpers, schema
 │   ├── portal.py                  # Local web UI (5001)
 │   ├── synthos_heartbeat.py       # Session-end POST to Company Pi
-│   ├── license_validator.py       # Key validation on every boot
+│   ├── license_validator.py       # DEFERRED_FROM_CURRENT_BASELINE — not yet built; future retail entitlement gate
 │   ├── boot_sequence.py           # Start agents in order
 │   ├── watchdog.py                # Restart crashed agents
 │   ├── health_check.py            # Verify system health
@@ -224,7 +224,7 @@ ${SYNTHOS_HOME}/
 │
 ├── data/
 │   ├── signals.db                 # SQLite: signals, positions, trades
-│   ├── license_cache.json         # Local license validation cache
+│   ├── license_cache.json         # DEFERRED_FROM_CURRENT_BASELINE — future; written by license_validator.py when built
 │   └── backup/                    # Daily backup of signals.db
 │
 └── logs/
@@ -238,69 +238,16 @@ ${SYNTHOS_HOME}/
 
 ### 2.3 Database Schema (Retail Pi)
 
-**SQLite: signals.db**
+**Authoritative schema:** `docs/specs/DATABASE_SCHEMA_CANONICAL.md` §3.1
 
-```sql
-CREATE TABLE signals (
-    id INTEGER PRIMARY KEY,
-    timestamp DATETIME,
-    congress_member TEXT,
-    ticker TEXT,
-    transaction_type TEXT,  -- BUY/SELL
-    signal_score TEXT,      -- HIGH/MEDIUM/LOW
-    agent_decision TEXT,    -- MIRROR/WATCH/SKIP
-    status TEXT,            -- PENDING/APPROVED/EXECUTED/SKIPPED
-    needs_reeval BOOLEAN DEFAULT 0,
-    created_at DATETIME
-);
+The pre-v3.1 inline schema definition in this section was stale and materially incorrect (wrong field names, phantom tables `trades` / `agent_status` / `license` / `config`, missing tables `portfolio` / `ledger` / `outcomes` / `handshakes` / `scan_log` / `urgent_flags` / `pending_approvals` / `member_weights` / `news_feed`). It has been replaced with this reference.
 
-CREATE TABLE positions (
-    id INTEGER PRIMARY KEY,
-    ticker TEXT UNIQUE,
-    shares REAL,
-    entry_price REAL,
-    entry_date DATETIME,
-    portfolio_value REAL,
-    status TEXT             -- OPEN/CLOSED
-);
+**Actual database:** `${DATA_DIR}/signals.db` (SQLite, WAL mode)
+**Access layer:** `src/database.py` — `DB` class
+**Schema version:** v1.2 (includes v1.1 and v1.2 migration columns)
+**Tables:** portfolio, positions, signals, ledger, outcomes, handshakes, scan_log, system_log, urgent_flags, pending_approvals, member_weights, news_feed
 
-CREATE TABLE trades (
-    id INTEGER PRIMARY KEY,
-    signal_id INTEGER,
-    ticker TEXT,
-    action TEXT,
-    shares REAL,
-    price REAL,
-    executed_at DATETIME,
-    profit_loss REAL,
-    status TEXT,            -- EXECUTED/PENDING/FAILED
-    FOREIGN KEY(signal_id) REFERENCES signals(id)
-);
-
-CREATE TABLE agent_status (
-    id INTEGER PRIMARY KEY,
-    agent_name TEXT,
-    last_run DATETIME,
-    status TEXT,
-    error_message TEXT,
-    uptime_seconds INTEGER
-);
-
-CREATE TABLE license (
-    id INTEGER PRIMARY KEY,
-    key TEXT UNIQUE,
-    issued_date DATETIME,
-    status TEXT,
-    expires_at DATETIME
-);
-
-CREATE TABLE config (
-    key TEXT PRIMARY KEY,
-    value TEXT,
-    set_by TEXT,
-    updated_at DATETIME
-);
-```
+See `docs/specs/DATABASE_SCHEMA_CANONICAL.md` for full table definitions, field types, indexes, access patterns, and known limitations.
 
 ### 2.4 Agents (Retail Pi)
 
@@ -558,7 +505,16 @@ ${SYNTHOS_HOME}/    # company node
 
 ### 3.3 Database Schema (Company Pi)
 
-*(No changes from v2.0. See SYSTEM_MANIFEST for full schema.)*
+**Authoritative schema:** `docs/specs/DATABASE_SCHEMA_CANONICAL.md` §3.2
+
+The pre-v3.1 reference ("See SYSTEM_MANIFEST for full schema") was incorrect — SYSTEM_MANIFEST does not contain a company.db schema. The schema is defined in `synthos-company/utils/db_helpers.py` `_bootstrap_inline()`.
+
+**Actual database:** `${COMPANY_DATA_DIR}/company.db` (SQLite, WAL mode)
+**Access layer:** `utils/db_helpers.py` — `DB` class
+**Schema version:** v2.0 (per schema_version table)
+**Tables:** customers, heartbeats, keys, audit_trail, suggestions, scoop_queue, deploy_watches, work_requests, api_usage, token_ledger, backup_log, silence_alerts, schema_version
+
+See `docs/specs/DATABASE_SCHEMA_CANONICAL.md` for full table definitions, field types, indexes, Timekeeper slot access model, and known limitations.
 
 ### 3.4 Company Agents
 

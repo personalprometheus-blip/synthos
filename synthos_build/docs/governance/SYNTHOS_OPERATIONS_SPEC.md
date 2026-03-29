@@ -126,7 +126,7 @@ A single configuration flag that switches the entire system from pre-trading to 
 
 **Strongbox** adjusts backup behavior: post-trading mode triggers increased backup frequency, stricter retention enforcement, and automated restore verification.
 
-**Vault** adjusts security posture: post-trading mode enforces stricter license validation (no grace period on cache expiry, immediate halt on revoked keys), tighter key enforcement behavior, and more aggressive audit logging.
+**Vault** adjusts security posture: post-trading mode will enforce stricter license validation (no grace period on cache expiry, immediate halt on revoked keys), tighter key enforcement behavior, and more aggressive audit logging. **Note:** Retail license validation is DEFERRED_FROM_CURRENT_BASELINE. This behavior activates once `license_validator.py` is implemented (FUTURE_RETAIL_ENTITLEMENT_WORK).
 
 **Note on company startup:** Company node startup does not depend on retail-style license validation. The company node uses an internal integrity gate model (see `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`). Full boot-time enforcement of that gate is a pre-release security task.
 

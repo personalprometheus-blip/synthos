@@ -4,6 +4,14 @@
 **Method:** Direct repo inspection, grep analysis, file registry cross-reference
 **Scope:** synthos_build/ (87 files) + synthos-company/ (46 non-log files)
 
+> **AMENDMENT — 2026-03-29:** Several blockers identified in this report have since been resolved or formally deferred. This report is a historical snapshot. For current blocker state see `docs/validation/BLOCKER_REFRESH_REPORT.md` and `docs/validation/RETAIL_LICENSE_DEFERRAL_NOTE.md`.
+> - SYS-B01 (license_validator.py): **DEFERRED_FROM_CURRENT_BASELINE** — removed from installer requirements
+> - SYS-B02 (boot license gate): **DEFERRED_FROM_CURRENT_BASELINE**
+> - SYS-B03 (post-deploy rollback): **RESOLVED**
+> - SYS-B04 (suggestions pipeline): **RESOLVED**
+> - SYS-B05 (watchdog hardcode): **RESOLVED**
+> - SYS-B09 (strongbox misplaced): **RESOLVED_PENDING_DEPLOYMENT**
+
 ---
 
 ## OVERALL STATUS

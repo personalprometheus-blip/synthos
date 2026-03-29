@@ -117,7 +117,7 @@ Post-deploy rollback (BROKEN — CL-004):
 
 | Domain | Node | Startup Gate | Gate Implemented |
 |--------|------|-------------|-----------------|
-| retail/customer | Pi 2W | License validation (`license_validator.py`) | Pending (SYS-B01) |
+| retail/customer | Pi 2W | License validation (`license_validator.py`) | DEFERRED_FROM_CURRENT_BASELINE — no entitlement gate in current release |
 | company/internal | Pi 4B / cloud | Internal integrity gate (`COMPANY_INTEGRITY_GATE_SPEC.md`) | Partial — installer only |
 
 **Company/internal trust domain:**

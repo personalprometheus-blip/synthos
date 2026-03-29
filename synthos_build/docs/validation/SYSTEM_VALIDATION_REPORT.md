@@ -4,6 +4,14 @@
 **Method:** Direct code inspection of install_retail.py, install_company.py, boot_sequence.py, watchdog.py, patch.py, health_check.py, blueprint.py, sentinel.py, SYNTHOS_INSTALLER_ARCHITECTURE.md, SYNTHOS_OPERATIONS_SPEC_ADDENDUM_1.md, SYSTEM_MANIFEST.md, and all reconciliation outputs from Steps 1–2.
 **Prerequisite outputs:** STATIC_VALIDATION_REPORT.md (Step 1), BEHAVIORAL_VALIDATION_REPORT.md (Step 2, referenced as existing per prompt)
 
+> **AMENDMENT — 2026-03-29:** Several critical blockers identified in this report have since been resolved or formally deferred. This report is a historical snapshot. For current blocker state see `docs/validation/BLOCKER_REFRESH_REPORT.md` and `docs/validation/RETAIL_LICENSE_DEFERRAL_NOTE.md`.
+> - SYS-B01 (install VERIFYING always DEGRADED): **DEFERRED_FROM_CURRENT_BASELINE** — `license_validator.py` removed from REQUIRED_CORE_FILES
+> - SYS-B02 (no boot license gate): **DEFERRED_FROM_CURRENT_BASELINE** — documented as intentional current state
+> - SYS-B03 (post-deploy rollback broken): **RESOLVED** — watchdog.py migrated to db_helpers
+> - SYS-B04 (suggestions pipeline split): **RESOLVED** — 4 agents migrated to db_helpers
+> - SYS-B05 (watchdog hardcoded path): **RESOLVED** — env var override introduced
+> - SYS-B09 (strongbox misplaced): **RESOLVED_PENDING_DEPLOYMENT** — wired in installer; live crontab pending re-run
+
 ---
 
 ## OVERALL STATUS

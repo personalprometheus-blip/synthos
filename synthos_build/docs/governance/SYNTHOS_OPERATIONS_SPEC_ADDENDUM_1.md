@@ -44,6 +44,9 @@ the actual resolved path at install time, not a hardcoded path.
 
 ## 2. LICENSE KEY — REQUIRED FOR ALL RETAIL PI ACTIVATIONS
 
+> **DEFERRED_FROM_CURRENT_BASELINE — FUTURE_RETAIL_ENTITLEMENT_WORK**
+> This section defines the target design for retail license enforcement. It is not implemented in the current release. `license_validator.py` is not yet built. The LICENSE_KEY is collected during setup and stored in `.env` for future use, but is not validated at boot or by any running agent. Retail Pis currently operate without entitlement enforcement. Implementation is tracked in `docs/milestones.md` (Retail Entitlement / License System).
+
 Every retail Pi must present a valid license key issued by Vault before any
 agent will run. This is non-negotiable and applies to all customers.
 
@@ -167,9 +170,11 @@ The company integrity gate model is architecturally defined. The installer enfor
 
 ### 3.3 Backup Schedule
 
-Vault (and eventually Strongbox) backs up company.db daily at 1am ET.
-The backup includes the full database, encrypted with the project lead's key.
-A restore takes the backup, decrypts it, and drops it into the data/ directory.
+The canonical backup policy is defined in `docs/specs/BACKUP_STRATEGY_INITIAL.md`. That document governs schedule, scope, retention, and agent responsibilities.
+
+Summary: Vault (and eventually Strongbox) creates a monthly full baseline snapshot and nightly incremental backups within the 11pm–midnight window. A restore takes the baseline + incremental chain and restores it to the data/ directory.
+
+Encryption of the backup archive is a deferred future item. See `docs/specs/BACKUP_STRATEGY_INITIAL.md` §Current Limitations.
 
 ---
 
@@ -237,11 +242,20 @@ compliance work for time and attention, Strongbox takes over all backup
 operations. Vault retains key management and compliance tracking.
 
 **Strongbox responsibilities:**
-- Daily encrypted backups of all retail Pi data to Cloudflare R2
-- Backup integrity verification (download and spot-check)
+- Monthly baseline snapshot of required system recovery artifacts (local)
+- Nightly incremental backups within the 11pm–midnight window
+- Baseline-linked cleanup: delete prior incremental chain on each new baseline
+- Retention enforcement: full baselines retained for 6 months, older deleted automatically
 - Restore orchestration (project lead initiates, Strongbox executes)
-- Retention management (30-day rolling window)
 - Backup health reporting in morning digest
+
+**Canonical backup policy:** `docs/specs/BACKUP_STRATEGY_INITIAL.md`
+
+**Future evaluation (not current scope):**
+- Cloud / off-device backup target
+- Encrypted backup archives
+- RAID / NAS backup target
+- Backup integrity verification
 
 **Strongbox does NOT:**
 - Generate or revoke license keys (Vault owns this)
