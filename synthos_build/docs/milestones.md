@@ -36,9 +36,9 @@
 
 **Goal:** Resolve all 4 critical blockers. Blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
 
-- [ ] **Step 1 (CODE):** Migrate suggestions pipeline — vault.py, sentinel.py, librarian.py, watchdog.py → `db_helpers.post_suggestion()`
-- [ ] **Step 2 (CODE):** Migrate watchdog.py post_deploy_watch read → `db_helpers.get_active_deploy_watches()`
-- [ ] **Step 3 (CODE):** Fix `watchdog.py` hardcoded `COMPANY_DATA_DIR` → introduce `COMPANY_DATA_DIR` env var
+- [x] **Step 1 (CODE):** Migrate suggestions pipeline — vault.py, sentinel.py, librarian.py, watchdog.py → `db_helpers.post_suggestion()`
+- [x] **Step 2 (CODE):** Migrate watchdog.py post_deploy_watch read → `db_helpers.get_active_deploy_watches()`
+- [x] **Step 3 (CODE):** Fix `watchdog.py` hardcoded `COMPANY_DATA_DIR` → introduce `COMPANY_DATA_DIR` env var`
 - [ ] **Step 4 (FILE MOVE):** Move strongbox.py to synthos-company/agents/; verify running
 - [ ] **Step 5 (DOC):** Update docs/specs/SYNTHOS_TECHNICAL_ARCHITECTURE.md DB schema to v1.2 reality (PRAGMA table_info output)
 - [ ] **Step 6 (HUMAN DECISION):** Declare license_validator.py status — (a) build now or (b) strike from all requirements and defer

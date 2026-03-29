@@ -34,9 +34,12 @@
 ### Phase 3 — Normalization Sprint
 Fixing the 4 critical blockers identified in system validation before any deployment claim.
 
-**Step 1 (next):** Migrate suggestions pipeline — vault.py, sentinel.py, librarian.py, watchdog.py must write via `db_helpers.post_suggestion()` instead of directly to suggestions.json
-**Step 2:** Migrate watchdog.py post_deploy_watch → `db_helpers.get_active_deploy_watches()`
-**Step 3:** Fix watchdog.py `COMPANY_DATA_DIR` hardcoded path → env var
+~~**Step 1:** Migrate suggestions pipeline~~ ✅ DONE
+~~**Step 2:** Migrate watchdog.py post_deploy_watch~~ ✅ DONE
+~~**Step 3:** Fix watchdog.py COMPANY_DATA_DIR hardcode~~ ✅ DONE
+**Step 4 (next):** Move strongbox.py to synthos-company/agents/; verify running
+**Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
+**Step 6 (human):** Declare license_validator.py status — build now or defer
 **Step 4:** Move strongbox.py to synthos-company/agents/; verify running
 **Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
 **Step 6 (human):** Declare license_validator.py status — build now or defer

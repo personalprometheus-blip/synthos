@@ -59,12 +59,25 @@ CRASH_REPORT_DIR = LOG_DIR / "crash_reports"
 SNAPSHOT_DIR     = PROJECT_DIR / ".known_good"
 SNAPSHOT_ENV     = SNAPSHOT_DIR / ".env.known_good"
 
-# Company Pi — where suggestions.json and post_deploy_watch.json live
-# Watchdog writes here to alert Patches and trigger Scoop
-COMPANY_DATA_DIR     = Path("/home/pi/synthos-company/data")
+# Company Pi data directory — override with COMPANY_DATA_DIR env var for non-default installs
+COMPANY_DATA_DIR     = Path(os.environ.get("COMPANY_DATA_DIR", "/home/pi/synthos-company/data"))
 SUGGESTIONS_FILE     = COMPANY_DATA_DIR / "suggestions.json"
 POST_DEPLOY_FILE     = COMPANY_DATA_DIR / "post_deploy_watch.json"
 TRADING_MODE_FILE    = COMPANY_DATA_DIR / "trading_mode.json"
+
+# db_helpers — available when retail and company node share the same Pi.
+# Falls back gracefully when company utils are not reachable (separate Pi deployment).
+_db = None
+try:
+    _COMPANY_UTILS = COMPANY_DATA_DIR.parent / "utils"
+    if str(_COMPANY_UTILS) not in sys.path:
+        sys.path.insert(0, str(_COMPANY_UTILS))
+    from db_helpers import DB as _DB
+    _db = _DB()
+except Exception as _db_init_err:
+    logging.getLogger("watchdog").warning(
+        f"db_helpers not available — alerts will fall back to local log ({_db_init_err})"
+    )
 
 SYNTHOS_VERSION = "2.0"
 
@@ -559,11 +572,14 @@ def check_post_deploy_rollback(state: AgentState) -> bool:
     """
     if not is_post_trading():
         return False
-    if not POST_DEPLOY_FILE.exists():
-        return False
 
     try:
-        watches = json.loads(POST_DEPLOY_FILE.read_text())
+        if _db is not None:
+            watches = _db.get_active_deploy_watches()
+        elif POST_DEPLOY_FILE.exists():
+            watches = json.loads(POST_DEPLOY_FILE.read_text())
+        else:
+            return False
     except Exception:
         return False
 
@@ -623,83 +639,37 @@ def check_post_deploy_rollback(state: AgentState) -> bool:
 
 def alert_company_pi(level: str, category: str, message: str, fix: str = "") -> None:
     """
-    Write a CRITICAL suggestion to suggestions.json on the Company Pi.
+    Post a CRITICAL suggestion to company.db via db_helpers.
     Scoop picks it up and delivers the alert email.
-    Patches will see it in the next audit scan.
-
-    This replaces the old SMS + SMTP email stack entirely.
+    Falls back to local log if db_helpers is unavailable (separate-Pi deployment).
     """
-    if not COMPANY_DATA_DIR.exists():
-        log.warning(f"Company Pi data dir not reachable — logging alert locally only")
+    if _db is None:
+        log.warning("db_helpers not available — logging alert locally only")
         log.critical(f"ALERT [{level}] {category}: {message}")
         return
 
     try:
-        if SUGGESTIONS_FILE.exists():
-            data = json.loads(SUGGESTIONS_FILE.read_text())
-        else:
-            data = {"version": "1.0", "suggestions": []}
-
-        # Deduplicate by message prefix
-        prefix = message[:60]
-        existing = {
-            s.get("description", "")[:60]
-            for s in data.get("suggestions", [])
-            if s.get("status") in ("pending", "approved")
-        }
-        if prefix in existing:
-            log.info(f"Duplicate alert suppressed: {prefix}")
-            return
-
-        suggestion = {
-            "id":        str(uuid.uuid4()),
-            "timestamp": now_iso(),
-            "agent":     "Watchdog",
-            "category":  "bug",
-            "title":     f"{level}: {category} — {PI_ID}",
-            "description": message,
-            "impact": {
-                "tokens_saved_per_week":    None,
-                "execution_time_saved":     None,
-                "risk_level":               level,
-                "affected_component":       f"Retail Pi — {PI_ID}",
-                "affected_customers_count": 1,
-                "estimated_improvement":    "Resolves active crash/halt condition",
-            },
-            "implementation": {
-                "effort":                "Emergency — immediate investigation",
-                "complexity":           "MODERATE",
-                "approver_needed":      "you",
-                "trial_run_recommended": False,
-                "breaking_changes":     False,
-                "rollback_difficulty":  "EASY",
-            },
-            "details": {
-                "root_cause":           f"Watchdog halt on {PI_ID} — see crash report in logs/crash_reports/",
-                "solution_approach":    fix or "Investigate crash logs and restart manually",
-                "alternative_approaches": [],
-                "dependencies":         [],
-                "metrics_to_track":     ["Agent stability after fix"],
-            },
-            "status":            "pending",
-            "status_updated_at": now_iso(),
-            "approver_notes":    None,
-            "implementation_status": None,
-            "implementation_notes":  None,
-        }
-
-        data["suggestions"].append(suggestion)
-        data["last_updated"] = now_iso()
-
-        # Backup before write
-        if SUGGESTIONS_FILE.exists():
-            shutil.copy2(SUGGESTIONS_FILE, SUGGESTIONS_FILE.with_suffix(".json.backup"))
-        SUGGESTIONS_FILE.write_text(json.dumps(data, indent=2))
-
-        log.info(f"Alert written to suggestions.json — Scoop will deliver to project lead")
+        with _db.slot("Watchdog", "post_suggestion", priority=10):
+            _db.post_suggestion(
+                agent="Watchdog",
+                category="bug",
+                title=f"{level}: {category} — {PI_ID}",
+                description=message,
+                risk_level=level,
+                affected_component=f"Retail Pi — {PI_ID}",
+                affected_customers=1,
+                effort="Emergency — immediate investigation",
+                complexity="MODERATE",
+                approver_needed="you",
+                root_cause=f"Watchdog halt on {PI_ID} — see crash report in logs/crash_reports/",
+                solution_approach=fix or "Investigate crash logs and restart manually",
+                estimated_improvement="Resolves active crash/halt condition",
+                metrics_to_track=["Agent stability after fix"],
+            )
+        log.info(f"Alert posted to company.db — Scoop will deliver to project lead")
 
     except Exception as e:
-        log.error(f"Failed to write alert to Company Pi: {e}")
+        log.error(f"Failed to post alert to company.db: {e}")
         log.critical(f"UNDELIVERED ALERT [{level}] {category}: {message}")
 
 
