@@ -15,10 +15,10 @@ Phase 3 — System Validation + Normalization Sprint
 - **monitor_node** (same Pi 4B): synthos_monitor.py on port 5000, receives heartbeats
 
 ## Where To Find Things
-- **Project status** → STATUS.md (start here every session)
+- **Master project status** → PROJECT_STATUS.md (phases, cross-repo blockers, overall progress)
+- **This node's status** → STATUS.md (retail node operational health)
 - **Blockers and conflicts** → docs/validation/CONFLICT_LEDGER.md
 - **What must be fixed before deployment** → docs/validation/SYSTEM_VALIDATION_REPORT.md
-- **Milestone plan** → docs/milestones.md
 - **Feature specs** → docs/specs/
 - **Governance / safety rules** → docs/governance/BLUEPRINT_SAFETY_CONTRACT.md
 - **Operations spec** → docs/governance/SYNTHOS_OPERATIONS_SPEC.md + ADDENDUM_1
@@ -27,22 +27,21 @@ Phase 3 — System Validation + Normalization Sprint
 - **Tests** → tests/
 
 ## Critical Known Issues (read before touching any code)
-1. `license_validator.py` is MISSING — installer always fails VERIFYING; no license gate at boot
-2. Suggestions pipeline is SPLIT — vault/sentinel/librarian/watchdog write to JSON; blueprint reads DB only
-3. Post-deploy rollback trigger is BROKEN — watchdog reads JSON; blueprint writes to DB
-4. `watchdog.py` hardcodes `COMPANY_DATA_DIR = Path("/home/pi/synthos-company/data")` — breaks multi-Pi
-5. `strongbox.py` is in wrong repo — no backups running on company node
+1. `license_validator.py` is MISSING — installer always fails VERIFYING; no license gate at boot (SYS-B01/B02)
+2. Suggestions pipeline — RESOLVED (Steps 1-3): vault/sentinel/librarian/watchdog now write via db_helpers
+3. Post-deploy rollback — RESOLVED (Step 2): watchdog now reads from db_helpers
+4. `watchdog.py` COMPANY_DATA_DIR — RESOLVED (Step 3): now reads from env var
+5. `strongbox.py` — RESOLVED (Step 4): moved to synthos-company/agents/
 See docs/validation/SYSTEM_VALIDATION_REPORT.md for full blocker list.
 
 ## Conventions
-- All progress updates go in STATUS.md
-- Completed tasks get checked off in docs/milestones.md
 - Never delete files — move deprecated work to /archive
 - Source code lives in src/, tests in tests/, all docs in docs/
 - TRADING_MODE must remain PAPER — PAPER→LIVE requires explicit project lead action
 
 ## How To Update Progress
 When a task is complete:
-1. Check it off in docs/milestones.md
-2. Update Current Phase and Last Updated in STATUS.md
-3. Commit: `git commit -m "progress: [what was completed]"`
+1. Check it off in PROJECT_STATUS.md (master tracker, this repo)
+2. Update Current Phase and Last Updated in STATUS.md (this node)
+3. Update synthos-company/STATUS.md if company node work was involved
+4. Commit: `git commit -m "progress: [what was completed]"`
