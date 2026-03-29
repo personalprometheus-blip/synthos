@@ -73,7 +73,7 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 |----|----------|-------------|
 | SYS-B01 | CRITICAL | `license_validator.py` missing — installer always fails VERIFYING |
 | SYS-B02 | CRITICAL | No boot-time license gate — key never validated at runtime |
-| SYS-B03 | CRITICAL | Post-deploy rollback broken — watchdog reads JSON; blueprint writes DB |
+| ~~SYS-B03~~ | ~~CRITICAL~~ | ~~Post-deploy rollback broken~~ — RESOLVED |
 | ~~SYS-B04~~ | ~~CRITICAL~~ | ~~Suggestions pipeline split~~ — RESOLVED |
 | SYS-B05 | HIGH | `watchdog.py` hardcoded `COMPANY_DATA_DIR` — breaks multi-Pi deployment |
 | SYS-B06 | HIGH | Installer core/ vs flat layout mismatch |

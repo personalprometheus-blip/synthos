@@ -14,7 +14,7 @@ Alerting: Watchdog does NOT send email or SMS directly.
 Rollback authority:
   Pre-trading:  Watchdog halts and alerts — project lead decides on rollback
   Post-trading: Watchdog may trigger full rollback autonomously if
-                rollback_trigger condition is met in post_deploy_watch.json
+                rollback_trigger condition is met in company.db.deploy_watches
 
 Known-good snapshot:
   Taken automatically after each successful agent run (max once per 7 days).
@@ -62,7 +62,7 @@ SNAPSHOT_ENV     = SNAPSHOT_DIR / ".env.known_good"
 # Company Pi data directory — override with COMPANY_DATA_DIR env var for non-default installs
 COMPANY_DATA_DIR     = Path(os.environ.get("COMPANY_DATA_DIR", "/home/pi/synthos-company/data"))
 # SUGGESTIONS_FILE removed — alerts now written to company.db via db_helpers.post_suggestion()
-POST_DEPLOY_FILE     = COMPANY_DATA_DIR / "post_deploy_watch.json"
+# POST_DEPLOY_FILE removed — deploy watches now read from company.db via db_helpers.get_active_deploy_watches()
 TRADING_MODE_FILE    = COMPANY_DATA_DIR / "trading_mode.json"
 
 # db_helpers — available when retail and company node share the same Pi.
@@ -573,13 +573,12 @@ def check_post_deploy_rollback(state: AgentState) -> bool:
     if not is_post_trading():
         return False
 
+    if _db is None:
+        log.warning("check_post_deploy_rollback: db_helpers unavailable — rollback trigger cannot fire")
+        return False
+
     try:
-        if _db is not None:
-            watches = _db.get_active_deploy_watches()
-        elif POST_DEPLOY_FILE.exists():
-            watches = json.loads(POST_DEPLOY_FILE.read_text())
-        else:
-            return False
+        watches = _db.get_active_deploy_watches()
     except Exception:
         return False
 
