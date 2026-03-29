@@ -109,13 +109,29 @@
 
 ---
 
+## agent3_sentiment.py / company node — RSS Feed Distribution
+
+| # | Item | Priority | Notes |
+|---|---|---|---|
+| T-22 | Build RSS/news feed distribution system | MEDIUM | Existing file: `synthos_build/free_public_api_source_list.html` (also check GitHub repo for latest version). Company node parses this file into a `feed_sources` DB table (url, name, tier, pull_count_today, is_active). Retail Pi calls `GET /api/feed` on company node to receive one random available feed URL. Each pull increments `pull_count_today` for that feed. When count exceeds threshold → feed temporarily disabled (web attack prevention). Cron at 00:01 resets `pull_count_today = 0` and re-enables all feeds. Replaces any hardcoded feed lists on retail Pi. Requires: parse `free_public_api_source_list.html`, `feed_sources` table in company DB, `/api/feed` endpoint on company node, retail-side `get_feed_url()` caller, cron reset job. |
+
+---
+
+## sentinel_daynight.py
+
+| # | Item | Priority | Notes |
+|---|---|---|---|
+| T-30 | Fix astral 3.x timezone compatibility in `_calculate_mode` | LOW | `loc.timezone` returns a string in astral 3.x but `sun()` requires a `tzinfo` object. Fix: `from zoneinfo import ZoneInfo` and pass `tzinfo=ZoneInfo(tz_name)`. Calculation is currently commented out; defaults to day mode. |
+
+---
+
 ## Summary by Priority
 
 | Priority | Count | Items |
 |---|---|---|
-| HIGH | 0 | all resolved (T-01, T-02, T-06, T-11, T-13) |
-| MEDIUM | 6 | T-07, T-10, T-15, T-16, T-21 (T-08 resolved) |
-| LOW | 7 | T-04, T-09, T-12, T-17, T-18, T-19, T-20 |
+| HIGH | 7 | T-23, T-24, T-25, T-26, T-27, T-28, T-29 — PRE-BETA SECURITY (all blocking) |
+| MEDIUM | 7 | T-07, T-10, T-15, T-16, T-21, T-22 (T-08 resolved) |
+| LOW | 8 | T-04, T-09, T-12, T-17, T-18, T-19, T-20, T-30 |
 
 ---
 
@@ -124,3 +140,21 @@
 - T-15 and T-16 both reference IP allowlisting activation — kept as separate items because they appear in different spec docs with slightly different context (architecture vs. operations). Treat as one task in practice.
 - `TBD` effort tags in `patches.py` and `migrate_agents.py` (T-18) are the same pattern — consolidated into one item.
 - Strongbox references appear throughout multiple docs — all consolidated under T-13 and T-14.
+
+---
+
+## PRE-BETA SECURITY HARDENING
+
+> **BLOCKING:** All items below must be completed before the system goes to beta.
+> The current setup uses default/dev credentials throughout. Every access point
+> must be secured before the system is exposed to customers or real trading capital.
+
+| # | Item | Priority | Notes |
+|---|---|---|---|
+| T-23 | Rotate all Raspberry Pi user passwords | HIGH | Default or dev passwords on all Pi nodes (retail, monitor, company) must be replaced with strong unique passwords before beta. |
+| T-24 | Set a strong Samba (SMB) password | HIGH | Current SMB share on monitor Pi uses dev credentials. Replace with a strong password and confirm guest access is disabled. |
+| T-25 | Secure all web-facing domains and portals | HIGH | All domains and subdomains (portal, monitor, Cloudflare tunnels) must use HTTPS with valid certs. Confirm no unauthenticated endpoints are exposed. |
+| T-26 | Harden portal.py authentication | HIGH | Web portal (port 5001) must require authentication before any kill switch, approval, or news feed access is permitted. See T-07. |
+| T-27 | Audit and rotate all API keys and secrets | HIGH | Alpaca, SendGrid, Cloudflare R2, Anthropic — all keys in `.env` files should be reviewed, rotated, and confirmed to have minimum required permissions. |
+| T-28 | Restrict SSH access | HIGH | Disable password-based SSH login; enforce key-only auth on all Pi nodes. Activate IP allowlisting (see T-15/T-16) once IP list is stable. |
+| T-29 | Review firewall rules on all nodes | HIGH | Confirm only required ports are open (e.g. 5000, 5001) and all other inbound traffic is blocked. |

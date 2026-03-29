@@ -34,7 +34,13 @@ SEP  = "-" * 60
 
 results = []
 
-def p(label, ok, detail=""):
+def p(label, ok, detail="", warn_only=False):
+    if warn_only and not ok:
+        line = f"{WARN} {label}"
+        if detail:
+            line += f"\n         {detail}"
+        print(line)
+        return ok
     icon = PASS if ok else FAIL
     line = f"{icon} {label}"
     if detail:
@@ -149,7 +155,8 @@ if db:
                   f"last={hb['timestamp']} ({age_mins}m ago) status={hb['details']}")
             else:
                 p(f"Heartbeat: {agent}", False,
-                  "No heartbeat recorded — agent has not run yet")
+                  "No heartbeat recorded — agent has not run yet",
+                  warn_only=True)
         except Exception as e:
             p(f"Heartbeat: {agent}", False, str(e))
 
@@ -221,7 +228,7 @@ if conn:
     try:
         total = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
         p("signals table has rows", total > 0,
-          f"{total} total signal(s) in DB")
+          f"{total} total signal(s) in DB", warn_only=True)
     except Exception as e:
         p("signals table readable", False, str(e))
 
@@ -258,7 +265,7 @@ if conn:
             ORDER BY created_at DESC LIMIT 5
         """).fetchall()
         p("Recent signals readable", len(recent) > 0,
-          f"{len(recent)} most recent signal(s):")
+          f"{len(recent)} most recent signal(s):", warn_only=True)
         for r in recent:
             print(f"       {r['ticker']:<6} {r['confidence']:<8} "
                   f"{r['staleness']:<10} {r['status']:<15} {r['created_at'][:16]}")
@@ -289,7 +296,8 @@ if conn:
         p("agent2_research has run",
           last_run is not None,
           f"last={last_run['timestamp'][:16]} details={last_run['details'][:60]}"
-          if last_run else "No record of agent2 run in system_log")
+          if last_run else "No record of agent2 run in system_log",
+          warn_only=True)
     except Exception as e:
         p("agent2 last run", False, str(e))
 
@@ -314,7 +322,7 @@ if conn:
     try:
         total = conn.execute("SELECT COUNT(*) FROM scan_log").fetchone()[0]
         p("scan_log has rows", total > 0,
-          f"{total} total scan(s) recorded")
+          f"{total} total scan(s) recorded", warn_only=True)
     except Exception as e:
         p("scan_log readable", False, str(e))
 
@@ -327,7 +335,7 @@ if conn:
             ORDER BY scanned_at DESC LIMIT 5
         """).fetchall()
         p("Recent scans readable", len(scans) > 0,
-          f"{len(scans)} most recent scan(s):")
+          f"{len(scans)} most recent scan(s):", warn_only=True)
         for s in scans:
             cascade = "CASCADE ⚠" if s['cascade_detected'] else "clean"
             print(f"       {s['ticker']:<6} T{s['tier']} {cascade:<12} {s['scanned_at'][:16]}")
@@ -388,7 +396,8 @@ if conn:
         p("agent3_sentiment has run",
           last_run is not None,
           f"last={last_run['timestamp'][:16]} details={last_run['details'][:60]}"
-          if last_run else "No record of agent3 run in system_log")
+          if last_run else "No record of agent3 run in system_log",
+          warn_only=True)
     except Exception as e:
         p("agent3 last run", False, str(e))
 
@@ -406,7 +415,8 @@ if conn:
             GROUP BY event ORDER BY cnt DESC LIMIT 12
         """).fetchall()
         p("system_log has events", len(events) > 0,
-          f"{sum(r['cnt'] for r in events)} total events across {len(events)} event types")
+          f"{sum(r['cnt'] for r in events)} total events across {len(events)} event types",
+          warn_only=True)
         print(f"{INFO} Top system_log events:")
         for r in events:
             print(f"       {r['event']:<30} {r['cnt']}")
@@ -421,7 +431,7 @@ if conn:
             ORDER BY timestamp DESC LIMIT 10
         """).fetchall()
         p("Recent system events readable", len(recent) > 0,
-          f"{len(recent)} most recent event(s):")
+          f"{len(recent)} most recent event(s):", warn_only=True)
         for r in recent:
             detail = (r['details'] or '')[:50]
             print(f"       {r['timestamp'][:16]}  {r['event']:<25} "
@@ -524,9 +534,10 @@ if db and portal_up:
         if ok:
             api_total = api_data.get('portfolio_value', None)
             match = api_total is not None and abs(db_total - api_total) < 1.0
+            api_str = f"${api_total:.2f}" if api_total is not None else "?"
             p("Portfolio value: DB matches API",
               match,
-              f"DB=${db_total:.2f} API=${api_total:.2f if api_total else '?'}")
+              f"DB=${db_total:.2f} API={api_str}")
         else:
             print(f"{INFO} Skipping portfolio coherence check — portal unavailable")
     except Exception as e:

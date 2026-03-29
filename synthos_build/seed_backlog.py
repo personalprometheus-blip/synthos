@@ -334,6 +334,38 @@ SEED_ITEMS = [
     ),
 
     make_suggestion(
+        title       = "T-22: Build RSS/news feed distribution system",
+        description = (
+            "Synthos agents currently use hardcoded or ad-hoc feed lists for news ingestion. "
+            "A distributed, rate-controlled feed system is needed. "
+            "Existing file: synthos_build/free_public_api_source_list.html — also check "
+            "GitHub repo root for the latest version. "
+            "Design: "
+            "(1) Company node parses free_public_api_source_list.html into a feed_sources "
+            "DB table (url, name, tier, pull_count_today, is_active, disabled_reason, last_reset_at). "
+            "(2) Company node exposes GET /api/feed endpoint — returns one randomly selected "
+            "active feed URL to the caller. "
+            "(3) Each retail Pi call increments pull_count_today for the returned feed. "
+            "When pull_count_today exceeds a configurable threshold (e.g. FEED_PULL_LIMIT_PER_DAY), "
+            "the feed is marked is_active=False (temporarily disabled) as a web attack prevention measure. "
+            "(4) A cron job on the company node runs at 00:01 daily: resets pull_count_today=0 "
+            "and re-enables all feeds. "
+            "(5) Retail Pi agent3_sentiment.py calls GET /api/feed to get a URL instead of "
+            "using any hardcoded list. "
+            "Implementation steps: parse HTML into DB, write /api/feed endpoint, "
+            "add pull counter + disable logic, add cron reset, update retail agent caller."
+        ),
+        category     = "improvement",
+        scope        = "system_wide",
+        priority     = "medium",
+        target_files = [
+            "synthos_build/free_public_api_source_list.html",
+            "synthos_build/agent3_sentiment.py",
+            "synthos_build/database.py",
+        ],
+    ),
+
+    make_suggestion(
         title       = "INC-009: Add company agent TDA classifications to TOOL_DEPENDENCY_ARCHITECTURE.md",
         description = (
             "TOOL_DEPENDENCY_ARCHITECTURE.md classifies tool types (Bootstrap, Runtime, "

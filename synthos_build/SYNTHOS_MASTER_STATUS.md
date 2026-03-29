@@ -2,7 +2,7 @@
 ## Single Source of Truth for Project Decisions, Progress, and Next Actions
 
 **Maintained by:** Claude Code (this file is the handoff document)
-**Last updated:** 2026-03-27
+**Last updated:** 2026-03-28
 **System version:** 1.2 (build brief applied)
 **Repo:** github.com/personalprometheus-blip/synthos
 **Working directory:** `/home/pi/synthos/synthos_build/`
@@ -136,6 +136,7 @@ _None at this time._
 | ~~**BB-02**~~ | ~~Interrogation peer side not built~~ | ~~agent2_research.py~~ | **RESOLVED 2026-03-27** — interrogation_listener.py built; started by boot_sequence.py on retail node boot. |
 | **BB-03** | Company-side news feed receiver | company agent | Scout POSTs to MONITOR_URL/api/news-feed but no company agent handles it. Endpoint doesn't exist yet. |
 | **T-21** | Pi comparison log — cross-Pi behavioral analysis | synthos_monitor.py / Patches | Compare signal decisions, member weight divergence, portfolio performance, validation rates, and trade outcomes across all retail Pis. Surfaces which Pis are behaving differently and why. Feeds Patches morning digest. |
+| **T-22** | RSS/news feed distribution system | agent3_sentiment.py / company DB / company node API | Company node parses `free_public_api_source_list.html` into `feed_sources` table. Retail Pi calls `GET /api/feed` for a random active URL. Each pull increments per-feed counter; stops distribution at threshold (web attack prevention). Cron at 00:01 resets counters daily. Existing file confirmed at `synthos_build/free_public_api_source_list.html` — also check GitHub for latest version. |
 
 ### LOW PRIORITY — Deferred
 

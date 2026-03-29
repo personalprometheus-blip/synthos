@@ -74,8 +74,8 @@ for f in required:
 
 json_path = os.path.join(PROJECT_DIR, ".pending_approvals.json")
 json_exists = os.path.exists(json_path)
-p("Legacy .pending_approvals.json present", json_exists,
-  "Will compare against DB state below" if json_exists else "Not present — clean")
+p("No legacy .pending_approvals.json (clean)", not json_exists,
+  "Not present — no migration needed" if not json_exists else "Present — will compare against DB state below")
 
 
 # ══════════════════════════════════════════════════════════
