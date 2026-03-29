@@ -106,6 +106,19 @@ Secondary (required before Phase 4):
 - [ ] Project lead approval documented
 - [ ] TRADING_MODE=LIVE set by project lead only
 
+### Pre-Release Security Hardening (gate condition for Phase 6)
+
+These items must be completed before any live trading or adversarial deployment. They do not block normalization or deployment pipeline testing.
+
+- [ ] Implement company boot-time integrity gate (`install_company.py` → `boot_company.py` or equivalent) — evaluates all §3 checks from `COMPANY_INTEGRITY_GATE_SPEC.md` before starting any agent
+- [ ] Align installer required-key check with canonical company integrity-gate secret set (`ANTHROPIC_API_KEY`, `MONITOR_TOKEN` currently missing from installer)
+- [ ] Add PRAGMA integrity_check to installer DB verification (currently checks existence only)
+- [ ] Enforce `MONITOR_URL` and `PI_ID` presence at installer time
+- [ ] Verify company startup trust path under normal and break-glass modes
+- [ ] Implement retail boot-time license gate (pending SYS-B01 license_validator.py decision)
+
+**Reference:** `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`, `docs/validation/TRUST_GATE_ALIGNMENT_NOTE.md`
+
 ---
 
 ## Open Blockers (cross-project)

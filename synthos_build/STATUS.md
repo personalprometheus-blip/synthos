@@ -37,10 +37,7 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 ~~**Step 1:** Migrate suggestions pipeline~~ ✅ DONE
 ~~**Step 2:** Migrate watchdog.py post_deploy_watch~~ ✅ DONE
 ~~**Step 3:** Fix watchdog.py COMPANY_DATA_DIR hardcode~~ ✅ DONE
-**Step 4 (next):** Move strongbox.py to synthos-company/agents/; verify running
-**Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
-**Step 6 (human):** Declare license_validator.py status — build now or defer
-**Step 4:** Move strongbox.py to synthos-company/agents/; verify running
+~~**Step 4:** Move strongbox.py to synthos-company/agents/~~ ✅ DONE
 **Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
 **Step 6 (human):** Declare license_validator.py status — build now or defer
 
@@ -83,6 +80,15 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 | SYS-B07 | HIGH | `update-staging` branch absent — deploy pipeline non-executable |
 
 Full blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
+
+## Company Integrity Gate
+- Architecture defined: `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`
+- Installer enforces a partial subset (MODE check, some secrets, file presence)
+- **Full enforcement is not implemented:** no company boot sequence exists to evaluate the gate before runtime services start
+- Boot-time company integrity gate is tracked as a pre-release security gate task (Phase 6 / PROJECT_STATUS.md)
+- This gap does not block the normalization sprint
+
+---
 
 ## Notes for AI Agents
 - This is a paper-trading-only system. TRADING_MODE must remain PAPER.

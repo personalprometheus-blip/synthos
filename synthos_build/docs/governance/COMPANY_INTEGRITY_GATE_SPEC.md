@@ -1,9 +1,23 @@
 # COMPANY INTEGRITY GATE — SPECIFICATION
 
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-03-29
 **Status:** AUTHORITATIVE — applies to company_node and monitor_node
 **Authority tier:** Tier 2 — Behavioral/Operational Authority
+
+---
+
+## IMPLEMENTATION STATUS OVERVIEW
+
+This document has three layers. Read this summary before using any section as implementation guidance.
+
+| Layer | Status |
+|-------|--------|
+| **A — Canonical model** | DEFINED — the architectural decision is made and authoritative |
+| **B — Current enforcement** | PARTIAL — installer enforces a subset; no boot-time gate exists |
+| **C — Deferred enforcement** | PENDING — full boot-time gate deferred to pre-release security hardening |
+
+**Current state in one sentence:** The canonical model is defined and correct. The company installer enforces a partial subset of it. No company boot sequence exists yet to evaluate the full gate before runtime services start. This gap is known, accepted for the current phase, and tracked for pre-release security gating.
 
 ---
 
@@ -49,9 +63,11 @@ This is **NOT**:
 
 ---
 
-## 3. MINIMUM INTEGRITY GATE (ENFORCED NOW)
+## 3. MINIMUM INTEGRITY GATE (CANONICAL MODEL)
 
-The following checks define the integrity gate. All checks must pass before runtime services start. There are no partial-pass conditions.
+The following checks define the integrity gate target. This is the canonical architectural model — the full set of checks that must pass before runtime services start when the boot-time gate is implemented.
+
+**Current enforcement status is documented per-check below.** See §11 for the consolidated enforcement summary.
 
 ---
 
@@ -65,13 +81,17 @@ The following checks define the integrity gate. All checks must pass before runt
 
 **Rationale:** This is the canonical flag that distinguishes company-side behavior throughout the codebase. Its absence indicates either a misconfigured environment or a retail `.env` accidentally loaded in place of `company.env`.
 
+**Current enforcement:** ENFORCED by installer (`install_company.py`) — presence and value both checked.
+
 ---
 
 ### 3.2 SECRET PRESENCE CHECK
 
 **Purpose:** Confirm that required internal secrets are present and non-empty before any agent attempts to use them.
 
-**Check:** The following keys must exist in `company.env` and be non-empty strings:
+#### A. Canonical trust-anchor set (target)
+
+The following keys must exist in `company.env` and be non-empty strings when full gate enforcement is implemented:
 
 | Key | Purpose |
 |-----|---------|
@@ -79,9 +99,26 @@ The following checks define the integrity gate. All checks must pass before runt
 | `SENDGRID_API_KEY` | Required by scoop.py for alert delivery |
 | `MONITOR_TOKEN` | Required for authenticated heartbeat reception |
 
-**Fail condition:** Any listed key is absent from `company.env` or resolves to an empty string.
+#### B. Currently enforced by installer
 
-**Note:** This check confirms **presence only**. Secret format validation and revocation checking are **DEFERRED** (see §6). A syntactically present but semantically invalid key passes this check.
+`install_company.py` currently verifies the following keys as present in `company.env`:
+
+| Key | Enforced |
+|-----|---------|
+| `COMPANY_MODE` | ✅ (also verifies value = `true`) |
+| `SENDGRID_API_KEY` | ✅ |
+| `SENDGRID_FROM` | ✅ |
+| `OPERATOR_EMAIL` | ✅ |
+| `KEY_SIGNING_SECRET` | ✅ |
+| `DATABASE_PATH` | ✅ |
+
+#### C. Alignment gap
+
+- `ANTHROPIC_API_KEY` and `MONITOR_TOKEN` are in the canonical target but **not currently in the installer's required-key check**
+- `SENDGRID_FROM`, `OPERATOR_EMAIL`, `KEY_SIGNING_SECRET`, `DATABASE_PATH` are enforced by the installer but not yet formally in the canonical spec
+- Full alignment between the canonical set and installer checks is deferred to pre-release security hardening
+
+**Note on presence-only checking:** This check confirms **presence only**. Secret format validation and revocation checking are **DEFERRED** (see §6). A syntactically present but semantically invalid key passes this check.
 
 ---
 
@@ -89,7 +126,7 @@ The following checks define the integrity gate. All checks must pass before runt
 
 **Purpose:** Confirm the minimum set of files required for company node operation are present before attempting to start any service.
 
-**Check:** The following files must exist at their expected paths (all relative to `SYNTHOS_HOME`):
+**Canonical required files** (relative to `SYNTHOS_HOME`):
 
 | File | Required By |
 |------|------------|
@@ -105,6 +142,8 @@ The following checks define the integrity gate. All checks must pass before runt
 
 **Note:** `license_validator.py` is explicitly **NOT** in this list. It must never be added to company node required files.
 
+**Current enforcement:** ENFORCED by installer. The installer checks `blueprint.py`, `sentinel.py`, `scoop.py`, `patches.py`, `fidget.py`, `librarian.py`, `vault.py`, `timekeeper.py` (superset of canonical minimum) and `utils/db_helpers.py`. Consistent with this spec.
+
 ---
 
 ### 3.4 DATABASE INTEGRITY CHECK
@@ -119,13 +158,15 @@ The following checks define the integrity gate. All checks must pass before runt
 
 **Fail condition:** DB exists but `PRAGMA integrity_check` returns any value other than `"ok"`.
 
+**Current enforcement:** Installer checks DB existence. PRAGMA integrity_check is **not currently run by the installer**. Full DB integrity check is deferred to boot-time gate implementation.
+
 ---
 
 ### 3.5 CONFIGURATION SANITY CHECK
 
 **Purpose:** Confirm that required configuration values are present and structurally valid (not semantically validated).
 
-**Checks:**
+#### A. Intended config sanity scope (target)
 
 | Config Value | Rule |
 |-------------|------|
@@ -134,9 +175,16 @@ The following checks define the integrity gate. All checks must pass before runt
 | `MONITOR_URL` | Present and non-empty string |
 | `PI_ID` | Present and non-empty string |
 
-**Fail condition:** Any listed value is absent, empty, or fails its structural rule.
-
 **Note:** URL reachability and port availability are **NOT** checked here. This check confirms configuration is structurally present, not operationally valid.
+
+#### B. Currently enforced by installer
+
+The installer collects `command_port` and `installer_port` as part of setup. It does **not** currently enforce `MONITOR_URL` or `PI_ID` as required present values in `company.env`.
+
+#### C. Enforcement gap
+
+- `MONITOR_URL` and `PI_ID` presence verification is **not currently enforced** by the installer
+- Full config sanity check against the canonical set is deferred to boot-time gate implementation
 
 ---
 
@@ -181,6 +229,8 @@ Partial startup — where some services start despite a gate failure — is **di
 ### 4.4 Failure Is Not Fatal to the Pi
 
 Gate failure halts the Synthos runtime startup. It does not crash the Pi or prevent the operator from SSHing in to diagnose. The failure is written to log and the process exits with a non-zero code.
+
+**Implementation note:** §4.1–4.4 describe the target behavior. This behavior cannot be enforced until a company boot sequence is implemented. See §7.2 and §11.
 
 ---
 
@@ -246,23 +296,43 @@ These items do not block system stabilization, validation, or deployment testing
 - Never collect or validate `LICENSE_KEY`, `OPERATING_MODE`, or `AUTONOMOUS_UNLOCK_KEY`
 - Never reference or call `license_validator.py`
 
+**Current status:** installer does NOT collect LICENSE_KEY or call license_validator.py ✅. Full alignment with §3.2 canonical secret set is pending (see §3.2-C).
+
 ### 7.2 Boot Sequence
 
-The company node boot sequence must:
-- Evaluate the integrity gate (§3) before starting any agent
-- Not gate startup on any retail license system
-- Not call `license_validator.py`
-- Exit with logged failure if any gate check fails (§4)
+**A company boot sequence that evaluates the integrity gate does not currently exist.**
 
-The integrity gate is evaluated at the start of the boot sequence, before any agent process is launched.
+This is a known implementation gap. Current enforcement is installer/setup-level only. The full boot-time integrity gate — which must evaluate all §3 checks before starting any agent — is a required future implementation deferred to pre-release security hardening.
 
-### 7.3 Sequence
-
+**Target behavior (when implemented):**
 ```
 company boot starts
   → evaluate integrity gate (§3.1 through §3.5)
   → if any check fails → log failure, exit (§4)
   → if all checks pass → start runtime services
+```
+
+**Current behavior:**
+```
+company agents start manually or via cron
+  → no pre-start integrity gate evaluation
+  → installer enforced a partial gate check at setup time only
+```
+
+This gap means the fail behavior in §4 is currently aspirational. It becomes enforceable when the boot sequence is implemented.
+
+**Tracking:** Implementing the company boot-time integrity gate is a release-gate security task. See docs/validation/TRUST_GATE_ALIGNMENT_NOTE.md and PROJECT_STATUS.md Phase 6 for tracking.
+
+### 7.3 Install → Boot Handoff
+
+```
+install_company.py (setup-time):
+  → partial gate checks (§3.1 MODE, §3.2 partial secrets, §3.3 files, §3.4 DB existence)
+  → writes .install_complete sentinel
+
+company boot (runtime, NOT YET IMPLEMENTED):
+  → full gate evaluation (§3.1 through §3.5)
+  → starts runtime services only on full pass
 ```
 
 ---
@@ -276,6 +346,7 @@ company boot starts
 | External dependency | Vault API (online), cached license (offline) | None |
 | Fail behavior | Defined by license validation flow | Defined by §4 of this spec |
 | Shared enforcement path | None | None |
+| Boot-time gate implemented | Pending (license_validator.py missing) | Pending (no company boot sequence) |
 
 `license_validator.py` is scoped to `retail_node` only. It must not be imported, called, or required by any company-side code path unless a future explicit architectural decision creates a shared or split model. That decision is not made here.
 
@@ -295,20 +366,22 @@ This minimal model has known limitations that are acceptable for the current pha
 
 **L-5.** The gate assumes a controlled deployment environment where the operator is trusted and local access is controlled.
 
-These limitations are accepted. Remediating them is the responsibility of the pre-release security phase (§6).
+**L-6.** No boot-time gate currently exists. Current enforcement is install-time only.
+
+These limitations are accepted. Remediating L-1 through L-5 is the responsibility of the pre-release security phase (§6). L-6 is tracked as a required implementation task (§7.2).
 
 ---
 
 ## 10. READINESS STATEMENT
 
-### This integrity gate IS sufficient for:
+### This integrity gate architecture IS sufficient for:
 
 - System stabilization (clears company-side license dependency)
-- Validation consistency (company node boot is deterministic and inspectable)
-- Deployment testing (gate checks confirm minimum operational readiness before runtime starts)
+- Validation consistency (company node boot path is defined and inspectable)
+- Deployment testing (partial gate checks confirm minimum operational readiness at install time)
 - Blocker remediation (SYS-B01 and SYS-B02 resolution — removes licensing from company boot path)
 
-### This integrity gate is NOT sufficient for:
+### This integrity gate architecture is NOT sufficient for:
 
 - Final production-grade security
 - Adversarial environments
@@ -320,3 +393,24 @@ These limitations are accepted. Remediating them is the responsibility of the pr
 This spec supersedes any prior requirement for `license_validator.py` on company/internal nodes. Any document that references license validation as a company-side boot requirement (including prior versions of SYNTHOS_TECHNICAL_ARCHITECTURE.md or SYSTEM_MANIFEST.md) should be updated to reflect this separation.
 
 The retail license model remains unchanged and is out of scope for this document.
+
+---
+
+## 11. ENFORCEMENT SUMMARY (CURRENT STATE)
+
+| Gate Check | Canonical Target | Installer (setup-time) | Boot-time |
+|-----------|-----------------|----------------------|-----------|
+| §3.1 MODE CHECK | COMPANY_MODE=true | ✅ Enforced | ⏳ Not yet — no boot sequence |
+| §3.2 SECRETS — SENDGRID_API_KEY | Required | ✅ Enforced | ⏳ Not yet |
+| §3.2 SECRETS — ANTHROPIC_API_KEY | Required | ❌ Not currently checked | ⏳ Not yet |
+| §3.2 SECRETS — MONITOR_TOKEN | Required | ❌ Not currently checked | ⏳ Not yet |
+| §3.3 CRITICAL FILES | agents + db_helpers + company.db | ✅ Enforced (superset) | ⏳ Not yet |
+| §3.4 DB INTEGRITY (PRAGMA) | Required | ❌ Existence only, no PRAGMA | ⏳ Not yet |
+| §3.5 CONFIG — COMMAND_PORT | Required | ✅ Collected | ⏳ Not yet |
+| §3.5 CONFIG — INSTALLER_PORT | Required | ✅ Collected | ⏳ Not yet |
+| §3.5 CONFIG — MONITOR_URL | Required | ❌ Not enforced | ⏳ Not yet |
+| §3.5 CONFIG — PI_ID | Required | ❌ Not enforced | ⏳ Not yet |
+
+**Legend:** ✅ = currently enforced | ❌ = gap vs canonical target | ⏳ = awaiting boot sequence implementation
+
+All boot-time enforcement is deferred to pre-release security hardening. See §7.2 for tracking.

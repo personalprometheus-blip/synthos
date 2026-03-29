@@ -128,6 +128,8 @@ A single configuration flag that switches the entire system from pre-trading to 
 
 **Vault** adjusts security posture: post-trading mode enforces stricter license validation (no grace period on cache expiry, immediate halt on revoked keys), tighter key enforcement behavior, and more aggressive audit logging.
 
+**Note on company startup:** Company node startup does not depend on retail-style license validation. The company node uses an internal integrity gate model (see `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`). Full boot-time enforcement of that gate is a pre-release security task.
+
 ```json
 {
   "trading_mode": "pre-trading"

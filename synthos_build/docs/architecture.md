@@ -113,12 +113,27 @@ Post-deploy rollback (BROKEN — CL-004):
 
 ---
 
+## Trust Domain Model
+
+| Domain | Node | Startup Gate | Gate Implemented |
+|--------|------|-------------|-----------------|
+| retail/customer | Pi 2W | License validation (`license_validator.py`) | Pending (SYS-B01) |
+| company/internal | Pi 4B / cloud | Internal integrity gate (`COMPANY_INTEGRITY_GATE_SPEC.md`) | Partial — installer only |
+
+**Company/internal trust domain:**
+- Company node uses an internal integrity gate — not retail-style license validation
+- Canonical gate model is defined in `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`
+- **Current implementation is partial:** the installer enforces MODE check, some secrets, and file presence at setup time. No boot-time gate evaluation exists.
+- **Full boot-time company integrity gate enforcement is pending** and tracked as a pre-release security gate task (PROJECT_STATUS.md Phase 6)
+
+---
+
 ## Key Path Rules
 
 - **No hardcoded `/home/pi/` paths** (SYNTHOS_OPERATIONS_SPEC_ADDENDUM_1.md §1)
 - All retail paths derive from `Path(__file__).resolve().parent`
 - Company agents use `_HERE = Path(__file__).resolve().parent` or synthos_paths.py
-- **EXCEPTION (violation):** `watchdog.py:64` hardcodes `COMPANY_DATA_DIR = Path("/home/pi/synthos-company/data")` — must be fixed
+- ~~**EXCEPTION (violation):** `watchdog.py:64` hardcodes `COMPANY_DATA_DIR`~~ — RESOLVED (Step 3, normalization sprint): now reads from `COMPANY_DATA_DIR` env var
 
 ---
 

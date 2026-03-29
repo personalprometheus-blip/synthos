@@ -159,6 +159,12 @@ Company agents do NOT call Vault's license endpoint. They read a local
 - All agents start without key validation
 - Vault still manages keys for customers — it just doesn't validate its own Pi
 
+**Trust domain split:**
+- retail/customer domain → license validation (`license_validator.py`, Vault endpoint)
+- company/internal domain → integrity gate validation (`COMPANY_INTEGRITY_GATE_SPEC.md`)
+
+The company integrity gate model is architecturally defined. The installer enforces a partial subset of it. **Full boot-time enforcement — where the gate is evaluated before any company agent starts — is not yet implemented and is deferred to pre-release security hardening.** Current company startup relies on the installer having run successfully at setup time.
+
 ### 3.3 Backup Schedule
 
 Vault (and eventually Strongbox) backs up company.db daily at 1am ET.

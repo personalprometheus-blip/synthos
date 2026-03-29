@@ -85,6 +85,26 @@ Full validation matrix: docs/validation/VALIDATION_MATRIX.md
 
 ---
 
+## Company Integrity Gate — Validation Scope Note
+
+The company integrity gate architecture is defined in `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`.
+
+**What is IN SCOPE for the current normalization sprint validation pass:**
+- Confirming the company license-dependency split (company node does not call `license_validator.py`)
+- Confirming installer does not collect `LICENSE_KEY` or `OPERATING_MODE`
+- Confirming `COMPANY_MODE=true` is set and checked by installer
+
+**What is OUT OF SCOPE for the current normalization sprint:**
+- Full company integrity-gate enforcement implementation
+- Boot-time gate evaluation (no company boot sequence exists yet)
+- Alignment of installer secret checks with canonical gate spec (§3.2 gap)
+- PRAGMA integrity_check enforcement
+- `MONITOR_URL` / `PI_ID` config sanity enforcement
+
+Full company integrity-gate enforcement must be validated as part of the **pre-release security gate** (Phase 6 / PROJECT_STATUS.md). Current validation only confirms the license-dependency split, not full enforcement implementation.
+
+---
+
 ## Test File Locations
 
 | File | Location | Purpose |
