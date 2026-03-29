@@ -8,7 +8,7 @@ Monitors all retail Pi agents for crashes, auto-restarts up to 3 times,
 then falls back to the known-good snapshot, then halts and alerts.
 
 Alerting: Watchdog does NOT send email or SMS directly.
-  All alerts are written to suggestions.json (CRITICAL) and to a
+  All alerts are written to company.db via db_helpers.post_suggestion() and to a
   crash_report file. Scoop on the Company Pi delivers the notification.
 
 Rollback authority:
@@ -61,7 +61,7 @@ SNAPSHOT_ENV     = SNAPSHOT_DIR / ".env.known_good"
 
 # Company Pi data directory — override with COMPANY_DATA_DIR env var for non-default installs
 COMPANY_DATA_DIR     = Path(os.environ.get("COMPANY_DATA_DIR", "/home/pi/synthos-company/data"))
-SUGGESTIONS_FILE     = COMPANY_DATA_DIR / "suggestions.json"
+# SUGGESTIONS_FILE removed — alerts now written to company.db via db_helpers.post_suggestion()
 POST_DEPLOY_FILE     = COMPANY_DATA_DIR / "post_deploy_watch.json"
 TRADING_MODE_FILE    = COMPANY_DATA_DIR / "trading_mode.json"
 
@@ -1017,7 +1017,7 @@ def test_crash() -> None:
 
     print(f"\nTest complete:")
     print(f"  Report:  {report_path}")
-    print(f"  Alert:   written to suggestions.json on Company Pi")
+    print(f"  Alert:   written to company.db via db_helpers.post_suggestion()")
 
 
 # ── GRACEFUL SHUTDOWN ─────────────────────────────────────────────────────────
