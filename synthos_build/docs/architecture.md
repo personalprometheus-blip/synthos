@@ -8,9 +8,14 @@
 
 ## Node Topology
 
+**Hardware note:** The company/monitor node is hardware-agnostic — runs on Pi 4B/5,
+any cloud VM (AWS/GCP/DigitalOcean), local Linux server, or Docker container.
+The retail node is Pi-specific (Pi 2W / Pi Zero 2W). Only the retail node has
+a hardware constraint.
+
 ```
-retail_node (Pi 2W)          company_node (Pi 4B)        monitor_node (Pi 4B, same)
-─────────────────────        ────────────────────        ──────────────────────────
+retail_node (Pi 2W)          company_node (Pi 4B / Pi 5 / cloud / other)
+─────────────────────        ────────────────────────────────────────────
 agent1_trader.py             agents/blueprint.py         synthos_monitor.py
 agent2_research.py           agents/sentinel.py          └─ port 5000
 agent3_sentiment.py          agents/vault.py             └─ receives heartbeats
