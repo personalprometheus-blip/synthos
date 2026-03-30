@@ -100,7 +100,8 @@ SNAPSHOT_FILES = [
     "agent3_sentiment.py",
     "database.py",
     "heartbeat.py",
-    "cleanup.py",
+    # cleanup.py removed — not yet built; take_snapshot() would silently skip it
+    # but it polluted snapshot_info.json with a file that doesn't exist in src/.
 ]
 
 # Agents Watchdog monitors
