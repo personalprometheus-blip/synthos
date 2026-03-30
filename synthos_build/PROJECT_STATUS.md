@@ -91,7 +91,7 @@ Secondary (required before Phase 4):
 ## Phase 5 — Deployment Pipeline 🔴 NOT STARTED
 
 - [x] Create update-staging git branch
-- [ ] Document actual Friday push process
+- [x] Document actual Friday push process — `docs/governance/FRIDAY_PUSH_RUNBOOK.md`
 - [ ] First end-to-end deploy test in paper mode
 - [ ] Verify post-deploy rollback trigger fires correctly
 - [ ] Verify watchdog known-good snapshot and restore

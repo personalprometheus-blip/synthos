@@ -54,7 +54,7 @@
 
 ### Phase 5 — Deployment Pipeline
 - [x] Create update-staging branch
-- [ ] Document actual Friday push process
+- [x] Document actual Friday push process
 - [ ] First end-to-end deploy test in paper mode
 - [ ] Verify post-deploy rollback trigger fires correctly
 - [ ] Verify watchdog known-good snapshot and restore
