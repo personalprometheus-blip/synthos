@@ -8,7 +8,7 @@ Runs:
 
 Responsibilities:
   - Fetch congressional disclosures and legislative news from free APIs
-  - Score signals through 18-gate deterministic classification spine
+  - Score signals through 22-gate deterministic classification spine
   - Apply per-member reliability weight → adjusted score
   - Pull 1yr price history for ticker + industry/sector ETF
   - Write all signals to news_feed table for portal display
@@ -46,7 +46,7 @@ from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 # ANTHROPIC_API_KEY removed — Scout uses no LLM in classification decisions.
-# All decisions are rule-based and traceable. See gate1-gate18 functions.
+# All decisions are rule-based and traceable. See gate1-gate22 functions.
 CONGRESS_API_KEY     = os.environ.get('CONGRESS_API_KEY', '')
 ALPACA_API_KEY       = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET_KEY    = os.environ.get('ALPACA_SECRET_KEY', '')
@@ -75,7 +75,7 @@ log = logging.getLogger('agent2_research')
 
 class ResearchControls:
     """
-    All configurable thresholds for the 18-gate news classification spine.
+    All configurable thresholds for the 22-gate news classification spine.
     Loaded from environment variables with documented defaults.
     """
     # Gate 1 — System
@@ -88,39 +88,63 @@ class ResearchControls:
     SPX_SMA_LONG         = int(os.environ.get('SPX_SMA_LONG', '50'))
     SPX_VOL_THRESHOLD    = float(os.environ.get('SPX_VOL_THRESHOLD', '0.018'))  # ATR/price
     SPX_DRAWDOWN_THRESH  = float(os.environ.get('SPX_DRAWDOWN_THRESH', '0.05'))
+    TREND_NEUTRAL_BAND   = float(os.environ.get('TREND_NEUTRAL_BAND', '0.002'))
+    ROC_LOOKBACK         = int(os.environ.get('ROC_LOOKBACK', '5'))
     # TODO: DATA_DEPENDENCY — VIX integration; using SPX ATR as proxy until feed available
 
-    # Gate 3 — Eligibility
+    # Gate 3 — Source Relevance
     CREDIBILITY_TIER_MAX = int(os.environ.get('CREDIBILITY_TIER_MAX', '3'))  # tiers 1-3 pass
     MIN_WORD_COUNT       = int(os.environ.get('MIN_WORD_COUNT', '8'))
+    MIN_CREDIBILITY      = float(os.environ.get('MIN_CREDIBILITY', '0.35'))
+    MIN_RELEVANCE        = float(os.environ.get('MIN_RELEVANCE', '0.20'))
 
-    # Gate 5 — Event detection
+    # Gate 6 — Event detection
     BREAKING_BURST_THRESH = int(os.environ.get('BREAKING_BURST_THRESH', '3'))
     FOLLOW_UP_SIMILARITY  = float(os.environ.get('FOLLOW_UP_SIMILARITY', '0.50'))
     # TODO: DATA_DEPENDENCY — automated event calendar; using manual exclusion list
 
-    # Gate 6 — Sentiment
+    # Gate 7 — Sentiment
     POSITIVE_THRESHOLD    = float(os.environ.get('POSITIVE_THRESHOLD', '0.10'))
     NEGATIVE_THRESHOLD    = float(os.environ.get('NEGATIVE_THRESHOLD', '-0.10'))
     SENTIMENT_CONF_MIN    = float(os.environ.get('SENTIMENT_CONF_MIN', '0.25'))
     MIXED_MIN_THRESHOLD   = float(os.environ.get('MIXED_MIN_THRESHOLD', '0.05'))
+    EXAGGERATION_DELTA    = float(os.environ.get('EXAGGERATION_DELTA', '0.15'))
 
-    # Gate 7 — Novelty
+    # Gate 8 — Novelty
     NOVELTY_THRESHOLD     = float(os.environ.get('NOVELTY_THRESHOLD', '0.40'))
     MIN_INCREMENTAL_INFO  = float(os.environ.get('MIN_INCREMENTAL_INFO', '0.25'))
+    SURPRISE_THRESHOLD    = float(os.environ.get('SURPRISE_THRESHOLD', '0.65'))
 
-    # Gate 10 — Credibility
+    # Gate 12 — Confirmation
     MIN_CONFIRMATIONS     = int(os.environ.get('MIN_CONFIRMATIONS', '2'))
 
-    # Gate 11 — Timing
+    # Gate 13 — Timing
     TRADEABLE_WINDOW_HOURS = float(os.environ.get('TRADEABLE_WINDOW_HOURS', '8'))
 
-    # Gate 12 — Crowding
+    # Gate 14 — Crowding
     CLUSTER_VOL_THRESHOLD  = int(os.environ.get('CLUSTER_VOL_THRESHOLD', '8'))
+    EXTREME_ATTENTION_MULT = float(os.environ.get('EXTREME_ATTENTION_MULT', '2.0'))
 
-    # Gate 13 — Contradiction
+    # Gate 15 — Contradiction
     UNCERTAINTY_DENSITY_MAX  = float(os.environ.get('UNCERTAINTY_DENSITY_MAX', '0.12'))
     HEAD_BODY_MISMATCH_LIMIT = float(os.environ.get('HEAD_BODY_MISMATCH_LIMIT', '0.30'))
+
+    # Gate 18 — Risk discounts (multiplicative, applied to impact_score)
+    DISCOUNT_SENTIMENT_CONF  = float(os.environ.get('DISCOUNT_SENTIMENT_CONF', '0.70'))
+    DISCOUNT_BENCHMARK_VOL   = float(os.environ.get('DISCOUNT_BENCHMARK_VOL', '0.80'))
+    DISCOUNT_NOISY_EVENT     = float(os.environ.get('DISCOUNT_NOISY_EVENT', '0.60'))
+    DISCOUNT_SOURCE_LOW      = float(os.environ.get('DISCOUNT_SOURCE_LOW', '0.50'))
+    DISCOUNT_CONTRADICTION   = float(os.environ.get('DISCOUNT_CONTRADICTION', '0.50'))
+
+    # Gate 22 — Composite weights
+    COMPOSITE_W1             = float(os.environ.get('COMPOSITE_W1', '0.20'))   # impact_score
+    COMPOSITE_W2             = float(os.environ.get('COMPOSITE_W2', '0.15'))   # credibility_score
+    COMPOSITE_W3             = float(os.environ.get('COMPOSITE_W3', '0.15'))   # novelty_score
+    COMPOSITE_W4             = float(os.environ.get('COMPOSITE_W4', '0.20'))   # sentiment_confidence
+    COMPOSITE_W5             = float(os.environ.get('COMPOSITE_W5', '0.15'))   # confirmation_score
+    COMPOSITE_W6             = float(os.environ.get('COMPOSITE_W6', '0.10'))   # (1-crowding_discount)
+    COMPOSITE_W7             = float(os.environ.get('COMPOSITE_W7', '0.05'))   # (1-ambiguity_score)
+    COMPOSITE_QUALITY_THRESH = float(os.environ.get('COMPOSITE_QUALITY_THRESH', '0.45'))
 
 
 # ── KEYWORD DICTIONARIES ──────────────────────────────────────────────────
@@ -191,6 +215,19 @@ _PRIMARY_SOURCE_SIGNALS = frozenset({
     'federal register', 'capitol trades',
 })
 
+_OPINION_SIGNALS = frozenset({
+    'opinion', 'analysis', 'commentary', 'editorial', 'column',
+    'perspective', 'viewpoint', 'argues', 'believes', 'thinks',
+    'according to analysts', 'analysts say', 'experts say',
+})
+
+_MARKET_STRUCTURE_TERMS = (
+    'circuit breaker', 'market maker', 'high frequency trading', 'hft',
+    'liquidity', 'market mechanics', 'order flow', 'dark pool',
+    'market structure', 'exchange halt', 'trading halt', 'market open',
+    'market close', 'settlement', 'clearing',
+)
+
 
 # ── SECTOR / ETF MAPS ─────────────────────────────────────────────────────
 
@@ -226,11 +263,71 @@ SECTOR_TICKER_MAP = {
 
 @dataclass
 class BenchmarkRegime:
-    trend:           str  = "NEUTRAL"   # UP / DOWN / NEUTRAL
-    volatility:      str  = "NORMAL"    # HIGH / NORMAL
+    trend:           str  = "neutral"    # bullish / bearish / neutral
+    volatility:      str  = "NORMAL"     # HIGH / NORMAL
     drawdown_active: bool = False
+    momentum:        str  = "flat"       # positive / negative / flat
     spx_price:       float = 0.0
     raw:             dict = field(default_factory=dict)
+
+
+# ── ARTICLE STATE ─────────────────────────────────────────────────────────
+
+@dataclass
+class ArticleState:
+    """
+    State machine tracking all 22 gate outputs for a single article.
+    Enables Gate 22 composite scoring and complete audit trail.
+    """
+    system_status: str = "unknown"
+    trend_state: str = "neutral"
+    volatility_state: str = "normal_vol"
+    drawdown_state: bool = False
+    momentum_state: str = "flat"
+    credibility_score: float = 0.0
+    relevance_score: float = 0.0
+    opinion_flag: bool = False
+    relevance_ok: bool = False
+    topic_state: str = "uncertain"
+    entity_state: str = "non_actionable"
+    event_state: str = "unscheduled"
+    sentiment_state: str = "neutral"
+    sentiment_score: float = 0.0
+    sentiment_confidence: float = 0.0
+    headline_exaggeration: bool = False
+    novelty_state: str = "incremental_update"
+    novelty_score: float = 0.0
+    scope_state: str = "unclear"
+    benchmark_corr: str = "MEDIUM"
+    horizon_state: str = "multi_day"
+    decay_state: str = "medium_decay"
+    benchmark_rel_state: str = "neutral"
+    signal_type: str = "beta"
+    dominance_state: str = "benchmark_dominant"
+    confirmation_state: str = "weak"
+    confirmation_score: float = 0.0
+    timing_state: str = "unknown"
+    timing_tradeable: bool = True
+    crowding_state: str = "still_open"
+    crowding_discount: float = 0.0
+    cluster_volume: int = 1
+    ambiguity_state: str = "clear"
+    ambiguity_score: float = 0.0
+    impact_magnitude: str = "low"
+    impact_link_state: str = "benchmark_weak"
+    base_impact_score: float = 0.0
+    action_state: str = "ignore"
+    action_reason: str = ""
+    impact_score: float = 0.0
+    discounts_applied: list = field(default_factory=list)
+    persistence_state: str = "slow"
+    evaluation_note: str = ""
+    output_mode: str = "uncertain"
+    output_priority: str = "article_first"
+    output_action: str = "no_signal"
+    routing: str = "DISCARD"
+    composite_score: float = 0.0
+    final_signal: str = "neutral_or_watch"
 
 
 # ── NEWS DECISION LOG ─────────────────────────────────────────────────────
@@ -389,7 +486,7 @@ def apply_member_weight(base_confidence, member_weight):
     Weight floor 0.5, ceiling 1.5. Requires 5+ trades before weight deviates.
 
     # FLAG: member_weight interaction with news classification — currently applied
-    # after Gate 18 as a final adjustment. Future: integrate into Gate 10 (credibility).
+    # after Gate 22 as a final adjustment. Future: integrate into Gate 12 (confirmation).
     """
     base_numeric = CONFIDENCE_NUMERIC.get(base_confidence, 0.0)
     adj_numeric  = round(base_numeric * member_weight, 4)
@@ -740,9 +837,22 @@ def _compute_atr(bars, window=14):
     return sum(trs[-window:]) / min(len(trs), window)
 
 
+def _compute_roc(closes, lookback):
+    """
+    Rate of Change over `lookback` periods.
+    Returns float ROC value, or 0.0 if insufficient data.
+    """
+    if len(closes) < lookback + 1:
+        return 0.0
+    base = closes[-(lookback + 1)]
+    if not base:
+        return 0.0
+    return (closes[-1] - base) / base
+
+
 # ── GATE 1 — SYSTEM ───────────────────────────────────────────────────────
 
-def gate1_system(item, ctrl, ndl, seen_headlines):
+def gate1_system(item, ctrl, ndl, seen_headlines, state):
     """
     System gate — data quality checks before any analysis.
     Returns True to PROCEED, False to HALT this item.
@@ -751,12 +861,14 @@ def gate1_system(item, ctrl, ndl, seen_headlines):
       news_source_status — was the item parsed successfully?
       timestamp          — is the article within MAX_NEWS_AGE_HOURS?
       duplicate          — Jaccard similarity against seen headlines
+      word_count         — minimum body length check
     """
     headline = (item.get("headline") or "").strip()
     subhead  = (item.get("subhead") or "").strip()
 
     # ── Parse failure check ────────────────────────────────────────────────
     if not headline or len(headline) < 5:
+        state.system_status = "parse_failure"
         ndl.gate(1, "SYSTEM", {"headline_len": len(headline)},
                  "HALT", "headline null or too short — parse failure")
         return False
@@ -769,6 +881,7 @@ def gate1_system(item, ctrl, ndl, seen_headlines):
             disc_dt   = datetime.strptime(disc_date_str, '%Y-%m-%d')
             age_hours = (datetime.now() - disc_dt).total_seconds() / 3600
             if age_hours > ctrl.MAX_NEWS_AGE_HOURS:
+                state.system_status = "timestamp_rejected"
                 ndl.gate(1, "SYSTEM",
                          {"disc_date": disc_date_str, "age_hours": f"{age_hours:.1f}",
                           "max": ctrl.MAX_NEWS_AGE_HOURS},
@@ -782,16 +895,28 @@ def gate1_system(item, ctrl, ndl, seen_headlines):
     full_text = f"{headline} {subhead}"
     best_sim  = max((_jaccard(full_text, h) for h in seen_headlines), default=0.0)
     if best_sim > ctrl.DUPLICATE_THRESHOLD:
+        state.system_status = "duplicate"
         ndl.gate(1, "SYSTEM",
                  {"similarity": f"{best_sim:.2f}", "threshold": ctrl.DUPLICATE_THRESHOLD},
                  "HALT", "duplicate article — similarity above threshold")
         return False
 
+    # ── Minimum word count check ───────────────────────────────────────────
+    word_count = len(_tokenize(full_text))
+    if word_count < ctrl.MIN_WORD_COUNT:
+        state.system_status = "body_too_short"
+        ndl.gate(1, "SYSTEM",
+                 {"word_count": word_count, "min": ctrl.MIN_WORD_COUNT},
+                 "HALT", "article below minimum word count — body too short")
+        return False
+
     seen_headlines.append(full_text)
 
+    state.system_status = "system_ok"
     ndl.gate(1, "SYSTEM",
              {"headline_len": len(headline), "disc_date": disc_date_str or "unknown",
-              "age_ok": news_age_ok, "best_sim": f"{best_sim:.2f}"},
+              "age_ok": news_age_ok, "best_sim": f"{best_sim:.2f}",
+              "word_count": word_count},
              "PROCEED")
     return True
 
@@ -805,13 +930,13 @@ def gate2_benchmark(ctrl):
 
     TODO: DATA_DEPENDENCY — VIX threshold not yet integrated; ATR/price used as proxy.
     """
-    ndl_stub = []   # local log; no per-article NDL at session level
     bars = _alpaca_bars(ctrl.SPX_TICKER, days=ctrl.SPX_SMA_LONG + 10)
     if not bars:
         log.warning(f"[GATE 2] Benchmark data unavailable for {ctrl.SPX_TICKER}"
-                    f" — defaulting to NEUTRAL regime")
-        return BenchmarkRegime(trend="NEUTRAL", volatility="NORMAL",
-                               drawdown_active=False, raw={"status": "offline"})
+                    f" — defaulting to neutral regime")
+        return BenchmarkRegime(trend="neutral", volatility="NORMAL",
+                               drawdown_active=False, momentum="flat",
+                               raw={"status": "offline"})
 
     closes    = [b["c"] for b in bars]
     sma_short = _compute_sma(closes, ctrl.SPX_SMA_SHORT)
@@ -819,93 +944,144 @@ def gate2_benchmark(ctrl):
     atr       = _compute_atr(bars)
     spx_price = closes[-1]
 
-    # Trend
+    # Trend with neutral band
     if sma_short is not None and sma_long is not None:
-        if sma_short > sma_long:
-            trend = "UP"
-        elif sma_short < sma_long:
-            trend = "DOWN"
+        if sma_short > sma_long * (1 + ctrl.TREND_NEUTRAL_BAND):
+            trend = "bullish"
+        elif sma_short < sma_long * (1 - ctrl.TREND_NEUTRAL_BAND):
+            trend = "bearish"
         else:
-            trend = "NEUTRAL"
+            trend = "neutral"
     else:
-        trend = "NEUTRAL"
+        trend = "neutral"
 
     # Volatility (ATR/price ratio proxy for VIX)
     vol_ratio = (atr / spx_price) if (atr and spx_price) else 0.0
     volatility = "HIGH" if vol_ratio > ctrl.SPX_VOL_THRESHOLD else "NORMAL"
 
     # Drawdown
-    rolling_peak  = max(closes)
-    drawdown      = (spx_price - rolling_peak) / rolling_peak if rolling_peak else 0.0
+    rolling_peak    = max(closes)
+    drawdown        = (spx_price - rolling_peak) / rolling_peak if rolling_peak else 0.0
     drawdown_active = drawdown <= -ctrl.SPX_DRAWDOWN_THRESH
+
+    # ROC momentum
+    roc = _compute_roc(closes, ctrl.ROC_LOOKBACK)
+    if roc > 0.001:
+        momentum = "positive"
+    elif roc < -0.001:
+        momentum = "negative"
+    else:
+        momentum = "flat"
 
     regime = BenchmarkRegime(
         trend=trend, volatility=volatility,
-        drawdown_active=drawdown_active, spx_price=spx_price,
+        drawdown_active=drawdown_active, momentum=momentum,
+        spx_price=spx_price,
         raw={"sma_short": sma_short, "sma_long": sma_long,
-             "vol_ratio": round(vol_ratio, 4), "drawdown": round(drawdown, 4)},
+             "vol_ratio": round(vol_ratio, 4), "drawdown": round(drawdown, 4),
+             "roc": round(roc, 5)},
     )
     log.info(f"[GATE 2] Benchmark regime: trend={trend} vol={volatility} "
-             f"drawdown_active={drawdown_active} spx=${spx_price:.2f}")
+             f"drawdown_active={drawdown_active} momentum={momentum} spx=${spx_price:.2f}")
     return regime
 
 
-# ── GATE 3 — ELIGIBILITY ──────────────────────────────────────────────────
+# ── GATE 3 — SOURCE RELEVANCE ─────────────────────────────────────────────
 
-def gate3_eligibility(item, ctrl, ndl):
+def gate3_source_relevance(item, ctrl, ndl, state):
     """
-    News eligibility filter — reject before analysis if basic quality not met.
+    Source relevance filter — compute credibility and relevance scores.
     Returns True to proceed, False to skip.
 
-    Checks: source credibility tier, minimum word count, Tier 4 opinion exclusion.
+    Credibility: tier1=1.0, tier2=0.7, tier3=0.4, tier4+=0.1 SKIP.
+    +0.1 if primary source signals found (cap 1.0). -0.1 if opinion/analysis.
+    Relevance: min(topic_hits/3.0, 1.0) across keyword categories.
+
     TODO: DATA_DEPENDENCY — language detection, topic universe filtering.
     """
     source_tier = item.get("source_tier", 2)
     headline    = (item.get("headline") or "")
     subhead     = (item.get("subhead") or "")
-    word_count  = len(_tokenize(f"{headline} {subhead}"))
+    text        = f"{headline} {subhead}".lower()
+    tokens      = _tokenize(text)
 
     # Tier 4 — opinion sources always excluded
     if source_tier >= 4:
-        ndl.gate(3, "ELIGIBILITY", {"source_tier": source_tier},
+        state.credibility_score = 0.1
+        ndl.gate(3, "SOURCE_RELEVANCE", {"source_tier": source_tier},
                  "SKIP", "Tier 4+ opinion source — excluded")
+        return False
+
+    # Base credibility by tier
+    tier_scores = {1: 1.0, 2: 0.7, 3: 0.4}
+    credibility = tier_scores.get(source_tier, 0.1)
+
+    # Primary source bonus
+    primary_hits = sum(1 for s in _PRIMARY_SOURCE_SIGNALS if s in text)
+    if primary_hits > 0:
+        credibility = min(credibility + 0.1, 1.0)
+
+    # Opinion/analysis penalty
+    opinion_flag = any(op in text for op in _OPINION_SIGNALS)
+    if opinion_flag:
+        credibility = max(credibility - 0.1, 0.0)
+
+    # Relevance: count keyword category hits
+    macro_hits    = _match_phrases(text, _MACRO_TERMS)
+    earnings_hits = _match_phrases(text, _EARNINGS_TERMS)
+    geo_hits      = _match_phrases(text, _GEOPOLITICAL_TERMS)
+    reg_hits      = _match_phrases(text, _REGULATORY_TERMS)
+    # Sector / ticker hits
+    sector_hits = sum(1 for sec in SECTOR_TICKER_MAP if sec in text)
+    ticker       = (item.get("ticker") or "").upper()
+    ticker_hits  = 1 if (ticker and ticker in {t for tl in SECTOR_TICKER_MAP.values() for t in tl}) else 0
+    total_hits   = macro_hits + earnings_hits + geo_hits + reg_hits + sector_hits + ticker_hits
+    relevance    = min(total_hits / 3.0, 1.0)
+
+    state.credibility_score = round(credibility, 4)
+    state.relevance_score   = round(relevance, 4)
+    state.opinion_flag      = opinion_flag
+    state.relevance_ok      = relevance >= ctrl.MIN_RELEVANCE
+
+    # Skip if credibility too low
+    if credibility < ctrl.MIN_CREDIBILITY:
+        ndl.gate(3, "SOURCE_RELEVANCE",
+                 {"source_tier": source_tier, "credibility": f"{credibility:.2f}",
+                  "min_credibility": ctrl.MIN_CREDIBILITY},
+                 "SKIP", f"credibility {credibility:.2f} below MIN_CREDIBILITY")
         return False
 
     # Source tier above allowed maximum
     if source_tier > ctrl.CREDIBILITY_TIER_MAX:
-        ndl.gate(3, "ELIGIBILITY",
+        ndl.gate(3, "SOURCE_RELEVANCE",
                  {"source_tier": source_tier, "max_tier": ctrl.CREDIBILITY_TIER_MAX},
                  "SKIP", "source tier exceeds credibility maximum")
         return False
 
-    # Minimum word count
-    if word_count < ctrl.MIN_WORD_COUNT:
-        ndl.gate(3, "ELIGIBILITY",
-                 {"word_count": word_count, "min": ctrl.MIN_WORD_COUNT},
-                 "SKIP", "article below minimum word count — insufficient for signal extraction")
-        return False
-
-    ndl.gate(3, "ELIGIBILITY",
-             {"source_tier": source_tier, "word_count": word_count},
+    ndl.gate(3, "SOURCE_RELEVANCE",
+             {"source_tier": source_tier, "credibility": f"{credibility:.2f}",
+              "relevance": f"{relevance:.2f}", "opinion_flag": opinion_flag},
              "PROCEED")
     return True
 
 
-# ── GATE 4 — CLASSIFICATION ───────────────────────────────────────────────
+# ── GATE 4 — TOPIC CLASSIFICATION ────────────────────────────────────────
 
-def gate4_classification(item, ctrl, ndl):
+def gate4_topic(item, ctrl, ndl, state):
     """
     Topic classification — identify the article's primary topic category.
-    Priority order: company > sector > regulatory > earnings > geopolitical > macro > unknown.
+    Priority order: company > sector > regulatory > earnings > geopolitical >
+                    macro > market_structure > unknown.
     Returns dict: {topic, scope, entity_match}.
     """
-    text = f"{item.get('headline','')} {item.get('subhead','')}".lower()
+    text   = f"{item.get('headline','')} {item.get('subhead','')}".lower()
     ticker = (item.get("ticker") or "").upper()
 
     macro_hits    = _match_phrases(text, _MACRO_TERMS)
     earnings_hits = _match_phrases(text, _EARNINGS_TERMS)
     geo_hits      = _match_phrases(text, _GEOPOLITICAL_TERMS)
     reg_hits      = _match_phrases(text, _REGULATORY_TERMS)
+    mktstr_hits   = _match_phrases(text, _MARKET_STRUCTURE_TERMS)
 
     # Company-specific (named ticker found)
     if ticker and ticker in {t for tl in SECTOR_TICKER_MAP.values() for t in tl}:
@@ -933,21 +1109,70 @@ def gate4_classification(item, ctrl, ndl):
         topic = "macro"
         scope = "broad_market"
         entity_match = False
+    elif mktstr_hits >= 1:
+        topic = "market_structure"
+        scope = "broad_market"
+        entity_match = False
     else:
         topic = "unknown"
         scope = "unknown"
         entity_match = False
 
-    ndl.gate(4, "CLASSIFICATION",
+    state.topic_state = topic
+
+    ndl.gate(4, "TOPIC",
              {"macro": macro_hits, "earnings": earnings_hits,
-              "geo": geo_hits, "reg": reg_hits, "ticker": ticker},
+              "geo": geo_hits, "reg": reg_hits, "mktstr": mktstr_hits,
+              "ticker": ticker},
              f"topic={topic} scope={scope}")
     return {"topic": topic, "scope": scope, "entity_match": entity_match}
 
 
-# ── GATE 5 — EVENT DETECTION ──────────────────────────────────────────────
+# ── GATE 5 — ENTITY CLASSIFICATION ───────────────────────────────────────
 
-def gate5_event_detection(item, ctrl, ndl, db, seen_headlines):
+def gate5_entity(item, topic, ctrl, ndl, state):
+    """
+    Entity classification — determine the actionability of the entity referenced.
+    Sets state.entity_state to: company_linked / multi_company / sector_linked /
+                                 benchmark_relevant / non_actionable.
+    Returns entity_state string.
+    """
+    ticker     = (item.get("ticker") or "").upper()
+    text       = f"{item.get('headline','')} {item.get('subhead','')}".lower()
+    topic_name = topic.get("topic", "unknown")
+
+    # All known tickers
+    all_tickers = {t for tl in SECTOR_TICKER_MAP.values() for t in tl}
+
+    # Check for multiple tickers in text
+    found_tickers = [m for m in re.findall(r'\b([A-Z]{2,5})\b',
+                     f"{item.get('headline','')} {item.get('subhead','')}")
+                     if m in all_tickers]
+    unique_tickers = set(found_tickers)
+
+    if ticker and ticker in all_tickers:
+        entity_state = "company_linked"
+    elif len(unique_tickers) > 1:
+        entity_state = "multi_company"
+    elif any(sec in text for sec in SECTOR_TICKER_MAP):
+        entity_state = "sector_linked"
+    elif topic_name in ("macro", "geopolitical", "market_structure"):
+        entity_state = "benchmark_relevant"
+    else:
+        entity_state = "non_actionable"
+
+    state.entity_state = entity_state
+
+    ndl.gate(5, "ENTITY",
+             {"ticker": ticker, "unique_tickers": len(unique_tickers),
+              "topic": topic_name},
+             f"entity_state={entity_state}")
+    return entity_state
+
+
+# ── GATE 6 — EVENT DETECTION ──────────────────────────────────────────────
+
+def gate6_event(item, ctrl, ndl, db, seen_headlines, state):
     """
     Event detection — classify the article's event type.
     Returns dict: {event_type, breaking, follow_up, rumor, scheduled}.
@@ -969,8 +1194,8 @@ def gate5_event_detection(item, ctrl, ndl, db, seen_headlines):
     follow_up      = follow_up_sim > ctrl.FOLLOW_UP_SIMILARITY
 
     # Rumor: high uncertainty term density AND Tier 3 source
-    tokens         = _tokenize(full_text)
-    uncertainty_ct = _count_keywords(tokens, _UNCERTAINTY)
+    tokens          = _tokenize(full_text)
+    uncertainty_ct  = _count_keywords(tokens, _UNCERTAINTY)
     uncertainty_density = uncertainty_ct / max(len(tokens), 1)
     rumor = source_tier == 3 and uncertainty_density > 0.10
 
@@ -978,33 +1203,48 @@ def gate5_event_detection(item, ctrl, ndl, db, seen_headlines):
     # For now: assume official government publications are scheduled events
     scheduled = item.get("source_tier", 2) == 1
 
-    event_type = "breaking" if breaking else (
-                 "follow_up" if follow_up else (
-                 "rumor" if rumor else (
-                 "scheduled" if scheduled else "unscheduled")))
+    # Official: Tier 1 source AND NOT breaking
+    official = source_tier == 1 and not breaking
 
-    ndl.gate(5, "EVENT_DETECTION",
+    if official:
+        event_type = "official"
+    elif breaking:
+        event_type = "breaking"
+    elif follow_up:
+        event_type = "follow_up"
+    elif rumor:
+        event_type = "rumor"
+    elif scheduled:
+        event_type = "scheduled"
+    else:
+        event_type = "unscheduled"
+
+    state.event_state = event_type
+
+    ndl.gate(6, "EVENT_DETECTION",
              {"breaking": breaking, "follow_up": f"{follow_up_sim:.2f}",
               "rumor": rumor, "uncertainty_density": f"{uncertainty_density:.3f}",
-              "scheduled": scheduled},
+              "scheduled": scheduled, "official": official},
              f"event_type={event_type}")
     return {
         "event_type": event_type, "breaking": breaking, "follow_up": follow_up,
-        "rumor": rumor, "scheduled": scheduled,
+        "rumor": rumor, "scheduled": scheduled, "official": official,
         "uncertainty_density": uncertainty_density,
     }
 
 
-# ── GATE 6 — SENTIMENT EXTRACTION ────────────────────────────────────────
+# ── GATE 7 — SENTIMENT EXTRACTION ─────────────────────────────────────────
 
-def gate6_sentiment(item, ctrl, ndl):
+def gate7_sentiment(item, ctrl, ndl, state):
     """
-    Sentiment extraction — keyword-based scoring.
+    Sentiment extraction — keyword-based scoring with exaggeration detection.
     Returns dict: {direction, score, confidence, positive_count, negative_count}.
     """
-    text   = f"{item.get('headline','')} {item.get('subhead','')} "
-    tokens = _tokenize(text)
-    total  = max(len(tokens), 1)
+    headline = item.get('headline', '')
+    subhead  = item.get('subhead', '')
+    full_text = f"{headline} {subhead} "
+    tokens    = _tokenize(full_text)
+    total     = max(len(tokens), 1)
 
     pos_ct = _count_keywords(tokens, _POSITIVE)
     neg_ct = _count_keywords(tokens, _NEGATIVE)
@@ -1012,6 +1252,10 @@ def gate6_sentiment(item, ctrl, ndl):
     raw_score = (pos_ct - neg_ct) / total
     # Confidence: proportion of tokens that are sentiment-bearing
     confidence = min((pos_ct + neg_ct) / max(total / 15, 1), 1.0)
+
+    # Uncertainty direction
+    unc_ct      = _count_keywords(tokens, _UNCERTAINTY)
+    unc_density = unc_ct / total
 
     if raw_score > ctrl.POSITIVE_THRESHOLD:
         direction = "POSITIVE"
@@ -1021,36 +1265,62 @@ def gate6_sentiment(item, ctrl, ndl):
           and pos_ct / total > ctrl.MIXED_MIN_THRESHOLD
           and neg_ct / total > ctrl.MIXED_MIN_THRESHOLD):
         direction = "MIXED"
+    elif unc_density > ctrl.UNCERTAINTY_DENSITY_MAX:
+        direction = "UNCERTAIN"
     else:
         direction = "NEUTRAL"
 
     conf_flag = confidence >= ctrl.SENTIMENT_CONF_MIN
 
-    ndl.gate(6, "SENTIMENT",
+    # Headline exaggeration check: compare head_score vs full_score
+    head_tokens  = _tokenize(headline)
+    head_total   = max(len(head_tokens), 1)
+    head_pos_ct  = _count_keywords(head_tokens, _POSITIVE)
+    head_neg_ct  = _count_keywords(head_tokens, _NEGATIVE)
+    head_score   = (head_pos_ct - head_neg_ct) / head_total
+
+    full_only_tokens = _tokenize(subhead + " ")
+    full_only_total  = max(len(full_only_tokens), 1)
+    full_pos_ct      = _count_keywords(full_only_tokens, _POSITIVE)
+    full_neg_ct      = _count_keywords(full_only_tokens, _NEGATIVE)
+    full_score       = (full_pos_ct - full_neg_ct) / full_only_total if full_only_tokens else head_score
+
+    headline_exaggeration = abs(head_score - full_score) > ctrl.EXAGGERATION_DELTA
+
+    state.sentiment_state        = direction.lower()
+    state.sentiment_score        = round(raw_score, 4)
+    state.sentiment_confidence   = round(confidence, 4)
+    state.headline_exaggeration  = headline_exaggeration
+
+    ndl.gate(7, "SENTIMENT",
              {"pos_tokens": pos_ct, "neg_tokens": neg_ct,
-              "score": f"{raw_score:.3f}", "confidence": f"{confidence:.2f}"},
+              "score": f"{raw_score:.3f}", "confidence": f"{confidence:.2f}",
+              "unc_density": f"{unc_density:.3f}",
+              "exaggeration": headline_exaggeration},
              f"direction={direction} conf_ok={conf_flag}")
     return {
         "direction": direction, "score": round(raw_score, 4),
         "confidence": round(confidence, 4), "conf_ok": conf_flag,
         "positive_count": pos_ct, "negative_count": neg_ct,
+        "headline_exaggeration": headline_exaggeration,
     }
 
 
-# ── GATE 7 — NOVELTY ─────────────────────────────────────────────────────
+# ── GATE 8 — NOVELTY ──────────────────────────────────────────────────────
 
-def gate7_novelty(item, ctrl, ndl, db, seen_headlines):
+def gate8_novelty(item, sentiment, ctrl, ndl, db, seen_headlines, state):
     """
     Novelty / surprise controls — detect repetitive or already-priced content.
-    Returns dict: {novelty_score, is_repetition, new_info_ok}.
+    Returns dict: {novelty_score, is_repetition, new_info_ok, novelty_state}.
 
     TODO: DATA_DEPENDENCY — 'already priced' detection requires market price
     data correlation with prior articles. Currently based on cluster volume only.
     """
-    headline = item.get("headline", "")
+    headline  = item.get("headline", "")
+    direction = sentiment.get("direction", "NEUTRAL")
 
     # Compare against seen headlines in current batch
-    batch_sims = [_jaccard(headline, h) for h in seen_headlines[:-1]]
+    batch_sims    = [_jaccard(headline, h) for h in seen_headlines[:-1]]
     max_batch_sim = max(batch_sims, default=0.0)
 
     # Also compare against recent DB headlines
@@ -1067,117 +1337,187 @@ def gate7_novelty(item, ctrl, ndl, db, seen_headlines):
     except Exception:
         max_db_sim = 0.0
 
-    max_sim      = max(max_batch_sim, max_db_sim)
-    novelty      = round(1.0 - max_sim, 4)
+    max_sim       = max(max_batch_sim, max_db_sim)
+    novelty       = round(1.0 - max_sim, 4)
     is_repetition = novelty < ctrl.MIN_INCREMENTAL_INFO
     new_info_ok   = novelty >= ctrl.NOVELTY_THRESHOLD
 
-    ndl.gate(7, "NOVELTY",
+    # Novelty state classification
+    if novelty > ctrl.SURPRISE_THRESHOLD and direction == "POSITIVE":
+        novelty_state = "positive_surprise"
+    elif novelty > ctrl.SURPRISE_THRESHOLD and direction == "NEGATIVE":
+        novelty_state = "negative_surprise"
+    elif novelty > ctrl.NOVELTY_THRESHOLD:
+        novelty_state = "novelty_high"
+    elif is_repetition:
+        novelty_state = "repetitive"
+    else:
+        novelty_state = "incremental_update"
+
+    state.novelty_state = novelty_state
+    state.novelty_score = novelty
+
+    ndl.gate(8, "NOVELTY",
              {"max_similarity": f"{max_sim:.2f}",
               "novelty_score": f"{novelty:.2f}",
               "novelty_threshold": ctrl.NOVELTY_THRESHOLD},
-             f"novelty={novelty:.2f} repetition={is_repetition} ok={new_info_ok}")
+             f"novelty={novelty:.2f} repetition={is_repetition} ok={new_info_ok} "
+             f"novelty_state={novelty_state}")
     return {
         "novelty_score": novelty, "is_repetition": is_repetition,
-        "new_info_ok": new_info_ok,
+        "new_info_ok": new_info_ok, "novelty_state": novelty_state,
     }
 
 
-# ── GATE 8 — MARKET IMPACT ESTIMATION ────────────────────────────────────
+# ── GATE 9 — SCOPE ────────────────────────────────────────────────────────
 
-def gate8_impact(item, topic, regime, ctrl, ndl):
+def gate9_scope(topic, entity_state, ctrl, ndl, state):
     """
-    Market impact estimation — assess breadth and expected duration of impact.
-    Returns dict: {scope, horizon, magnitude_est, benchmark_corr}.
+    Scope classification — determine market breadth of the article's impact.
+    Sets state.scope_state and state.benchmark_corr.
+    Returns dict: {scope_state, benchmark_corr}.
 
-    TODO: DATA_DEPENDENCY — historical correlation between topic type and
-    realized SPX/sector moves not yet available. Using heuristics.
+    Scope mapping:
+      macro/geo → marketwide (HIGH)
+      sector/sector_linked → sector_only (MEDIUM)
+      company + company_linked → single_name (LOW)
+      multi_company → peer_group (MEDIUM)
+      benchmark_relevant → marketwide (HIGH)
+      else → unclear (MEDIUM)
     """
-    scope   = topic.get("scope", "unknown")
-    t       = topic.get("topic", "unknown")
+    topic_name = topic.get("topic", "unknown")
 
-    # Impact horizon by topic
-    if t in ("regulatory", "geopolitical"):
-        horizon = "multi-day"
-    elif t == "earnings":
-        horizon = "multi-day"
-    elif t == "macro":
-        horizon = "multi-day"
-    else:
-        horizon = "intraday"
-
-    # Benchmark correlation estimate (heuristic)
-    if t == "macro":
+    if topic_name in ("macro", "geopolitical", "market_structure"):
+        scope_state    = "marketwide"
         benchmark_corr = "HIGH"
-    elif t == "geopolitical":
+    elif entity_state == "benchmark_relevant":
+        scope_state    = "marketwide"
         benchmark_corr = "HIGH"
-    elif t == "sector":
+    elif entity_state == "multi_company":
+        scope_state    = "peer_group"
         benchmark_corr = "MEDIUM"
-    elif t == "company":
+    elif topic_name in ("sector",) or entity_state == "sector_linked":
+        scope_state    = "sector_only"
+        benchmark_corr = "MEDIUM"
+    elif topic_name in ("company", "earnings", "regulatory") and entity_state == "company_linked":
+        scope_state    = "single_name"
         benchmark_corr = "LOW"
     else:
+        scope_state    = "unclear"
         benchmark_corr = "MEDIUM"
 
-    # Magnitude: elevated in high-vol benchmark regime
-    magnitude_est = "HIGH" if regime.volatility == "HIGH" else "NORMAL"
+    state.scope_state    = scope_state
+    state.benchmark_corr = benchmark_corr
 
-    ndl.gate(8, "IMPACT",
-             {"scope": scope, "topic": t, "benchmark_vol": regime.volatility},
-             f"horizon={horizon} benchmark_corr={benchmark_corr} magnitude={magnitude_est}")
-    return {
-        "scope": scope, "horizon": horizon,
-        "benchmark_corr": benchmark_corr, "magnitude_est": magnitude_est,
-    }
+    ndl.gate(9, "SCOPE",
+             {"topic": topic_name, "entity_state": entity_state},
+             f"scope_state={scope_state} benchmark_corr={benchmark_corr}")
+    return {"scope_state": scope_state, "benchmark_corr": benchmark_corr}
 
 
-# ── GATE 9 — BENCHMARK-RELATIVE INTERPRETATION ───────────────────────────
+# ── GATE 10 — HORIZON ─────────────────────────────────────────────────────
 
-def gate9_benchmark_relative(sentiment, impact, regime, ctrl, ndl):
+def gate10_horizon(topic, event, ctrl, ndl, state):
+    """
+    Horizon classification — compute expected duration and decay of signal impact.
+    Sets state.horizon_state and state.decay_state.
+    Returns dict: {horizon_state, decay_state}.
+
+    Horizon mapping:
+      regulatory/macro → structural + persistent
+      earnings → multi_day + medium_decay
+      geopolitical → multi_day + medium_decay
+      breaking → intraday + fast_decay
+      else → multi_day + medium_decay
+    """
+    topic_name = topic.get("topic", "unknown")
+    breaking   = event.get("breaking", False)
+
+    if topic_name in ("regulatory", "macro"):
+        horizon_state = "structural"
+        decay_state   = "persistent"
+    elif topic_name == "geopolitical":
+        horizon_state = "multi_day"
+        decay_state   = "medium_decay"
+    elif topic_name == "earnings":
+        horizon_state = "multi_day"
+        decay_state   = "medium_decay"
+    elif breaking:
+        horizon_state = "intraday"
+        decay_state   = "fast_decay"
+    else:
+        horizon_state = "multi_day"
+        decay_state   = "medium_decay"
+
+    state.horizon_state = horizon_state
+    state.decay_state   = decay_state
+
+    ndl.gate(10, "HORIZON",
+             {"topic": topic_name, "breaking": breaking},
+             f"horizon_state={horizon_state} decay_state={decay_state}")
+    return {"horizon_state": horizon_state, "decay_state": decay_state}
+
+
+# ── GATE 11 — BENCHMARK-RELATIVE INTERPRETATION ──────────────────────────
+
+def gate11_benchmark_relative(sentiment, scope, regime, ctrl, ndl, state):
     """
     Benchmark-relative interpretation — adjust signal value based on SPX backdrop.
-    Returns dict: {interpretation, alpha_signal, overwhelmed_by_benchmark}.
+    Uses state.sentiment_state (lowercase) and state.trend_state (bullish/bearish/neutral).
+    Sets state.benchmark_rel_state, state.signal_type, state.dominance_state.
+    Returns dict: {benchmark_rel_state, signal_type, dominance_state}.
     """
-    direction     = sentiment.get("direction", "NEUTRAL")
-    benchmark_corr = impact.get("benchmark_corr", "MEDIUM")
-    scope         = impact.get("scope", "unknown")
+    direction      = state.sentiment_state   # lowercase from state
+    trend          = state.trend_state        # bullish/bearish/neutral
+    benchmark_corr = state.benchmark_corr
+    scope_state    = state.scope_state
 
-    # Headwind: positive news against a down or high-vol benchmark
-    if direction == "POSITIVE" and regime.trend == "DOWN":
-        interpretation = "momentum_headwind"
-        overwhelmed = benchmark_corr == "HIGH"
-    # Tailwind against: negative news in an up-trending benchmark
-    elif direction == "NEGATIVE" and regime.trend == "UP":
-        interpretation = "counter_trend"
-        overwhelmed = benchmark_corr == "HIGH"
-    elif direction == "POSITIVE" and regime.trend == "UP":
-        interpretation = "aligned"
-        overwhelmed = False
-    elif direction == "NEGATIVE" and regime.trend == "DOWN":
-        interpretation = "aligned"
-        overwhelmed = False
+    # Determine alignment
+    if direction == "positive" and trend == "bullish":
+        benchmark_rel_state = "aligned_positive"
+    elif direction == "negative" and trend == "bearish":
+        benchmark_rel_state = "aligned_negative"
+    elif direction == "positive" and trend == "bearish":
+        benchmark_rel_state = "countertrend_positive"
+    elif direction == "negative" and trend == "bullish":
+        benchmark_rel_state = "countertrend_negative"
     else:
-        interpretation = "neutral_backdrop"
-        overwhelmed = False
+        benchmark_rel_state = "neutral"
 
-    # Alpha opportunity: company-specific with low benchmark correlation
-    alpha_signal = scope == "single_name" and benchmark_corr == "LOW"
+    # Signal type: alpha if single_name with LOW benchmark_corr
+    signal_type = "alpha" if (scope_state == "single_name"
+                              and benchmark_corr == "LOW") else "beta"
 
-    ndl.gate(9, "BENCHMARK_RELATIVE",
-             {"sentiment": direction, "spx_trend": regime.trend,
-              "benchmark_corr": benchmark_corr, "scope": scope},
-             f"interpretation={interpretation} alpha={alpha_signal} overwhelmed={overwhelmed}")
+    # Dominance
+    dominance_state = ("benchmark_dominant" if benchmark_corr == "HIGH"
+                       else "idiosyncratic_dominant")
+
+    state.benchmark_rel_state = benchmark_rel_state
+    state.signal_type         = signal_type
+    state.dominance_state     = dominance_state
+
+    ndl.gate(11, "BENCHMARK_RELATIVE",
+             {"sentiment": direction, "spx_trend": trend,
+              "benchmark_corr": benchmark_corr, "scope_state": scope_state},
+             f"benchmark_rel_state={benchmark_rel_state} signal_type={signal_type} "
+             f"dominance={dominance_state}")
     return {
-        "interpretation": interpretation, "alpha_signal": alpha_signal,
-        "overwhelmed_by_benchmark": overwhelmed,
+        "benchmark_rel_state": benchmark_rel_state,
+        "signal_type": signal_type,
+        "dominance_state": dominance_state,
     }
 
+# ── GATE 12 — CONFIRMATION ────────────────────────────────────────────────
 
-# ── GATE 10 — CREDIBILITY & CONFIRMATION ─────────────────────────────────
-
-def gate10_credibility(item, ctrl, ndl, db):
+def gate12_confirmation(item, ctrl, ndl, db, state):
     """
     Credibility and confirmation controls.
-    Returns dict: {source_count, has_primary_source, conf_adj, misinformation_risk}.
+    Sets state.confirmation_state and state.confirmation_score.
+    Returns dict: {source_count, has_primary_source, conf_adj, misinformation_risk,
+                   confirmed, confirmation_state, confirmation_score}.
+
+    States: primary_confirmed(1.0), strong(0.7), weak(0.4),
+            high_misinformation_risk(0.0), expired_unconfirmed(0.1), contradictory(0.0).
 
     TODO: DATA_DEPENDENCY — cross-source claim validation requires multi-source
     aggregation not yet implemented. Current: DB-based source count for same ticker.
@@ -1187,7 +1527,7 @@ def gate10_credibility(item, ctrl, ndl, db):
     text        = f"{item.get('headline','')} {item.get('subhead','')}".lower()
 
     # Primary source indicators in article text
-    primary_hits = sum(1 for s in _PRIMARY_SOURCE_SIGNALS if s in text)
+    primary_hits       = sum(1 for s in _PRIMARY_SOURCE_SIGNALS if s in text)
     has_primary_source = primary_hits > 0 or source_tier == 1
 
     # Source count: how many other recent signals exist for this ticker
@@ -1207,48 +1547,70 @@ def gate10_credibility(item, ctrl, ndl, db):
     confirmed = source_count >= ctrl.MIN_CONFIRMATIONS
 
     # Misinformation risk: Tier 3 with no primary source and high uncertainty
-    tokens = _tokenize(text)
-    unc_ct = _count_keywords(tokens, _UNCERTAINTY)
+    tokens      = _tokenize(text)
+    unc_ct      = _count_keywords(tokens, _UNCERTAINTY)
     unc_density = unc_ct / max(len(tokens), 1)
     misinformation_risk = source_tier == 3 and not has_primary_source and unc_density > 0.08
 
-    # Confidence adjustment
-    if source_tier == 1:
-        conf_adj = "HIGH"
-    elif source_tier == 2 and (has_primary_source or confirmed):
-        conf_adj = "HIGH"
-    elif source_tier == 2:
-        conf_adj = "MEDIUM"
+    # Confirmation state with scores
+    if misinformation_risk:
+        confirmation_state = "high_misinformation_risk"
+        confirmation_score = 0.0
+    elif source_tier == 1 and has_primary_source:
+        confirmation_state = "primary_confirmed"
+        confirmation_score = 1.0
+    elif source_tier <= 2 and (has_primary_source or confirmed):
+        confirmation_state = "strong"
+        confirmation_score = 0.7
     elif source_tier == 3 and has_primary_source and confirmed:
-        conf_adj = "MEDIUM"
+        confirmation_state = "strong"
+        confirmation_score = 0.7
+    else:
+        confirmation_state = "weak"
+        confirmation_score = 0.4
+
+    # Legacy conf_adj for backward compat
+    if confirmation_state in ("primary_confirmed", "strong"):
+        conf_adj = "HIGH" if source_tier <= 2 else "MEDIUM"
+    elif confirmation_state == "weak":
+        conf_adj = "LOW"
     else:
         conf_adj = "LOW"
 
-    ndl.gate(10, "CREDIBILITY",
+    state.confirmation_state = confirmation_state
+    state.confirmation_score = round(confirmation_score, 4)
+
+    ndl.gate(12, "CONFIRMATION",
              {"source_tier": source_tier, "source_count": source_count,
               "has_primary_source": has_primary_source, "confirmed": confirmed,
               "misinfo_risk": misinformation_risk},
-             f"conf_adj={conf_adj}")
+             f"confirmation_state={confirmation_state} score={confirmation_score:.2f}")
     return {
         "source_count": source_count, "has_primary_source": has_primary_source,
         "conf_adj": conf_adj, "misinformation_risk": misinformation_risk,
-        "confirmed": confirmed,
+        "confirmed": confirmed, "confirmation_state": confirmation_state,
+        "confirmation_score": confirmation_score,
     }
 
 
-# ── GATE 11 — TIMING ──────────────────────────────────────────────────────
+# ── GATE 13 — TIMING ──────────────────────────────────────────────────────
 
-def gate11_timing(item, ctrl, ndl):
+def gate13_timing(item, ctrl, ndl, state):
     """
     Timing controls — assess publication timing relative to market windows.
-    Returns dict: {tradeable, publication_timing, stale}.
+    Sets state.timing_state and state.timing_tradeable.
+    Returns dict: {tradeable, timing_state, stale}.
+
+    States: premarket, intraday, postmarket, expired (not tradeable),
+            delayed_distribution (source_tier==3 aggregator), active_flow.
     """
     disc_date_str = item.get("disc_date", "")
+    source_tier   = item.get("source_tier", 2)
     now           = datetime.now(ET)
 
     # Staleness check
-    stale   = False
-    pub_dt  = None
+    stale  = False
+    pub_dt = None
     if disc_date_str:
         try:
             pub_dt    = datetime.strptime(disc_date_str, '%Y-%m-%d').replace(tzinfo=ET)
@@ -1257,38 +1619,51 @@ def gate11_timing(item, ctrl, ndl):
         except ValueError:
             pass
 
-    # Publication timing classification
-    mkt_open  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
-    mkt_close = now.replace(hour=16, minute=0,  second=0, microsecond=0)
-    if pub_dt:
-        pub_naive = pub_dt.replace(tzinfo=None)
+    if stale:
+        timing_state    = "expired"
+        timing_tradeable = False
+    elif source_tier == 3:
+        # Tier 3 aggregators introduce distribution delay
+        timing_state    = "delayed_distribution"
+        timing_tradeable = True
+    elif pub_dt:
+        mkt_open  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        mkt_close = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        pub_naive   = pub_dt.replace(tzinfo=None)
         open_naive  = mkt_open.replace(tzinfo=None)
         close_naive = mkt_close.replace(tzinfo=None)
         if pub_naive < open_naive:
-            publication_timing = "premarket"
+            timing_state = "premarket"
         elif pub_naive > close_naive:
-            publication_timing = "postmarket"
+            timing_state = "postmarket"
         else:
-            publication_timing = "intraday"
+            timing_state = "intraday"
+        timing_tradeable = True
     else:
-        publication_timing = "unknown"
+        timing_state    = "active_flow"
+        timing_tradeable = True
 
-    tradeable = not stale
+    state.timing_state    = timing_state
+    state.timing_tradeable = timing_tradeable
 
-    ndl.gate(11, "TIMING",
+    ndl.gate(13, "TIMING",
              {"disc_date": disc_date_str or "unknown",
-              "publication_timing": publication_timing,
-              "stale": stale},
-             f"tradeable={tradeable}")
-    return {"tradeable": tradeable, "publication_timing": publication_timing, "stale": stale}
+              "timing_state": timing_state, "stale": stale},
+             f"tradeable={timing_tradeable}")
+    return {"tradeable": timing_tradeable, "timing_state": timing_state, "stale": stale}
 
 
-# ── GATE 12 — CROWDING / SATURATION ──────────────────────────────────────
+# ── GATE 14 — CROWDING / SATURATION ──────────────────────────────────────
 
-def gate12_crowding(item, ctrl, ndl, db):
+def gate14_crowding(item, ctrl, ndl, db, state):
     """
     Crowding and saturation controls.
-    Returns dict: {cluster_volume, saturated}.
+    Sets state.crowding_state, state.crowding_discount, state.cluster_volume.
+    Returns dict: {cluster_volume, crowding_state, crowding_discount}.
+
+    States: exhausted (cluster>=EXTREME_ATTENTION_MULT*threshold, discount=0.9),
+            crowded (cluster>=threshold, discount=0.5),
+            still_open (discount=0.0).
 
     TODO: DATA_DEPENDENCY — social mention count requires external API.
     Current: DB-based cluster volume for same topic keyword.
@@ -1313,21 +1688,48 @@ def gate12_crowding(item, ctrl, ndl, db):
     except Exception:
         pass
 
-    saturated = cluster_volume >= ctrl.CLUSTER_VOL_THRESHOLD
+    exhausted_threshold = int(ctrl.EXTREME_ATTENTION_MULT * ctrl.CLUSTER_VOL_THRESHOLD)
 
-    ndl.gate(12, "CROWDING",
+    if cluster_volume >= exhausted_threshold:
+        crowding_state   = "exhausted"
+        crowding_discount = 0.9
+    elif cluster_volume >= ctrl.CLUSTER_VOL_THRESHOLD:
+        crowding_state   = "crowded"
+        crowding_discount = 0.5
+    else:
+        crowding_state   = "still_open"
+        crowding_discount = 0.0
+
+    state.crowding_state    = crowding_state
+    state.crowding_discount = crowding_discount
+    state.cluster_volume    = cluster_volume
+
+    ndl.gate(14, "CROWDING",
              {"cluster_volume": cluster_volume,
-              "threshold": ctrl.CLUSTER_VOL_THRESHOLD},
-             f"saturated={saturated}")
-    return {"cluster_volume": cluster_volume, "saturated": saturated}
+              "threshold": ctrl.CLUSTER_VOL_THRESHOLD,
+              "exhausted_threshold": exhausted_threshold},
+             f"crowding_state={crowding_state} discount={crowding_discount}")
+    return {
+        "cluster_volume": cluster_volume,
+        "crowding_state": crowding_state,
+        "crowding_discount": crowding_discount,
+    }
 
 
-# ── GATE 13 — CONTRADICTION / AMBIGUITY ──────────────────────────────────
+# ── GATE 15 — CONTRADICTION / AMBIGUITY ──────────────────────────────────
 
-def gate13_contradiction(item, ctrl, ndl):
+def gate15_contradiction(item, ctrl, ndl, state):
     """
     Contradiction and ambiguity controls.
-    Returns dict: {has_contradiction, uncertainty_density, head_body_mismatch}.
+    Sets state.ambiguity_state and state.ambiguity_score.
+    Returns dict: {ambiguity_state, ambiguity_score, has_contradiction,
+                   uncertainty_density, head_body_mismatch}.
+
+    States with ambiguity_score:
+      internally_conflicted (both pos+neg>=2, score=1.0)
+      headline_body_mismatch (score=0.8)
+      uncertain_language (score=0.5)
+      clear (score=0.0)
 
     TODO: DATA_DEPENDENCY — analyst view dispersion requires aggregated
     expert consensus data not yet available.
@@ -1336,230 +1738,380 @@ def gate13_contradiction(item, ctrl, ndl):
     subhead  = item.get("subhead", "")
 
     # Uncertainty term density
-    head_tokens = _tokenize(headline)
-    unc_ct      = _count_keywords(head_tokens, _UNCERTAINTY)
+    head_tokens     = _tokenize(headline)
+    unc_ct          = _count_keywords(head_tokens, _UNCERTAINTY)
     uncertainty_density = unc_ct / max(len(head_tokens), 1)
-    high_uncertainty = uncertainty_density > ctrl.UNCERTAINTY_DENSITY_MAX
+    high_uncertainty    = uncertainty_density > ctrl.UNCERTAINTY_DENSITY_MAX
 
     # Headline / body sentiment mismatch
     head_pos = _count_keywords(head_tokens, _POSITIVE)
     head_neg = _count_keywords(head_tokens, _NEGATIVE)
-    head_dir  = 1 if head_pos > head_neg else (-1 if head_neg > head_pos else 0)
+    head_dir = 1 if head_pos > head_neg else (-1 if head_neg > head_pos else 0)
 
     sub_tokens = _tokenize(subhead)
-    sub_pos  = _count_keywords(sub_tokens, _POSITIVE)
-    sub_neg  = _count_keywords(sub_tokens, _NEGATIVE)
-    sub_dir  = 1 if sub_pos > sub_neg else (-1 if sub_neg > sub_pos else 0)
+    sub_pos    = _count_keywords(sub_tokens, _POSITIVE)
+    sub_neg    = _count_keywords(sub_tokens, _NEGATIVE)
+    sub_dir    = 1 if sub_pos > sub_neg else (-1 if sub_neg > sub_pos else 0)
 
     # Mismatch: headline positive and subhead negative (or vice versa)
     head_body_mismatch = (bool(sub_tokens) and head_dir != 0 and sub_dir != 0
                           and head_dir != sub_dir)
 
-    has_contradiction = high_uncertainty or head_body_mismatch
+    # Internal conflict: both strongly positive AND negative (>=2 each)
+    internally_conflicted = head_pos >= 2 and head_neg >= 2
 
-    ndl.gate(13, "CONTRADICTION",
+    # Determine ambiguity state and score
+    if internally_conflicted:
+        ambiguity_state = "internally_conflicted"
+        ambiguity_score = 1.0
+    elif head_body_mismatch:
+        ambiguity_state = "headline_body_mismatch"
+        ambiguity_score = 0.8
+    elif high_uncertainty:
+        ambiguity_state = "uncertain_language"
+        ambiguity_score = 0.5
+    else:
+        ambiguity_state = "clear"
+        ambiguity_score = 0.0
+
+    has_contradiction = ambiguity_state != "clear"
+
+    state.ambiguity_state = ambiguity_state
+    state.ambiguity_score = round(ambiguity_score, 4)
+
+    ndl.gate(15, "CONTRADICTION",
              {"uncertainty_density": f"{uncertainty_density:.3f}",
-              "head_body_mismatch": head_body_mismatch},
-             f"contradiction={has_contradiction}")
+              "head_body_mismatch": head_body_mismatch,
+              "internally_conflicted": internally_conflicted},
+             f"ambiguity_state={ambiguity_state} score={ambiguity_score:.2f}")
     return {
+        "ambiguity_state": ambiguity_state,
+        "ambiguity_score": ambiguity_score,
         "has_contradiction": has_contradiction,
         "uncertainty_density": uncertainty_density,
         "head_body_mismatch": head_body_mismatch,
     }
 
 
-# ── GATE 14 — ACTION CLASSIFICATION ──────────────────────────────────────
+# ── GATE 16 — IMPACT MAGNITUDE ───────────────────────────────────────────
 
-def gate14_classification(sentiment, novelty, credibility, impact,
-                           contradiction, regime, ctrl, ndl):
+def gate16_impact_magnitude(scope, topic, regime, ctrl, ndl, state):
+    """
+    Impact magnitude estimation — assess breadth and expected magnitude of impact.
+    Sets state.impact_magnitude, state.impact_link_state, state.base_impact_score.
+    Returns dict: {impact_magnitude, impact_link_state, base_impact_score}.
+
+    Mapping:
+      marketwide + macro/geo → high + benchmark_linked
+      sector_only/peer_group/earnings → medium + benchmark_weak
+      single_name → low + benchmark_weak
+    Boost: high_vol or drawdown → low→medium, medium→high
+    """
+    scope_state  = state.scope_state
+    topic_name   = topic.get("topic", "unknown")
+    high_vol     = regime.volatility == "HIGH"
+    drawdown     = regime.drawdown_active
+
+    # Base magnitude by scope + topic
+    if scope_state == "marketwide" and topic_name in ("macro", "geopolitical", "market_structure"):
+        impact_magnitude = "high"
+        impact_link_state = "benchmark_linked"
+    elif scope_state in ("sector_only", "peer_group") or topic_name == "earnings":
+        impact_magnitude = "medium"
+        impact_link_state = "benchmark_weak"
+    elif scope_state == "single_name":
+        impact_magnitude = "low"
+        impact_link_state = "benchmark_weak"
+    else:
+        impact_magnitude = "medium"
+        impact_link_state = "benchmark_weak"
+
+    # Volatility / drawdown boost
+    if high_vol or drawdown:
+        if impact_magnitude == "low":
+            impact_magnitude = "medium"
+        elif impact_magnitude == "medium":
+            impact_magnitude = "high"
+
+    # Base score
+    score_map = {"high": 1.0, "medium": 0.5, "low": 0.2}
+    base_impact_score = score_map.get(impact_magnitude, 0.2)
+
+    state.impact_magnitude  = impact_magnitude
+    state.impact_link_state = impact_link_state
+    state.base_impact_score = round(base_impact_score, 4)
+
+    ndl.gate(16, "IMPACT_MAGNITUDE",
+             {"scope_state": scope_state, "topic": topic_name,
+              "high_vol": high_vol, "drawdown": drawdown},
+             f"impact_magnitude={impact_magnitude} link={impact_link_state} "
+             f"base_score={base_impact_score:.2f}")
+    return {
+        "impact_magnitude": impact_magnitude,
+        "impact_link_state": impact_link_state,
+        "base_impact_score": base_impact_score,
+    }
+
+
+# ── GATE 17 — ACTION CLASSIFICATION ──────────────────────────────────────
+
+def gate17_action(sentiment, novelty, confirmation, contradiction,
+                  regime, event, ctrl, ndl, state):
     """
     Action classification — determine what to do with the article.
-    Returns dict: {classification, confidence_label, reason}.
+    Sets state.action_state and state.action_reason.
+    Returns dict: {action_state, confidence_label, reason}.
 
-    Classifications:
+    States:
       bullish_signal      — positive, credible, novel, relevant
       bearish_signal      — negative, credible, novel, relevant
       relative_alpha      — company-specific, benchmark-neutral
-      spx_regime_signal   — broad macro, high benchmark linkage
+      benchmark_signal    — broad macro, high benchmark linkage
+      provisional_watch   — rumor + weak confirmation
+      freeze              — internally_conflicted/contradictory + weak/contradictory confirmation
       watch_only          — mixed or uncertain
       ignore              — low credibility or repetition
     """
-    direction   = sentiment.get("direction", "NEUTRAL")
-    conf_ok     = sentiment.get("conf_ok", False)
-    novelty_ok  = novelty.get("new_info_ok", False)
-    repetition  = novelty.get("is_repetition", False)
-    conf_adj    = credibility.get("conf_adj", "LOW")
-    misinfo     = credibility.get("misinformation_risk", False)
-    contradiction_detected = contradiction.get("has_contradiction", False)
-    scope       = impact.get("scope", "unknown")
-    bench_corr  = impact.get("benchmark_corr", "MEDIUM")
-    overwhelmed = False  # set by gate9 — not passed here; TODO: pass regime result
+    direction    = sentiment.get("direction", "NEUTRAL")
+    conf_ok      = sentiment.get("conf_ok", False)
+    novelty_ok   = novelty.get("new_info_ok", False)
+    repetition   = novelty.get("is_repetition", False)
+    conf_state   = state.confirmation_state
+    misinfo      = confirmation.get("misinformation_risk", False)
+    conf_adj     = confirmation.get("conf_adj", "LOW")
+    amb_state    = state.ambiguity_state
+    rumor        = event.get("rumor", False)
+    scope_state  = state.scope_state
+    bench_corr   = state.benchmark_corr
 
     # ── Discard paths ──────────────────────────────────────────────────────
     if repetition:
-        ndl.gate(14, "CLASSIFICATION", {"repetition": True},
+        ndl.gate(17, "ACTION", {"repetition": True},
                  "ignore", "article is repetition — no new information")
-        return {"classification": "ignore", "confidence_label": "NOISE",
+        state.action_state  = "ignore"
+        state.action_reason = "repetition — no incremental information"
+        return {"action_state": "ignore", "confidence_label": "NOISE",
                 "reason": "repetition — no incremental information"}
 
     if misinfo:
-        ndl.gate(14, "CLASSIFICATION", {"misinfo_risk": True},
+        ndl.gate(17, "ACTION", {"misinfo_risk": True},
                  "ignore", "misinformation risk high — Tier 3, no primary source, high uncertainty")
-        return {"classification": "ignore", "confidence_label": "NOISE",
+        state.action_state  = "ignore"
+        state.action_reason = "misinformation risk — source quality insufficient"
+        return {"action_state": "ignore", "confidence_label": "NOISE",
                 "reason": "misinformation risk — source quality insufficient"}
 
     if conf_adj == "LOW" and not novelty_ok:
-        ndl.gate(14, "CLASSIFICATION",
+        ndl.gate(17, "ACTION",
                  {"conf_adj": conf_adj, "novelty_ok": novelty_ok},
                  "ignore", "low credibility and low novelty")
-        return {"classification": "ignore", "confidence_label": "NOISE",
+        state.action_state  = "ignore"
+        state.action_reason = "low credibility and low novelty — ignore"
+        return {"action_state": "ignore", "confidence_label": "NOISE",
                 "reason": "low credibility and low novelty — ignore"}
 
-    # ── Watch paths ────────────────────────────────────────────────────────
-    if contradiction_detected:
-        ndl.gate(14, "CLASSIFICATION", {"contradiction": True},
-                 "watch_only", "contradiction or high ambiguity detected")
-        return {"classification": "watch_only", "confidence_label": "LOW",
-                "reason": "contradiction or ambiguity — watch for resolution"}
+    # ── Freeze path ────────────────────────────────────────────────────────
+    if amb_state in ("internally_conflicted",) and conf_state in ("weak", "high_misinformation_risk"):
+        ndl.gate(17, "ACTION",
+                 {"ambiguity_state": amb_state, "confirmation_state": conf_state},
+                 "freeze", "internally conflicted + weak confirmation")
+        state.action_state  = "freeze"
+        state.action_reason = "internally conflicted with weak confirmation — freeze"
+        return {"action_state": "freeze", "confidence_label": "LOW",
+                "reason": "contradiction or ambiguity + weak confirmation — freeze"}
 
-    if direction in ("NEUTRAL", "MIXED") or not conf_ok:
-        ndl.gate(14, "CLASSIFICATION",
+    # ── Provisional watch path ─────────────────────────────────────────────
+    if rumor and conf_state == "weak":
+        ndl.gate(17, "ACTION",
+                 {"rumor": rumor, "confirmation_state": conf_state},
+                 "provisional_watch", "rumor + weak confirmation")
+        state.action_state  = "provisional_watch"
+        state.action_reason = "rumor with weak confirmation — provisional watch"
+        return {"action_state": "provisional_watch", "confidence_label": "LOW",
+                "reason": "rumor with weak confirmation — provisional watch"}
+
+    # ── Watch paths ────────────────────────────────────────────────────────
+    if amb_state in ("headline_body_mismatch", "uncertain_language"):
+        ndl.gate(17, "ACTION", {"ambiguity_state": amb_state},
+                 "watch_only", "ambiguity detected")
+        state.action_state  = "watch_only"
+        state.action_reason = f"ambiguity state={amb_state} — watch for resolution"
+        return {"action_state": "watch_only", "confidence_label": "LOW",
+                "reason": f"ambiguity {amb_state} — watch for resolution"}
+
+    if direction in ("NEUTRAL", "MIXED", "UNCERTAIN") or not conf_ok:
+        ndl.gate(17, "ACTION",
                  {"direction": direction, "conf_ok": conf_ok},
                  "watch_only", "neutral or mixed sentiment / low confidence")
-        return {"classification": "watch_only", "confidence_label": "LOW",
+        state.action_state  = "watch_only"
+        state.action_reason = f"sentiment {direction} or confidence below threshold"
+        return {"action_state": "watch_only", "confidence_label": "LOW",
                 "reason": f"sentiment {direction} or confidence below threshold"}
 
     # ── Signal paths ───────────────────────────────────────────────────────
     # Broad macro with high benchmark linkage
-    if scope == "broad_market" and bench_corr == "HIGH":
-        classification = "spx_regime_signal"
+    if scope_state == "marketwide" and bench_corr == "HIGH":
+        action_state     = "benchmark_signal"
         confidence_label = "MEDIUM" if conf_adj != "LOW" else "LOW"
-        reason = "broad macro with high SPX linkage — benchmark regime signal"
+        reason           = "broad macro with high SPX linkage — benchmark regime signal"
 
     # Company-specific alpha
-    elif scope == "single_name" and bench_corr == "LOW":
-        classification = "relative_alpha"
+    elif scope_state == "single_name" and bench_corr == "LOW":
+        action_state     = "relative_alpha"
         confidence_label = conf_adj
-        reason = (f"company-specific {direction} signal with low benchmark correlation"
-                  f" — alpha opportunity")
+        reason           = (f"company-specific {direction} signal with low benchmark correlation"
+                            f" — alpha opportunity")
 
     # Directional signals
     elif direction == "POSITIVE":
-        classification = "bullish_signal"
+        action_state     = "bullish_signal"
         confidence_label = conf_adj
-        reason = f"positive + credible ({conf_adj}) + novel + relevant"
+        reason           = f"positive + credible ({conf_adj}) + novel + relevant"
 
     elif direction == "NEGATIVE":
-        classification = "bearish_signal"
+        action_state     = "bearish_signal"
         confidence_label = conf_adj
-        reason = f"negative + credible ({conf_adj}) + novel + relevant"
+        reason           = f"negative + credible ({conf_adj}) + novel + relevant"
 
     else:
-        classification = "watch_only"
+        action_state     = "watch_only"
         confidence_label = "LOW"
-        reason = "unclassified — defaulting to watch"
+        reason           = "unclassified — defaulting to watch"
 
-    ndl.gate(14, "CLASSIFICATION",
-             {"direction": direction, "scope": scope,
+    state.action_state  = action_state
+    state.action_reason = reason
+
+    ndl.gate(17, "ACTION",
+             {"direction": direction, "scope_state": scope_state,
               "bench_corr": bench_corr, "conf_adj": conf_adj},
-             classification, reason)
-    return {"classification": classification, "confidence_label": confidence_label,
+             action_state, reason)
+    return {"action_state": action_state, "confidence_label": confidence_label,
             "reason": reason}
 
 
-# ── GATE 15 — RISK CONTROLS ───────────────────────────────────────────────
+# ── GATE 18 — RISK DISCOUNTS ──────────────────────────────────────────────
 
-def gate15_risk(action, sentiment, regime, event, ctrl, ndl):
+def gate18_risk_discounts(action, sentiment, regime, event, ctrl, ndl, state):
     """
-    Risk controls — apply discounts that reduce confidence without changing classification.
-    Returns dict: {final_confidence, discounts_applied}.
+    Risk discounts — apply multiplicative discounts to base_impact_score.
+    Sets state.impact_score and state.discounts_applied.
+    Returns dict: {impact_score, discounts_applied, final_confidence}.
+
+    Discounts:
+      *DISCOUNT_SENTIMENT_CONF if sentiment_confidence < SENTIMENT_CONF_MIN
+      *DISCOUNT_BENCHMARK_VOL  if high volatility regime
+      *DISCOUNT_NOISY_EVENT    if rumor
+      *DISCOUNT_SOURCE_LOW     if credibility_score < 0.5
+      *DISCOUNT_CONTRADICTION  if ambiguity != clear
     """
-    confidence = action.get("confidence_label", "LOW")
-    discounts  = []
-
-    CONFIDENCE_ORDER = ["HIGH", "MEDIUM", "LOW", "NOISE"]
-
-    def _downgrade(conf, reason):
-        """Move confidence one step down the scale."""
-        idx = CONFIDENCE_ORDER.index(conf) if conf in CONFIDENCE_ORDER else 3
-        new_conf = CONFIDENCE_ORDER[min(idx + 1, 3)]
-        discounts.append(f"{reason} → {conf} → {new_conf}")
-        return new_conf
+    impact_score = state.base_impact_score
+    discounts    = []
 
     # Low sentiment confidence
-    if not sentiment.get("conf_ok", True):
-        confidence = _downgrade(confidence, "low_sentiment_confidence")
+    if state.sentiment_confidence < ctrl.SENTIMENT_CONF_MIN:
+        impact_score *= ctrl.DISCOUNT_SENTIMENT_CONF
+        discounts.append(f"low_sentiment_conf *{ctrl.DISCOUNT_SENTIMENT_CONF}")
 
-    # High benchmark volatility — downweight all signals
+    # High benchmark volatility
     if regime.volatility == "HIGH":
-        confidence = _downgrade(confidence, "benchmark_vol_HIGH")
+        impact_score *= ctrl.DISCOUNT_BENCHMARK_VOL
+        discounts.append(f"benchmark_vol_HIGH *{ctrl.DISCOUNT_BENCHMARK_VOL}")
 
     # Rumor discount
     if event.get("rumor", False):
-        confidence = _downgrade(confidence, "rumor_source")
+        impact_score *= ctrl.DISCOUNT_NOISY_EVENT
+        discounts.append(f"rumor_source *{ctrl.DISCOUNT_NOISY_EVENT}")
 
-    # Frozen classification: contradictory updates — keep as watch
-    # (handled by Gate 13/14 — no additional action here)
+    # Low credibility source
+    if state.credibility_score < 0.5:
+        impact_score *= ctrl.DISCOUNT_SOURCE_LOW
+        discounts.append(f"source_low_credibility *{ctrl.DISCOUNT_SOURCE_LOW}")
 
-    ndl.gate(15, "RISK_CONTROLS",
-             {"input_confidence": action.get("confidence_label"), "discounts": len(discounts)},
-             f"final_confidence={confidence}",
+    # Contradiction / ambiguity discount
+    if state.ambiguity_state != "clear":
+        impact_score *= ctrl.DISCOUNT_CONTRADICTION
+        discounts.append(f"contradiction({state.ambiguity_state}) *{ctrl.DISCOUNT_CONTRADICTION}")
+
+    impact_score = round(impact_score, 4)
+
+    state.impact_score       = impact_score
+    state.discounts_applied  = discounts
+
+    # Legacy final_confidence label for backward compat
+    if impact_score > 0.7:
+        final_confidence = "HIGH"
+    elif impact_score > 0.3:
+        final_confidence = "MEDIUM"
+    else:
+        final_confidence = "LOW"
+
+    ndl.gate(18, "RISK_DISCOUNTS",
+             {"base_impact_score": state.base_impact_score,
+              "discounts": len(discounts)},
+             f"impact_score={impact_score:.4f} final_confidence={final_confidence}",
              "; ".join(discounts) or "none")
-    return {"final_confidence": confidence, "discounts_applied": discounts}
+    return {
+        "impact_score": impact_score,
+        "discounts_applied": discounts,
+        "final_confidence": final_confidence,
+    }
 
 
-# ── GATE 16 — PERSISTENCE ─────────────────────────────────────────────────
+# ── GATE 19 — PERSISTENCE ─────────────────────────────────────────────────
 
-def gate16_persistence(topic, event, ctrl, ndl):
+def gate19_persistence(topic, event, ctrl, ndl, state):
     """
     Persistence controls — classify expected decay rate of the signal's market impact.
-    Returns dict: {persistence, decay_rate}.
+    Sets state.persistence_state.
+    Returns dict: {persistence_state, decay_rate}.
+
+    States: structural(regulatory/macro), dynamically_updated(geo),
+            medium_or_fast(earnings), rapid(breaking), slow(default).
     """
     t = topic.get("topic", "unknown")
 
-    if t in ("regulatory",):
-        persistence = "HIGH"
-        decay_rate  = "low"
-        reason      = "regulatory/policy change — structural repricing expected"
-    elif t == "macro":
-        persistence = "HIGH"
-        decay_rate  = "low"
-        reason      = "macro shift — persistent repricing"
+    if t in ("regulatory", "macro"):
+        persistence_state = "structural"
+        decay_rate        = "low"
+        reason            = "regulatory/policy change — structural repricing expected"
     elif t == "geopolitical":
-        persistence = "DYNAMIC"
-        decay_rate  = "variable"
-        reason      = "geopolitical — update per follow-up flow"
+        persistence_state = "dynamically_updated"
+        decay_rate        = "variable"
+        reason            = "geopolitical — update per follow-up flow"
     elif t == "earnings":
-        persistence = "MEDIUM"
-        decay_rate  = "medium"
-        reason      = "earnings one-off — fades unless guidance revision broad"
+        persistence_state = "medium_or_fast"
+        decay_rate        = "medium"
+        reason            = "earnings one-off — fades unless guidance revision broad"
     elif event.get("breaking"):
-        persistence = "LOW"
-        decay_rate  = "high"
-        reason      = "breaking news — typically transient"
+        persistence_state = "rapid"
+        decay_rate        = "high"
+        reason            = "breaking news — typically transient"
     else:
-        persistence = "LOW"
-        decay_rate  = "high"
-        reason      = "default — assume transient"
+        persistence_state = "slow"
+        decay_rate        = "high"
+        reason            = "default — assume slow decay"
 
-    ndl.gate(16, "PERSISTENCE",
+    state.persistence_state = persistence_state
+
+    ndl.gate(19, "PERSISTENCE",
              {"topic": t, "breaking": event.get("breaking", False)},
-             f"persistence={persistence} decay={decay_rate}", reason)
-    return {"persistence": persistence, "decay_rate": decay_rate}
+             f"persistence_state={persistence_state} decay={decay_rate}", reason)
+    return {"persistence_state": persistence_state, "decay_rate": decay_rate}
 
 
-# ── GATE 17 — EVALUATION LOOP ─────────────────────────────────────────────
+# ── GATE 20 — EVALUATION LOOP ─────────────────────────────────────────────
 
-def gate17_evaluation(item, action, ctrl, ndl, db):
+def gate20_evaluation(item, action, ctrl, ndl, db, state):
     """
     Evaluation loop — update relevance and confidence based on prior articles
     and record the classification for future comparison.
+    Sets state.evaluation_note.
 
     TODO: DATA_DEPENDENCY — comparing predicted vs. realized market response
     requires post-trade outcome data. Currently updates relevance score only.
     """
-    classification = action.get("classification", "ignore")
-    ticker         = (item.get("ticker") or "").upper()
+    action_state = action.get("action_state", "ignore")
+    ticker       = (item.get("ticker") or "").upper()
 
     # Recompute relevance: is ticker still active in signals DB?
     ticker_active = False
@@ -1581,62 +2133,178 @@ def gate17_evaluation(item, action, ctrl, ndl, db):
     # TODO: DATA_DEPENDENCY — event_class accuracy tracking not yet implemented
     accuracy_note = "accuracy_tracking_pending"
 
-    ndl.gate(17, "EVALUATION_LOOP",
-             {"classification": classification, "ticker_active": ticker_active},
-             f"relevance_ok={ticker_active or classification in ('spx_regime_signal','macro')}",
+    evaluation_note = (f"ticker_active={ticker_active} action_state={action_state} "
+                       f"accuracy={accuracy_note}")
+    state.evaluation_note = evaluation_note
+
+    ndl.gate(20, "EVALUATION_LOOP",
+             {"action_state": action_state, "ticker_active": ticker_active},
+             f"relevance_ok={ticker_active or action_state in ('benchmark_signal','watch_only')}",
              accuracy_note)
     return {"ticker_active": ticker_active}
 
 
-# ── GATE 18 — OUTPUT CONTROLS ─────────────────────────────────────────────
+# ── GATE 21 — OUTPUT CONTROLS ─────────────────────────────────────────────
 
-def gate18_output(action, risk, regime, topic, ndl):
+def gate21_output(action, risk, regime, scope, ctrl, ndl, state):
     """
     Output controls — shape final output based on confidence level and regime.
-    Returns dict: {classification, confidence, explanation, routing}.
+    Sets state.output_mode, state.output_priority, state.output_action, state.routing.
+    Returns dict: {classification, confidence, explanation, routing, output_type}.
+
+    Output modes: decisive(impact_score>0.7) / probabilistic(>0.3) / uncertain
+    Output priority: benchmark_first if benchmark_corr==HIGH
+    Output actions: wait_for_confirmation, no_signal, positive_signal,
+                    negative_signal, benchmark_context_signal, idiosyncratic_alpha_signal
+    Routing: QUEUE for bullish/relative_alpha, WATCH for others, DISCARD for ignore
     """
-    classification  = action.get("classification", "ignore")
-    final_confidence = risk.get("final_confidence", "LOW")
-    bench_corr       = topic.get("benchmark_corr") if isinstance(topic, dict) else "MEDIUM"
+    action_state     = state.action_state
+    impact_score     = state.impact_score
+    bench_corr       = state.benchmark_corr
 
-    # Certainty of output
-    if final_confidence == "HIGH":
-        output_type = "decisive"
-    elif final_confidence == "MEDIUM":
-        output_type = "probabilistic"
+    # Output mode
+    if impact_score > 0.7:
+        output_mode = "decisive"
+    elif impact_score > 0.3:
+        output_mode = "probabilistic"
     else:
-        output_type = "uncertain"
+        output_mode = "uncertain"
 
-    # Explanation framing
-    if bench_corr == "HIGH" and regime.trend != "NEUTRAL":
-        explanation = f"benchmark-first: SPX trend={regime.trend}, signal={classification}"
+    # Output priority
+    output_priority = "benchmark_first" if bench_corr == "HIGH" else "article_first"
+
+    # Output action mapping
+    if action_state == "freeze":
+        output_action = "wait_for_confirmation"
+    elif action_state == "ignore":
+        output_action = "no_signal"
+    elif action_state == "bullish_signal":
+        output_action = "positive_signal"
+    elif action_state == "bearish_signal":
+        output_action = "negative_signal"
+    elif action_state == "benchmark_signal":
+        output_action = "benchmark_context_signal"
+    elif action_state == "relative_alpha":
+        output_action = "idiosyncratic_alpha_signal"
     else:
-        explanation = f"asset-first: {classification} signal, SPX backdrop={regime.trend}"
+        output_action = "no_signal"
 
-    # Routing decision
-    if classification in ("bullish_signal", "relative_alpha"):
+    # Routing
+    if output_action in ("positive_signal", "idiosyncratic_alpha_signal"):
         routing = "QUEUE"
-    elif classification in ("watch_only", "spx_regime_signal", "bearish_signal"):
+    elif action_state in ("watch_only", "provisional_watch", "bearish_signal",
+                          "benchmark_signal"):
         routing = "WATCH"
     else:
         routing = "DISCARD"
 
-    ndl.gate(18, "OUTPUT",
-             {"classification": classification, "final_confidence": final_confidence,
-              "output_type": output_type},
-             f"routing={routing}", explanation)
+    # Explanation framing
+    if bench_corr == "HIGH" and regime.trend != "neutral":
+        explanation = (f"benchmark-first: SPX trend={regime.trend}, "
+                       f"action={action_state}")
+    else:
+        explanation = (f"article-first: {action_state} signal, "
+                       f"SPX backdrop={regime.trend}")
+
+    state.output_mode     = output_mode
+    state.output_priority = output_priority
+    state.output_action   = output_action
+    state.routing         = routing
+
+    # Backward compat confidence
+    final_confidence = risk.get("final_confidence", "LOW")
+
+    ndl.gate(21, "OUTPUT",
+             {"action_state": action_state, "impact_score": f"{impact_score:.4f}",
+              "output_mode": output_mode},
+             f"routing={routing} output_action={output_action}", explanation)
     return {
-        "classification": classification, "confidence": final_confidence,
-        "explanation": explanation, "routing": routing, "output_type": output_type,
+        "classification": action_state, "confidence": final_confidence,
+        "explanation": explanation, "routing": routing, "output_type": output_mode,
     }
 
 
-# ── CLASSIFICATION → LEGACY CONFIDENCE MAPPING ───────────────────────────
+# ── GATE 22 — COMPOSITE SCORING ───────────────────────────────────────────
 
-def _output_to_confidence(output):
-    """Map Gate 18 classification to legacy HIGH/MEDIUM/LOW/NOISE for DB schema."""
-    c = output.get("confidence", "LOW")
-    return c if c in ("HIGH", "MEDIUM", "LOW", "NOISE") else "LOW"
+def gate22_composite(ctrl, ndl, state):
+    """
+    Composite scoring — final arbiter combining all gate outputs into a single score.
+    Sets state.composite_score, state.final_signal, and optionally overrides state.routing.
+
+    Composite weights:
+      W1=0.20  impact_score
+      W2=0.15  credibility_score
+      W3=0.15  novelty_score
+      W4=0.20  sentiment_confidence
+      W5=0.15  confirmation_score
+      W6=0.10  (1 - crowding_discount)
+      W7=0.05  (1 - ambiguity_score)
+
+    If composite_score < COMPOSITE_QUALITY_THRESH → downgrade routing to DISCARD
+    unless action_state is watch_only/provisional_watch (→ WATCH).
+    """
+    composite_score = (
+        ctrl.COMPOSITE_W1 * state.impact_score
+        + ctrl.COMPOSITE_W2 * state.credibility_score
+        + ctrl.COMPOSITE_W3 * state.novelty_score
+        + ctrl.COMPOSITE_W4 * state.sentiment_confidence
+        + ctrl.COMPOSITE_W5 * state.confirmation_score
+        + ctrl.COMPOSITE_W6 * (1.0 - state.crowding_discount)
+        + ctrl.COMPOSITE_W7 * (1.0 - state.ambiguity_score)
+    )
+    composite_score = round(composite_score, 4)
+    state.composite_score = composite_score
+
+    # Final signal classification
+    if state.action_state == "ignore":
+        final_signal = "no_signal"
+    elif composite_score >= ctrl.COMPOSITE_QUALITY_THRESH:
+        if state.action_state == "bullish_signal":
+            final_signal = "bullish_signal"
+        elif state.action_state == "bearish_signal":
+            final_signal = "bearish_signal"
+        elif state.action_state == "relative_alpha":
+            final_signal = "alpha_signal"
+        elif state.action_state == "benchmark_signal":
+            final_signal = "benchmark_regime_signal"
+        elif state.action_state == "freeze":
+            final_signal = "frozen_watch"
+        else:
+            final_signal = "neutral_or_watch"
+    else:
+        final_signal = "neutral_or_watch"
+
+    state.final_signal = final_signal
+
+    # Override routing based on composite quality
+    if composite_score < ctrl.COMPOSITE_QUALITY_THRESH:
+        if state.routing == "QUEUE":
+            # Downgrade: not enough composite quality for a queue
+            if state.action_state in ("watch_only", "provisional_watch"):
+                state.routing = "WATCH"
+            else:
+                state.routing = "DISCARD"
+
+    ndl.gate(22, "COMPOSITE",
+             {"composite_score": f"{composite_score:.4f}",
+              "quality_thresh": ctrl.COMPOSITE_QUALITY_THRESH,
+              "action_state": state.action_state},
+             f"final_signal={final_signal} routing={state.routing}")
+    return {"composite_score": composite_score, "final_signal": final_signal}
+
+
+# ── STATE → CONFIDENCE MAPPING ────────────────────────────────────────────
+
+def _state_to_confidence(state):
+    """Map state.output_mode to legacy HIGH/MEDIUM/LOW/NOISE for DB schema."""
+    if state.output_mode == "decisive":
+        return "HIGH"
+    elif state.output_mode == "probabilistic":
+        return "MEDIUM"
+    elif state.action_state == "ignore":
+        return "NOISE"
+    else:
+        return "LOW"
 
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
@@ -1670,7 +2338,7 @@ def run(session="market"):
 
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
-    # ── Process each item through 18-gate spine ───────────────────────────
+    # ── Process each item through 22-gate spine ───────────────────────────
     new_signals  = 0
     queued       = 0
     discarded    = 0
@@ -1688,16 +2356,25 @@ def run(session="market"):
             ticker      = item.get("ticker"),
         )
 
+        # ── Initialize article state ──────────────────────────────────────
+        state = ArticleState()
+
         # ── Gate 1: System ────────────────────────────────────────────────
-        if not gate1_system(item, ctrl, ndl, seen_headlines):
+        if not gate1_system(item, ctrl, ndl, seen_headlines, state):
             ndl.decide("DISCARD", "NOISE", "gate1_system halt")
             ndl.commit(db)
             skipped += 1
             continue
 
-        # ── Gate 3: Eligibility ───────────────────────────────────────────
-        if not gate3_eligibility(item, ctrl, ndl):
-            ndl.decide("DISCARD", "NOISE", "gate3_eligibility skip")
+        # ── Copy benchmark regime into state ──────────────────────────────
+        state.trend_state      = regime.trend
+        state.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
+        state.drawdown_state   = regime.drawdown_active
+        state.momentum_state   = regime.momentum
+
+        # ── Gate 3: Source relevance ──────────────────────────────────────
+        if not gate3_source_relevance(item, ctrl, ndl, state):
+            ndl.decide("DISCARD", "NOISE", "gate3_source_relevance skip")
             ndl.commit(db)
             skipped += 1
             continue
@@ -1731,42 +2408,54 @@ def run(session="market"):
         item["is_amended"] = is_amended
         item["is_spousal"] = is_spousal
 
-        # ── Gates 4-18: Full spine ────────────────────────────────────────
-        topic        = gate4_classification(item, ctrl, ndl)
-        event        = gate5_event_detection(item, ctrl, ndl, db, seen_headlines)
-        sentiment    = gate6_sentiment(item, ctrl, ndl)
-        novelty      = gate7_novelty(item, ctrl, ndl, db, seen_headlines)
-        impact       = gate8_impact(item, topic, regime, ctrl, ndl)
-        interp       = gate9_benchmark_relative(sentiment, impact, regime, ctrl, ndl)
-        credibility  = gate10_credibility(item, ctrl, ndl, db)
-        timing       = gate11_timing(item, ctrl, ndl)
-        crowding     = gate12_crowding(item, ctrl, ndl, db)
-        contradiction = gate13_contradiction(item, ctrl, ndl)
+        # ── Gates 4-11: Topic, entity, event, sentiment, novelty, scope,
+        #               horizon, benchmark-relative ─────────────────────────
+        topic    = gate4_topic(item, ctrl, ndl, state)
+        entity_s = gate5_entity(item, topic, ctrl, ndl, state)
+        event    = gate6_event(item, ctrl, ndl, db, seen_headlines, state)
+        sentiment = gate7_sentiment(item, ctrl, ndl, state)
+        novelty   = gate8_novelty(item, sentiment, ctrl, ndl, db, seen_headlines, state)
+        scope     = gate9_scope(topic, entity_s, ctrl, ndl, state)
+        gate10_horizon(topic, event, ctrl, ndl, state)
+        gate11_benchmark_relative(sentiment, scope, regime, ctrl, ndl, state)
 
-        # ── Gate 11: Timing exit ──────────────────────────────────────────
-        if not timing["tradeable"]:
-            ndl.decide("DISCARD", "NOISE", "gate11_timing: article too old / not tradeable")
+        # ── Gates 12-16: Confirmation, timing, crowding, contradiction,
+        #                impact magnitude ────────────────────────────────────
+        confirmation = gate12_confirmation(item, ctrl, ndl, db, state)
+        timing       = gate13_timing(item, ctrl, ndl, state)
+        crowding     = gate14_crowding(item, ctrl, ndl, db, state)
+        contradiction = gate15_contradiction(item, ctrl, ndl, state)
+        gate16_impact_magnitude(scope, topic, regime, ctrl, ndl, state)
+
+        # ── Gate 13: Timing exit ──────────────────────────────────────────
+        if not state.timing_tradeable:
+            ndl.decide("DISCARD", "NOISE", "gate13_timing: article too old / not tradeable")
             ndl.commit(db)
             skipped += 1
             continue
 
-        # ── Gates 14-18: Classification and output ────────────────────────
-        action      = gate14_classification(sentiment, novelty, credibility,
-                                            impact, contradiction, regime, ctrl, ndl)
-        risk        = gate15_risk(action, sentiment, regime, event, ctrl, ndl)
-        persistence = gate16_persistence(topic, event, ctrl, ndl)
-        gate17_evaluation(item, action, ctrl, ndl, db)
-        output      = gate18_output(action, risk, regime, impact, ndl)
+        # ── Gates 17-22: Action, risk, persistence, evaluation, output,
+        #                composite scoring ────────────────────────────────────
+        action      = gate17_action(sentiment, novelty, confirmation, contradiction,
+                                    regime, event, ctrl, ndl, state)
+        risk        = gate18_risk_discounts(action, sentiment, regime, event, ctrl, ndl, state)
+        persistence = gate19_persistence(topic, event, ctrl, ndl, state)
+        gate20_evaluation(item, action, ctrl, ndl, db, state)
+        output      = gate21_output(action, risk, regime, scope, ctrl, ndl, state)
+        gate22_composite(ctrl, ndl, state)
 
-        # ── Member weight (kept — FLAG: integrate into Gate 10 in future) ─
+        # Routing now comes from gate22 composite (may have overridden gate21)
+        routing = state.routing
+
+        # ── Member weight (kept — FLAG: integrate into Gate 12 in future) ─
         congress_member = item.get("politician", "")
         member_data     = db.get_member_weight(congress_member) if congress_member else {"weight": 1.0}
         member_weight   = member_data.get("weight", 1.0)
-        base_confidence = _output_to_confidence(output)
+        base_confidence = _state_to_confidence(state)
         adj_text, adj_numeric = apply_member_weight(base_confidence, member_weight)
 
-        routing = output["routing"]
-        log.info(f"{ticker} classification={output['classification']} "
+        log.info(f"{ticker} action_state={state.action_state} final_signal={state.final_signal} "
+                 f"composite={state.composite_score:.3f} "
                  f"base_conf={base_confidence} weight={member_weight:.2f} "
                  f"adj={adj_text}({adj_numeric:.3f}) routing={routing}")
 
@@ -1781,26 +2470,33 @@ def run(session="market"):
                 sentiment_score = sentiment.get("score"),
                 raw_headline    = headline,
                 metadata        = {
-                    "source":          item.get("source"),
-                    "source_tier":     source_tier,
-                    "staleness":       staleness,
-                    "base_confidence": base_confidence,
-                    "member_weight":   member_weight,
-                    "adj_numeric":     adj_numeric,
-                    "is_amended":      is_amended,
-                    "is_spousal":      is_spousal,
-                    "ind_etf":         ind_etf,
-                    "sec_etf":         sec_etf,
-                    "classification":  output["classification"],
-                    "routing":         routing,
-                    "persistence":     persistence["persistence"],
+                    "source":            item.get("source"),
+                    "source_tier":       source_tier,
+                    "staleness":         staleness,
+                    "base_confidence":   base_confidence,
+                    "member_weight":     member_weight,
+                    "adj_numeric":       adj_numeric,
+                    "is_amended":        is_amended,
+                    "is_spousal":        is_spousal,
+                    "ind_etf":           ind_etf,
+                    "sec_etf":           sec_etf,
+                    "action_state":      state.action_state,
+                    "final_signal":      state.final_signal,
+                    "composite_score":   state.composite_score,
+                    "entity_state":      state.entity_state,
+                    "horizon_state":     state.horizon_state,
+                    "benchmark_rel":     state.benchmark_rel_state,
+                    "signal_type":       state.signal_type,
+                    "impact_score":      state.impact_score,
+                    "routing":           routing,
+                    "persistence_state": state.persistence_state,
                 },
                 source = "CONGRESS" if source_tier == 1 else "RSS",
             )
         except Exception as e:
             log.warning(f"news_feed write failed (non-fatal): {e}")
 
-        ndl.decide(routing, adj_text, output["reason"])
+        ndl.decide(routing, adj_text, output.get("explanation", state.action_reason))
         ndl.commit(db)
 
         # ── Discard path ──────────────────────────────────────────────────
@@ -1840,7 +2536,7 @@ def run(session="market"):
             amount_range  = str(item.get("amount", "")),
             confidence    = adj_text,
             staleness     = staleness,
-            corroborated  = credibility.get("confirmed", False),
+            corroborated  = confirmation.get("confirmed", False),
             corroboration_note = output.get("explanation"),
             is_amended    = is_amended,
             is_spousal    = is_spousal,
@@ -1891,9 +2587,10 @@ def run(session="market"):
         if routing in ("QUEUE", "WATCH"):
             db.queue_signal_for_trader(sig_id)
             queued += 1
-            log.info(f"Routed to Bolt: {ticker} routing={routing} adj={adj_text} {interrogation_status}")
+            log.info(f"Routed to Bolt: {ticker} routing={routing} adj={adj_text} "
+                     f"{interrogation_status}")
         else:
-            db.discard_signal(sig_id, reason=output.get("reason", "gate18 discard"))
+            db.discard_signal(sig_id, reason=output.get("explanation", "gate22 discard"))
             discarded += 1
 
     # ── Re-evaluate WATCH signals ─────────────────────────────────────────
@@ -1929,32 +2626,50 @@ def run(session="market"):
             )
             ndl_re.note("re-evaluation of WATCH signal")
 
-            topic_re       = gate4_classification(reeval_item, ctrl, ndl_re)
-            event_re       = gate5_event_detection(reeval_item, ctrl, ndl_re, db, [])
-            sentiment_re   = gate6_sentiment(reeval_item, ctrl, ndl_re)
-            novelty_re     = gate7_novelty(reeval_item, ctrl, ndl_re, db, [])
-            impact_re      = gate8_impact(reeval_item, topic_re, regime, ctrl, ndl_re)
-            credibility_re = gate10_credibility(reeval_item, ctrl, ndl_re, db)
-            contradiction_re = gate13_contradiction(reeval_item, ctrl, ndl_re)
-            action_re      = gate14_classification(sentiment_re, novelty_re, credibility_re,
-                                                   impact_re, contradiction_re, regime, ctrl, ndl_re)
-            risk_re        = gate15_risk(action_re, sentiment_re, regime, event_re, ctrl, ndl_re)
-            output_re      = gate18_output(action_re, risk_re, regime, impact_re, ndl_re)
+            state_re = ArticleState()
+            state_re.trend_state      = regime.trend
+            state_re.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
+            state_re.drawdown_state   = regime.drawdown_active
+            state_re.momentum_state   = regime.momentum
+
+            topic_re         = gate4_topic(reeval_item, ctrl, ndl_re, state_re)
+            entity_re        = gate5_entity(reeval_item, topic_re, ctrl, ndl_re, state_re)
+            event_re         = gate6_event(reeval_item, ctrl, ndl_re, db, [], state_re)
+            sentiment_re     = gate7_sentiment(reeval_item, ctrl, ndl_re, state_re)
+            novelty_re       = gate8_novelty(reeval_item, sentiment_re, ctrl, ndl_re, db, [], state_re)
+            scope_re         = gate9_scope(topic_re, entity_re, ctrl, ndl_re, state_re)
+            gate10_horizon(topic_re, event_re, ctrl, ndl_re, state_re)
+            gate11_benchmark_relative(sentiment_re, scope_re, regime, ctrl, ndl_re, state_re)
+            confirmation_re  = gate12_confirmation(reeval_item, ctrl, ndl_re, db, state_re)
+            gate13_timing(reeval_item, ctrl, ndl_re, state_re)
+            gate14_crowding(reeval_item, ctrl, ndl_re, db, state_re)
+            contradiction_re = gate15_contradiction(reeval_item, ctrl, ndl_re, state_re)
+            gate16_impact_magnitude(scope_re, topic_re, regime, ctrl, ndl_re, state_re)
+            action_re        = gate17_action(sentiment_re, novelty_re, confirmation_re,
+                                             contradiction_re, regime, event_re, ctrl, ndl_re, state_re)
+            risk_re          = gate18_risk_discounts(action_re, sentiment_re, regime, event_re,
+                                                     ctrl, ndl_re, state_re)
+            gate19_persistence(topic_re, event_re, ctrl, ndl_re, state_re)
+            gate20_evaluation(reeval_item, action_re, ctrl, ndl_re, db, state_re)
+            output_re        = gate21_output(action_re, risk_re, regime, scope_re, ctrl, ndl_re, state_re)
+            gate22_composite(ctrl, ndl_re, state_re)
 
             reeval_count += 1
             with db.conn() as c:
                 c.execute("UPDATE signals SET needs_reeval=0, updated_at=? WHERE id=?",
                           (db.now(), sig["id"]))
 
-            ndl_re.decide(output_re["routing"], output_re["confidence"], output_re["reason"])
+            ndl_re.decide(state_re.routing, output_re["confidence"],
+                          output_re.get("explanation", state_re.action_reason))
             ndl_re.commit(db)
 
-            if output_re["routing"] == "QUEUE":
+            if state_re.routing == "QUEUE":
                 db.queue_signal_for_trader(sig["id"])
                 queued += 1
                 log.info(f"Re-eval promoted to queue: {sig['ticker']}")
-            elif output_re["routing"] == "DISCARD":
-                db.discard_signal(sig["id"], reason=output_re.get("reason", "re-eval discard"))
+            elif state_re.routing == "DISCARD":
+                db.discard_signal(sig["id"],
+                                  reason=output_re.get("explanation", "re-eval discard"))
                 discarded += 1
                 log.info(f"Re-eval discarded: {sig['ticker']}")
 
