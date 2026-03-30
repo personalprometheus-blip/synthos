@@ -12,6 +12,7 @@
 |------|------|------|--------|
 | [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 2W) | Trading agents, portal, signals.db | Active |
 | [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B / cloud) | Ops agents, licensing, backups, monitoring | Active |
+| TBD — repo not yet created | process_node (Pi 3) | News/signal ingestion pipeline, article enrichment, cross-node distribution | Hardware in hand; SD card arriving ~2026-03-31 |
 
 ---
 

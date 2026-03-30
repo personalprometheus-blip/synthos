@@ -11,6 +11,7 @@ Phase 3 — System Validation + Normalization Sprint
 
 ## Node Architecture
 - **retail_node** (Pi 2W): trading agents, portal, local signals.db — lives in this repo (synthos_build/)
+- **process_node** (Pi 3): news/signal ingestion pipeline, article enrichment, Redis-based distribution — repo TBD; hardware in hand, SD card arriving ~2026-03-31
 - **company_node** (Pi 4B): operational agents (blueprint, sentinel, patches, vault, etc.) — lives in synthos-company/
 - **monitor_node** (same Pi 4B): synthos_monitor.py on port 5000, receives heartbeats
 
