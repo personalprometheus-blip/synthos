@@ -6,9 +6,9 @@
 > **Companion:** `synthos-company` owns company_node (Pi 4B) agents — do NOT put company code here
 > **Separate:** `Sentinel` repo is unrelated to Synthos
 
-**Last Updated:** 2026-03-29
-**Current Phase:** Phase 3 — System Validation + Normalization Sprint
-**Overall Progress:** 2 of 6 phases complete
+**Last Updated:** 2026-03-30
+**Current Phase:** Phase 5 — Deployment Pipeline
+**Overall Progress:** 4 of 6 phases complete
 
 ---
 
@@ -33,35 +33,33 @@
 - System validation complete (SYSTEM_VALIDATION_REPORT.md)
 - Repo reorganized to professional structure
 
+### Phase 3 — Normalization Sprint
+- Suggestions pipeline migrated to db_helpers.post_suggestion() across all agents
+- watchdog.py post_deploy_watch migrated to db_helpers.get_active_deploy_watches()
+- watchdog.py COMPANY_DATA_DIR hardcode fixed to env var
+- strongbox.py moved to synthos-company/agents/
+- company.db schema canonicalized — docs/specs/DATABASE_SCHEMA_CANONICAL.md (CL-012 RESOLVED)
+- license_validator.py formally deferred — DEFERRED_FROM_CURRENT_BASELINE
+- All secondary doc tasks complete (SUGGESTIONS_JSON_SPEC, POST_DEPLOY_WATCH_SPEC, SYSTEM_MANIFEST)
+
+### Phase 4 — Ground Truth Declaration
+- Schema extracted and canonicalized — docs/specs/DATABASE_SCHEMA_CANONICAL.md
+- Ground Truth synthesized — docs/GROUND_TRUTH.md
+- All critical blockers resolved or formally deferred (CRITICAL_BLOCKERS_REMAIN: NO)
+- Ground Truth declared and committed
+
 ---
 
 ## 🟡 In Progress
 
-### Phase 3 — Normalization Sprint
-Fixing the 4 critical blockers identified in system validation before any deployment claim.
-
-~~**Step 1:** Migrate suggestions pipeline~~ ✅ DONE
-~~**Step 2:** Migrate watchdog.py post_deploy_watch~~ ✅ DONE
-~~**Step 3:** Fix watchdog.py COMPANY_DATA_DIR hardcode~~ ✅ DONE
-~~**Step 4:** Move strongbox.py to synthos-company/agents/~~ ✅ DONE
-**Step 5:** Update TECHNICAL_ARCH DB schema to v1.2 reality (doc change)
-~~**Step 6 (human):** Declare license_validator.py status — build now or defer~~ ✅ DONE — FORMALLY DEFERRED (see RETAIL_LICENSE_DEFERRAL_NOTE.md)
-
----
+### Phase 5 — Deployment Pipeline
+- [x] Create update-staging branch
+- [x] Document actual Friday push process
+- [ ] First end-to-end deploy test in paper mode
+- [ ] Verify post-deploy rollback trigger fires correctly
+- [ ] Verify watchdog known-good snapshot and restore
 
 ## 🔴 Not Started
-
-### Phase 4 — Ground Truth Declaration
-- All critical conflicts resolved
-- SYNTHOS_GROUND_TRUTH.md updated to v1.2
-- SYSTEM_MANIFEST.md updated (v1.2 env vars, install.py deprecated, ADDENDUM_2 speculative)
-- Architecture doc DB schema updated
-- New ground truth committed and declared
-
-### Phase 5 — Deployment Pipeline
-- update-staging branch created
-- Friday push process executable as documented
-- End-to-end deployment tested in paper mode
 
 ### Phase 6 — Live Trading Gate
 - Paper trading review complete
@@ -70,9 +68,9 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 
 ---
 
-## Current Milestone: Normalization Sprint (Phase 3)
-**Goal:** Resolve all 4 critical blockers so the system operates coherently end-to-end
-**Status:** Not started — repo reorganization just completed, ready to begin
+## Current Milestone: Deployment Pipeline (Phase 5)
+**Goal:** Build and validate the end-to-end deploy pipeline in paper mode
+**Status:** Not started — stragglers from Phase 3/4 cleared; ready to begin
 
 ## Blockers
 | ID | Severity | Description |
@@ -82,8 +80,8 @@ Fixing the 4 critical blockers identified in system validation before any deploy
 | ~~SYS-B03~~ | ~~CRITICAL~~ | ~~Post-deploy rollback broken~~ — RESOLVED |
 | ~~SYS-B04~~ | ~~CRITICAL~~ | ~~Suggestions pipeline split~~ — RESOLVED |
 | ~~SYS-B05~~ | ~~HIGH~~ | ~~`watchdog.py` hardcoded `COMPANY_DATA_DIR`~~ — RESOLVED |
-| SYS-B06 | HIGH | Installer core/ vs flat layout mismatch |
-| SYS-B07 | HIGH | `update-staging` branch absent — deploy pipeline non-executable |
+| ~~SYS-B06~~ | ~~HIGH~~ | ~~Installer core/ vs flat layout mismatch~~ — RESOLVED 2026-03-30 |
+| ~~SYS-B07~~ | ~~HIGH~~ | ~~`update-staging` branch absent~~ — RESOLVED 2026-03-30 |
 
 Full blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
 

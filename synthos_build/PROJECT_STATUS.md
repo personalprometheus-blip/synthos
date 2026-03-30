@@ -90,8 +90,8 @@ Secondary (required before Phase 4):
 
 ## Phase 5 — Deployment Pipeline 🔴 NOT STARTED
 
-- [ ] Create update-staging git branch
-- [ ] Document actual Friday push process
+- [x] Create update-staging git branch
+- [x] Document actual Friday push process — `docs/governance/FRIDAY_PUSH_RUNBOOK.md`
 - [ ] First end-to-end deploy test in paper mode
 - [ ] Verify post-deploy rollback trigger fires correctly
 - [ ] Verify watchdog known-good snapshot and restore
@@ -128,5 +128,5 @@ These items must be completed before any live trading or adversarial deployment.
 |----|------|----------|-------------|
 | ~~SYS-B01~~ | synthos | ~~CRITICAL~~ | ~~license_validator.py missing~~ — DEFERRED_FROM_CURRENT_BASELINE |
 | ~~SYS-B02~~ | synthos | ~~CRITICAL~~ | ~~No license gate in boot_sequence.py~~ — DEFERRED_FROM_CURRENT_BASELINE |
-| CL-009 | synthos-company | HIGH | Company agents not classified in TOOL_DEPENDENCY_ARCHITECTURE.md |
+| ~~CL-009~~ | synthos-company | ~~HIGH~~ | ~~Company agents not classified in TOOL_DEPENDENCY_ARCHITECTURE.md~~ — RESOLVED 2026-03-30 |
 | ~~CL-012~~ | synthos-company | ~~HIGH~~ | ~~company.db schema undocumented~~ — RESOLVED: docs/specs/DATABASE_SCHEMA_CANONICAL.md |
