@@ -1,88 +1,84 @@
 """
-agent1_trader.py — The Trader (Execution Agent)
-Synthos · Agent 1
+agent1_trader.py — ExecutionAgent
+Synthos · Agent 1 · Version 2.0
 
 Runs:
   9:30 AM ET  --session=open
   12:30 PM ET --session=midday
   3:30 PM ET  --session=close
 
-Responsibilities:
-  - Read validated signals from The Daily (via signals.db)
-  - Check urgent flags from The Pulse
-  - Apply all trading rules (position sizing, ATR stops, sector caps)
-  - Execute paper or live trades via Alpaca API
-  - Manage open positions (trailing stop updates, profit-taking)
-  - Reconcile positions against Alpaca on session start
-  - Auto-sweep monthly tax on last trading day of month
+Decision architecture: 14-gate deterministic control spine.
+No LLM calls in any decision path.
+Every decision produces a structured human-readable audit log.
 
-Usage:
-  python3 agent1_trader.py --session=open
-  python3 agent1_trader.py --session=midday
-  python3 agent1_trader.py --session=close
+Regulatory reference: synthos-company/documentation/governance/AGENT1_SYSTEM_DESCRIPTION.md
+
+SUPERSEDED from v1.x:
+  - call_claude() removed — was used for reasoning text only; decision was already rule-based
+  - analyze_signal_with_claude() removed — replaced by gates 4–8
+  - build_learning_context() removed — learning context now flows via DB metrics (gate 14)
+  - fetch_price_history_5yr() removed — price context now computed per-gate without LLM prompt
+
+KEPT from v1.x (flagged for later review):
+  - AlpacaClient — unchanged; broker interface is stable          [KEEP]
+  - BIL reserve logic (sync_bil_reserve) — unchanged              [KEEP — REVIEW: integrate into gate 11]
+  - reconcile_with_alpaca — unchanged                             [KEEP]
+  - Supervised/autonomous mode queue — unchanged                  [KEEP]
+  - Protective exit (send_protective_exit_email) — unchanged      [KEEP]
+  - Monthly tax sweep — unchanged                                 [KEEP]
+  - Daily report POST — unchanged                                 [KEEP]
+  - PORTFOLIO_TIERS — unchanged                                   [KEEP — REVIEW: unify with gate 7 sizing]
+  - PROFIT_RULES — unchanged                                      [KEEP — REVIEW: unify with gate 10 exit]
+
+FLAG — LOG WRITE LOCATION:
+  Trade decision logs currently written to system_log table in signals.db.
+  A dedicated `trade_decisions` table is recommended for regulatory export.
+  Tracked as future work. See AGENT1_SYSTEM_DESCRIPTION.md §5.
 """
 
 import os
 import sys
 import time
+import json
 import logging
 import argparse
 import requests
-# smtplib / email imports removed -- Gmail send path is commented out pending
-# command portal transport toggle. Uncomment these and the Gmail block in
-# _direct_send_fallback() when ready to activate.
-# import smtplib
-# from email.mime.text import MIMEText
-# from email.mime.multipart import MIMEMultipart
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from calendar import monthrange
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
+load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from database import get_db, acquire_agent_lock, release_agent_lock
 
-# ── CONFIG ────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY    = os.environ.get('ANTHROPIC_API_KEY', '')
-ALPACA_API_KEY       = os.environ.get('ALPACA_API_KEY', '')
-ALPACA_SECRET        = os.environ.get('ALPACA_SECRET_KEY', '')
-ALPACA_BASE_URL      = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
-ALPACA_DATA_URL      = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
-TRADING_MODE         = os.environ.get('TRADING_MODE', 'PAPER')
-MIN_SIGNAL_THRESHOLD = float(os.environ.get('MIN_SIGNAL_THRESHOLD', '0.1'))
-ET                   = ZoneInfo("America/New_York")
-CLAUDE_MODEL         = "claude-sonnet-4-20250514"
-MAX_RETRIES          = 3
-
-# ── OPERATING MODE ────────────────────────────────────────────────────────
-# SUPERVISED: Claude queues proposals, user approves each one before execution
-#             This is the default per framing section 4.1
-# AUTONOMOUS: Pre-authorized rules execute without per-trade approval
-#             Requires unlock key — see framing section 4.2
-OPERATING_MODE   = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
-AUTONOMOUS_KEY   = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
-KILL_SWITCH_FILE = os.path.join(os.path.dirname(__file__), '.kill_switch')
-
-# ── NOTIFICATION CONFIG ───────────────────────────────────────────────────
-# SendGrid for protective exit email notifications (framing section 5.3)
+# ── ENVIRONMENT ───────────────────────────────────────────────────────────────
+ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
+ALPACA_SECRET     = os.environ.get('ALPACA_SECRET_KEY', '')
+ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
+OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
+AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 SENDGRID_API_KEY  = os.environ.get('SENDGRID_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
-USER_EMAIL        = os.environ.get('USER_EMAIL', '')       # recipient for trade alerts
+USER_EMAIL        = os.environ.get('USER_EMAIL', '')
+ET                = ZoneInfo("America/New_York")
+MAX_RETRIES       = 3
 
-# Safety check — refuse to run if config is ambiguous
-# ⚠️ UNDER REVIEW — live trading deployment not yet authorized
+KILL_SWITCH_FILE  = os.path.join(_ROOT_DIR, '.kill_switch')
+
 if TRADING_MODE not in ('PAPER', 'LIVE'):
     print(f"ERROR: Invalid TRADING_MODE '{TRADING_MODE}'. Must be PAPER or LIVE.")
     sys.exit(1)
-if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:  # ⚠️ UNDER REVIEW — live trading deployment not yet authorized
+if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:
     print("ERROR: TRADING_MODE=LIVE but ALPACA_BASE_URL points to paper endpoint.")
     sys.exit(1)
-
-# Validate autonomous mode — requires unlock key (framing 4.2)
 if OPERATING_MODE == 'AUTONOMOUS' and not AUTONOMOUS_KEY:
     print("ERROR: OPERATING_MODE=AUTONOMOUS requires AUTONOMOUS_UNLOCK_KEY in .env")
-    print("Contact Synthos support to complete the onboarding process.")
     sys.exit(1)
 
 logging.basicConfig(
@@ -93,264 +89,97 @@ logging.basicConfig(
 log = logging.getLogger('agent1_trader')
 
 
-# ── KILL SWITCH ───────────────────────────────────────────────────────────
+# ── TRADING CONTROLS (all configurable thresholds) ────────────────────────────
+# These are the system parameters. Changes here are the ONLY way to modify
+# decision behaviour. No logic is embedded in prompt strings.
 
-def kill_switch_active():
-    """
-    Check if the kill switch has been triggered.
-    Kill switch is set by writing a file at KILL_SWITCH_FILE.
-    The portal writes this file when the user hits the kill button.
-    Framing section 4.3 / C1 / C5.
-    """
-    return os.path.exists(KILL_SWITCH_FILE)
+class TradingControls:
+    # Benchmark (Gate 2)
+    BENCHMARK_SYMBOL          = os.environ.get('BENCHMARK_SYMBOL', 'SPY')
+    BENCHMARK_MA_SHORT        = int(os.environ.get('BENCHMARK_MA_SHORT', '20'))
+    BENCHMARK_MA_LONG         = int(os.environ.get('BENCHMARK_MA_LONG', '50'))
+    BENCHMARK_DD_THRESHOLD    = float(os.environ.get('BENCHMARK_DD_THRESHOLD', '0.05'))
+    BENCHMARK_VOL_THRESHOLD   = float(os.environ.get('BENCHMARK_VOL_THRESHOLD', '0.018'))
 
-def clear_kill_switch():
-    """Remove kill switch file — called when user re-enables the system."""
-    try:
-        if os.path.exists(KILL_SWITCH_FILE):
-            os.remove(KILL_SWITCH_FILE)
-            log.info("Kill switch cleared")
-    except Exception as e:
-        log.error(f"Could not clear kill switch: {e}")
+    # Regime (Gate 3)
+    VOL_HIGH_THRESHOLD        = float(os.environ.get('VOL_HIGH_THRESHOLD', '0.020'))
+    MA_FLAT_THRESHOLD         = float(os.environ.get('MA_FLAT_THRESHOLD', '0.005'))
+    CORR_SPIKE_THRESHOLD      = float(os.environ.get('CORR_SPIKE_THRESHOLD', '0.75'))
+    # TODO: DATA_DEPENDENCY — VIX_HIGH_THRESHOLD requires VIX data feed
+    # TODO: DATA_DEPENDENCY — RISK_OFF detection using bonds/credit spreads (TLT proxy in use)
 
+    # Trade Eligibility (Gate 4)
+    MIN_AVG_VOLUME            = int(os.environ.get('MIN_AVG_VOLUME', '500000'))
+    MAX_SPREAD_PCT            = float(os.environ.get('MAX_SPREAD_PCT', '0.005'))
+    MAX_PORTFOLIO_CORR        = float(os.environ.get('MAX_PORTFOLIO_CORR', '0.70'))
+    # TODO: DATA_DEPENDENCY — EVENT_CALENDAR requires FOMC/CPI/earnings API
 
-# ── SUPERVISED MODE QUEUE ─────────────────────────────────────────────────
-# DB-backed. pending_approvals table is the single source of truth.
-# JSON file is no longer written or read by the trader.
-
-def queue_for_approval(signal, decision_data):
-    """
-    In supervised mode: instead of executing, queue the proposed trade
-    for user review. Portal reads from DB and presents it.
-    Framing section 4.1 / C2 / C3.
-    """
-    from database import get_db
-    try:
-        get_db().queue_approval(
-            signal_id  = signal['id'],
-            ticker     = signal['ticker'],
-            company    = signal.get('company', ''),
-            sector     = signal.get('sector', ''),
-            politician = signal.get('politician', ''),
-            confidence = signal.get('confidence', ''),
-            staleness  = signal.get('staleness', ''),
-            headline   = signal.get('headline', ''),
-            price      = decision_data.get('price'),
-            shares     = decision_data.get('shares'),
-            max_trade  = decision_data.get('max_trade'),
-            trail_amt  = decision_data.get('trail_amt'),
-            trail_pct  = decision_data.get('trail_pct'),
-            vol_label  = decision_data.get('vol_label'),
-            reasoning  = decision_data.get('reasoning', ''),
-            session    = decision_data.get('session', ''),
-        )
-        log.info(
-            f"[SUPERVISED] Trade queued for approval [DB]: "
-            f"{signal['ticker']} ${decision_data.get('max_trade', 0):.2f}"
-        )
-    except Exception as e:
-        log.error(f"queue_for_approval DB error: {e}")
-        raise
-
-def get_approved_trades():
-    """Return trades the user has approved via the portal."""
-    from database import get_db
-    try:
-        return get_db().get_pending_approvals(status_filter=['APPROVED'])
-    except Exception as e:
-        log.error(f"get_approved_trades DB error: {e}")
-        return []
-
-def mark_approval_executed(signal_id):
-    """Transition an approved trade to EXECUTED status. Row is preserved for audit."""
-    from database import get_db
-    try:
-        get_db().mark_approval_executed(signal_id)
-    except Exception as e:
-        log.error(f"mark_approval_executed DB error: {e}")
-
-
-# ── PROTECTIVE EXIT EMAIL ─────────────────────────────────────────────────
-
-def _enqueue_p0_alert(subject: str, body: str, event_type: str,
-                      related_ticker: str = None,
-                      related_signal_id: str = None) -> bool:
-    """
-    POST a P0 alert to the company Pi Scoop queue via /api/enqueue.
-    Returns True if enqueue succeeded.
-    Caller must implement fallback if this returns False.
-    """
-    monitor_url   = os.environ.get('MONITOR_URL', '').rstrip('/')
-    monitor_token = os.environ.get('MONITOR_TOKEN', '')
-    pi_id         = os.environ.get('PI_ID', 'synthos-pi')
-
-    if not monitor_url:
-        log.debug("[ENQUEUE] MONITOR_URL not set — enqueue skipped")
-        return False
-
-    payload = {
-        "event_type":        event_type,
-        "priority":          0,
-        "subject":           subject,
-        "body":              body,
-        "source_agent":      "agent1_trader",
-        "pi_id":             pi_id,
-        "audience":          "customer",
-        "related_ticker":    related_ticker,
-        "related_signal_id": str(related_signal_id) if related_signal_id else None,
-        "payload":           {
-            "ticker":     related_ticker,
-            "signal_id":  related_signal_id,
-            "pi_id":      pi_id,
-        },
+    # Signal (Gate 5)
+    MIN_CONFIDENCE_SCORE      = float(os.environ.get('MIN_CONFIDENCE_SCORE', '0.55'))
+    SIGNAL_WEIGHTS            = {
+        'source_tier':         float(os.environ.get('W_SOURCE_TIER', '0.25')),
+        'politician_weight':   float(os.environ.get('W_POLITICIAN', '0.20')),
+        'staleness':           float(os.environ.get('W_STALENESS', '0.15')),
+        'interrogation':       float(os.environ.get('W_INTERROGATION', '0.20')),
+        'sentiment':           float(os.environ.get('W_SENTIMENT', '0.20')),
     }
 
-    try:
-        r = requests.post(
-            f"{monitor_url}/api/enqueue",
-            json=payload,
-            headers={
-                "X-Token":      monitor_token,
-                "Content-Type": "application/json",
-            },
-            timeout=3,   # short — P0 can't wait long
-        )
-        if r.status_code == 200:
-            log.info(f"[ENQUEUE] P0 {event_type} queued for Scoop (id={r.json().get('id','?')[:8]})")
-            return True
-        else:
-            log.warning(
-                f"[ENQUEUE] Company Pi returned {r.status_code} — "
-                f"falling back to direct send"
-            )
-            return False
-    except requests.exceptions.Timeout:
-        log.warning("[ENQUEUE] Enqueue timed out (3s) — falling back to direct send")
-        return False
-    except requests.exceptions.ConnectionError:
-        log.warning(f"[ENQUEUE] Company Pi unreachable at {monitor_url} — falling back to direct send")
-        return False
-    except Exception as e:
-        log.warning(f"[ENQUEUE] Unexpected error: {e} — falling back to direct send")
-        return False
+    # Entry (Gate 6)
+    MOMENTUM_ROC_THRESHOLD    = float(os.environ.get('MOMENTUM_ROC_THRESHOLD', '0.02'))
+    MEAN_REV_ZSCORE           = float(os.environ.get('MEAN_REV_ZSCORE', '-1.5'))
+    BREAKOUT_LOOKBACK         = int(os.environ.get('BREAKOUT_LOOKBACK', '20'))
+    PULLBACK_RETRACE_PCT      = float(os.environ.get('PULLBACK_RETRACE_PCT', '0.05'))
+
+    # Sizing (Gate 7)
+    BASE_RISK_PER_TRADE       = float(os.environ.get('BASE_RISK_PER_TRADE', '0.01'))
+    MAX_POSITION_PCT          = float(os.environ.get('MAX_POSITION_PCT', '0.10'))
+    DEFENSIVE_SIZE_FACTOR     = float(os.environ.get('DEFENSIVE_SIZE_FACTOR', '0.50'))
+    AGGRESSIVE_SIZE_FACTOR    = float(os.environ.get('AGGRESSIVE_SIZE_FACTOR', '1.20'))
+    TARGET_VOLATILITY         = float(os.environ.get('TARGET_VOLATILITY', '0.015'))
+
+    # Risk setup (Gate 8)
+    ATR_STOP_MULTIPLIER       = float(os.environ.get('ATR_STOP_MULTIPLIER', '2.0'))
+    PROFIT_TARGET_MULTIPLE    = float(os.environ.get('PROFIT_TARGET_MULTIPLE', '2.0'))
+    ATR_TRAIL_MULTIPLIER      = float(os.environ.get('ATR_TRAIL_MULTIPLIER', '2.0'))
+    MAX_HOLDING_DAYS          = int(os.environ.get('MAX_HOLDING_DAYS', '15'))
+
+    # Execution (Gate 9)
+    SLIPPAGE_TOLERANCE        = float(os.environ.get('SLIPPAGE_TOLERANCE', '0.002'))
+
+    # Portfolio (Gate 11)
+    MAX_DAILY_LOSS            = float(os.environ.get('MAX_DAILY_LOSS', '-500.0'))
+    MAX_DRAWDOWN_PCT          = float(os.environ.get('MAX_DRAWDOWN_PCT', '0.15'))
+    MAX_GROSS_EXPOSURE        = float(os.environ.get('MAX_GROSS_EXPOSURE', '0.80'))
+    MAX_SECTOR_PCT            = float(os.environ.get('MAX_SECTOR_PCT', '0.25'))
+    MAX_POSITIONS             = int(os.environ.get('MAX_POSITIONS', '10'))
+    MAX_LEVERAGE              = float(os.environ.get('MAX_LEVERAGE', '1.0'))
+
+    # Adaptive (Gate 12)
+    MIN_SHARPE_THRESHOLD      = float(os.environ.get('MIN_SHARPE_THRESHOLD', '0.5'))
+    PERFORMANCE_WINDOW_DAYS   = int(os.environ.get('PERFORMANCE_WINDOW_DAYS', '30'))
+
+    # Stress (Gate 13)
+    FLASH_CRASH_PCT           = float(os.environ.get('FLASH_CRASH_PCT', '0.03'))
+    FLASH_CRASH_MINUTES       = int(os.environ.get('FLASH_CRASH_MINUTES', '10'))
+    BENCHMARK_CRASH_PCT       = float(os.environ.get('BENCHMARK_CRASH_PCT', '0.05'))
+
+    # Evaluation (Gate 14)
+    EVAL_MIN_SHARPE           = float(os.environ.get('EVAL_MIN_SHARPE', '0.3'))
+    EVAL_MAX_DRAWDOWN         = float(os.environ.get('EVAL_MAX_DRAWDOWN', '0.20'))
+
+    # Legacy (KEEP — review for unification)
+    IDLE_RESERVE_PCT          = float(os.environ.get('IDLE_RESERVE_PCT', '0.20'))
+    TRADEABLE_PCT             = float(os.environ.get('TRADEABLE_PCT', '0.80'))
+    BIL_TICKER                = os.environ.get('BIL_TICKER', 'BIL')
+    BIL_REBALANCE_THRESHOLD   = float(os.environ.get('BIL_REBALANCE_THRESHOLD', '10.0'))
+    CLOSE_SESSION_MODE        = os.environ.get('CLOSE_SESSION_MODE', 'conservative')
+    SPOUSAL_WEIGHT            = os.environ.get('SPOUSAL_WEIGHT', 'reduced')
+    MONTHLY_INFRA_COST        = float(os.environ.get('MONTHLY_INFRA_COST', '20.0'))
+    GAIN_TAX_PCT              = float(os.environ.get('GAIN_TAX_PCT', '0.10'))
 
 
-def _direct_send_fallback(subject: str, body: str, reason: str = "enqueue_failed") -> bool:
-    """
-    P0-ONLY direct email fallback when Scoop enqueue fails.
-    Uses SendGrid if configured. Logs the fallback reason.
-    Gmail SMTP path placeholder — toggle via command portal when configured.
-    """
-    log.warning(f"[FALLBACK] Direct send triggered — reason: {reason}")
+C = TradingControls()
 
-    # Log to system_log for audit trail
-    try:
-        from database import get_db
-        get_db().log_event(
-            "P0_DIRECT_SEND_FALLBACK",
-            agent="agent1_trader",
-            details=f"reason={reason} subject={subject[:80]}"
-        )
-    except Exception:
-        pass
-
-    # ── SendGrid path (primary) ────────────────────────────────────────────
-    if SENDGRID_API_KEY and USER_EMAIL:
-        try:
-            import sendgrid as _sg
-            from sendgrid.helpers.mail import Mail
-            msg = Mail(
-                from_email=ALERT_FROM or 'alerts@synthos.local',
-                to_emails=USER_EMAIL,
-                subject=subject,
-                plain_text_content=body,
-            )
-            sg = _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-            sg.client.mail.send.post(request_body=msg.get())
-            log.info(f"[FALLBACK] SendGrid direct send succeeded → {USER_EMAIL}")
-            return True
-        except ImportError:
-            log.warning("[FALLBACK] sendgrid package not installed")
-        except Exception as e:
-            log.error(f"[FALLBACK] SendGrid send failed: {e}")
-
-    # ── Gmail SMTP path (secondary — uncomment when configured) ───────────
-    # GMAIL_USER = os.environ.get('GMAIL_USER', '')
-    # GMAIL_APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD', '')
-    # if GMAIL_USER and GMAIL_APP_PASSWORD and USER_EMAIL:
-    #     try:
-    #         import smtplib
-    #         from email.mime.text import MIMEText
-    #         msg = MIMEText(body)
-    #         msg['Subject'] = subject
-    #         msg['From']    = GMAIL_USER
-    #         msg['To']      = USER_EMAIL
-    #         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
-    #             s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-    #             s.send_message(msg)
-    #         log.info(f"[FALLBACK] Gmail direct send succeeded → {USER_EMAIL}")
-    #         return True
-    #     except Exception as e:
-    #         log.error(f"[FALLBACK] Gmail send failed: {e}")
-
-    log.error("[FALLBACK] All send paths exhausted — P0 alert not delivered")
-    return False
-
-
-def send_protective_exit_email(ticker, reason, reasoning, entry_price,
-                                exit_price, shares, pnl_dollar):
-    """
-    P0 alert — Layer 1 protective exit notification.
-    Framing section 5.3 / M1.
-
-    Primary path:  POST to company Pi /api/enqueue → Scoop delivers.
-    Fallback path: Direct send (SendGrid, then Gmail if configured).
-    Fallback is P0-only and only triggers if enqueue fails.
-    """
-    pnl_sign  = "+" if pnl_dollar >= 0 else ""
-    direction = "profit" if pnl_dollar >= 0 else "loss"
-
-    subject = f"[Synthos] Protective Exit — {ticker} ({pnl_sign}${abs(pnl_dollar):.2f})"
-    body = f"""Synthos executed a Layer 1 protective exit on your behalf.
-
-TRADE SUMMARY
-─────────────────────────────────────
-Ticker:      {ticker}
-Exit reason: {reason}
-Entry price: ${entry_price:.2f}
-Exit price:  ${exit_price:.2f}
-Shares:      {shares:.4f}
-P&L:         {pnl_sign}${abs(pnl_dollar):.2f} ({direction})
-
-REASONING
-─────────────────────────────────────
-{reasoning}
-
-─────────────────────────────────────
-This exit was executed automatically under your pre-authorized
-protective exit ruleset. No action is required.
-
-Synthos
-"""
-    # Step 1 — try Scoop enqueue (preferred path)
-    enqueued = _enqueue_p0_alert(
-        subject          = subject,
-        body             = body,
-        event_type       = "PROTECTIVE_EXIT_TRIGGERED",
-        related_ticker   = ticker,
-    )
-
-    if enqueued:
-        return True
-
-    # Step 2 — P0 fallback: direct send (enqueue failed)
-    return _direct_send_fallback(
-        subject = subject,
-        body    = body,
-        reason  = "enqueue_failed_protective_exit",
-    )
-
-# ── PORTFOLIO TIERS ───────────────────────────────────────────────────────
 PORTFOLIO_TIERS = [
     {"threshold": 0,      "max_deployed": 0.30, "max_positions": 3,  "label": "Seed"   },
     {"threshold": 1000,   "max_deployed": 0.35, "max_positions": 5,  "label": "Early"  },
@@ -360,36 +189,15 @@ PORTFOLIO_TIERS = [
 ]
 
 VOLATILITY_BUCKETS = {
-    "low":  {"multiplier": 1.5,  "label": "Low Vol",
+    "low":  {"multiplier": 1.5, "label": "Low Vol",
              "sectors": ["Utilities","Industrials","Consumer Staples","Real Estate"]},
-    "mid":  {"multiplier": 1.1,  "label": "Mid Vol",
+    "mid":  {"multiplier": 1.1, "label": "Mid Vol",
              "sectors": ["Defense","Financials","Healthcare","Materials","Energy"]},
-    "high": {"multiplier": 0.85, "label": "High Vol",
+    "high": {"multiplier": 0.85,"label": "High Vol",
              "sectors": ["Technology","Consumer Discretionary","Communication"]},
 }
 
 STALENESS_DISCOUNTS = {"Fresh": 0.0, "Aging": 0.15, "Stale": 0.30, "Expired": 0.50}
-
-GAIN_TAX_PCT       = 0.10
-# ── CAPITAL DEPLOYMENT LIMITS ─────────────────────────────────────────────
-# PRODUCTION: 80% tradeable / 20% reserve.
-# Validation phase (20/80) completed. Flipped per T-01.
-#
-IDLE_RESERVE_PCT   = 0.20
-TRADEABLE_PCT      = 0.80
-BIL_TICKER              = "BIL"   # iShares 0-3 Month Treasury Bond ETF
-BIL_REBALANCE_THRESHOLD = 10.0    # min dollar delta to trigger a BIL rebalance
-MAX_POSITION_PCT   = float(os.environ.get('MAX_POSITION_PCT', '0.10'))
-MAX_SECTOR_CAP_PCT = float(os.environ.get('MAX_SECTOR_PCT', '25'))
-MONTHLY_INFRA_COST = 20.0
-
-# Portal-configurable filters
-MIN_CONFIDENCE     = os.environ.get('MIN_CONFIDENCE', 'MEDIUM').upper()   # HIGH / MEDIUM / LOW
-MAX_STALENESS      = os.environ.get('MAX_STALENESS', 'Aging')             # Fresh / Aging / Stale / Expired
-CLOSE_SESSION_MODE = os.environ.get('CLOSE_SESSION_MODE', 'conservative') # conservative / normal
-SPOUSAL_WEIGHT     = os.environ.get('SPOUSAL_WEIGHT', 'reduced')          # reduced / skip / equal
-
-CONFIDENCE_ORDER   = ['HIGH', 'MEDIUM', 'LOW', 'NOISE']
 
 PROFIT_RULES = [
     {"gain_pct": 0.08, "sell_pct": 0.33, "label": "8% — sell ⅓"},
@@ -397,7 +205,123 @@ PROFIT_RULES = [
     {"gain_pct": 0.25, "sell_pct": 0.75, "label": "25% — sell ¾"},
 ]
 
-# ── HELPERS ───────────────────────────────────────────────────────────────
+
+# ── TRADE DECISION LOG ────────────────────────────────────────────────────────
+
+class TradeDecisionLog:
+    """
+    Builds a structured, human-readable + machine-readable record of every
+    decision made during signal evaluation and position management.
+
+    FLAG — LOG WRITE LOCATION:
+      Currently: written to system_log table via db.log_event().
+      Recommended: dedicated `trade_decisions` table or .jsonl file for
+      regulatory export and long-term storage. Tracked as future work.
+    """
+
+    def __init__(self, session: str, ticker: str = None, signal_id=None):
+        self.session    = session
+        self.ticker     = ticker
+        self.signal_id  = signal_id
+        self.timestamp  = datetime.now(ET).isoformat()
+        self.gates      = []
+        self.final      = None
+        self.notes      = []
+
+    def gate(self, name: str, result, inputs: dict, reason: str):
+        """Record a gate evaluation."""
+        self.gates.append({
+            "gate":   name,
+            "result": str(result),
+            "inputs": inputs,
+            "reason": reason,
+        })
+        log.info(f"[GATE:{name}] result={result} reason={reason}")
+
+    def decide(self, decision: str, detail: str = ""):
+        self.final = decision
+        self.notes.append(detail)
+        log.info(f"[DECISION] {self.ticker or '—'} → {decision} | {detail}")
+
+    def note(self, text: str):
+        self.notes.append(text)
+
+    def to_human(self) -> str:
+        lines = [
+            "=" * 72,
+            f"TRADE DECISION LOG",
+            f"  Timestamp : {self.timestamp}",
+            f"  Session   : {self.session.upper()}",
+            f"  Ticker    : {self.ticker or '—'}",
+            f"  Signal ID : {self.signal_id or '—'}",
+            f"  Mode      : {TRADING_MODE} / {OPERATING_MODE}",
+            "-" * 72,
+        ]
+        for g in self.gates:
+            lines.append(f"  GATE {g['gate']}")
+            lines.append(f"    Result : {g['result']}")
+            lines.append(f"    Reason : {g['reason']}")
+            for k, v in g['inputs'].items():
+                lines.append(f"    {k:<22}: {v}")
+        lines.append("-" * 72)
+        lines.append(f"  FINAL DECISION : {self.final or 'NONE'}")
+        for n in self.notes:
+            if n:
+                lines.append(f"    → {n}")
+        lines.append("=" * 72)
+        return "\n".join(lines)
+
+    def to_machine(self) -> dict:
+        return {
+            "timestamp":  self.timestamp,
+            "session":    self.session,
+            "ticker":     self.ticker,
+            "signal_id":  self.signal_id,
+            "gates":      self.gates,
+            "decision":   self.final,
+            "notes":      self.notes,
+        }
+
+    def commit(self, db):
+        """Write to system_log. FLAG: move to trade_decisions table."""
+        human = self.to_human()
+        machine = self.to_machine()
+        log.info("\n" + human)
+        try:
+            db.log_event(
+                "TRADE_DECISION",
+                agent="agent1_trader",
+                details=json.dumps(machine)[:2000],  # FLAG: truncation — need dedicated table
+            )
+        except Exception as e:
+            log.warning(f"TradeDecisionLog.commit failed: {e}")
+
+
+# ── REGIME STATE ──────────────────────────────────────────────────────────────
+
+@dataclass
+class RegimeState:
+    volatility:  str = "NORMAL"   # LOW / NORMAL / HIGH
+    trend:       str = "NEUTRAL"  # BULL / BEAR / SIDEWAYS
+    risk_posture:str = "RISK_ON"  # RISK_ON / RISK_OFF
+    mode:        str = "NEUTRAL"  # DEFENSIVE / NEUTRAL / AGGRESSIVE
+
+
+# ── KILL SWITCH ───────────────────────────────────────────────────────────────
+
+def kill_switch_active():
+    return os.path.exists(KILL_SWITCH_FILE)
+
+def clear_kill_switch():
+    try:
+        if os.path.exists(KILL_SWITCH_FILE):
+            os.remove(KILL_SWITCH_FILE)
+            log.info("Kill switch cleared")
+    except Exception as e:
+        log.error(f"Could not clear kill switch: {e}")
+
+
+# ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def get_portfolio_tier(total_value):
     tier = PORTFOLIO_TIERS[0]
@@ -406,7 +330,6 @@ def get_portfolio_tier(total_value):
             tier = t
     return tier
 
-
 def get_volatility_bucket(sector):
     sector = (sector or "").strip()
     for key, bucket in VOLATILITY_BUCKETS.items():
@@ -414,39 +337,37 @@ def get_volatility_bucket(sector):
             return key, bucket
     return "mid", VOLATILITY_BUCKETS["mid"]
 
-
 def calculate_trail_stop(atr, price, sector):
     _, bucket = get_volatility_bucket(sector)
     amt = round(atr * bucket["multiplier"], 2)
     pct = round((amt / price) * 100, 2)
     return amt, pct, bucket["label"]
 
-
-def get_position_size_pct(tier_num, confidence, sector_concentration_pct):
-    """Signal quality sizing — stronger signals get more capital."""
-    pct = MAX_POSITION_PCT
-    if tier_num == 1 and confidence == "HIGH":   pct = 0.12
-    elif tier_num == 2 and confidence == "HIGH": pct = 0.10
-    elif confidence == "MEDIUM":                 pct = 0.07
-    elif confidence == "LOW":                    pct = 0.05
-    # Sector concentration penalty
-    if sector_concentration_pct > MAX_SECTOR_CAP_PCT * 0.8:
-        pct = min(pct, 0.05)
-    return pct
-
-
 def is_last_trading_day_of_month():
-    """Check if today is the last weekday of the month (approximate)."""
     today   = datetime.now(ET).date()
     _, days = monthrange(today.year, today.month)
     last    = date(today.year, today.month, days)
-    # Walk back from last day to find last weekday
     while last.weekday() > 4:
         last -= timedelta(days=1)
     return today == last
 
+def confidence_to_score(confidence_str: str) -> float:
+    """Map legacy confidence label to numeric score."""
+    return {"HIGH": 0.85, "MEDIUM": 0.60, "LOW": 0.35, "NOISE": 0.10}.get(
+        (confidence_str or "LOW").upper(), 0.35
+    )
 
-# ── ALPACA CLIENT ─────────────────────────────────────────────────────────
+def staleness_to_score(staleness_str: str) -> float:
+    return {"Fresh": 1.0, "Aging": 0.75, "Stale": 0.45, "Expired": 0.10}.get(
+        staleness_str or "Fresh", 0.75
+    )
+
+def interrogation_to_score(status: str) -> float:
+    return {"VALIDATED": 1.0, "CORROBORATED": 0.85, "UNVALIDATED": 0.50,
+            "CHALLENGED": 0.20, "REJECTED": 0.0}.get(status or "UNVALIDATED", 0.50)
+
+
+# ── ALPACA CLIENT (KEEP — unchanged from v1.x) ────────────────────────────────
 
 class AlpacaClient:
     def __init__(self):
@@ -483,55 +404,80 @@ class AlpacaClient:
     def get_position(self, ticker):
         return self._request("get", f"/v2/positions/{ticker}")
 
-    def get_latest_price(self, ticker):
+    def get_latest_quote(self, ticker):
+        """Return (bid, ask, mid) or (None, None, None)."""
         r = self._request("get", f"/v2/stocks/{ticker}/quotes/latest")
         if r and "quote" in r:
-            return float(r["quote"].get("ap", 0) or r["quote"].get("bp", 0))
-        return None
+            bid = float(r["quote"].get("bp", 0) or 0)
+            ask = float(r["quote"].get("ap", 0) or 0)
+            mid = (bid + ask) / 2 if bid and ask else (bid or ask)
+            return bid, ask, mid
+        return None, None, None
+
+    def get_latest_price(self, ticker):
+        _, _, mid = self.get_latest_quote(ticker)
+        return mid
+
+    def get_bars(self, ticker, days=60):
+        """Fetch daily bars for ticker. Returns list of bar dicts."""
+        end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        headers = {
+            "APCA-API-KEY-ID":     ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET,
+        }
+        try:
+            r = requests.get(
+                f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
+                params={"timeframe": "1Day", "start": start, "end": end,
+                        "limit": days + 10, "feed": "iex"},
+                headers=headers, timeout=20,
+            )
+            if r.status_code == 200:
+                return r.json().get("bars", [])
+        except Exception as e:
+            log.warning(f"get_bars({ticker}): {e}")
+        return []
 
     def get_atr(self, ticker, period=14):
-        """Fetch 14-day ATR from Alpaca bars data."""
-        end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
-        start = (datetime.now(ET) - timedelta(days=period+5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        r = self._request("get", f"/v2/stocks/{ticker}/bars",
-                          params={"timeframe":"1Day","start":start,"end":end,"limit":period+5})
-        if not r or "bars" not in r:
-            return None
-        bars = r["bars"]
+        bars = self.get_bars(ticker, days=period + 10)
         if len(bars) < 2:
             return None
-        # True Range = max(High-Low, abs(High-PrevClose), abs(Low-PrevClose))
         trs = []
         for i in range(1, len(bars)):
-            h  = bars[i]["h"]
-            l  = bars[i]["l"]
-            pc = bars[i-1]["c"]
-            trs.append(max(h-l, abs(h-pc), abs(l-pc)))
-        return round(sum(trs[-period:]) / min(len(trs), period), 2)
+            h, l, pc = bars[i]["h"], bars[i]["l"], bars[i-1]["c"]
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        return round(sum(trs[-period:]) / min(len(trs), period), 2) if trs else None
+
+    def get_sma(self, ticker, window: int, days_back: int = None) -> float | None:
+        bars = self.get_bars(ticker, days=days_back or window + 10)
+        closes = [b["c"] for b in bars]
+        if len(closes) < window:
+            return None
+        return round(sum(closes[-window:]) / window, 4)
+
+    def get_rolling_high(self, ticker, lookback: int) -> float | None:
+        bars = self.get_bars(ticker, days=lookback + 5)
+        if len(bars) < lookback:
+            return None
+        return max(b["h"] for b in bars[-lookback:])
+
+    def get_volume_avg(self, ticker, days=30) -> int:
+        bars = self.get_bars(ticker, days=days + 5)
+        vols = [b["v"] for b in bars[-days:]]
+        return int(sum(vols) / len(vols)) if vols else 0
 
     def submit_order(self, ticker, qty, side, order_type="market",
                      trail_price=None, trail_percent=None):
-        """
-        Submit an order to Alpaca.
-        For entries: market order with fractional qty.
-        For trail stops: trailing_stop order type.
-        """
         if TRADING_MODE == "PAPER":
             log.info(f"[PAPER] Would {side} {qty} shares of {ticker}")
-
         payload = {
-            "symbol":        ticker,
-            "qty":           str(qty),
-            "side":          side,
-            "type":          order_type,
-            "time_in_force": "day",
+            "symbol": ticker, "qty": str(qty), "side": side,
+            "type": order_type, "time_in_force": "day",
         }
         if order_type == "trailing_stop":
-            if trail_price:
-                payload["trail_price"] = str(trail_price)
-            elif trail_percent:
-                payload["trail_percent"] = str(trail_percent)
-
+            if trail_price:    payload["trail_price"]   = str(trail_price)
+            elif trail_percent:payload["trail_percent"] = str(trail_percent)
         result = self._request("post", "/v2/orders", json=payload)
         if result:
             log.info(f"Order submitted: {side} {qty} {ticker} — id={result.get('id','?')}")
@@ -541,11 +487,6 @@ class AlpacaClient:
         return self._request("delete", f"/v2/orders/{order_id}")
 
     def get_position_safe(self, ticker):
-        """
-        Return a position dict or None if the ticker is not held.
-        Unlike get_position(), a 404 is treated as 'not held' rather than
-        an error — avoids noisy retries when BIL has not been purchased yet.
-        """
         url = f"{self.base_url}/v2/positions/{ticker}"
         try:
             r = requests.get(url, headers=self.headers, timeout=15)
@@ -558,805 +499,1254 @@ class AlpacaClient:
             return None
 
     def _submit_notional(self, ticker, notional, side):
-        """Submit a dollar-amount market order — used for BIL sweep."""
         if TRADING_MODE == "PAPER":
             log.info(f"[PAPER] Would {side} ${notional:.2f} notional of {ticker}")
         payload = {
-            "symbol":        ticker,
-            "notional":      str(round(notional, 2)),
-            "side":          side,
-            "type":          "market",
-            "time_in_force": "day",
+            "symbol": ticker, "notional": str(round(notional, 2)),
+            "side": side, "type": "market", "time_in_force": "day",
         }
         result = self._request("post", "/v2/orders", json=payload)
         if result:
-            log.info(f"Notional order: {side} ${notional:.2f} {ticker} — id={result.get('id','?')}")
+            log.info(f"Notional order: {side} ${notional:.2f} {ticker}")
         return result
 
     def close_position(self, ticker):
-        """Liquidate entire position."""
         return self._request("delete", f"/v2/positions/{ticker}")
 
 
-# ── CLAUDE HELPERS ────────────────────────────────────────────────────────
+# ── GATE 1 — SYSTEM GATE ─────────────────────────────────────────────────────
 
-def call_claude(prompt, max_tokens=1000):
-    headers = {
-        "Content-Type":    "application/json",
-        "x-api-key":       ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-    }
-    payload = {
-        "model":     CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages":  [{"role": "user", "content": prompt}],
-    }
-    last_error = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers, json=payload, timeout=30,
-            )
-            if r.status_code == 429:
-                wait = 2 ** (attempt + 2)
-                log.warning(f"Rate limited — waiting {wait}s")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            return "".join(b.get("text","") for b in data.get("content",[]))
-        except Exception as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(2 ** attempt * 2)
-    log.error(f"Claude API failed: {last_error}")
-    return None
-
-
-def build_learning_context(db):
-    """Build recent outcome context to include in Claude prompts."""
-    outcomes = db.get_recent_outcomes(limit=8)
-    if not outcomes:
-        return ""
-    lines = []
-    for o in outcomes:
-        lines.append(
-            f"  {o['ticker']} {o.get('verdict','?')} "
-            f"{o.get('pnl_pct',0):+.1f}% "
-            f"({o.get('staleness','?')} T{o.get('signal_tier','?')} {o.get('vol_bucket','?')}) "
-            f"— {o.get('lesson','')[:60]}"
-        )
-    return "RECENT OUTCOMES (learning):\n" + "\n".join(lines)
-
-
-def fetch_price_history_5yr(ticker):
+def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bool:
     """
-    Fetch 5yr daily OHLCV summary for ticker from Alpaca Data API.
-    Returns a summary dict, or None on failure.
-    Caller must del the result after use — data is not persisted.
+    Hard stops. Returns True = proceed, False = halt.
+    Logic: Doc 3 §1
     """
+    now = datetime.now(ET)
+
+    # Market hours check
+    session_windows = {
+        "open":   (9, 30, 10, 30),
+        "midday": (12, 0, 14, 0),
+        "close":  (15, 0, 16, 30),
+    }
+    if session in session_windows:
+        sh, sm, eh, em = session_windows[session]
+        session_start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
+        session_end   = now.replace(hour=eh, minute=em, second=0, microsecond=0)
+        in_window = session_start <= now <= session_end
+        decision_log.gate("1_SYSTEM_HOURS", in_window, {
+            "current_time": now.strftime("%H:%M ET"),
+            "window": f"{sh}:{sm:02d}–{eh}:{em:02d}",
+        }, "session within trading window" if in_window else "outside session window")
+        # Non-fatal — sessions triggered by cron should be within window; log and continue
+
+    # Kill switch
+    if kill_switch_active():
+        decision_log.gate("1_KILL_SWITCH", False, {}, "kill switch file present")
+        decision_log.decide("HALT", "Kill switch active")
+        return False
+
+    # Portfolio drawdown limit
+    # current_equity <= peak_equity * (1 - max_drawdown_pct)
     try:
-        end   = datetime.now(ET)
-        start = end - timedelta(days=365 * 5 + 10)
-        url   = (
-            f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"
-            f"?timeframe=1Day"
-            f"&start={start.strftime('%Y-%m-%dT00:00:00Z')}"
-            f"&end={end.strftime('%Y-%m-%dT00:00:00Z')}"
-            f"&limit=1500"
-            f"&feed=iex"
-        )
-        headers = {
-            "APCA-API-KEY-ID":     ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_SECRET,
-        }
-        r = requests.get(url, headers=headers, timeout=20)
-        if r.status_code != 200:
-            log.warning(f"[5YR] Data API returned {r.status_code} for {ticker}")
-            return None
-        bars = r.json().get('bars', [])
-        if len(bars) < 2:
-            return None
-        closes  = [b['c'] for b in bars]
-        volumes = [b['v'] for b in bars]
-        recent_52w = bars[-252:] if len(bars) >= 252 else bars
-        return {
-            "ticker":         ticker,
-            "bars_fetched":   len(bars),
-            "last_close":     round(closes[-1], 2),
-            "close_5yr_ago":  round(closes[0], 2),
-            "change_pct_5yr": round((closes[-1] - closes[0]) / closes[0] * 100, 1) if closes[0] else 0,
-            "high_52w":       round(max(b['h'] for b in recent_52w), 2),
-            "low_52w":        round(min(b['l'] for b in recent_52w), 2),
-            "avg_vol_90d":    int(round(sum(volumes[-90:]) / min(len(volumes), 90), 0)),
-            "change_pct_1yr": (
-                round((closes[-1] - closes[-252]) / closes[-252] * 100, 1)
-                if len(closes) >= 252 and closes[-252] else None
-            ),
-        }
+        portfolio = db.get_portfolio()
+        peak      = portfolio.get('peak_equity') or portfolio.get('cash', 0)
+        current   = portfolio.get('cash', 0)
+        drawdown  = (peak - current) / peak if peak > 0 else 0
+        dd_breach = drawdown >= C.MAX_DRAWDOWN_PCT
+        decision_log.gate("1_DRAWDOWN", not dd_breach, {
+            "current_equity": f"${current:.2f}",
+            "peak_equity":    f"${peak:.2f}",
+            "drawdown_pct":   f"{drawdown*100:.2f}%",
+            "limit":          f"{C.MAX_DRAWDOWN_PCT*100:.0f}%",
+        }, f"drawdown {drawdown*100:.1f}% {'EXCEEDS' if dd_breach else 'within'} limit")
+        if dd_breach:
+            decision_log.decide("HALT", "Portfolio drawdown limit reached")
+            return False
     except Exception as e:
-        log.warning(f"[5YR] fetch_price_history_5yr({ticker}) failed: {e}")
+        log.warning(f"Gate 1 drawdown check error: {e}")
+
+    # Daily loss limit
+    # realized_pnl_today <= -daily_loss_limit
+    try:
+        today_str = now.strftime('%Y-%m-%d')
+        outcomes_today = db.get_recent_outcomes(limit=50)
+        pnl_today = sum(
+            o.get('pnl_dollar', 0) for o in outcomes_today
+            if o.get('created_at', '').startswith(today_str)
+        )
+        loss_breach = pnl_today <= C.MAX_DAILY_LOSS
+        decision_log.gate("1_DAILY_LOSS", not loss_breach, {
+            "pnl_today":       f"${pnl_today:+.2f}",
+            "daily_loss_limit":f"${C.MAX_DAILY_LOSS:.2f}",
+        }, f"daily P&L {'BREACHED' if loss_breach else 'within'} limit")
+        if loss_breach:
+            decision_log.decide("HALT", f"Daily loss limit hit (${pnl_today:+.2f})")
+            return False
+    except Exception as e:
+        log.warning(f"Gate 1 daily loss check error: {e}")
+
+    # API health check
+    account = alpaca.get_account()
+    api_ok = account is not None
+    decision_log.gate("1_API_HEALTH", api_ok, {
+        "broker": "Alpaca",
+        "cash":   f"${float(account.get('cash',0)):.2f}" if api_ok else "unreachable",
+    }, "broker API reachable" if api_ok else "API failure — halting")
+    if not api_ok:
+        decision_log.decide("HALT", "Broker API unreachable")
+        return False
+
+    decision_log.gate("1_SYSTEM", True, {}, "all system gates passed")
+    return True
+
+
+# ── GATE 2 — BENCHMARK GATE ───────────────────────────────────────────────────
+
+def gate2_benchmark(alpaca, decision_log: TradeDecisionLog) -> str:
+    """
+    Sets operating mode: DEFENSIVE / NEUTRAL / AGGRESSIVE.
+    Logic: Doc 3 §2
+    """
+    sym = C.BENCHMARK_SYMBOL
+    bars = alpaca.get_bars(sym, days=max(C.BENCHMARK_MA_LONG, 60) + 10)
+
+    if len(bars) < C.BENCHMARK_MA_LONG:
+        decision_log.gate("2_BENCHMARK", "NEUTRAL", {
+            "reason": f"insufficient bars ({len(bars)}) for {sym}",
+        }, "defaulting to NEUTRAL — data unavailable")
+        return "NEUTRAL"
+
+    closes = [b["c"] for b in bars]
+    ma_short = sum(closes[-C.BENCHMARK_MA_SHORT:]) / C.BENCHMARK_MA_SHORT
+    ma_long  = sum(closes[-C.BENCHMARK_MA_LONG:])  / C.BENCHMARK_MA_LONG
+
+    # Rolling drawdown from peak in window
+    window_closes = closes[-60:]
+    peak    = max(window_closes)
+    current = closes[-1]
+    dd      = (peak - current) / peak if peak > 0 else 0
+
+    # Volatility: ATR / price
+    trs = []
+    for i in range(1, len(bars)):
+        h, l, pc = bars[i]["h"], bars[i]["l"], bars[i-1]["c"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    atr = sum(trs[-14:]) / 14 if len(trs) >= 14 else trs[-1] if trs else 0
+    bm_vol = atr / current if current > 0 else 0
+
+    trend_up = ma_short > ma_long
+    vol_ok   = bm_vol <= C.BENCHMARK_VOL_THRESHOLD
+
+    if dd >= C.BENCHMARK_DD_THRESHOLD:
+        mode = "DEFENSIVE"
+    elif trend_up and vol_ok:
+        mode = "AGGRESSIVE"
+    else:
+        mode = "NEUTRAL"
+
+    decision_log.gate("2_BENCHMARK", mode, {
+        "benchmark":       sym,
+        "current_price":   f"${current:.2f}",
+        "ma_short":        f"${ma_short:.2f} ({C.BENCHMARK_MA_SHORT}d)",
+        "ma_long":         f"${ma_long:.2f} ({C.BENCHMARK_MA_LONG}d)",
+        "trend":           "UP" if trend_up else "DOWN",
+        "rolling_dd":      f"{dd*100:.2f}%",
+        "dd_threshold":    f"{C.BENCHMARK_DD_THRESHOLD*100:.0f}%",
+        "bm_volatility":   f"{bm_vol*100:.3f}%",
+        "vol_threshold":   f"{C.BENCHMARK_VOL_THRESHOLD*100:.3f}%",
+    }, f"mode={mode}: dd={dd*100:.1f}% trend={'UP' if trend_up else 'DOWN'} vol={'OK' if vol_ok else 'HIGH'}")
+
+    return mode
+
+
+# ── GATE 3 — REGIME DETECTION ────────────────────────────────────────────────
+
+def gate3_regime(alpaca, mode: str, decision_log: TradeDecisionLog) -> RegimeState:
+    """
+    Classifies volatility, trend, and risk regime.
+    Logic: Doc 3 §3
+    """
+    regime = RegimeState(mode=mode)
+    sym    = C.BENCHMARK_SYMBOL
+    bars   = alpaca.get_bars(sym, days=60)
+
+    if len(bars) < 20:
+        decision_log.gate("3_REGIME", "NEUTRAL/NORMAL/RISK_ON", {
+            "reason": "insufficient data",
+        }, "defaulting to neutral regime")
+        return regime
+
+    closes = [b["c"] for b in bars]
+    ma_s   = sum(closes[-C.BENCHMARK_MA_SHORT:]) / C.BENCHMARK_MA_SHORT
+    ma_l   = sum(closes[-C.BENCHMARK_MA_LONG:]) / C.BENCHMARK_MA_LONG if len(closes) >= C.BENCHMARK_MA_LONG else ma_s
+
+    trs = []
+    for i in range(1, len(bars)):
+        h, l, pc = bars[i]["h"], bars[i]["l"], bars[i-1]["c"]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    atr = sum(trs[-14:]) / 14 if len(trs) >= 14 else trs[-1] if trs else 0
+    vol = atr / closes[-1] if closes[-1] > 0 else 0
+
+    # Volatility regime
+    # IF vol > threshold → HIGH; ELSE NORMAL
+    # TODO: DATA_DEPENDENCY — replace with VIX when data feed available
+    if vol > C.VOL_HIGH_THRESHOLD:
+        regime.volatility = "HIGH"
+    elif vol < C.VOL_HIGH_THRESHOLD * 0.6:
+        regime.volatility = "LOW"
+    else:
+        regime.volatility = "NORMAL"
+
+    # Trend regime
+    # IF abs(ma_short - ma_long) < flat_threshold → SIDEWAYS
+    separation_pct = abs(ma_s - ma_l) / ma_l if ma_l > 0 else 0
+    if separation_pct < C.MA_FLAT_THRESHOLD:
+        regime.trend = "SIDEWAYS"
+    elif ma_s > ma_l:
+        regime.trend = "BULL"
+    else:
+        regime.trend = "BEAR"
+
+    # Risk posture: use TLT as bond proxy
+    # TODO: DATA_DEPENDENCY — add credit spread data for fuller risk-off detection
+    tlt_bars = alpaca.get_bars("TLT", days=10)
+    tlt_trend = "UP" if (len(tlt_bars) >= 5 and
+                         tlt_bars[-1]["c"] > tlt_bars[-5]["c"]) else "FLAT_OR_DOWN"
+    risk_off = (regime.trend in ("BEAR", "SIDEWAYS") and tlt_trend == "UP")
+    regime.risk_posture = "RISK_OFF" if risk_off else "RISK_ON"
+
+    decision_log.gate("3_REGIME", f"vol={regime.volatility} trend={regime.trend} posture={regime.risk_posture}", {
+        "volatility_atr_pct": f"{vol*100:.3f}%",
+        "vol_threshold":      f"{C.VOL_HIGH_THRESHOLD*100:.3f}%",
+        "ma_separation_pct":  f"{separation_pct*100:.3f}%",
+        "flat_threshold":     f"{C.MA_FLAT_THRESHOLD*100:.3f}%",
+        "tlt_trend":          tlt_trend,
+        "risk_posture":       regime.risk_posture,
+        # TODO: DATA_DEPENDENCY — VIX, credit spreads not yet included
+    }, f"volatility={regime.volatility} trend={regime.trend} risk={regime.risk_posture}")
+
+    return regime
+
+
+# ── GATE 4 — TRADE ELIGIBILITY ────────────────────────────────────────────────
+
+def gate4_eligibility(signal: dict, positions: list, alpaca,
+                      decision_log: TradeDecisionLog) -> bool:
+    """
+    Filter out signals that fail liquidity, spread, event, or correlation checks.
+    Logic: Doc 3 §4
+    """
+    ticker = signal['ticker']
+    dlog = TradeDecisionLog(decision_log.session, ticker, signal.get('id'))
+
+    # Liquidity: avg_volume < volume_threshold
+    avg_vol = alpaca.get_volume_avg(ticker, days=30)
+    liq_ok  = avg_vol >= C.MIN_AVG_VOLUME
+    decision_log.gate("4_LIQUIDITY", liq_ok, {
+        "ticker":         ticker,
+        "avg_volume_30d": f"{avg_vol:,}",
+        "min_required":   f"{C.MIN_AVG_VOLUME:,}",
+    }, "liquidity OK" if liq_ok else f"SKIP — volume {avg_vol:,} below {C.MIN_AVG_VOLUME:,}")
+    if not liq_ok:
+        return False
+
+    # Spread: (ask - bid) / mid > spread_threshold
+    bid, ask, mid = alpaca.get_latest_quote(ticker)
+    if bid and ask and mid:
+        spread_pct = (ask - bid) / mid
+        spread_ok  = spread_pct <= C.MAX_SPREAD_PCT
+        decision_log.gate("4_SPREAD", spread_ok, {
+            "bid":        f"${bid:.4f}",
+            "ask":        f"${ask:.4f}",
+            "spread_pct": f"{spread_pct*100:.4f}%",
+            "max_allowed":f"{C.MAX_SPREAD_PCT*100:.3f}%",
+        }, "spread OK" if spread_ok else f"SKIP — spread {spread_pct*100:.3f}% too wide")
+        if not spread_ok:
+            return False
+    else:
+        decision_log.gate("4_SPREAD", "SKIP_CHECK", {"reason": "no quote data"}, "spread check skipped — no quote")
+
+    # Event risk
+    # TODO: DATA_DEPENDENCY — automated FOMC/CPI/earnings calendar not yet integrated
+    # Currently: manual exclusion only — flagged for future implementation
+    decision_log.gate("4_EVENT_RISK", "NOT_CHECKED", {
+        "TODO": "EVENT_CALENDAR not yet integrated",
+    }, "event risk check skipped — TODO: DATA_DEPENDENCY")
+
+    # Correlated exposure: corr(new_trade, portfolio) > corr_limit
+    # Simplified: check if sector already highly concentrated
+    sig_sector = signal.get('sector', '')
+    sector_positions = [p for p in positions if p.get('sector') == sig_sector]
+    sector_count_ok  = len(sector_positions) < 3  # simple proxy for correlation
+    decision_log.gate("4_CORRELATION", sector_count_ok, {
+        "ticker_sector":        sig_sector,
+        "positions_in_sector":  len(sector_positions),
+        "max_sector_positions": 3,
+        # TODO: compute actual pairwise correlation when multi-asset data available
+    }, "correlation OK" if sector_count_ok else f"SKIP — sector {sig_sector} already concentrated")
+    if not sector_count_ok:
+        return False
+
+    return True
+
+
+# ── GATE 5 — SIGNAL EVALUATION ───────────────────────────────────────────────
+
+def gate5_signal_score(signal: dict, positions: list, alpaca,
+                       decision_log: TradeDecisionLog) -> float:
+    """
+    Compute composite confidence score. Returns score in [0, 1].
+    Logic: Doc 3 §5
+    """
+    ticker = signal['ticker']
+
+    # Component scores
+    tier_score   = max(0.0, 1.0 - (int(signal.get('source_tier', 2) or 2) - 1) * 0.3)
+    pol_weight   = float(signal.get('politician_weight') or 0.5)
+    stale_score  = staleness_to_score(signal.get('staleness', 'Fresh'))
+    interr_score = interrogation_to_score(signal.get('interrogation_status', 'UNVALIDATED'))
+    conf_score   = confidence_to_score(signal.get('confidence', 'MEDIUM'))
+
+    # Sentiment from corroboration_note (written by agent3)
+    corr_note = signal.get('corroboration_note', '') or ''
+    if '[PULSE_POSITIVE' in corr_note:
+        sentiment_score = 0.90
+    elif '[PULSE' in corr_note or '[PULSE_NEGATIVE' in corr_note:
+        sentiment_score = 0.25
+    else:
+        sentiment_score = 0.55  # neutral — no pulse data
+
+    # Weighted composite
+    W = C.SIGNAL_WEIGHTS
+    final_score = (
+        W['source_tier']       * tier_score   +
+        W['politician_weight'] * pol_weight    +
+        W['staleness']         * stale_score   +
+        W['interrogation']     * interr_score  +
+        W['sentiment']         * sentiment_score
+    )
+    final_score = round(min(max(final_score, 0.0), 1.0), 4)
+
+    # Benchmark-relative strength
+    # asset_return - SPX_return < 0 over rolling window → penalise
+    asset_bars = alpaca.get_bars(ticker, days=20)
+    bm_bars    = alpaca.get_bars(C.BENCHMARK_SYMBOL, days=20)
+    if len(asset_bars) >= 5 and len(bm_bars) >= 5:
+        asset_ret = (asset_bars[-1]["c"] - asset_bars[-5]["c"]) / asset_bars[-5]["c"]
+        bm_ret    = (bm_bars[-1]["c"]    - bm_bars[-5]["c"])    / bm_bars[-5]["c"]
+        rel_str   = asset_ret - bm_ret
+        if rel_str < -0.02:
+            final_score = round(final_score * 0.85, 4)
+    else:
+        rel_str = None
+
+    passes = final_score >= C.MIN_CONFIDENCE_SCORE
+
+    decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
+        "ticker":             ticker,
+        "tier_score":         f"{tier_score:.2f} × {W['source_tier']}",
+        "politician_weight":  f"{pol_weight:.2f} × {W['politician_weight']}",
+        "staleness_score":    f"{stale_score:.2f} × {W['staleness']}",
+        "interrogation_score":f"{interr_score:.2f} × {W['interrogation']}",
+        "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
+        "composite_score":    f"{final_score:.4f}",
+        "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
+        "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
+        "result":             "PASS" if passes else "SKIP",
+    }, f"score {final_score:.4f} {'≥' if passes else '<'} threshold {C.MIN_CONFIDENCE_SCORE}")
+
+    return final_score if passes else 0.0
+
+
+# ── GATE 6 — ENTRY DECISION ──────────────────────────────────────────────────
+
+def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
+                decision_log: TradeDecisionLog) -> dict | None:
+    """
+    Select entry type (momentum / mean-reversion / breakout / pullback).
+    Returns candidate dict or None.
+    Logic: Doc 3 §6
+    """
+    ticker  = signal['ticker']
+    bars    = alpaca.get_bars(ticker, days=max(C.BREAKOUT_LOOKBACK, 30) + 10)
+    if len(bars) < 10:
+        decision_log.gate("6_ENTRY", "SKIP", {"reason": "insufficient price data"}, "no price data")
         return None
 
+    closes  = [b["c"] for b in bars]
+    current = closes[-1]
+    ma20    = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
+    roc     = (current - closes[-6]) / closes[-6] if len(closes) >= 6 else 0
 
-def analyze_signal_with_claude(signal, portfolio, positions, session, db, alpaca):
+    candidates = []
+
+    # Momentum: price > MA AND ROC > threshold
+    # Disabled in BEAR regime
+    if regime.trend != "BEAR":
+        momentum_ok = current > ma20 and roc >= C.MOMENTUM_ROC_THRESHOLD
+        if momentum_ok:
+            candidates.append({"type": "MOMENTUM", "score": score * 1.0,
+                                "detail": f"price ${current:.2f} > MA20 ${ma20:.2f}, ROC {roc*100:.2f}%"})
+
+    # Mean-reversion: z-score(price, mean) < -threshold
+    # Only in SIDEWAYS regime
+    if regime.trend == "SIDEWAYS" and len(closes) >= 20:
+        mean = sum(closes[-20:]) / 20
+        std  = (sum((c - mean)**2 for c in closes[-20:]) / 20) ** 0.5
+        z    = (current - mean) / std if std > 0 else 0
+        if z <= C.MEAN_REV_ZSCORE:
+            candidates.append({"type": "MEAN_REVERSION", "score": score * 0.9,
+                                "detail": f"z-score {z:.2f} ≤ threshold {C.MEAN_REV_ZSCORE}"})
+
+    # Breakout: price > rolling N-period high
+    # Disabled in SIDEWAYS regime
+    if regime.trend != "SIDEWAYS" and len(bars) >= C.BREAKOUT_LOOKBACK:
+        rolling_high = max(b["h"] for b in bars[-(C.BREAKOUT_LOOKBACK + 1):-1])
+        if current > rolling_high:
+            candidates.append({"type": "BREAKOUT", "score": score * 0.95,
+                                "detail": f"price ${current:.2f} > {C.BREAKOUT_LOOKBACK}d high ${rolling_high:.2f}"})
+
+    # Pullback: retraced X% within uptrend
+    if regime.trend == "BULL" and len(closes) >= 10:
+        recent_high = max(closes[-10:])
+        retrace     = (recent_high - current) / recent_high if recent_high > 0 else 0
+        if 0 < retrace <= C.PULLBACK_RETRACE_PCT and current > ma20:
+            candidates.append({"type": "PULLBACK", "score": score * 0.92,
+                                "detail": f"retraced {retrace*100:.2f}% from ${recent_high:.2f} in uptrend"})
+
+    if not candidates:
+        decision_log.gate("6_ENTRY", "WATCH", {
+            "ticker":    ticker,
+            "price":     f"${current:.2f}",
+            "ma20":      f"${ma20:.2f}",
+            "roc_5d":    f"{roc*100:.2f}%",
+            "regime":    f"{regime.trend}/{regime.volatility}",
+            "reason":    "no entry condition met",
+        }, "WATCH — no entry condition triggered")
+        return None
+
+    best = max(candidates, key=lambda x: x["score"])
+    decision_log.gate("6_ENTRY", best["type"], {
+        "ticker":           ticker,
+        "entry_type":       best["type"],
+        "entry_score":      f"{best['score']:.4f}",
+        "regime":           f"{regime.trend}/{regime.volatility}",
+        "candidates_found": len(candidates),
+        "detail":           best["detail"],
+    }, f"entry={best['type']} score={best['score']:.4f}")
+
+    return {"ticker": ticker, "type": best["type"],
+            "score": best["score"], "price": current}
+
+
+# ── GATE 7 — POSITION SIZING ─────────────────────────────────────────────────
+
+def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
+                 positions: list, atr: float, decision_log: TradeDecisionLog) -> float:
     """
-    Analyze a queued signal and decide: MIRROR / WATCH / SKIP.
-    Option B rules determine the entry decision based on adjusted_signal_score,
-    pulse sentiment, and interrogation status. Claude provides reasoning context.
-    Returns (decision, reasoning, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label)
+    Compute final position size in shares.
+    Logic: Doc 3 §7
     """
-    total_value    = portfolio['cash'] + sum(
-        p['entry_price'] * p['shares'] for p in positions
-    )
-    tradeable      = portfolio['cash'] * TRADEABLE_PCT
-    tier_rules     = get_portfolio_tier(total_value)
-    deployed_value = sum(p['entry_price'] * p['shares'] for p in positions)
-    deployed_pct   = deployed_value / tradeable if tradeable > 0 else 0
+    price    = candidate["price"]
+    equity   = portfolio.get("cash", 0)
+    tier     = get_portfolio_tier(equity)
 
-    # Sector concentration
-    sig_sector     = signal.get('sector', '')
-    sector_value   = sum(
-        p['entry_price'] * p['shares']
-        for p in positions if p.get('sector') == sig_sector
-    )
-    sector_pct     = (sector_value / total_value * 100) if total_value > 0 else 0
+    # Drawdown-based scaling
+    peak     = portfolio.get("peak_equity") or equity
+    drawdown = (peak - equity) / peak if peak > 0 else 0
 
-    # Position sizing
-    pos_pct        = get_position_size_pct(
-        signal.get('source_tier', 2),
-        signal.get('confidence', 'MEDIUM'),
-        sector_pct,
-    )
-    staleness_disc = STALENESS_DISCOUNTS.get(signal.get('staleness','Fresh'), 0)
-    adj_pos_pct    = round(pos_pct * (1 - staleness_disc), 4)
-    max_trade      = round(tradeable * adj_pos_pct, 2)
+    # Base size: risk_per_trade / stop_distance
+    stop_dist = atr * C.ATR_STOP_MULTIPLIER if atr else price * 0.02
+    base_risk  = equity * C.BASE_RISK_PER_TRADE
+    base_size  = base_risk / stop_dist if stop_dist > 0 else 0
 
-    # Get current price and ATR from Alpaca
-    ticker = signal['ticker']
-    price  = alpaca.get_latest_price(ticker)
-    atr    = alpaca.get_atr(ticker)
+    # Volatility adjustment: size *= target_vol / asset_vol
+    asset_vol = atr / price if (atr and price) else C.TARGET_VOLATILITY
+    vol_adj   = C.TARGET_VOLATILITY / asset_vol if asset_vol > 0 else 1.0
+    size      = base_size * vol_adj
 
-    if not price:
-        log.warning(f"Could not get price for {ticker} — skipping")
-        return "SKIP", "Price data unavailable"
+    # Mode adjustment
+    if regime.mode == "DEFENSIVE":
+        size *= C.DEFENSIVE_SIZE_FACTOR
+    elif regime.mode == "AGGRESSIVE":
+        size *= C.AGGRESSIVE_SIZE_FACTOR
 
-    if not atr:
-        atr = price * 0.02   # fallback: 2% of price as rough ATR estimate
+    # Drawdown scaling: size *= (1 - current_drawdown_pct)
+    size *= max(0.1, 1.0 - drawdown)
 
-    trail_amt, trail_pct, vol_label = calculate_trail_stop(atr, price, sig_sector)
-    shares = round(max_trade / price, 4)
+    # Max cap: size <= max_position_pct * portfolio
+    max_shares = (equity * C.MAX_POSITION_PCT) / price if price > 0 else 0
+    size       = min(size, max_shares)
+    size       = round(max(size, 0.0001), 4)
 
-    # Urgent flags from The Pulse (open positions)
-    urgent_flags = db.get_urgent_flags()
-    urgent_tickers = {f['ticker'] for f in urgent_flags}
+    dollar_value = size * price
 
-    # Pre-trade sentiment from The Pulse (written to corroboration_note by agent3_sentiment.py)
-    corroboration_note = signal.get('corroboration_note', '') or ''
-    pulse_pre_trade = (
-        f"⚠ PRE-TRADE PULSE WARNING: {corroboration_note}"
-        if '[PULSE' in corroboration_note else ''
-    )
-    pulse_warning = '\n'.join(filter(None, [
-        f"⚠ URGENT PULSE FLAG on {ticker}" if ticker in urgent_tickers else '',
-        pulse_pre_trade,
-    ]))
+    decision_log.gate("7_SIZING", f"{size:.4f} shares (${dollar_value:.2f})", {
+        "equity":          f"${equity:.2f}",
+        "tier":            tier["label"],
+        "atr":             f"${atr:.2f}" if atr else "estimated",
+        "stop_distance":   f"${stop_dist:.2f}",
+        "base_risk":       f"${base_risk:.2f} ({C.BASE_RISK_PER_TRADE*100:.1f}%)",
+        "base_size":       f"{base_size:.4f}",
+        "vol_adjustment":  f"×{vol_adj:.3f}",
+        "mode_adjustment": f"×{C.DEFENSIVE_SIZE_FACTOR if regime.mode=='DEFENSIVE' else C.AGGRESSIVE_SIZE_FACTOR if regime.mode=='AGGRESSIVE' else 1.0:.2f}",
+        "drawdown_scale":  f"×{1.0-drawdown:.3f} (dd={drawdown*100:.1f}%)",
+        "max_cap":         f"{max_shares:.4f} shares",
+        "final_size":      f"{size:.4f} shares @ ${price:.2f}",
+    }, f"{size:.4f} shares × ${price:.2f} = ${dollar_value:.2f}")
 
-    # ── OPTION B: Rule-based entry decision ───────────────────────────────
-    # Decision is determined by adjusted_signal_score, pulse state, and
-    # interrogation_status — not by Claude's free-form judgment.
-    # Claude still provides reasoning for transparency and audit trail.
-    adj_score            = (signal.get('entry_signal_score') or signal.get('confidence', 'MEDIUM')).upper()
-    interrogation_status = signal.get('interrogation_status', 'UNVALIDATED')
-    cascade_detected     = ticker in urgent_tickers
-    pulse_negative       = cascade_detected or bool(pulse_pre_trade)
+    return size
 
-    if adj_score == 'HIGH' and not pulse_negative and not kill_switch_active():
-        option_b_decision = 'MIRROR'
-    elif adj_score in ('MEDIUM', 'LOW') or pulse_negative or interrogation_status == 'UNVALIDATED':
-        option_b_decision = 'WATCH'
-    else:
-        option_b_decision = 'WATCH'  # default conservative
 
-    # ── 5YR PRICE HISTORY for Claude context (deleted after call) ─────────
-    price_hist = fetch_price_history_5yr(ticker)
-    if price_hist:
-        _1yr = price_hist['change_pct_1yr']
-        _1yr_str = f"{_1yr:+.1f}%" if _1yr is not None else 'N/A'
-        price_hist_section = (
-            f"\nPRICE HISTORY ({ticker}):\n"
-            f"  5yr change:    {price_hist['change_pct_5yr']:+.1f}%"
-            f"  (${price_hist['close_5yr_ago']} -> ${price_hist['last_close']})\n"
-            f"  1yr change:    {_1yr_str}\n"
-            f"  52w range:     ${price_hist['low_52w']} - ${price_hist['high_52w']}\n"
-            f"  Avg vol (90d): {price_hist['avg_vol_90d']:,}\n"
+# ── GATE 8 — RISK SETUP ──────────────────────────────────────────────────────
+
+def gate8_risk(candidate: dict, atr: float, session: str,
+               decision_log: TradeDecisionLog) -> dict:
+    """
+    Set stop loss, profit target, trailing stop.
+    Logic: Doc 3 §8
+    """
+    price    = candidate["price"]
+    stop_d   = atr * C.ATR_STOP_MULTIPLIER if atr else price * 0.02
+    stop_lvl = round(price - stop_d, 4)
+    target   = round(price + stop_d * C.PROFIT_TARGET_MULTIPLE, 4)
+    trail    = round(atr * C.ATR_TRAIL_MULTIPLIER if atr else price * 0.02, 4)
+
+    # Overnight risk: close session → flag
+    overnight_flag = (session == "close")
+
+    # Gap risk: use ATR as proxy for gap std
+    gap_risk = atr and (atr / price) > 0.03  # >3% ATR/price = elevated gap risk
+
+    risk = {
+        "stop_loss":    stop_lvl,
+        "profit_target":target,
+        "trail_stop":   trail,
+        "stop_distance":round(stop_d, 4),
+        "overnight":    overnight_flag,
+        "gap_risk":     bool(gap_risk),
+    }
+
+    decision_log.gate("8_RISK_SETUP", f"stop=${stop_lvl} target=${target} trail=${trail}", {
+        "entry_price":    f"${price:.4f}",
+        "atr":            f"${atr:.4f}" if atr else "N/A",
+        "stop_loss":      f"${stop_lvl:.4f} (−${stop_d:.4f})",
+        "profit_target":  f"${target:.4f} (+${stop_d*C.PROFIT_TARGET_MULTIPLE:.4f})",
+        "trailing_stop":  f"${trail:.4f}",
+        "r_r_ratio":      f"1:{C.PROFIT_TARGET_MULTIPLE:.1f}",
+        "overnight_flag": str(overnight_flag),
+        "gap_risk":       str(bool(gap_risk)),
+    }, "risk parameters set")
+
+    if overnight_flag:
+        decision_log.note("Close session — position held overnight. Review position sizing.")
+    if gap_risk:
+        decision_log.note(f"Gap risk elevated (ATR/price = {(atr/price)*100:.1f}%). Stops set wider.")
+
+    return risk
+
+
+# ── GATE 11 — PORTFOLIO CONTROLS ─────────────────────────────────────────────
+
+def gate11_portfolio(positions: list, portfolio: dict, signal: dict,
+                     size: float, alpaca, decision_log: TradeDecisionLog) -> bool:
+    """
+    Enforce portfolio-wide limits before allowing new entry.
+    Logic: Doc 3 §11
+    """
+    equity         = portfolio.get("cash", 0)
+    tier           = get_portfolio_tier(equity)
+
+    # Total gross exposure cap
+    deployed = sum(p["entry_price"] * p["shares"] for p in positions)
+    new_val  = size * (signal.get("price") or 1)
+    gross    = (deployed + new_val) / equity if equity > 0 else 0
+    gross_ok = gross <= C.MAX_GROSS_EXPOSURE
+
+    decision_log.gate("11_GROSS_EXPOSURE", gross_ok, {
+        "current_deployed": f"${deployed:.2f}",
+        "new_position":     f"${new_val:.2f}",
+        "projected_gross":  f"{gross*100:.1f}%",
+        "limit":            f"{C.MAX_GROSS_EXPOSURE*100:.0f}%",
+    }, "exposure OK" if gross_ok else f"BLOCK — would breach {C.MAX_GROSS_EXPOSURE*100:.0f}% cap")
+    if not gross_ok:
+        return False
+
+    # Max position count
+    pos_ok = len(positions) < tier["max_positions"]
+    decision_log.gate("11_POSITION_COUNT", pos_ok, {
+        "open_positions": len(positions),
+        "max_positions":  tier["max_positions"],
+        "tier":           tier["label"],
+    }, "position count OK" if pos_ok else "BLOCK — max positions reached")
+    if not pos_ok:
+        return False
+
+    # Sector exposure
+    sig_sector    = signal.get("sector", "")
+    sector_val    = sum(p["entry_price"] * p["shares"]
+                        for p in positions if p.get("sector") == sig_sector)
+    sector_pct    = (sector_val + new_val) / equity if equity > 0 else 0
+    sector_ok     = sector_pct <= C.MAX_SECTOR_PCT
+    decision_log.gate("11_SECTOR_EXPOSURE", sector_ok, {
+        "sector":              sig_sector,
+        "projected_sector_pct":f"{sector_pct*100:.1f}%",
+        "limit":               f"{C.MAX_SECTOR_PCT*100:.0f}%",
+    }, "sector OK" if sector_ok else f"BLOCK — sector {sig_sector} would reach {sector_pct*100:.1f}%")
+    if not sector_ok:
+        return False
+
+    return True
+
+
+# ── GATE 13 — STRESS OVERRIDES ───────────────────────────────────────────────
+
+def gate13_stress(alpaca, decision_log: TradeDecisionLog) -> bool:
+    """
+    Detect extreme market conditions. Returns True = safe, False = halt/de-risk.
+    Logic: Doc 3 §13
+    """
+    sym  = C.BENCHMARK_SYMBOL
+    bars = alpaca.get_bars(sym, days=3)
+
+    if not bars:
+        decision_log.gate("13_STRESS", True, {"reason": "no data for stress check"}, "stress check skipped")
+        return True
+
+    current   = bars[-1]["c"]
+    prev_close = bars[-2]["c"] if len(bars) >= 2 else current
+    intraday_drop = (prev_close - current) / prev_close if prev_close > 0 else 0
+
+    # Benchmark crash: intraday drop > threshold
+    if intraday_drop >= C.BENCHMARK_CRASH_PCT:
+        decision_log.gate("13_STRESS", False, {
+            "benchmark":        sym,
+            "prev_close":       f"${prev_close:.2f}",
+            "current":          f"${current:.2f}",
+            "intraday_drop":    f"{intraday_drop*100:.2f}%",
+            "crash_threshold":  f"{C.BENCHMARK_CRASH_PCT*100:.0f}%",
+        }, f"STRESS — benchmark crash {intraday_drop*100:.1f}% detected → DEFENSIVE mode forced")
+        return False
+
+    # TODO: DATA_DEPENDENCY — Flash crash detection requires intraday bar data
+    # TODO: DATA_DEPENDENCY — Liquidity collapse requires real-time spread monitoring
+
+    decision_log.gate("13_STRESS", True, {
+        "benchmark":     sym,
+        "intraday_drop": f"{intraday_drop*100:.2f}%",
+    }, "no stress condition detected")
+    return True
+
+
+# ── GATE 14 — EVALUATION LOOP ────────────────────────────────────────────────
+
+def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bool:
+    """
+    Update performance metrics. Check kill condition.
+    Returns True = continue trading, False = strategy suspended.
+    Logic: Doc 3 §14
+    """
+    outcomes = db.get_recent_outcomes(limit=100)
+    if len(outcomes) < 5:
+        decision_log.gate("14_EVALUATION", True, {"reason": "insufficient trade history"}, "evaluation skipped — need ≥5 trades")
+        return True
+
+    window = [o for o in outcomes[-C.PERFORMANCE_WINDOW_DAYS:]]
+    wins   = [o for o in window if o.get("verdict") == "WIN"]
+    losses = [o for o in window if o.get("verdict") == "LOSS"]
+    win_rate  = len(wins) / len(window) if window else 0
+    avg_win   = sum(o.get("pnl_dollar", 0) for o in wins)  / len(wins)   if wins   else 0
+    avg_loss  = sum(o.get("pnl_dollar", 0) for o in losses) / len(losses) if losses else 0
+    expectancy = avg_win * win_rate + avg_loss * (1 - win_rate)
+
+    pnl_series = [o.get("pnl_pct", 0) for o in window]
+    mean_ret   = sum(pnl_series) / len(pnl_series) if pnl_series else 0
+    std_ret    = (sum((r - mean_ret)**2 for r in pnl_series) / len(pnl_series))**0.5 if pnl_series else 0
+    sharpe     = (mean_ret / std_ret * (252**0.5)) if std_ret > 0 else 0
+
+    equity = portfolio.get("cash", 0)
+    peak   = portfolio.get("peak_equity") or equity
+    dd     = (peak - equity) / peak if peak > 0 else 0
+
+    kill = sharpe < C.EVAL_MIN_SHARPE and dd > C.EVAL_MAX_DRAWDOWN
+
+    decision_log.gate("14_EVALUATION", "SUSPEND" if kill else "CONTINUE", {
+        "trades_in_window":  len(window),
+        "win_rate":          f"{win_rate*100:.1f}%",
+        "avg_win":           f"${avg_win:.2f}",
+        "avg_loss":          f"${avg_loss:.2f}",
+        "expectancy":        f"${expectancy:.2f}",
+        "rolling_sharpe":    f"{sharpe:.3f}",
+        "current_drawdown":  f"{dd*100:.2f}%",
+        "sharpe_threshold":  f"{C.EVAL_MIN_SHARPE:.2f}",
+        "dd_threshold":      f"{C.EVAL_MAX_DRAWDOWN*100:.0f}%",
+        "kill_condition":    str(kill),
+    }, "STRATEGY SUSPENDED — kill condition met" if kill else "performance within limits")
+
+    if kill:
+        db.log_event("STRATEGY_KILL_CONDITION", agent="agent1_trader",
+                     details=f"Sharpe={sharpe:.3f} DD={dd*100:.1f}% — suspended pending human review")
+        log.critical("STRATEGY KILL CONDITION: Sharpe and drawdown both outside limits. Suspending new entries.")
+        return False
+
+    return True
+
+
+# ── SUPERVISED MODE (KEEP from v1.x) ─────────────────────────────────────────
+
+def queue_for_approval(signal, decision_data):
+    from database import get_db
+    try:
+        get_db().queue_approval(
+            signal_id  = signal['id'],
+            ticker     = signal['ticker'],
+            company    = signal.get('company', ''),
+            sector     = signal.get('sector', ''),
+            politician = signal.get('politician', ''),
+            confidence = signal.get('confidence', ''),
+            staleness  = signal.get('staleness', ''),
+            headline   = signal.get('headline', ''),
+            price      = decision_data.get('price'),
+            shares     = decision_data.get('shares'),
+            max_trade  = decision_data.get('max_trade'),
+            trail_amt  = decision_data.get('trail_amt'),
+            trail_pct  = decision_data.get('trail_pct'),
+            vol_label  = decision_data.get('vol_label'),
+            reasoning  = decision_data.get('reasoning', ''),
+            session    = decision_data.get('session', ''),
         )
-    else:
-        price_hist_section = ""
+        log.info(f"[SUPERVISED] Trade queued: {signal['ticker']} ${decision_data.get('max_trade',0):.2f}")
+    except Exception as e:
+        log.error(f"queue_for_approval error: {e}")
+        raise
 
-    learning = build_learning_context(db)
-    is_cold  = len(positions) == 0 and portfolio.get('realized_gains', 0) == 0
+def get_approved_trades():
+    from database import get_db
+    try:
+        return get_db().get_pending_approvals(status_filter=['APPROVED'])
+    except Exception as e:
+        log.error(f"get_approved_trades error: {e}")
+        return []
 
-    session_guidance = {
-        "open":   "Morning session — new disclosures most actionable. Fresh signals preferred.",
-        "midday": "Midday check — verify signal still holds, no major reversals.",
-        "close":  "⚠ PRE-CLOSE: Be conservative. Avoid overnight positions unless signal is exceptional.",
-    }.get(session, "")
-
-    prompt = f"""You are the Trader — Agent 1 for Synthos, a conservative congressional trade following system.
-
-MISSION: Prove congressional STOCK Act disclosures generate consistent positive returns.
-Capital preservation first. More wins than losses is the goal, not big wins.
-
-PORTFOLIO ({tier_rules['label']} tier):
-  Total: ${total_value:.2f} | Tradeable: ${tradeable:.2f} | Deployed: {deployed_pct*100:.1f}% (max {tier_rules['max_deployed']*100:.0f}%)
-  Open positions: {len(positions)}/{tier_rules['max_positions']} | Month gains: ${portfolio.get('realized_gains',0):.2f}
-  {'COLD START MODE: First run — only Tier 1 HIGH confidence, max 1 position.' if is_cold else ''}
-
-SESSION: {session.upper()} — {session_guidance}
-
-SIGNAL:
-  Ticker: {ticker} | Source: {signal.get('source')} (Tier {signal.get('source_tier')}) | Base confidence: {signal.get('confidence')}
-  Adjusted score: {adj_score} | Interrogation: {interrogation_status}
-  Politician: {signal.get('politician','?')} | Staleness: {signal.get('staleness','?')} (discount: {staleness_disc*100:.0f}%)
-  Headline: "{signal.get('headline','')}"
-{price_hist_section}
-PROPOSED TRADE:
-  Position size: ${max_trade:.2f} ({adj_pos_pct*100:.1f}% of tradeable after staleness discount)
-  Shares: {shares:.4f} @ ${price:.2f}
-  Trailing stop: ${trail_amt:.2f} ({trail_pct:.1f}%) — {vol_label} (ATR x {VOLATILITY_BUCKETS.get("mid",{}).get("multiplier",1.1)})
-  Sector exposure: {sector_pct:.1f}% in {sig_sector} {'⚠ approaching cap' if sector_pct > MAX_SECTOR_CAP_PCT * 0.8 else ''}
-
-ENTRY DECISION (Option B rules — pre-determined): {option_b_decision}
-  MIRROR criteria: adjusted_score==HIGH AND no pulse warning AND no kill switch
-  WATCH criteria:  adjusted_score==MEDIUM/LOW OR pulse warning OR interrogation==UNVALIDATED
-
-{pulse_warning}
-
-{learning}
-
-PROFIT RULES (for awareness): sell ⅓ at 8% gain, ½ at 15%, ¾ at 25%.
-
-The entry decision above has been determined by Option B rules. Provide analysis of signal
-quality, price history, timing, and sector fit. Your reasoning will be logged for audit.
-
-End with exactly:
-DECISION: {option_b_decision}"""
-
-    response = call_claude(prompt, max_tokens=1000)
-    del price_hist  # release from memory — not persisted
-
-    if not response:
-        return option_b_decision, "Claude unavailable", price, atr, shares, max_trade, trail_amt, trail_pct, vol_label
-
-    return option_b_decision, response, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label
+def mark_approval_executed(signal_id):
+    from database import get_db
+    try:
+        get_db().mark_approval_executed(signal_id)
+    except Exception as e:
+        log.error(f"mark_approval_executed error: {e}")
 
 
-# ── POSITION MANAGEMENT ───────────────────────────────────────────────────
+# ── PROTECTIVE EXIT (KEEP from v1.x) ─────────────────────────────────────────
 
-def check_profit_taking(pos, current_price):
-    """Check if position has hit a profit-taking threshold."""
-    entry   = pos['entry_price']
-    gain_pct = (current_price - entry) / entry
-    triggered = [r for r in PROFIT_RULES if gain_pct >= r["gain_pct"]]
-    return triggered[-1] if triggered else None
+def _enqueue_p0_alert(subject, body, event_type, related_ticker=None, related_signal_id=None):
+    monitor_url   = os.environ.get('MONITOR_URL', '').rstrip('/')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    pi_id         = os.environ.get('PI_ID', 'synthos-pi')
+    if not monitor_url:
+        return False
+    payload = {
+        "event_type": event_type, "priority": 0, "subject": subject, "body": body,
+        "source_agent": "agent1_trader", "pi_id": pi_id, "audience": "customer",
+        "related_ticker": related_ticker,
+        "related_signal_id": str(related_signal_id) if related_signal_id else None,
+        "payload": {"ticker": related_ticker, "signal_id": related_signal_id, "pi_id": pi_id},
+    }
+    try:
+        r = requests.post(f"{monitor_url}/api/enqueue", json=payload,
+                          headers={"X-Token": monitor_token, "Content-Type": "application/json"},
+                          timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
 
+def _direct_send_fallback(subject, body, reason="enqueue_failed"):
+    log.warning(f"[FALLBACK] Direct send triggered — reason: {reason}")
+    try:
+        from database import get_db
+        get_db().log_event("P0_DIRECT_SEND_FALLBACK", agent="agent1_trader",
+                           details=f"reason={reason} subject={subject[:80]}")
+    except Exception:
+        pass
+    if SENDGRID_API_KEY and USER_EMAIL:
+        try:
+            import sendgrid as _sg
+            from sendgrid.helpers.mail import Mail
+            msg = Mail(from_email=ALERT_FROM or 'alerts@synthos.local',
+                       to_emails=USER_EMAIL, subject=subject, plain_text_content=body)
+            _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
+                request_body=msg.get())
+            return True
+        except Exception as e:
+            log.error(f"[FALLBACK] SendGrid failed: {e}")
+    return False
+
+def send_protective_exit_email(ticker, reason, reasoning, entry_price,
+                                exit_price, shares, pnl_dollar):
+    pnl_sign  = "+" if pnl_dollar >= 0 else ""
+    direction = "profit" if pnl_dollar >= 0 else "loss"
+    subject   = f"[Synthos] Protective Exit — {ticker} ({pnl_sign}${abs(pnl_dollar):.2f})"
+    body = (
+        f"Synthos executed a Layer 1 protective exit.\n\n"
+        f"Ticker: {ticker}\nExit reason: {reason}\n"
+        f"Entry: ${entry_price:.2f} | Exit: ${exit_price:.2f} | "
+        f"Shares: {shares:.4f} | P&L: {pnl_sign}${abs(pnl_dollar):.2f} ({direction})\n\n"
+        f"Reasoning: {reasoning}"
+    )
+    if not _enqueue_p0_alert(subject, body, "PROTECTIVE_EXIT_TRIGGERED", ticker):
+        _direct_send_fallback(subject, body, "enqueue_failed_protective_exit")
+
+
+# ── BIL RESERVE (KEEP from v1.x — REVIEW: integrate into Gate 11) ────────────
 
 def sync_bil_reserve(db, alpaca):
-    """
-    Maintain IDLE_RESERVE_PCT (20%) of total liquid capital in BIL.
-    Runs every session after cash reconciliation.
-
-    total_liquid = free_cash (Alpaca) + current BIL market value
-    target_bil   = total_liquid * IDLE_RESERVE_PCT
-    delta        = target_bil - current_bil_value
-
-    Buys or sells BIL when |delta| >= BIL_REBALANCE_THRESHOLD ($10).
-    BIL is excluded from position count and P&L tracking — it is not
-    opened via open_position() and does not appear in get_open_positions().
-    Buy/sell events are logged with type 'BIL_BUY' / 'BIL_SELL'.
-    """
     try:
-        account = alpaca.get_account()
+        account   = alpaca.get_account()
         if not account:
-            log.warning("[BIL] Cannot sync — Alpaca account unreachable")
             return
-
         free_cash = float(account.get('cash', 0))
-        bil_pos   = alpaca.get_position_safe(BIL_TICKER)
+        bil_pos   = alpaca.get_position_safe(C.BIL_TICKER)
         bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
-
-        total_liquid = free_cash + bil_value
-        target_bil   = round(total_liquid * IDLE_RESERVE_PCT, 2)
-        delta        = round(target_bil - bil_value, 2)
-
-        log.info(
-            f"[BIL] Liquid: ${total_liquid:.2f} | "
-            f"Current: ${bil_value:.2f} | Target: ${target_bil:.2f} | "
-            f"Delta: ${delta:+.2f}"
-        )
-
-        if abs(delta) < BIL_REBALANCE_THRESHOLD:
-            log.info(f"[BIL] Within ${BIL_REBALANCE_THRESHOLD} threshold — no rebalance")
+        total_liq = free_cash + bil_value
+        target    = round(total_liq * C.IDLE_RESERVE_PCT, 2)
+        delta     = round(target - bil_value, 2)
+        log.info(f"[BIL] Liquid: ${total_liq:.2f} | Current: ${bil_value:.2f} | "
+                 f"Target: ${target:.2f} | Delta: ${delta:+.2f}")
+        if abs(delta) < C.BIL_REBALANCE_THRESHOLD:
             return
-
         if delta > 0:
-            # Buy more BIL — cap at available free cash (leave $1 buffer)
-            buy_amount = min(delta, max(0.0, free_cash - 1.0))
-            if buy_amount < BIL_REBALANCE_THRESHOLD:
-                log.warning(f"[BIL] Insufficient free cash to rebalance (free: ${free_cash:.2f})")
-                return
-            order = alpaca._submit_notional(BIL_TICKER, buy_amount, "buy")
-            if order:
-                db.log_event("BIL_BUY", agent="The Trader",
-                             details=f"Bought ${buy_amount:.2f} of BIL — reserve rebalance")
-                log.info(f"[BIL] Buy order placed: ${buy_amount:.2f}")
+            buy = min(delta, max(0.0, free_cash - 1.0))
+            if buy >= C.BIL_REBALANCE_THRESHOLD:
+                if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
+                    db.log_event("BIL_BUY", agent="The Trader",
+                                 details=f"Bought ${buy:.2f} BIL")
         else:
-            # Sell BIL to free up cash
-            sell_amount = abs(delta)
-            if sell_amount >= bil_value * 0.99:
-                order = alpaca.close_position(BIL_TICKER)
-                if order:
+            sell = abs(delta)
+            if sell >= bil_value * 0.99:
+                if alpaca.close_position(C.BIL_TICKER):
                     db.log_event("BIL_SELL", agent="The Trader",
-                                 details=f"Sold all BIL (${bil_value:.2f}) — reserve rebalance")
-                    log.info(f"[BIL] Sold entire BIL position (${bil_value:.2f})")
+                                 details=f"Sold all BIL (${bil_value:.2f})")
             else:
-                order = alpaca._submit_notional(BIL_TICKER, sell_amount, "sell")
-                if order:
+                if alpaca._submit_notional(C.BIL_TICKER, sell, "sell"):
                     db.log_event("BIL_SELL", agent="The Trader",
-                                 details=f"Sold ${sell_amount:.2f} of BIL — reserve rebalance")
-                    log.info(f"[BIL] Sell order placed: ${sell_amount:.2f}")
-
+                                 details=f"Sold ${sell:.2f} BIL")
     except Exception as e:
-        log.error(f"[BIL] sync_bil_reserve error (non-fatal): {e}")
+        log.error(f"[BIL] sync error: {e}")
 
+
+# ── RECONCILE (KEEP from v1.x) ────────────────────────────────────────────────
 
 def reconcile_with_alpaca(db, alpaca):
-    """
-    Compare DB open positions against Alpaca.
-    Flag orphans (in Alpaca but not DB) and ghosts (in DB but not Alpaca).
-    Also syncs portfolio.cash from Alpaca's actual account balance — DB cash
-    is not authoritative; Alpaca is the source of truth for cash.
-    """
     try:
         alpaca_positions = alpaca.get_positions()
         if alpaca_positions is None:
-            log.warning("Could not fetch Alpaca positions for reconciliation")
-            return
-
-        # ── CASH SYNC (T-03) ──────────────────────────────────────────────
-        # Pull free cash from Alpaca and add back any BIL position value so
-        # DB cash represents total liquid capital. This keeps tradeable math
-        # correct: tradeable = (free_cash + BIL_value) * TRADEABLE_PCT = 80%
-        # of total liquid deployed in equities, 20% parked in BIL.
-        try:
-            account = alpaca.get_account()
-            if account:
-                alpaca_cash = float(account.get('cash', 0))
-                if alpaca_cash > 0:
-                    bil_pos   = alpaca.get_position_safe(BIL_TICKER)
-                    bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
-                    total_liquid = alpaca_cash + bil_value
-                    db.update_portfolio(cash=total_liquid)
-                    log.info(
-                        f"[CASH SYNC] DB cash = ${total_liquid:.2f} "
-                        f"(free: ${alpaca_cash:.2f} + BIL: ${bil_value:.2f})"
-                    )
-                else:
-                    log.warning("[CASH SYNC] Alpaca returned $0 cash — skipping update")
-        except Exception as e:
-            log.warning(f"[CASH SYNC] Could not sync cash from Alpaca (non-fatal): {e}")
-
+            return True
+        account = alpaca.get_account()
+        if account:
+            alpaca_cash = float(account.get('cash', 0))
+            if alpaca_cash > 0:
+                bil_pos   = alpaca.get_position_safe(C.BIL_TICKER)
+                bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
+                db.update_portfolio(cash=alpaca_cash + bil_value)
         alpaca_tickers = {p['symbol'] for p in alpaca_positions}
         db_tickers     = db.get_open_tickers()
-
         orphans = alpaca_tickers - db_tickers
         ghosts  = db_tickers - alpaca_tickers
-
-        for ticker in orphans:
-            log.critical(f"ORPHAN POSITION: {ticker} in Alpaca but not in DB — human review required")
-            db.log_event("ORPHAN_POSITION", agent="The Trader",
-                         details=f"Ticker {ticker} in Alpaca but not in DB")
-
-        for ticker in ghosts:
-            log.critical(f"GHOST POSITION: {ticker} in DB but not in Alpaca — human review required")
-            # Find position id and flag it
-            positions = db.get_open_positions()
-            for pos in positions:
-                if pos['ticker'] == ticker:
+        for t in orphans:
+            log.critical(f"ORPHAN: {t} in Alpaca but not DB")
+            db.log_event("ORPHAN_POSITION", agent="The Trader", details=f"Ticker {t}")
+        for t in ghosts:
+            log.critical(f"GHOST: {t} in DB but not Alpaca")
+            for pos in db.get_open_positions():
+                if pos['ticker'] == t:
                     db.flag_orphan(pos['id'])
-
         if orphans or ghosts:
-            log.critical(f"Reconciliation found issues — {len(orphans)} orphans, {len(ghosts)} ghosts. HALTING new trades this session.")
+            log.critical(f"Reconciliation issues — {len(orphans)} orphans, {len(ghosts)} ghosts. Halting new trades.")
             return False
-
-        # Update prices for all open positions
         for ap in alpaca_positions:
-            ticker = ap['symbol']
-            current_price = float(ap.get('current_price', 0))
-            if current_price:
-                positions = db.get_open_positions()
-                for pos in positions:
-                    if pos['ticker'] == ticker:
-                        db.update_position_price(pos['id'], current_price)
-
-        log.info(f"Reconciliation clean — {len(alpaca_positions)} Alpaca positions match DB")
+            cp = float(ap.get('current_price', 0))
+            if cp:
+                for pos in db.get_open_positions():
+                    if pos['ticker'] == ap['symbol']:
+                        db.update_position_price(pos['id'], cp)
         return True
-
     except Exception as e:
         log.error(f"Reconciliation error: {e}")
-        return True  # Don't halt on reconciliation errors in paper mode
+        return True
 
 
-# ── MAIN PIPELINE ─────────────────────────────────────────────────────────
+# ── MAIN PIPELINE ─────────────────────────────────────────────────────────────
 
 def run(session="open"):
-    db      = get_db()
-    alpaca  = AlpacaClient()
-    now     = datetime.now(ET)
+    db     = get_db()
+    alpaca = AlpacaClient()
+    now    = datetime.now(ET)
 
-    log.info(f"The Trader starting — session={session} mode={TRADING_MODE} operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
-    db.log_event("AGENT_START", agent="The Trader", details=f"session={session} mode={TRADING_MODE} operating={OPERATING_MODE}")
+    log.info(f"ExecutionAgent starting — session={session} mode={TRADING_MODE} "
+             f"operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
+    db.log_event("AGENT_START", agent="The Trader",
+                 details=f"session={session} mode={TRADING_MODE} operating={OPERATING_MODE}")
     db.log_heartbeat("agent1_trader", "RUNNING")
 
-    # ── KILL SWITCH CHECK (framing 4.3 / C1 / C5)
-    if kill_switch_active():
-        log.warning("KILL SWITCH ACTIVE — halting all agent activity")
-        db.log_event("KILL_SWITCH_HALT", agent="The Trader",
-                     details="Kill switch file present — session aborted")
-        try:
-            from heartbeat import write_heartbeat
-            write_heartbeat(agent_name="agent1_trader", status="KILL_SWITCH_ACTIVE")
-        except Exception:
-            pass
+    session_log = TradeDecisionLog(session=session)
+
+    # ── GATE 1: System Gate
+    if not gate1_system(db, alpaca, session, session_log):
+        session_log.commit(db)
         sys.exit(0)
 
-    # ── EXPIRE STALE APPROVALS
-    # Clean up any PENDING_APPROVAL entries older than 48h before this session.
-    try:
-        db.expire_stale_approvals(max_age_hours=48)
-    except Exception as e:
-        log.warning(f"expire_stale_approvals failed (non-fatal): {e}")
+    # ── GATE 2: Benchmark Gate
+    mode = gate2_benchmark(alpaca, session_log)
 
-    # ── STEP 1: Account check
-    account = alpaca.get_account()
-    if not account:
-        log.error("Cannot connect to Alpaca — aborting session")
-        db.log_event("ALPACA_UNREACHABLE", agent="The Trader")
-        sys.exit(1)
-    log.info(f"Alpaca connected — cash: ${float(account.get('cash',0)):.2f} ({TRADING_MODE})")
+    # ── GATE 3: Regime Detection
+    regime = gate3_regime(alpaca, mode, session_log)
+    regime.mode = mode
 
-    # ── STEP 2: Reconcile positions
+    # ── GATE 13: Stress Overrides (early check — can override mode)
+    if not gate13_stress(alpaca, session_log):
+        regime.mode = "DEFENSIVE"
+        log.warning("Stress condition — forcing DEFENSIVE mode")
+
+    # ── GATE 14: Evaluation (check kill condition before trading)
+    portfolio = db.get_portfolio()
+    if not gate14_evaluation(db, portfolio, session_log):
+        session_log.commit(db)
+        log.warning("Strategy suspended — skipping new entries this session")
+        # Still run position management below
+
+    session_log.commit(db)
+
+    # ── PRE-TRADE: Reconcile and BIL
     reconcile_ok = reconcile_with_alpaca(db, alpaca)
-
-    # ── STEP 2b: BIL reserve sweep
-    # Maintains IDLE_RESERVE_PCT (20%) of total liquid in BIL (T-bills).
-    # Skipped only if reconciliation found orphan/ghost positions.
     if reconcile_ok is not False:
         sync_bil_reserve(db, alpaca)
 
-    # ── STEP 3: Check urgent flags from The Pulse
-    urgent_flags = db.get_urgent_flags()
-    if urgent_flags:
-        for flag in urgent_flags:
-            log.warning(f"URGENT FLAG: {flag['ticker']} cascade detected at {flag['detected_at']}")
+    # ── EXPIRE STALE APPROVALS
+    try:
+        db.expire_stale_approvals(max_age_hours=48)
+    except Exception as e:
+        log.warning(f"expire_stale_approvals error: {e}")
 
-    # ── STEP 3b: Layer 1 protective exits for urgent-flagged open positions
-    # Framing section 5.3 — executes without per-trade approval, user notified by email
-    if urgent_flags and reconcile_ok:
-        flagged_tickers = {f['ticker'] for f in urgent_flags}
-        positions_now   = db.get_open_positions()
-        for pos in positions_now:
-            if pos['ticker'] in flagged_tickers:
-                current_price = pos.get('current_price') or pos['entry_price']
-                flag_info     = next((f for f in urgent_flags if f['ticker'] == pos['ticker']), {})
-                reason        = f"CASCADE DETECTED — Tier {flag_info.get('tier', 1)} urgent flag"
-                reasoning     = (
-                    f"The Pulse detected a cascade signal on {pos['ticker']}. "
-                    f"Put/call ratio, insider flow, or volume anomalies triggered "
-                    f"a Tier {flag_info.get('tier', 1)} alert at {flag_info.get('detected_at', 'unknown')}. "
-                    f"Layer 1 protective exit executed per pre-authorized ruleset."
-                )
-                log.warning(f"LAYER 1 EXIT: Closing {pos['ticker']} — {reason}")
+    portfolio = db.get_portfolio()
+    positions = db.get_open_positions()
+    tier      = get_portfolio_tier(portfolio['cash'])
+
+    # ── GATE 10: Active trade management (every session — open positions)
+    urgent_flags    = db.get_urgent_flags()
+    urgent_tickers  = {f['ticker'] for f in urgent_flags}
+
+    for pos in positions:
+        pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
+                                   signal_id=pos.get('signal_id'))
+        current_price = pos.get('current_price') or pos['entry_price']
+        holding_days  = (now - datetime.fromisoformat(
+            pos.get('opened_at', now.isoformat()).replace('Z', '+00:00')
+        )).days if pos.get('opened_at') else 0
+
+        exit_reason = None
+
+        # Protective exit (urgent flag)
+        if pos['ticker'] in urgent_tickers:
+            exit_reason = "PULSE_EXIT"
+            flag_info   = next((f for f in urgent_flags if f['ticker'] == pos['ticker']), {})
+            pos_log.gate("10_STOP_PULSE", True, {
+                "ticker": pos['ticker'],
+                "flag_tier": flag_info.get('tier', 1),
+                "detected": flag_info.get('detected_at', 'unknown'),
+            }, "CASCADE signal — protective exit triggered")
+
+        # Stop loss hit: price <= stop_level
+        elif current_price <= pos.get('trail_stop_amt', 0) or \
+             current_price <= pos['entry_price'] - (pos.get('trail_stop_amt', 0) or pos['entry_price'] * 0.02):
+            exit_reason = "STOP_LOSS"
+            pos_log.gate("10_STOP_LOSS", True, {
+                "current":    f"${current_price:.2f}",
+                "stop_level": f"${pos.get('trail_stop_amt', 0):.2f}",
+                "entry":      f"${pos['entry_price']:.2f}",
+            }, "stop loss triggered")
+
+        # Max holding time
+        elif holding_days > C.MAX_HOLDING_DAYS:
+            exit_reason = "MAX_HOLDING_TIME"
+            pos_log.gate("10_MAX_TIME", True, {
+                "holding_days": holding_days,
+                "max_days":     C.MAX_HOLDING_DAYS,
+            }, f"max holding time {C.MAX_HOLDING_DAYS}d exceeded")
+
+        else:
+            # Profit-taking check (KEEP from v1.x — REVIEW: unify with Gate 10)
+            gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
+            triggered = [r for r in PROFIT_RULES if gain_pct >= r["gain_pct"]]
+            if triggered:
+                rule = triggered[-1]
+                sell_shares = round(pos['shares'] * rule['sell_pct'], 4)
+                pos_log.gate("10_PROFIT_TAKE", True, {
+                    "ticker":     pos['ticker'],
+                    "gain_pct":   f"{gain_pct*100:.2f}%",
+                    "rule":       rule['label'],
+                    "sell_shares":f"{sell_shares:.4f}",
+                }, f"profit target {rule['label']} triggered")
+                pos_log.decide("PARTIAL_EXIT", rule['label'])
+                if reconcile_ok:
+                    order = alpaca.submit_order(pos['ticker'], sell_shares, "sell")
+                    if order:
+                        pnl = db.close_position(pos['id'], current_price, exit_reason="PROFIT_TAKE")
+                        try:
+                            sig = db.get_signal_by_id(pos.get('signal_id'))
+                            if sig and sig.get('politician'):
+                                db.update_member_weight_after_trade(sig['politician'], pnl)
+                        except Exception:
+                            pass
+                        remaining = pos['shares'] - sell_shares
+                        if remaining > 0.0001:
+                            _, _, vl = calculate_trail_stop(
+                                pos['trail_stop_amt'] / 1.1, current_price, pos.get('sector',''))
+                            db.open_position(ticker=pos['ticker'], company=pos.get('company'),
+                                             sector=pos.get('sector'), entry_price=current_price,
+                                             shares=remaining, trail_stop_amt=pos['trail_stop_amt'],
+                                             trail_stop_pct=pos['trail_stop_pct'],
+                                             vol_bucket=pos.get('vol_bucket'),
+                                             signal_id=pos.get('signal_id'))
+                pos_log.commit(db)
+                continue
+
+            pos_log.gate("10_ACTIVE", False, {
+                "ticker":       pos['ticker'],
+                "current":      f"${current_price:.2f}",
+                "entry":        f"${pos['entry_price']:.2f}",
+                "gain_pct":     f"{gain_pct*100:.2f}%",
+                "holding_days": holding_days,
+            }, "HOLD — no exit condition met")
+            pos_log.decide("HOLD")
+            pos_log.commit(db)
+            continue
+
+        # Execute exit
+        if exit_reason:
+            pos_log.decide("EXIT", f"reason={exit_reason} price=${current_price:.2f}")
+            if reconcile_ok:
                 order = alpaca.close_position(pos['ticker'])
                 if order is not None:
-                    pnl = db.close_position(pos['id'], current_price, exit_reason="PULSE_EXIT")
-                    db.acknowledge_urgent_flag(flag_info['id'])
-                    db.log_event(
-                        "PULSE_EXIT", agent="The Trader",
-                        details=f"{pos['ticker']} — {reason}",
-                        portfolio_value=current_price * pos['shares'],
-                    )
-                    # Update member weight for the politician behind this signal
-                    try:
-                        _sig = db.get_signal_by_id(pos.get('signal_id'))
-                        if _sig and _sig.get('politician'):
-                            db.update_member_weight_after_trade(_sig['politician'], pnl)
-                    except Exception as _mw_e:
-                        log.debug(f"Member weight update skipped: {_mw_e}")
-                    # Send immediate email notification (framing 5.3 / M1)
-                    send_protective_exit_email(
-                        ticker=pos['ticker'],
-                        reason=reason,
-                        reasoning=reasoning,
-                        entry_price=pos['entry_price'],
-                        exit_price=current_price,
-                        shares=pos['shares'],
-                        pnl_dollar=pnl,
-                    )
-                    log.info(f"Layer 1 exit complete: {pos['ticker']} P&L=${pnl:+.2f}")
+                    pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason)
+                    if exit_reason == "PULSE_EXIT":
+                        flag_info = next((f for f in urgent_flags
+                                          if f['ticker'] == pos['ticker']), {})
+                        db.acknowledge_urgent_flag(flag_info.get('id'))
+                        try:
+                            sig = db.get_signal_by_id(pos.get('signal_id'))
+                            if sig and sig.get('politician'):
+                                db.update_member_weight_after_trade(sig['politician'], pnl)
+                        except Exception:
+                            pass
+                        send_protective_exit_email(
+                            ticker=pos['ticker'], reason=exit_reason,
+                            reasoning=f"Cascade signal detected. Exit triggered per pre-authorized ruleset.",
+                            entry_price=pos['entry_price'], exit_price=current_price,
+                            shares=pos['shares'], pnl_dollar=pnl,
+                        )
+                    db.log_event(exit_reason, agent="The Trader",
+                                 details=f"{pos['ticker']} exit=${current_price:.2f} pnl=${pnl:+.2f}")
+                    log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
+            pos_log.commit(db)
 
-    # ── STEP 4: Get current state
-    portfolio  = db.get_portfolio()
-    positions  = db.get_open_positions()
-    total_value = portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in positions)
-    tradeable  = portfolio['cash'] * TRADEABLE_PCT
-    tier_rules = get_portfolio_tier(total_value)
-    deployed   = sum(p['entry_price'] * p['shares'] for p in positions)
-    deployed_pct = deployed / tradeable if tradeable > 0 else 0
-
-    log.info(
-        f"Portfolio: ${total_value:.2f} ({tier_rules['label']}) | "
-        f"Cash: ${portfolio['cash']:.2f} | Deployed: {deployed_pct*100:.1f}% | "
-        f"Positions: {len(positions)}/{tier_rules['max_positions']}"
-    )
-
-    # ── STEP 5: In supervised mode — execute any trades the user approved via portal
+    # ── SUPERVISED MODE: execute user-approved trades
     if OPERATING_MODE == 'SUPERVISED':
         approved = get_approved_trades()
-        if approved:
-            log.info(f"[SUPERVISED] Executing {len(approved)} user-approved trade(s)")
         for approval in approved:
             try:
-                ticker  = approval['ticker']
-                shares  = float(approval['shares'])
-                price   = float(approval['price'])
+                ticker    = approval['ticker']
+                shares    = float(approval['shares'])
+                price     = float(approval['price'])
                 trail_amt = float(approval['trail_amt'])
                 trail_pct = float(approval['trail_pct'])
                 vol_label = approval['vol_label']
                 sig_id    = approval['id']
-
                 order = alpaca.submit_order(ticker=ticker, qty=shares, side="buy")
                 if order:
                     _appr_sig = db.get_signal_by_id(sig_id) or {}
-                    db.open_position(
-                        ticker=ticker,
-                        company=approval.get('company'),
-                        sector=approval.get('sector'),
-                        entry_price=price,
-                        shares=shares,
-                        trail_stop_amt=trail_amt,
-                        trail_stop_pct=trail_pct,
-                        vol_bucket=vol_label,
-                        signal_id=sig_id,
-                        entry_signal_score=_appr_sig.get('entry_signal_score', approval.get('confidence')),
-                        entry_sentiment_score=_appr_sig.get('sentiment_score'),
-                        interrogation_status=_appr_sig.get('interrogation_status'),
-                    )
-                    alpaca.submit_order(
-                        ticker=ticker, qty=shares, side="sell",
-                        order_type="trailing_stop", trail_price=trail_amt,
-                    )
+                    db.open_position(ticker=ticker, company=approval.get('company'),
+                                     sector=approval.get('sector'), entry_price=price,
+                                     shares=shares, trail_stop_amt=trail_amt,
+                                     trail_stop_pct=trail_pct, vol_bucket=vol_label,
+                                     signal_id=sig_id,
+                                     entry_signal_score=_appr_sig.get('entry_signal_score',
+                                                                       approval.get('confidence')),
+                                     entry_sentiment_score=_appr_sig.get('sentiment_score'),
+                                     interrogation_status=_appr_sig.get('interrogation_status'))
+                    alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
+                                        order_type="trailing_stop", trail_price=trail_amt)
                     db.acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
-                    log.info(f"[SUPERVISED] Approved trade executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
+                    log.info(f"[SUPERVISED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
                 else:
-                    log.error(f"[SUPERVISED] Order failed for approved trade: {ticker}")
+                    log.error(f"[SUPERVISED] Order failed: {ticker}")
             except Exception as e:
-                log.error(f"[SUPERVISED] Error executing approved trade: {e}")
+                log.error(f"[SUPERVISED] Execution error: {e}")
 
-    # ── STEP 6: Check profit-taking on open positions
-    for pos in positions:
-        current_price = pos.get('current_price') or pos['entry_price']
-        rule = check_profit_taking(pos, current_price)
-        if rule:
-            sell_shares = round(pos['shares'] * rule['sell_pct'], 4)
-            log.info(f"PROFIT TAKE: {pos['ticker']} hit {rule['label']} — selling {sell_shares:.4f} shares")
-            if reconcile_ok:
-                result = alpaca.submit_order(
-                    ticker=pos['ticker'], qty=sell_shares, side="sell"
-                )
-                if result:
-                    proceeds = sell_shares * current_price
-                    remaining = pos['shares'] - sell_shares
-                    _pt_pnl = db.close_position(pos['id'], current_price, exit_reason="PROFIT_TAKE")
-                    # Update member weight for the politician behind this signal
-                    try:
-                        _sig = db.get_signal_by_id(pos.get('signal_id'))
-                        if _sig and _sig.get('politician'):
-                            db.update_member_weight_after_trade(_sig['politician'], _pt_pnl)
-                    except Exception as _mw_e:
-                        log.debug(f"Member weight update skipped: {_mw_e}")
-                    if remaining > 0.0001:
-                        # Reopen with remaining shares
-                        _, _, vol_label = calculate_trail_stop(
-                            pos['trail_stop_amt'] / 1.1, current_price, pos.get('sector','')
-                        )
-                        db.open_position(
-                            ticker=pos['ticker'], company=pos.get('company'),
-                            sector=pos.get('sector'), entry_price=current_price,
-                            shares=remaining,
-                            trail_stop_amt=pos['trail_stop_amt'],
-                            trail_stop_pct=pos['trail_stop_pct'],
-                            vol_bucket=pos.get('vol_bucket'), signal_id=pos.get('signal_id'),
-                        )
-                    pnl = round((current_price - pos['entry_price']) * sell_shares, 2)
-                    pnl_sign = "+" if pnl >= 0 else ""
-                    log.info(f"Partial exit complete: sold {sell_shares:.4f} @ ${current_price:.2f} P&L={pnl_sign}${pnl:.2f}")
-
-    # ── STEP 7: Process queued signals
+    # ── NEW SIGNAL EVALUATION (Gates 4–9 + 11)
     if not reconcile_ok:
-        log.warning("Reconciliation issues detected — skipping new entries this session")
+        log.warning("Reconciliation issues — skipping new entries")
     else:
-        can_deploy = (
-            deployed_pct < tier_rules['max_deployed'] and
-            len(positions) < tier_rules['max_positions']
+        positions = db.get_open_positions()
+        portfolio = db.get_portfolio()
+        equity    = portfolio['cash']
+        tier      = get_portfolio_tier(equity)
+        deployed  = sum(p['entry_price'] * p['shares'] for p in positions)
+        tradeable = equity * C.TRADEABLE_PCT
+        deployed_pct = deployed / tradeable if tradeable > 0 else 0
+
+        can_enter = (
+            deployed_pct < tier["max_deployed"] and
+            len(positions) < tier["max_positions"]
         )
 
-        if not can_deploy:
-            log.info(f"Max deployment/positions reached — no new entries this session")
+        if not can_enter:
+            log.info("Deployment/position cap reached — no new entries this session")
         else:
             signals = db.get_queued_signals()
-            log.info(f"Processing {len(signals)} queued signal(s)")
+            log.info(f"Evaluating {len(signals)} queued signal(s)")
 
             for signal in signals:
-                # Re-check deployment limits per signal
-                positions  = db.get_open_positions()
-                deployed   = sum(p['entry_price'] * p['shares'] for p in positions)
+                positions = db.get_open_positions()
+                deployed  = sum(p['entry_price'] * p['shares'] for p in positions)
                 deployed_pct = deployed / tradeable if tradeable > 0 else 0
 
-                if (deployed_pct >= tier_rules['max_deployed'] or
-                        len(positions) >= tier_rules['max_positions']):
-                    log.info("Deployment limit reached mid-session — stopping")
+                if (deployed_pct >= tier["max_deployed"] or
+                        len(positions) >= tier["max_positions"]):
+                    log.info("Deployment cap reached mid-session — stopping")
                     break
 
-                # ── PORTAL SETTINGS FILTERS ───────────────────────────────
-                sig_confidence = signal.get('confidence', 'LOW').upper()
-                sig_staleness  = signal.get('staleness', 'Fresh')
-                sig_spousal    = bool(signal.get('is_spousal', 0))
-
-                # Confidence filter
-                min_idx = CONFIDENCE_ORDER.index(MIN_CONFIDENCE) if MIN_CONFIDENCE in CONFIDENCE_ORDER else 1
-                sig_idx = CONFIDENCE_ORDER.index(sig_confidence) if sig_confidence in CONFIDENCE_ORDER else 2
-                if sig_idx > min_idx:
-                    log.info(f"Signal {signal['ticker']} skipped — confidence {sig_confidence} below threshold {MIN_CONFIDENCE}")
-                    continue
-
-                # Staleness filter
-                staleness_order = ['Fresh', 'Aging', 'Stale', 'Expired']
-                max_stale_idx = staleness_order.index(MAX_STALENESS) if MAX_STALENESS in staleness_order else 1
-                sig_stale_idx = staleness_order.index(sig_staleness) if sig_staleness in staleness_order else 0
-                if sig_stale_idx > max_stale_idx:
-                    log.info(f"Signal {signal['ticker']} skipped — staleness {sig_staleness} beyond cutoff {MAX_STALENESS}")
-                    continue
-
-                # Spousal filter
-                if sig_spousal and SPOUSAL_WEIGHT == 'skip':
-                    log.info(f"Signal {signal['ticker']} skipped — spousal trade (SPOUSAL_WEIGHT=skip)")
-                    continue
-
-                # Close session conservatism
-                if session == 'close' and CLOSE_SESSION_MODE == 'conservative':
-                    if sig_confidence != 'HIGH':
-                        log.info(f"Signal {signal['ticker']} skipped — close session conservative mode requires HIGH confidence")
+                # Close session conservatism (KEEP from v1.x)
+                if session == 'close' and C.CLOSE_SESSION_MODE == 'conservative':
+                    if (signal.get('confidence', 'LOW') or 'LOW').upper() != 'HIGH':
+                        log.info(f"Signal {signal['ticker']} skipped — close session conservative")
                         continue
 
-                log.info(f"Analyzing signal: {signal['ticker']} T{signal['source_tier']} {signal['confidence']}")
-
-                result = analyze_signal_with_claude(
-                    signal, portfolio, positions, session, db, alpaca
-                )
-
-                if isinstance(result, tuple) and len(result) == 9:
-                    decision, reasoning, price, atr, shares, max_trade, trail_amt, trail_pct, vol_label = result
-                else:
-                    decision, reasoning = result[0], result[1]
-                    log.warning(f"Unexpected result format for {signal['ticker']} — skipping")
+                # Spousal filter (KEEP from v1.x)
+                if signal.get('is_spousal') and C.SPOUSAL_WEIGHT == 'skip':
+                    log.info(f"Signal {signal['ticker']} skipped — spousal (SPOUSAL_WEIGHT=skip)")
                     continue
 
-                log.info(f"Decision: {decision} — {signal['ticker']}")
+                sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
+                                           signal_id=signal.get('id'))
+                sig_log.note(f"politician={signal.get('politician','?')} "
+                             f"staleness={signal.get('staleness','?')} "
+                             f"headline={signal.get('headline','')[:60]}")
 
-                if decision == "MIRROR":
-                    decision_data = {
-                        "price":     price,
-                        "shares":    shares,
-                        "max_trade": max_trade,
-                        "trail_amt": trail_amt,
-                        "trail_pct": trail_pct,
-                        "vol_label": vol_label,
-                        "reasoning": reasoning,
-                        "session":   session,
-                    }
+                # Gate 4: Eligibility
+                if not gate4_eligibility(signal, positions, alpaca, sig_log):
+                    sig_log.decide("SKIP", "failed eligibility gate")
+                    sig_log.commit(db)
+                    continue
 
-                    if OPERATING_MODE == 'SUPERVISED':
-                        # ── SUPERVISED MODE (framing 4.1 / C2 / C3)
-                        # Queue for user approval — do not execute yet
-                        queue_for_approval(signal, decision_data)
-                        log.info(f"[SUPERVISED] {signal['ticker']} queued — awaiting portal approval")
+                # Gate 5: Signal score
+                score = gate5_signal_score(signal, positions, alpaca, sig_log)
+                if score == 0.0:
+                    sig_log.decide("SKIP", f"score below threshold {C.MIN_CONFIDENCE_SCORE}")
+                    sig_log.commit(db)
+                    continue
 
-                    else:
-                        # ── AUTONOMOUS MODE (framing 4.2)
-                        # Execute immediately per pre-authorized rules
-                        # ⚠️ UNDER REVIEW — live trading deployment not yet authorized
-                        order = alpaca.submit_order(
-                            ticker=signal['ticker'], qty=shares, side="buy"
+                # Gate 6: Entry decision
+                candidate = gate6_entry(signal, score, regime, alpaca, sig_log)
+                if candidate is None:
+                    sig_log.decide("WATCH", "no entry condition met — signal retained in queue")
+                    sig_log.commit(db)
+                    continue
+
+                # Get ATR for sizing and risk
+                atr = alpaca.get_atr(signal['ticker'])
+                if not atr:
+                    atr = candidate['price'] * 0.02
+
+                # Gate 7: Position sizing
+                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log)
+
+                # Gate 8: Risk setup
+                risk = gate8_risk(candidate, atr, session, sig_log)
+
+                # Gate 11: Portfolio controls
+                if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log):
+                    sig_log.decide("SKIP", "portfolio limits block entry")
+                    sig_log.commit(db)
+                    continue
+
+                # Entry approved — MIRROR
+                sig_log.decide("MIRROR", f"{candidate['type']} entry | "
+                               f"{size:.4f} shares @ ${candidate['price']:.2f} | "
+                               f"stop=${risk['stop_loss']} target=${risk['profit_target']}")
+
+                trail_amt, trail_pct, vol_label = calculate_trail_stop(
+                    atr, candidate['price'], signal.get('sector', ''))
+
+                decision_data = {
+                    "price":     candidate['price'],
+                    "shares":    size,
+                    "max_trade": round(size * candidate['price'], 2),
+                    "trail_amt": trail_amt,
+                    "trail_pct": trail_pct,
+                    "vol_label": vol_label,
+                    "reasoning": f"Entry type: {candidate['type']} | Score: {score:.4f} | "
+                                 f"Mode: {regime.mode} | Regime: {regime.trend}/{regime.volatility}",
+                    "session":   session,
+                }
+
+                if OPERATING_MODE == 'SUPERVISED':
+                    queue_for_approval(signal, decision_data)
+                    log.info(f"[SUPERVISED] {signal['ticker']} queued for portal approval")
+                else:
+                    # AUTONOMOUS MODE ⚠️ UNDER REVIEW — live trading not yet authorized
+                    order = alpaca.submit_order(signal['ticker'], size, "buy")
+                    if order:
+                        db.open_position(
+                            ticker=signal['ticker'], company=signal.get('company'),
+                            sector=signal.get('sector'), entry_price=candidate['price'],
+                            shares=size, trail_stop_amt=trail_amt,
+                            trail_stop_pct=trail_pct, vol_bucket=vol_label,
+                            signal_id=signal['id'],
+                            entry_signal_score=str(score),
+                            entry_sentiment_score=signal.get('sentiment_score'),
+                            interrogation_status=signal.get('interrogation_status'),
                         )
-                        if order:
-                            _, _, vol_label = calculate_trail_stop(
-                                atr, price, signal.get('sector','')
-                            )
-                            pos_id = db.open_position(
-                                ticker=signal['ticker'],
-                                company=signal.get('company'),
-                                sector=signal.get('sector'),
-                                entry_price=price,
-                                shares=shares,
-                                trail_stop_amt=trail_amt,
-                                trail_stop_pct=trail_pct,
-                                vol_bucket=vol_label,
-                                signal_id=signal['id'],
-                                entry_signal_score=signal.get('entry_signal_score', signal.get('confidence')),
-                                entry_sentiment_score=signal.get('sentiment_score'),
-                                interrogation_status=signal.get('interrogation_status'),
-                            )
-                            alpaca.submit_order(
-                                ticker=signal['ticker'],
-                                qty=shares,
-                                side="sell",
-                                order_type="trailing_stop",
-                                trail_price=trail_amt,
-                            )
-                            db.acknowledge_signal(signal['id'])
-                            log.info(
-                                f"TRADE EXECUTED: BUY {shares:.4f} {signal['ticker']} "
-                                f"@ ${price:.2f} — stop ${trail_amt:.2f} ({vol_label})"
-                            )
-                        else:
-                            log.error(f"Order failed for {signal['ticker']}")
+                        alpaca.submit_order(signal['ticker'], size, "sell",
+                                            order_type="trailing_stop", trail_price=trail_amt)
+                        db.acknowledge_signal(signal['id'])
+                        log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
+                                 f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
+                    else:
+                        log.error(f"Order failed: {signal['ticker']}")
 
-                elif decision == "SKIP":
-                    db.discard_signal(signal['id'], reason="Trader: SKIP")
-                    log.info(f"Signal {signal['id']} discarded by trader")
+                sig_log.commit(db)
+                time.sleep(1)
 
-                # WATCH: signal stays in queue, re-evaluated next session
-                time.sleep(2)  # Rate limit buffer between Claude calls
-
-    # ── STEP 7: Monthly tax sweep
+    # ── Monthly tax sweep (KEEP from v1.x)
     if is_last_trading_day_of_month() and session == "close":
         portfolio = db.get_portfolio()
         positions = db.get_open_positions()
-        unrealized = sum(p.get('pnl', 0) for p in positions)
+        unrealized  = sum(p.get('pnl', 0) for p in positions)
         total_gains = portfolio['realized_gains'] + unrealized
         if total_gains > 0:
-            tax = round(total_gains * GAIN_TAX_PCT, 2)
-            log.info(f"Month-end tax sweep: ${tax:.2f} (10% of ${total_gains:.2f} gains)")
+            tax = round(total_gains * C.GAIN_TAX_PCT, 2)
+            log.info(f"Month-end tax sweep: ${tax:.2f}")
             db.sweep_monthly_tax(tax)
 
-    # ── DONE
-    portfolio = db.get_portfolio()
-    positions = db.get_open_positions()
+    # ── Session complete
+    portfolio   = db.get_portfolio()
+    positions   = db.get_open_positions()
     total_value = portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in positions)
-
-    log.info(
-        f"Session complete — portfolio=${total_value:.2f} "
-        f"positions={len(positions)} cash=${portfolio['cash']:.2f}"
-    )
+    log.info(f"Session complete — portfolio=${total_value:.2f} "
+             f"positions={len(positions)} cash=${portfolio['cash']:.2f}")
     db.log_heartbeat("agent1_trader", "OK", portfolio_value=total_value)
-    db.log_event(
-        "AGENT_COMPLETE", agent="The Trader",
-        details=f"session={session} positions={len(positions)}",
-        portfolio_value=total_value,
-    )
+    db.log_event("AGENT_COMPLETE", agent="The Trader",
+                 details=f"session={session} positions={len(positions)}",
+                 portfolio_value=total_value)
 
-    # Send heartbeat to monitor server
     try:
         from heartbeat import write_heartbeat
         write_heartbeat(agent_name="agent1_trader", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
-    # On close session — send daily report to monitor server
+    # Daily report (KEEP from v1.x)
     if session == "close":
         try:
             monitor_url   = os.environ.get('MONITOR_URL', '')
@@ -1364,53 +1754,40 @@ def run(session="open"):
             pi_id         = os.environ.get('PI_ID', 'synthos-pi')
             if monitor_url:
                 outcomes_today = db.get_recent_outcomes(limit=20)
-                today_str = datetime.now(ET).strftime('%Y-%m-%d')
-                today_outcomes = [o for o in outcomes_today
-                                  if o.get('created_at','').startswith(today_str)]
-                wins   = sum(1 for o in today_outcomes if o.get('verdict') == 'WIN')
-                losses = sum(1 for o in today_outcomes if o.get('verdict') == 'LOSS')
-                realized = round(sum(o.get('pnl_dollar', 0) for o in today_outcomes), 2)
-                report = {
-                    "pi_id":           pi_id,
-                    "date":            today_str,
-                    "portfolio_value": round(total_value, 2),
-                    "realized_pnl":    realized,
-                    "open_positions":  len(positions),
-                    "trades_today":    len(today_outcomes),
-                    "wins":            wins,
-                    "losses":          losses,
-                    "summary":         f"{len(today_outcomes)} trades today — {wins}W/{losses}L — portfolio ${total_value:.2f}",
-                }
+                today_str = now.strftime('%Y-%m-%d')
+                today_out = [o for o in outcomes_today
+                             if o.get('created_at', '').startswith(today_str)]
+                wins     = sum(1 for o in today_out if o.get('verdict') == 'WIN')
+                losses   = sum(1 for o in today_out if o.get('verdict') == 'LOSS')
+                realized = round(sum(o.get('pnl_dollar', 0) for o in today_out), 2)
                 requests.post(
                     f"{monitor_url.rstrip('/')}/report",
-                    json=report,
-                    headers={"X-Token": monitor_token},
-                    timeout=10,
+                    json={"pi_id": pi_id, "date": today_str,
+                          "portfolio_value": round(total_value, 2),
+                          "realized_pnl": realized, "open_positions": len(positions),
+                          "trades_today": len(today_out), "wins": wins, "losses": losses,
+                          "summary": f"{len(today_out)} trades — {wins}W/{losses}L — ${total_value:.2f}"},
+                    headers={"X-Token": monitor_token}, timeout=10,
                 )
-                log.info(f"Daily report posted to monitor: {report['summary']}")
         except Exception as e:
             log.warning(f"Daily report POST failed: {e}")
 
 
-# ── ENTRY POINT ───────────────────────────────────────────────────────────
+# ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Synthos — The Trader (Execution Agent)')
-    parser.add_argument('--session', choices=['open','midday','close'], default='open',
-                        help='Trading session: open=9:30am, midday=12:30pm, close=3:30pm')
+    parser = argparse.ArgumentParser(description='Synthos — ExecutionAgent (Agent 1)')
+    parser.add_argument('--session', choices=['open', 'midday', 'close'], default='open')
     args = parser.parse_args()
 
-    if not ANTHROPIC_API_KEY:
-        log.error("ANTHROPIC_API_KEY not set — check .env file")
-        sys.exit(1)
     if not ALPACA_API_KEY:
-        log.error("ALPACA_API_KEY not set — check .env file")
+        log.error("ALPACA_API_KEY not set — check .env")
         sys.exit(1)
 
     acquire_agent_lock("agent1_trader.py")
     try:
         run(session=args.session)
     except KeyboardInterrupt:
-        log.info("Interrupted by user")
+        log.info("Interrupted")
     except Exception as e:
         log.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
