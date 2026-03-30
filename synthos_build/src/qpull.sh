@@ -3,7 +3,9 @@
 # Usage: qpull
 #        qpull --no-restart
 
-cd ~/synthos 2>/dev/null || { echo "Error: ~/synthos not found"; exit 1; }
+SYNTHOS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+cd "$SYNTHOS_DIR" 2>/dev/null || { echo "Error: synthos build root not found at $SYNTHOS_DIR"; exit 1; }
 
 echo "Pulling from GitHub..."
 if ! git pull; then
@@ -20,7 +22,7 @@ if pgrep -f portal.py > /dev/null; then
   echo "Restarting portal..."
   pkill -f portal.py
   sleep 1
-  nohup python3 ~/synthos/portal.py >> ~/synthos/logs/portal.log 2>&1 &
+  nohup python3 "$SYNTHOS_DIR/src/portal.py" >> "$SYNTHOS_DIR/logs/portal.log" 2>&1 &
   echo "✓ Portal restarted"
 fi
 

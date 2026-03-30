@@ -16,7 +16,7 @@ Boot order:
   6. Log boot complete — cron takes over
 
 CRON ENTRY (replaces individual @reboot lines):
-  @reboot sleep 60 && python3 /home/pi/synthos/boot_sequence.py >> /home/pi/synthos/logs/boot.log 2>&1
+  @reboot sleep 60 && python3 /home/pi/synthos/synthos_build/src/boot_sequence.py >> /home/pi/synthos/synthos_build/logs/boot.log 2>&1
 
 Developer:  Patrick McGuire
 Support:    synthos.signal@gmail.com
@@ -36,9 +36,11 @@ from dotenv import load_dotenv
 
 SYNTHOS_VERSION = "1.2"
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR     = os.path.join(PROJECT_DIR, 'logs')
-ENV_PATH    = os.path.join(PROJECT_DIR, '.env')
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))   # src/
+_ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)                  # synthos_build/
+PROJECT_DIR = _SCRIPT_DIR                                   # sibling scripts live here
+LOG_DIR     = os.path.join(_ROOT_DIR, 'logs')
+ENV_PATH    = os.path.join(_ROOT_DIR, 'user', '.env')
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -173,7 +175,7 @@ def step4_database():
     log.info("Step 4/9 — Database")
     try:
         import sqlite3
-        db_path = os.path.join(PROJECT_DIR, 'signals.db')
+        db_path = os.path.join(_ROOT_DIR, 'data', 'signals.db')
 
         if not os.path.exists(db_path):
             # Cold start — database will be created on first agent run
@@ -397,7 +399,7 @@ def step10_seed_suggestions():
     if os.environ.get('COMPANY_MODE', '').lower() != 'true':
         return step("Suggestions backlog", True, "skipped — not company node")
 
-    suggestions_path = os.path.join(PROJECT_DIR, 'data', 'suggestions.json')
+    suggestions_path = os.path.join(_ROOT_DIR, 'data', 'suggestions.json')
     seed_path        = os.path.join(PROJECT_DIR, 'seed_backlog.py')
 
     if not os.path.exists(seed_path):

@@ -7,7 +7,7 @@
 #   install    — from anywhere to launch the installer
 #   synthos     — same thing (registered by installer on completion)
 
-SYNTHOS_DIR="/home/pi/synthos"
+SYNTHOS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo ""
 echo "============================================================"
@@ -16,7 +16,7 @@ echo "============================================================"
 
 # Register 'install' command system-wide
 sudo bash -c "echo '#!/bin/bash
-cd $SYNTHOS_DIR && python3 install.py \"\$@\"' > /usr/local/bin/install && chmod +x /usr/local/bin/install"
+cd $SYNTHOS_DIR/src && python3 install_retail.py \"\$@\"' > /usr/local/bin/install && chmod +x /usr/local/bin/install"
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -31,6 +31,6 @@ else
     echo ""
     echo "  Could not register system command."
     echo "  Run the installer manually:"
-    echo "    python3 $SYNTHOS_DIR/install.py"
+    echo "    python3 $SYNTHOS_DIR/src/install_retail.py"
     echo ""
 fi

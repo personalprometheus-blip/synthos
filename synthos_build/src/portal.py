@@ -7,10 +7,10 @@ Provides: kill switch, supervised mode trade approval queue,
           system status, autonomous mode unlock gate.
 
 Runs continuously on the Pi:
-  @reboot sleep 90 && python3 /home/pi/synthos/portal.py &
+  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/portal.py &
 
 Or add to crontab:
-  @reboot sleep 90 && python3 /home/pi/synthos/portal.py >> /home/pi/synthos/logs/portal.log 2>&1 &
+  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/portal.py >> /home/pi/synthos/synthos_build/logs/portal.log 2>&1 &
 
 Access at: http://raspberrypi.local:5001
            http://10.0.0.224:5001  (or your Pi's IP)
@@ -32,12 +32,14 @@ from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, render_template_string, redirect, session
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+_SCRIPT_DIR          = os.path.dirname(os.path.abspath(__file__))   # src/
+_ROOT_DIR            = os.path.dirname(_SCRIPT_DIR)                  # synthos_build/
+load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-PROJECT_DIR          = os.path.dirname(os.path.abspath(__file__))
-KILL_SWITCH_FILE     = os.path.join(PROJECT_DIR, '.kill_switch')
-ENV_PATH             = os.path.join(PROJECT_DIR, '.env')
-LOG_DIR              = os.path.join(PROJECT_DIR, 'logs')
+PROJECT_DIR          = _SCRIPT_DIR                                   # keep for co-located script references
+KILL_SWITCH_FILE     = os.path.join(_ROOT_DIR, '.kill_switch')
+ENV_PATH             = os.path.join(_ROOT_DIR, 'user', '.env')
+LOG_DIR              = os.path.join(_ROOT_DIR, 'logs')
 ET                   = ZoneInfo("America/New_York")
 PORT                 = int(os.environ.get('PORTAL_PORT', 5001))
 PI_ID                = os.environ.get('PI_ID', 'synthos-pi')

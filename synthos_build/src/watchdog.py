@@ -1,6 +1,6 @@
 """
 watchdog.py — Crash Monitor & Auto-Restart System
-Synthos Retail Pi | /home/pi/synthos/core/watchdog.py
+Synthos Retail Pi | synthos_build/src/watchdog.py
 Version: 2.0
 
 Runs continuously in the background via cron @reboot.
@@ -22,7 +22,7 @@ Known-good snapshot:
   Also used as the Sunday morning rollback source if Friday push breaks things.
 
 CRON SETUP:
-  @reboot sleep 90 && python3 /home/pi/synthos/core/watchdog.py &
+  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/watchdog.py &
 
 USAGE:
   python3 watchdog.py              # start watching
@@ -49,8 +49,8 @@ from dotenv import load_dotenv
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-PROJECT_DIR      = Path(__file__).parent.parent   # /home/pi/synthos
-CORE_DIR         = PROJECT_DIR / "core"
+PROJECT_DIR      = Path(__file__).resolve().parent.parent   # synthos_build/
+CORE_DIR         = PROJECT_DIR / "src"
 LOG_DIR          = PROJECT_DIR / "logs"
 DATA_DIR         = PROJECT_DIR / "data"
 USER_DIR         = PROJECT_DIR / "user"
@@ -60,7 +60,8 @@ SNAPSHOT_DIR     = PROJECT_DIR / ".known_good"
 SNAPSHOT_ENV     = SNAPSHOT_DIR / ".env.known_good"
 
 # Company Pi data directory — override with COMPANY_DATA_DIR env var for non-default installs
-COMPANY_DATA_DIR     = Path(os.environ.get("COMPANY_DATA_DIR", "/home/pi/synthos-company/data"))
+_COMPANY_DEFAULT     = PROJECT_DIR.parent.parent / "synthos-company" / "data"   # synthos_build/ → synthos/ → /home/pi/ → /home/pi/synthos-company/data
+COMPANY_DATA_DIR     = Path(os.environ.get("COMPANY_DATA_DIR", str(_COMPANY_DEFAULT)))
 # SUGGESTIONS_FILE removed — alerts now written to company.db via db_helpers.post_suggestion()
 # POST_DEPLOY_FILE removed — deploy watches now read from company.db via db_helpers.get_active_deploy_watches()
 TRADING_MODE_FILE    = COMPANY_DATA_DIR / "trading_mode.json"

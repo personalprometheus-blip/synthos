@@ -21,6 +21,10 @@ company.env
 # Logs
 logs/*.log
 logs/crash_reports/
+src/logs/
+
+# Runtime data
+data/suggestions.json
 
 # Runtime state
 .kill_switch

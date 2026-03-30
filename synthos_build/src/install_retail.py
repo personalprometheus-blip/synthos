@@ -49,11 +49,11 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 # ── PATH RESOLUTION ───────────────────────────────────────────────────────────
-# SYNTHOS_HOME is the parent of this file — which is synthos-retail/
+# SYNTHOS_HOME is the build root (parent of src/ where this file lives).
 # This is the ONLY path resolution in this file. All others derive from it.
 
-SYNTHOS_HOME: Path = Path(__file__).resolve().parent
-CORE_DIR:     Path = SYNTHOS_HOME / "core"
+SYNTHOS_HOME: Path = Path(__file__).resolve().parent.parent
+CORE_DIR:     Path = SYNTHOS_HOME / "src"
 USER_DIR:     Path = SYNTHOS_HOME / "user"
 DATA_DIR:     Path = SYNTHOS_HOME / "data"
 LOG_DIR:      Path = SYNTHOS_HOME / "logs"
