@@ -42,12 +42,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY   = os.environ.get('ANTHROPIC_API_KEY', '')
+# ANTHROPIC_API_KEY removed — Scout uses no LLM in signal classification.
+# All decisions are rule-based and traceable. See classify_signal().
 CONGRESS_API_KEY    = os.environ.get('CONGRESS_API_KEY', '')
 ALPACA_API_KEY      = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET_KEY   = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_DATA_URL     = "https://data.alpaca.markets"
-CLAUDE_MODEL        = "claude-sonnet-4-20250514"
 ET                  = ZoneInfo("America/New_York")
 MAX_RETRIES         = 3
 REQUEST_TIMEOUT     = 10   # seconds per HTTP request
@@ -127,39 +127,75 @@ def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
     return None
 
 
-def call_claude(prompt, max_tokens=700):
-    """Call Claude API with retry. Returns text or None."""
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-    }
-    payload = {
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    last_error = None
-    for attempt in range(MAX_RETRIES):
+# ── SIGNAL DECISION LOG ───────────────────────────────────────────────────
+
+class SignalDecisionLog:
+    """
+    Records the classification decision for every processed signal.
+    Human-readable + machine-readable output for regulatory audit.
+
+    # FLAG — LOG WRITE LOCATION: Currently written via db.log_event() to
+    # system_log table. A dedicated signal_decisions table is recommended
+    # for regulatory export and volume management. Tracked as future work.
+    """
+
+    def __init__(self, ticker, source, source_tier):
+        self.ticker      = ticker
+        self.source      = source
+        self.source_tier = source_tier
+        self.steps       = []
+        self.decision    = None
+        self.confidence  = None
+        self.reason      = None
+        self.ts          = datetime.now(ET).isoformat()
+
+    def step(self, name, value, note=""):
+        self.steps.append({"name": name, "value": str(value), "note": note})
+        return self
+
+    def decide(self, decision, confidence, reason):
+        self.decision   = decision
+        self.confidence = confidence
+        self.reason     = reason
+        return self
+
+    def to_human(self):
+        tier_label = {1: "OFFICIAL", 2: "WIRE", 3: "PRESS", 4: "OPINION"}.get(
+            self.source_tier, "UNKNOWN"
+        )
+        lines = [
+            f"SIGNAL CLASSIFICATION — {self.ticker} @ {self.ts}",
+            f"  Source    : {self.source} (Tier {self.source_tier} — {tier_label})",
+        ]
+        for s in self.steps:
+            note = f"  [{s['note']}]" if s["note"] else ""
+            lines.append(f"  {s['name']:<24}: {s['value']}{note}")
+        lines.append(f"  {'DECISION':<24}: {self.decision} | confidence={self.confidence}")
+        lines.append(f"  {'REASON':<24}: {self.reason}")
+        return "\n".join(lines)
+
+    def to_machine(self):
+        return {
+            "ts":          self.ts,
+            "ticker":      self.ticker,
+            "source":      self.source,
+            "source_tier": self.source_tier,
+            "steps":       self.steps,
+            "decision":    self.decision,
+            "confidence":  self.confidence,
+            "reason":      self.reason,
+        }
+
+    def commit(self, db):
+        log.info(f"[SIGNAL_DECISION]\n{self.to_human()}")
         try:
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers, json=payload, timeout=30,
+            db.log_event(
+                "SIGNAL_CLASSIFIED",
+                agent="Scout",
+                details=json.dumps(self.to_machine()),
             )
-            if r.status_code == 429:
-                wait = 2 ** (attempt + 2)
-                log.warning(f"Rate limited — waiting {wait}s")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            return "".join(b.get("text", "") for b in data.get("content", []))
         except Exception as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(2 ** attempt * 2)
-    log.error(f"Claude API failed after {MAX_RETRIES} attempts: {last_error}")
-    return None
+            log.debug(f"SignalDecisionLog.commit failed (non-fatal): {e}")
 
 
 # ── STALENESS CALCULATION ─────────────────────────────────────────────────
@@ -595,83 +631,112 @@ def fetch_rss_feeds():
     return results
 
 
-# ── SIGNAL VALIDATION ─────────────────────────────────────────────────────
+# ── SIGNAL CLASSIFICATION ─────────────────────────────────────────────────
 
-def validate_signal_with_claude(signal, db):
+def _check_tier1_corroboration(ticker, db):
     """
-    Ask Claude to validate a signal and determine if it should be
-    queued for Bolt, watched, or discarded.
-    Returns: ("QUEUE" | "WATCH" | "DISCARD", confidence, summary)
-    confidence is the BASE confidence before member weight is applied.
+    Returns True if a non-expired Tier 1 signal for this ticker exists.
+    Used by classify_signal() to elevate Tier 2/3 signals.
     """
-    tier_label = {1:"OFFICIAL", 2:"WIRE", 3:"PRESS", 4:"OPINION"}.get(signal.get("source_tier", 2), "WIRE")
+    try:
+        with db.conn() as c:
+            row = c.execute("""
+                SELECT id FROM signals
+                WHERE ticker = ?
+                  AND source_tier = 1
+                  AND (expires_at IS NULL OR expires_at > ?)
+                LIMIT 1
+            """, (ticker, db.now())).fetchone()
+        return row is not None
+    except Exception:
+        return False
 
-    outcomes = db.get_recent_outcomes(limit=5)
-    outcome_context = ""
-    if outcomes:
-        lines = [f"  - {o['ticker']} {o['verdict']} {o.get('pnl_pct',0):+.1f}% ({o.get('staleness','?')} T{o.get('signal_tier','?')})" for o in outcomes]
-        outcome_context = "RECENT TRADE OUTCOMES (learning context):\n" + "\n".join(lines)
 
-    prompt = f"""You are Scout — the Research Agent for Synthos, a conservative congressional trade following system.
+def classify_signal(signal, db):
+    """
+    Deterministic rule-based signal classification.
+    Replaces: validate_signal_with_claude()
 
-STRICT SCOPE: You analyze political and legislative signals ONLY.
-You do NOT analyze market sentiment, price action, or volume.
-You do NOT execute trades. Your output goes to the Bolt (Trader) agent.
+    Tier rules:
+      Tier 1 (Official) → auto-HIGH / QUEUE  — handled in run() before this call
+      Tier 4 (Opinion)  → auto-NOISE / DISCARD — handled in run() before this call
+      Tier 2 (Wire)     → HIGH if Tier 1 corroborated; MEDIUM/WATCH otherwise
+      Tier 3 (Press)    → MEDIUM always; QUEUE only with Tier 1 corroboration
 
-SIGNAL TO VALIDATE:
-Source: {signal.get('source')} (Tier {signal.get('source_tier')} — {tier_label})
-Headline: "{signal.get('headline', '')}"
-Subhead: "{signal.get('subhead', '')}"
-Politician: {signal.get('politician', 'Unknown')}
-Ticker: {signal.get('ticker', 'Unknown')}
-Sector: {signal.get('sector', 'Unknown')}
-Transaction date: {signal.get('tx_date', 'Unknown')}
-Disclosure date: {signal.get('disc_date', 'Unknown')}
-Staleness: {signal.get('staleness', 'Unknown')}
-Corroborated: {signal.get('corroborated', False)}
-Corroboration note: {signal.get('corroboration_note', 'N/A')}
+    Returns: (decision, confidence, reason)
+    All steps logged to SignalDecisionLog.
+    """
+    sdl = SignalDecisionLog(
+        ticker      = signal.get("ticker", "UNKNOWN"),
+        source      = signal.get("source", ""),
+        source_tier = signal.get("source_tier", 2),
+    )
 
-TIER RULES:
-- Tier 1 (Official: Congress.gov, SEC, Federal Register) → auto-HIGH, queue immediately
-- Tier 2 (Wire: Reuters, AP) → HIGH only if corroborated by official source
-- Tier 3 (Press: Politico, The Hill) → MEDIUM, needs Tier 1 or 2 backup
-- Tier 4 (Opinion/Social) → NOISE, always discard
+    source_tier = signal.get("source_tier", 2)
+    staleness   = signal.get("staleness", "Unknown")
+    is_spousal  = signal.get("is_spousal", False)
+    is_amended  = signal.get("is_amended", False)
+    ticker      = signal.get("ticker")
 
-{outcome_context}
+    sdl.step("staleness",  staleness)
+    sdl.step("is_spousal", is_spousal)
+    sdl.step("is_amended", is_amended)
 
-Analyze (be concise):
-1. Source credibility — factual or sensational?
-2. Political mechanism — plausible path from this news to the ticker?
-3. Manipulation check — could this be coordinated price movement?
-4. Confidence — HIGH / MEDIUM / LOW / NOISE
-5. Decision — QUEUE / WATCH / DISCARD
+    # ── Hard discard conditions ────────────────────────────────────────────
+    if not ticker:
+        sdl.decide("DISCARD", "NOISE", "No ticker resolved for this signal")
+        sdl.commit(db)
+        return sdl.decision, sdl.confidence, sdl.reason
 
-End your response with exactly one line:
-DECISION: QUEUE
-or
-DECISION: WATCH
-or
-DECISION: DISCARD"""
+    if is_spousal:
+        sdl.decide("DISCARD", "LOW",
+                   "Spousal/dependent filing — reduced legislative signal quality")
+        sdl.commit(db)
+        return sdl.decision, sdl.confidence, sdl.reason
 
-    response = call_claude(prompt)
-    if not response:
-        return "WATCH", "MEDIUM", "Claude unavailable — defaulting to WATCH"
+    if staleness == "Expired":
+        sdl.decide("DISCARD", "LOW",
+                   "Signal expired (>14 days between transaction and disclosure)")
+        sdl.commit(db)
+        return sdl.decision, sdl.confidence, sdl.reason
 
-    decision = "WATCH"
-    for line in response.strip().split('\n'):
-        if line.startswith("DECISION:"):
-            d = line.replace("DECISION:", "").strip().upper()
-            if d in ("QUEUE", "WATCH", "DISCARD"):
-                decision = d
-            break
+    # ── Corroboration check ────────────────────────────────────────────────
+    corroborated = _check_tier1_corroboration(ticker, db)
+    sdl.step("tier1_corroboration", corroborated,
+             note="Tier 1 official signal exists for ticker" if corroborated else "No Tier 1 signal found")
 
-    confidence = "MEDIUM"
-    for conf in ("HIGH", "MEDIUM", "LOW", "NOISE"):
-        if conf in response.upper():
-            confidence = conf
-            break
+    # ── Tier 2: Wire sources (Reuters, AP) ────────────────────────────────
+    if source_tier == 2:
+        if corroborated:
+            sdl.decide("QUEUE", "HIGH",
+                       "Tier 2 wire + Tier 1 official corroboration confirmed")
+        elif staleness in ("Fresh", "Aging"):
+            sdl.decide("WATCH", "MEDIUM",
+                       "Tier 2 wire — no Tier 1 corroboration yet; watching")
+        else:
+            sdl.decide("DISCARD", "LOW",
+                       "Tier 2 wire — stale (>7 days) and uncorroborated")
+        sdl.commit(db)
+        return sdl.decision, sdl.confidence, sdl.reason
 
-    return decision, confidence, response[:500]
+    # ── Tier 3: Press sources (Politico, The Hill, Bloomberg) ─────────────
+    if source_tier == 3:
+        if corroborated and staleness in ("Fresh", "Aging"):
+            sdl.decide("QUEUE", "MEDIUM",
+                       "Tier 3 press + Tier 1 backup — within freshness window")
+        elif staleness in ("Fresh", "Aging"):
+            sdl.decide("WATCH", "MEDIUM",
+                       "Tier 3 press — monitoring for Tier 1 corroboration")
+        else:
+            sdl.decide("DISCARD", "LOW",
+                       "Tier 3 press — stale or outside freshness window")
+        sdl.commit(db)
+        return sdl.decision, sdl.confidence, sdl.reason
+
+    # ── Fallback for unrecognised tier ─────────────────────────────────────
+    sdl.decide("WATCH", "LOW", f"Unrecognised source tier {source_tier} — defaulting to WATCH")
+    sdl.commit(db)
+    return sdl.decision, sdl.confidence, sdl.reason
 
 
 # ── TICKER EXTRACTION ─────────────────────────────────────────────────────
@@ -770,18 +835,18 @@ def run(session="market"):
         # ── Determine base confidence ──────────────────────────────────
         if source_tier == 1:
             base_confidence = "HIGH"
-            claude_decision = "QUEUE"
-            claude_summary  = "Tier 1 auto-HIGH"
+            signal_decision = "QUEUE"
+            signal_reason   = "Tier 1 official source — auto-HIGH"
         elif source_tier == 4:
             base_confidence = "NOISE"
-            claude_decision = "DISCARD"
-            claude_summary  = "Tier 4 auto-DISCARD"
+            signal_decision = "DISCARD"
+            signal_reason   = "Tier 4 opinion source — auto-DISCARD"
         else:
             item["staleness"]  = staleness
             item["ticker"]     = ticker
             item["is_amended"] = is_amended
             item["is_spousal"] = is_spousal
-            claude_decision, base_confidence, claude_summary = validate_signal_with_claude(item, db)
+            signal_decision, base_confidence, signal_reason = classify_signal(item, db)
 
         # ── Apply member weight → adjusted score ──────────────────────
         member_data      = db.get_member_weight(congress_member)
@@ -790,7 +855,7 @@ def run(session="market"):
 
         log.info(
             f"{ticker} base={base_confidence} weight={member_weight:.2f} "
-            f"adj={adj_text}({adj_numeric:.3f}) decision={claude_decision}"
+            f"adj={adj_text}({adj_numeric:.3f}) decision={signal_decision}"
         )
 
         # ── Identify sector + ETFs ─────────────────────────────────────
@@ -823,7 +888,7 @@ def run(session="market"):
             log.warning(f"news_feed write failed (non-fatal): {e}")
 
         # ── Discard path ───────────────────────────────────────────────
-        if claude_decision == "DISCARD" or adj_text == "NOISE":
+        if signal_decision == "DISCARD" or adj_text == "NOISE":
             db.upsert_signal(
                 ticker=ticker,
                 source=item.get("source"),
@@ -922,12 +987,12 @@ def run(session="market"):
         # ── Pass to Bolt ───────────────────────────────────────────────
         # All signals above threshold go to Bolt; Bolt applies Option B rules
         # to decide MIRROR / WATCH / SKIP based on adjusted score + pulse data.
-        if claude_decision in ("QUEUE", "WATCH"):
+        if signal_decision in ("QUEUE", "WATCH"):
             db.queue_signal_for_trader(sig_id)
             queued += 1
             log.info(f"Queued for Bolt: {ticker} adj={adj_text} {interrogation_status}")
         else:
-            db.discard_signal(sig_id, reason=f"Claude: {claude_decision}")
+            db.discard_signal(sig_id, reason=signal_reason)
             discarded += 1
 
     # ── STEP 4: Re-evaluate signals that were previously WATCHING
@@ -947,7 +1012,7 @@ def run(session="market"):
 
         for sig in watching:
             log.info(f"Re-evaluating WATCH signal: {sig['ticker']} T{sig['source_tier']} (id={sig['id']})")
-            decision, confidence, summary = validate_signal_with_claude(sig, db)
+            decision, confidence, reason = classify_signal(sig, db)
             reeval_count += 1
 
             with db.conn() as c:
@@ -959,11 +1024,9 @@ def run(session="market"):
                 queued += 1
                 log.info(f"Re-eval promoted to queue: {sig['ticker']}")
             elif decision == 'DISCARD':
-                db.discard_signal(sig['id'], reason="Re-eval: DISCARD")
+                db.discard_signal(sig['id'], reason=reason)
                 discarded += 1
                 log.info(f"Re-eval discarded: {sig['ticker']}")
-
-            time.sleep(1)  # rate limit buffer
 
     except Exception as e:
         log.warning(f"Re-evaluation step failed: {e}")
