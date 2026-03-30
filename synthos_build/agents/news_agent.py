@@ -412,6 +412,35 @@ class NewsDecisionLog:
             log.debug(f"NewsDecisionLog.commit failed (non-fatal): {e}")
 
 
+# ── TEMP PATCH: PER-SOURCE DAILY FETCH GUARD ──────────────────────────────
+# Prevents Scout from hitting any external source more than once per day.
+# Remove this block once a proper rate-limiting layer is in place.
+
+SOURCE_FETCH_COOLDOWN_HOURS = 24    # minimum hours between fetches from the same source
+_FETCH_GUARD_EVENT          = "SCOUT_SOURCE_FETCH"
+
+
+def _source_fetched_recently(source_name: str, db) -> bool:
+    """Return True if this source was successfully fetched within the cooldown window."""
+    try:
+        cutoff = (datetime.now(ET) - timedelta(hours=SOURCE_FETCH_COOLDOWN_HOURS)).isoformat()
+        rows = db.query(
+            "SELECT id FROM event_log WHERE event_type = ? AND details LIKE ? AND created_at > ? LIMIT 1",
+            (_FETCH_GUARD_EVENT, f"%{source_name}%", cutoff),
+        )
+        return bool(rows)
+    except Exception:
+        return False   # fail open — allow fetch if DB check errors
+
+
+def _record_source_fetch(source_name: str, db) -> None:
+    """Record a successful fetch so the guard fires on the next call within 24 h."""
+    try:
+        db.log_event(_FETCH_GUARD_EVENT, agent="Scout", details=f"source={source_name}")
+    except Exception:
+        pass
+
+
 # ── RETRY HELPERS ─────────────────────────────────────────────────────────
 
 def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
@@ -2326,17 +2355,50 @@ def run(session="market"):
     # ── Expire stale signals ───────────────────────────────────────────────
     db.expire_old_signals()
 
-    # ── Fetch all sources ─────────────────────────────────────────────────
+    # ── Fetch all sources (guarded — max 1 fetch per source per 24 h) ────────
     all_raw = []
-    all_raw.extend(fetch_capitol_trades())
+
+    if _source_fetched_recently("Capitol Trades API", db):
+        log.info("GUARD: Capitol Trades API skipped — fetched within last 24 h")
+    else:
+        results = fetch_capitol_trades()
+        all_raw.extend(results)
+        if results is not None:
+            _record_source_fetch("Capitol Trades API", db)
 
     if session == "market":
-        all_raw.extend(fetch_congress_gov_activity())
-        all_raw.extend(fetch_federal_register())
-        all_raw.extend(fetch_rss_feeds())
+        if _source_fetched_recently("Congress.gov API", db):
+            log.info("GUARD: Congress.gov API skipped — fetched within last 24 h")
+        else:
+            results = fetch_congress_gov_activity()
+            all_raw.extend(results)
+            if results is not None:
+                _record_source_fetch("Congress.gov API", db)
+
+        if _source_fetched_recently("Federal Register API", db):
+            log.info("GUARD: Federal Register API skipped — fetched within last 24 h")
+        else:
+            results = fetch_federal_register()
+            all_raw.extend(results)
+            if results is not None:
+                _record_source_fetch("Federal Register API", db)
+
+        if _source_fetched_recently("RSS feeds", db):
+            log.info("GUARD: RSS feeds skipped — fetched within last 24 h")
+        else:
+            results = fetch_rss_feeds()
+            all_raw.extend(results)
+            if results is not None:
+                _record_source_fetch("RSS feeds", db)
     else:
         # Overnight: disclosures + congress only
-        all_raw.extend(fetch_congress_gov_activity())
+        if _source_fetched_recently("Congress.gov API", db):
+            log.info("GUARD: Congress.gov API skipped — fetched within last 24 h")
+        else:
+            results = fetch_congress_gov_activity()
+            all_raw.extend(results)
+            if results is not None:
+                _record_source_fetch("Congress.gov API", db)
 
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
