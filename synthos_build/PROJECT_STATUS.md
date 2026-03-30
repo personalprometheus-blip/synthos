@@ -1,6 +1,6 @@
 # PROJECT STATUS — Synthos
 
-**Last Updated:** 2026-03-29
+**Last Updated:** 2026-03-30
 **Current Phase:** Phase 5 — Deployment Pipeline (Phases 3 and 4 complete)
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
@@ -68,10 +68,10 @@
 - [x] **Step 6 (HUMAN DECISION):** Declare license_validator.py status — FORMALLY DEFERRED (DEFERRED_FROM_CURRENT_BASELINE; removed from installer requirements; future work tracked in docs/milestones.md)
 
 Secondary (required before Phase 4):
-- [ ] Mark SUGGESTIONS_JSON_SPEC.md as SUPERSEDED
-- [ ] Mark POST_DEPLOY_WATCH_SPEC.md as SUPERSEDED
-- [ ] Update SYSTEM_MANIFEST.md (v1.2 env vars)
-- [ ] Boot SMS alert (boot_sequence.py smtplib) — route through MONITOR_URL or document exception
+- [x] Mark SUGGESTIONS_JSON_SPEC.md as SUPERSEDED
+- [x] Mark POST_DEPLOY_WATCH_SPEC.md as SUPERSEDED
+- [x] Update SYSTEM_MANIFEST.md — CORE_DIR core→src, install.py→install_retail.py, remove cleanup.py
+- [x] Boot SMS alert — documented as formal architectural exception in boot_sequence.py (pre-agent context; scoop.py not yet running at boot time)
 
 ---
 

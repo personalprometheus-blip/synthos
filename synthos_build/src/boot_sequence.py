@@ -107,7 +107,14 @@ def wait_for_network(timeout=60):
 
 
 def send_sms_alert(message):
-    """Send SMS alert via Gmail gateway."""
+    """Send SMS alert via Gmail gateway.
+
+    ARCHITECTURAL EXCEPTION: This function uses smtplib directly rather than
+    routing through scoop.py. This is intentional — boot_sequence.py runs before
+    any agents are started, so scoop.py is not yet available. Direct SMTP is the
+    only viable path for a boot-time alert. This is the sole permitted exception
+    to the scoop-only outbound email rule.
+    """
     try:
         load_dotenv(ENV_PATH, override=True)
         gmail_user  = os.environ.get('GMAIL_USER', '')
