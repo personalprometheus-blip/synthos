@@ -745,12 +745,44 @@ def get_rss_feeds():
         except Exception as e:
             log.warning(f"RSS_FEEDS_JSON parse error — using defaults: {e}")
     return [
-        ["Reuters RSS",          "https://feeds.reuters.com/reuters/politicsNews", 2],
-        ["Associated Press RSS", "https://apnews.com/rss",                         2],
-        ["Politico RSS",         "https://www.politico.com/rss/politicopicks.xml", 3],
-        ["The Hill RSS",         "https://thehill.com/feed",                       3],
-        ["Roll Call RSS",        "https://rollcall.com/feed",                      3],
-        ["Bloomberg RSS",        "https://feeds.bloomberg.com/politics/news.rss",  3],
+        # ── POLITICS / NEWS ───────────────────────────────────────────────
+        ["Reuters Politics",        "https://feeds.reuters.com/reuters/politicsNews",                                             2],
+        ["Associated Press",        "https://apnews.com/rss",                                                                     2],
+        ["Bloomberg Politics",      "https://feeds.bloomberg.com/politics/news.rss",                                              3],
+        ["Politico",                "https://www.politico.com/rss/politicopicks.xml",                                             3],
+        ["The Hill",                "https://thehill.com/feed",                                                                   3],
+        ["Roll Call",               "https://rollcall.com/feed",                                                                  3],
+
+        # ── REGULATORY: Enforcement / Approvals ──────────────────────────
+        ["SEC Press Releases",      "https://www.sec.gov/rss/news/pressreleases.rss",                                             1],
+        ["SEC Enforcement",         "https://www.sec.gov/rss/litigation/admin.xml",                                               1],
+        ["CFTC Press Releases",     "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",                                                   1],
+        ["CFTC Enforcement",        "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",                                                 1],
+        ["CFTC Speeches",           "https://www.cftc.gov/RSS/RSSST/rssst.xml",                                                   2],
+
+        # ── CONTRACTS ────────────────────────────────────────────────────
+        ["DoD Contract Awards",     "https://www.war.gov/DesktopModules/ArticleCS/RSS.ashx?max=10&ContentType=400&Site=945",      1],
+
+        # ── MACRO / RATES ─────────────────────────────────────────────────
+        ["Federal Reserve",         "https://www.federalreserve.gov/feeds/press_all.xml",                                         1],
+        ["Fed FOMC",                "https://www.federalreserve.gov/feeds/press_monetary.xml",                                    1],
+        ["Fed Powell Speeches",     "https://www.federalreserve.gov/feeds/s_t_powell.xml",                                       1],
+        ["Fed Speeches",            "https://www.federalreserve.gov/feeds/speeches.xml",                                         2],
+        ["Fed H.15 Rates",          "https://www.federalreserve.gov/feeds/h15.xml",                                              2],
+        ["Fed Enforcement",         "https://www.federalreserve.gov/feeds/press_enforcement.xml",                                 2],
+        ["Fed Bank Orders",         "https://www.federalreserve.gov/feeds/press_orders.xml",                                     2],
+        ["BEA Economic Releases",   "https://apps.bea.gov/rss/rss.xml",                                                          1],
+        ["Treasury Auctions",       "https://www.treasurydirect.gov/TA_WS/securities/announced/rss",                             2],
+        ["OCC Banking Bulletins",   "https://www.occ.treas.gov/rss/occ_bulletins.xml",                                          2],
+        ["OCC News Releases",       "https://www.occ.treas.gov/rss/occ_news.xml",                                               2],
+
+        # ── LEGISLATION / RULES ───────────────────────────────────────────
+        ["Federal Register Daily",  "https://www.govinfo.gov/rss/fr.xml",                                                        2],
+        ["Congressional Bills",     "https://www.govinfo.gov/rss/bills.xml",                                                     2],
+        ["Enrolled Bills",          "https://www.govinfo.gov/rss/bills-enr.xml",                                                 1],
+        ["House Floor Today",       "https://www.congress.gov/rss/house-floor-today.xml",                                       2],
+        ["Senate Floor Today",      "https://www.congress.gov/rss/senate-floor-today.xml",                                      2],
+        ["FERC Energy Filings",     "https://ecollection.ferc.gov/api/rssfeed",                                                  2],
     ]
 
 
