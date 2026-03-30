@@ -170,6 +170,48 @@ def logout():
     return redirect('/login')
 
 
+@app.route('/sso')
+def sso_login():
+    """
+    SSO entry point — called by the company node login server after successful auth.
+    Validates a short-lived signed token, creates a session, and redirects to dashboard.
+    Token is issued by login_server/app.py using the shared SSO_SECRET.
+    """
+    from flask import session, redirect, request as freq
+    from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
+
+    SSO_SECRET   = os.environ.get('SSO_SECRET', '')
+    LOGIN_URL    = os.environ.get('LOGIN_SERVER_URL', 'https://portal.synth-cloud.com')
+    SSO_TOKEN_TTL = 900  # 15 minutes — must match login_server/app.py
+
+    token = freq.args.get('t', '')
+
+    if not SSO_SECRET:
+        log.error('SSO_SECRET not configured on retail node — rejecting SSO attempt')
+        return redirect(f'{LOGIN_URL}/login?error=sso_not_configured')
+
+    if not token:
+        return redirect(f'{LOGIN_URL}/login?error=missing_token')
+
+    try:
+        s = URLSafeTimedSerializer(SSO_SECRET)
+        email = s.loads(token, salt='sso-login', max_age=SSO_TOKEN_TTL)
+    except SignatureExpired:
+        log.warning('SSO token expired')
+        return redirect(f'{LOGIN_URL}/login?error=token_expired')
+    except BadSignature:
+        log.warning('SSO token invalid signature')
+        return redirect(f'{LOGIN_URL}/login?error=invalid_token')
+    except Exception as e:
+        log.error(f'SSO token error: {e}')
+        return redirect(f'{LOGIN_URL}/login?error=token_error')
+
+    session['authenticated'] = True
+    session.permanent = True
+    log.info(f'SSO login: {email}')
+    return redirect('/')
+
+
 # ── HELPERS ───────────────────────────────────────────────────────────────
 
 def now_et():
