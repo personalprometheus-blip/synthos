@@ -416,14 +416,27 @@ class NewsDecisionLog:
 # Prevents Scout from hitting any external source more than once per day.
 # Remove this block once a proper rate-limiting layer is in place.
 
-SOURCE_FETCH_COOLDOWN_HOURS = 24    # minimum hours between fetches from the same source
-_FETCH_GUARD_EVENT          = "SCOUT_SOURCE_FETCH"
+_FETCH_GUARD_EVENT      = "SCOUT_SOURCE_FETCH"
+_FETCH_GUARD_RESET_HOUR = 8    # daily reset at 08:00 ET — fetches before this are discarded
+
+
+def _fetch_guard_cutoff() -> str:
+    """
+    Return the ISO timestamp of today's 08:00 ET reset point.
+    If it's currently before 08:00 ET, use yesterday's 08:00 ET —
+    so the window always covers the period since the last 08:00 reset.
+    """
+    now   = datetime.now(ET)
+    reset = now.replace(hour=_FETCH_GUARD_RESET_HOUR, minute=0, second=0, microsecond=0)
+    if now < reset:
+        reset -= timedelta(days=1)
+    return reset.isoformat()
 
 
 def _source_fetched_recently(source_name: str, db) -> bool:
-    """Return True if this source was successfully fetched within the cooldown window."""
+    """Return True if this source was fetched since the most recent 08:00 ET reset."""
     try:
-        cutoff = (datetime.now(ET) - timedelta(hours=SOURCE_FETCH_COOLDOWN_HOURS)).isoformat()
+        cutoff = _fetch_guard_cutoff()
         rows = db.query(
             "SELECT id FROM event_log WHERE event_type = ? AND details LIKE ? AND created_at > ? LIMIT 1",
             (_FETCH_GUARD_EVENT, f"%{source_name}%", cutoff),
@@ -434,7 +447,7 @@ def _source_fetched_recently(source_name: str, db) -> bool:
 
 
 def _record_source_fetch(source_name: str, db) -> None:
-    """Record a successful fetch so the guard fires on the next call within 24 h."""
+    """Record a successful fetch so the guard fires until the next 08:00 ET reset."""
     try:
         db.log_event(_FETCH_GUARD_EVENT, agent="Scout", details=f"source={source_name}")
     except Exception:
