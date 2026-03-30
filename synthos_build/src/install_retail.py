@@ -498,7 +498,8 @@ def run_full_install(config: dict) -> bool:
     # 2. Write .env
     _log_ui("Writing environment configuration...")
     try:
-        secret_key = secrets.token_hex(32)
+        # Preserve existing PORTAL_SECRET_KEY if repair mode loaded it; otherwise generate
+        secret_key = config.pop("_portal_secret_key", None) or secrets.token_hex(32)
         env_content = build_retail_env(config, secret_key)
         write_env(ENV_PATH, env_content)
         _log_ui("  ✓ user/.env written")
@@ -1052,13 +1053,47 @@ def repair_mode() -> int:
         print("  Run install_retail.py (without --repair) to reconfigure.")
         return 1
 
-    # Load existing config from .env for package/cron steps
+    # Load existing config from .env for package/cron steps.
+    # Map raw env var names → wizard key names so build_retail_env preserves all values.
+    _env_to_wizard = {
+        "ANTHROPIC_API_KEY":    "anthropic_key",
+        "ALPACA_API_KEY":       "alpaca_key",
+        "ALPACA_SECRET_KEY":    "alpaca_secret",
+        "ALPACA_BASE_URL":      "alpaca_base_url",
+        "TRADING_MODE":         "trading_mode",
+        "CONGRESS_API_KEY":     "congress_key",
+        "OPERATING_MODE":       "operating_mode",
+        "AUTONOMOUS_UNLOCK_KEY":"autonomous_unlock_key",
+        "LICENSE_KEY":          "license_key",
+        "PI_ID":                "pi_id",
+        "PI_LABEL":             "pi_label",
+        "PI_EMAIL":             "pi_email",
+        "OWNER_NAME":           "owner_name",
+        "OWNER_EMAIL":          "owner_email",
+        "STARTING_CAPITAL":     "starting_capital",
+        "SUPPORT_EMAIL":        "support_email",
+        "PORTAL_PORT":          "portal_port",
+        "PORTAL_PASSWORD":      "portal_password",
+        "PORTAL_SECRET_KEY":    "_portal_secret_key",
+        "MONITOR_URL":          "monitor_url",
+        "MONITOR_TOKEN":        "monitor_token",
+        "SENDGRID_API_KEY":     "sendgrid_key",
+        "ALERT_FROM":           "alert_from",
+        "USER_EMAIL":           "user_email",
+        "GMAIL_USER":           "gmail_user",
+        "GMAIL_APP_PASSWORD":   "gmail_app_password",
+        "ALERT_PHONE":          "alert_phone",
+        "CARRIER_GATEWAY":      "carrier_gateway",
+        "GITHUB_TOKEN":         "github_token",
+    }
     config: dict[str, str] = {}
     try:
         for line in ENV_PATH.read_text().splitlines():
             if "=" in line and not line.strip().startswith("#"):
                 k, _, v = line.partition("=")
-                config[k.strip()] = v.strip()
+                k = k.strip()
+                wizard_key = _env_to_wizard.get(k, k)
+                config[wizard_key] = v.strip()
     except OSError as exc:
         print(f"  ✗ Could not read .env: {exc}")
         return 1
