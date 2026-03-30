@@ -17,26 +17,21 @@ Phase 3 — System Validation + Normalization Sprint
 ## Where To Find Things
 - **Master project status** → PROJECT_STATUS.md (phases, cross-repo blockers, overall progress)
 - **This node's status** → STATUS.md (retail node operational health)
-- **Blockers and conflicts** → docs/validation/CONFLICT_LEDGER.md
-- **What must be fixed before deployment** → docs/validation/SYSTEM_VALIDATION_REPORT.md
-- **Feature specs** → docs/specs/
-- **Governance / safety rules** → docs/governance/BLUEPRINT_SAFETY_CONTRACT.md
-- **Operations spec** → docs/governance/SYNTHOS_OPERATIONS_SPEC.md + ADDENDUM_1
-- **All validation reports** → docs/validation/
 - **Source code** → src/
 - **Tests** → tests/
+- **All governance, specs, validation, and planning docs** → synthos-company/documentation/
 
 ## Critical Known Issues (read before touching any code)
-1. Retail license validation — DEFERRED_FROM_CURRENT_BASELINE (SYS-B01/B02 formally closed by deferral). `license_validator.py` is not built; removed from installer requirements; boot has no entitlement gate. This is intentional and documented. Future work tracked in docs/milestones.md.
+1. Retail license validation — DEFERRED_FROM_CURRENT_BASELINE (SYS-B01/B02 formally closed by deferral). `license_validator.py` is not built; removed from installer requirements; boot has no entitlement gate. This is intentional and documented. Future work tracked in synthos-company/documentation/milestones.md.
 2. Suggestions pipeline — RESOLVED (Steps 1-3): vault/sentinel/librarian/watchdog now write via db_helpers
 3. Post-deploy rollback — RESOLVED (Step 2): watchdog now reads from db_helpers
 4. `watchdog.py` COMPANY_DATA_DIR — RESOLVED (Step 3): now reads from env var
 5. `strongbox.py` — RESOLVED (Step 4): moved to synthos-company/agents/
-See docs/validation/SYSTEM_VALIDATION_REPORT.md for full blocker list.
+See synthos-company/documentation/validation/SYSTEM_VALIDATION_REPORT.md for full blocker list.
 
 ## Conventions
-- Never delete files — move deprecated work to /archive
-- Source code lives in src/, tests in tests/, all docs in docs/
+- Never delete files — move deprecated work to synthos-company/documentation/archive/
+- Source code lives in src/, tests in tests/
 - TRADING_MODE must remain PAPER — PAPER→LIVE requires explicit project lead action
 
 ## How To Update Progress
