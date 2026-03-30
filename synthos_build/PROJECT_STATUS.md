@@ -90,7 +90,7 @@ Secondary (required before Phase 4):
 
 ## Phase 5 — Deployment Pipeline 🔴 NOT STARTED
 
-- [ ] Create update-staging git branch
+- [x] Create update-staging git branch
 - [ ] Document actual Friday push process
 - [ ] First end-to-end deploy test in paper mode
 - [ ] Verify post-deploy rollback trigger fires correctly
