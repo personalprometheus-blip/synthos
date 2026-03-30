@@ -40,8 +40,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
-CLAUDE_MODEL      = "claude-sonnet-4-20250514"
+# ANTHROPIC_API_KEY removed — The Pulse uses no LLM in sentiment analysis.
+# All cascade detection and scan analysis is rule-based and traceable.
 ET                = ZoneInfo("America/New_York")
 MAX_RETRIES       = 3
 REQUEST_TIMEOUT   = 10
@@ -77,41 +77,6 @@ def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
                 log.warning(f"Fetch failed attempt {attempt+1}/{max_retries} — retry in {wait}s")
                 time.sleep(wait)
     log.error(f"Fetch permanently failed: {url[:80]} — {last_error}")
-    return None
-
-
-def call_claude(prompt, max_tokens=700):
-    """Call Claude with retry. Returns text or None."""
-    headers = {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-    }
-    payload = {
-        "model": CLAUDE_MODEL,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    last_error = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers, json=payload, timeout=30,
-            )
-            if r.status_code == 429:
-                wait = 2 ** (attempt + 2)
-                log.warning(f"Rate limited — waiting {wait}s")
-                time.sleep(wait)
-                continue
-            r.raise_for_status()
-            data = r.json()
-            return "".join(b.get("text", "") for b in data.get("content", []))
-        except Exception as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(2 ** attempt * 2)
-    log.error(f"Claude API failed: {last_error}")
     return None
 
 
@@ -342,41 +307,153 @@ def detect_cascade(put_call, put_call_avg, insider_data, volume_data):
     return tier, label, cascade_detected, summary
 
 
-# ── CLAUDE DEEP ANALYSIS ──────────────────────────────────────────────────
+# ── SCAN DECISION LOG ────────────────────────────────────────────────────
 
-def analyze_position_with_claude(pos, put_call, put_call_avg, insider_data,
-                                  volume_data, tier, tier_label, cascade_detected):
-    """Ask Claude for deep sentiment analysis of a position."""
-    prompt = f"""You are The Pulse — the Sentiment Agent for Synthos, a conservative congressional trade following system.
-You watch open positions for market deterioration. You NEVER trade. You log warnings for the Trader.
+from datetime import datetime as _dt
+import json as _json
 
-POSITION:
-Ticker: {pos['ticker']}
-Entry: ${pos['entry_price']:.2f} · Current: ${pos.get('current_price', pos['entry_price']):.2f}
-Trailing Stop: ${pos['trail_stop_amt']:.2f} below current (fires at ~${pos.get('current_price', pos['entry_price']) - pos['trail_stop_amt']:.2f})
-Vol Bucket: {pos.get('vol_bucket', 'Unknown')}
+class ScanDecisionLog:
+    """
+    Records the sentiment scan result for each scanned position.
+    Human-readable + machine-readable output for audit.
 
-SENTIMENT SIGNALS (free sources):
-Put/Call: {put_call or 'N/A'} vs {put_call_avg or 'N/A'} 30d avg
-Insider: {insider_data.get('buys',0)}B / {insider_data.get('sells',0)}S = {insider_data.get('net_dollar','?')}
-Volume: {volume_data.get('today_vs_avg','?')} vs avg, {volume_data.get('seller_dominance','?')} seller dominance
+    # FLAG — LOG WRITE LOCATION: Results written to scan_log table via db.log_scan().
+    # The human-readable summary is included in the event_summary field.
+    # A dedicated sentiment_decisions table is recommended for volume management
+    # and regulatory export. Tracked as future work item.
+    """
 
-CURRENT TIER: {tier} — {tier_label}
-CASCADE DETECTED: {cascade_detected}
+    def __init__(self, ticker):
+        self.ticker   = ticker
+        self.signals  = []
+        self.tier     = None
+        self.label    = None
+        self.cascade  = None
+        self.analysis = None
+        self.ts       = datetime.now(ET).isoformat()
 
-KEY RULE: Single large sell = profit-taking (NOT cascade). Multiple different sellers = cascade signal.
+    def signal(self, name, value, status, note=""):
+        self.signals.append({"name": name, "value": str(value), "status": status, "note": note})
+        return self
 
-Analyze:
-1. Cascade assessment — one actor or multiple?
-2. Signal alignment — all pointing same direction?
-3. Stop loss comparison — will mechanical stop catch this in time?
-4. Tier confirmation — confirm or adjust Tier {tier}
-5. Trader recommendation — specific and actionable
+    def conclude(self, tier, label, cascade, analysis):
+        self.tier     = tier
+        self.label    = label
+        self.cascade  = cascade
+        self.analysis = analysis
+        return self
 
-Keep it tight. You log, you don't trade."""
+    def to_human(self):
+        lines = [
+            f"SENTIMENT SCAN — {self.ticker} @ {self.ts}",
+        ]
+        for s in self.signals:
+            note = f"  [{s['note']}]" if s["note"] else ""
+            lines.append(f"  {s['name']:<24}: {s['value']}  [{s['status']}]{note}")
+        lines.append(f"  {'TIER':<24}: {self.tier} ({self.label}) | cascade={self.cascade}")
+        lines.append(f"  {'ANALYSIS':<24}: {self.analysis}")
+        return "\n".join(lines)
 
-    response = call_claude(prompt, max_tokens=500)
-    return response or f"Tier {tier} ({tier_label}): {'; '.join([str(put_call), str(insider_data), str(volume_data)])}"
+    def to_machine(self):
+        return {
+            "ts":       self.ts,
+            "ticker":   self.ticker,
+            "signals":  self.signals,
+            "tier":     self.tier,
+            "label":    self.label,
+            "cascade":  self.cascade,
+            "analysis": self.analysis,
+        }
+
+    def commit(self, db):
+        log.info(f"[SCAN_DECISION]\n{self.to_human()}")
+        try:
+            db.log_event(
+                "SCAN_CLASSIFIED",
+                agent="The Pulse",
+                details=_json.dumps(self.to_machine()),
+            )
+        except Exception as e:
+            log.debug(f"ScanDecisionLog.commit failed (non-fatal): {e}")
+
+
+# ── SCAN ANALYSIS ─────────────────────────────────────────────────────────
+
+def format_scan_analysis(pos, put_call, put_call_avg, insider_data,
+                         volume_data, tier, tier_label, cascade_detected, db):
+    """
+    Generate a structured sentiment analysis summary from raw signal data.
+    Replaces: analyze_position_with_claude()
+
+    All logic is deterministic. No external calls.
+    Returns: analysis string for inclusion in scan log event_summary.
+    """
+    sdl = ScanDecisionLog(ticker=pos.get("ticker", "UNKNOWN"))
+
+    # ── Record each signal and its status ─────────────────────────────────
+    if put_call is not None and put_call_avg is not None:
+        ratio_pct = (put_call / put_call_avg - 1) * 100
+        status = "ELEVATED" if put_call / put_call_avg > CASCADE_PUT_CALL_THRESHOLD else (
+                 "ABOVE_AVG" if ratio_pct > 0 else "NORMAL")
+        sdl.signal("put_call_ratio",
+                   f"{put_call:.2f} vs {put_call_avg:.2f} avg ({ratio_pct:+.0f}%)", status)
+    else:
+        sdl.signal("put_call_ratio", "unavailable", "UNKNOWN")
+
+    insider_sells = insider_data.get("sells", 0)
+    insider_buys  = insider_data.get("buys", 0)
+    insider_net   = insider_data.get("net_dollar", "$0")
+    if insider_sells >= CASCADE_INSIDER_SELLS_MIN and insider_buys == 0:
+        ins_status = "CRITICAL"
+    elif insider_sells > insider_buys + 2:
+        ins_status = "ELEVATED"
+    elif insider_buys > insider_sells:
+        ins_status = "POSITIVE"
+    else:
+        ins_status = "NORMAL"
+    sdl.signal("insider_transactions",
+               f"{insider_buys}B / {insider_sells}S = {insider_net}", ins_status)
+
+    vol_cascade = volume_data.get("cascade_detected", False)
+    sdl.signal("volume_cascade",
+               f"{volume_data.get('today_vs_avg','?')} vs avg, {volume_data.get('seller_dominance','?')} sellers",
+               "CRITICAL" if vol_cascade else "NORMAL")
+
+    # ── Actor assessment (single large sell vs. multiple sellers) ──────────
+    # KEY RULE: multiple independent signals aligning = cascade.
+    # Single elevated signal = likely one actor, not cascade.
+    cascade_str = "multiple signals aligning — broad seller pressure" if cascade_detected else (
+                  "single signal elevated — isolated actor likely")
+
+    # ── Stop level context ─────────────────────────────────────────────────
+    current_price = pos.get("current_price", pos.get("entry_price", 0.0))
+    trail_dist    = pos.get("trail_stop_amt", 0.0)
+    stop_level    = current_price - trail_dist if trail_dist else 0.0
+
+    # ── Recommendation by tier ─────────────────────────────────────────────
+    if tier == 1:
+        aligned = [s["name"] for s in sdl.signals if s["status"] in ("CRITICAL", "ELEVATED")]
+        rec = (
+            f"CASCADE DETECTED. Trail stop at ~${stop_level:.2f}. "
+            f"Signals aligning: {', '.join(aligned) or 'multiple'}. "
+            "Tighten trailing stop or prepare protective exit."
+        )
+    elif tier == 2:
+        top = next((s for s in sdl.signals if s["status"] in ("ELEVATED",)), None)
+        src = top["name"] if top else "unknown signal"
+        rec = (
+            f"Single signal elevated ({src}). "
+            f"Trail stop at ~${stop_level:.2f}. "
+            "Hold stops — monitor for additional confirmation."
+        )
+    else:
+        rec = f"No action required — tier {tier} ({tier_label})."
+
+    analysis = f"cascade_assessment={cascade_str} | {rec}"
+    sdl.conclude(tier, tier_label, cascade_detected, analysis)
+    sdl.commit(db)
+
+    return analysis
 
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
@@ -420,9 +497,9 @@ def run():
         # Deep analysis for elevated/critical positions
         analysis = None
         if tier <= 2:
-            analysis = analyze_position_with_claude(
+            analysis = format_scan_analysis(
                 pos, put_call, put_call_avg, insider_data,
-                volume_data, tier, tier_label, cascade_detected
+                volume_data, tier, tier_label, cascade_detected, db
             )
 
         # Log scan result to database
@@ -474,7 +551,7 @@ def run():
             )
             if tier <= 2:
                 log.warning(f"Pre-trade warning: {ticker} (signal {sig['id']}) — {tier_label}: {summary}")
-                # Write finding back to signal so The Trader can see it in its Claude prompt
+                # Write finding back to signal so Agent 1 reads it in Gate 5 signal scoring
                 db.annotate_signal_pulse(sig['id'], tier, summary)
             time.sleep(1)
 
@@ -501,10 +578,6 @@ def run():
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    if not ANTHROPIC_API_KEY:
-        log.error("ANTHROPIC_API_KEY not set — check .env file")
-        sys.exit(1)
-
     acquire_agent_lock("agent3_sentiment.py")
     try:
         run()
