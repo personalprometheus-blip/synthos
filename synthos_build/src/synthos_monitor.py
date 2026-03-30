@@ -1143,7 +1143,7 @@ function renderModalTab(tab, pi) {
 }
 
 function renderAgents(agents) {
-  const names = {'agent1_trader':'The Trader','agent2_research':'The Daily','agent3_sentiment':'The Pulse'};
+  const names = {'trade_logic_agent':'Trade Logic','news_agent':'News','market_sentiment_agent':'Market Sentiment'};
   const list = Object.keys(names);
   return '<div>' + list.map(k => {
     const status = agents[k];

@@ -51,6 +51,7 @@ from dotenv import load_dotenv
 
 PROJECT_DIR      = Path(__file__).resolve().parent.parent   # synthos_build/
 CORE_DIR         = PROJECT_DIR / "src"
+AGENTS_DIR       = PROJECT_DIR / "agents"
 LOG_DIR          = PROJECT_DIR / "logs"
 DATA_DIR         = PROJECT_DIR / "data"
 USER_DIR         = PROJECT_DIR / "user"
@@ -94,14 +95,13 @@ CRASH_WINDOW     = 3600            # seconds — crash pattern window
 HISTORY_HOURS    = 24
 
 # Files included in known-good snapshot
+# Paths relative to their respective directories (agents/ or src/)
 SNAPSHOT_FILES = [
-    "agent1_trader.py",
-    "agent2_research.py",
-    "agent3_sentiment.py",
+    "trade_logic_agent.py",
+    "news_agent.py",
+    "market_sentiment_agent.py",
     "database.py",
     "heartbeat.py",
-    # cleanup.py removed — not yet built; take_snapshot() would silently skip it
-    # but it polluted snapshot_info.json with a file that doesn't exist in src/.
 ]
 
 # Agents Watchdog monitors
@@ -110,24 +110,24 @@ SNAPSHOT_FILES = [
 WATCHED_AGENTS = [
     {
         "name":    "Bolt",
-        "alias":   "The Trader",
-        "script":  "agent1_trader.py",
+        "alias":   "Trade Logic",
+        "script":  "trade_logic_agent.py",
         "args":    [],
         "log":     "trader.log",
         "managed": False,
     },
     {
         "name":    "Scout",
-        "alias":   "The Daily",
-        "script":  "agent2_research.py",
+        "alias":   "News",
+        "script":  "news_agent.py",
         "args":    ["--session=market"],
         "log":     "daily.log",
         "managed": False,
     },
     {
         "name":    "Pulse",
-        "alias":   "The Pulse",
-        "script":  "agent3_sentiment.py",
+        "alias":   "Market Sentiment",
+        "script":  "market_sentiment_agent.py",
         "args":    [],
         "log":     "pulse.log",
         "managed": False,
@@ -255,7 +255,9 @@ def take_snapshot() -> bool:
             SNAPSHOT_ENV.chmod(0o600)
 
         for fname in SNAPSHOT_FILES:
-            src = CORE_DIR / fname
+            # agents live in AGENTS_DIR; support files live in CORE_DIR
+            src_dir = AGENTS_DIR if (AGENTS_DIR / fname).exists() else CORE_DIR
+            src = src_dir / fname
             dst = SNAPSHOT_DIR / fname
             if src.exists():
                 shutil.copy2(src, dst)
@@ -297,7 +299,9 @@ def restore_snapshot() -> bool:
         restored = []
         for fname in SNAPSHOT_FILES:
             src = SNAPSHOT_DIR / fname
-            dst = CORE_DIR / fname
+            # restore to agents/ or src/ depending on where the live file belongs
+            dst_dir = AGENTS_DIR if fname in {a["script"] for a in WATCHED_AGENTS} else CORE_DIR
+            dst = dst_dir / fname
             if src.exists():
                 if dst.exists():
                     shutil.copy2(dst, str(dst) + f".failed_{ts}")
@@ -445,9 +449,9 @@ def start_managed_service(agent_cfg: dict) -> bool:
     try:
         with open(log_file, "a") as lf:
             proc = subprocess.Popen(
-                [sys.executable, str(CORE_DIR / script)] + agent_cfg.get("args", []),
+                [sys.executable, str(AGENTS_DIR / script)] + agent_cfg.get("args", []),
                 stdout=lf, stderr=lf,
-                cwd=str(CORE_DIR), env=env,
+                cwd=str(AGENTS_DIR), env=env,
             )
         time.sleep(2)
         if proc.poll() is None:
@@ -463,13 +467,13 @@ def start_managed_service(agent_cfg: dict) -> bool:
 
 def run_agent_once(state: AgentState) -> tuple[bool, str]:
     """Run a cron agent once directly. Returns (success, error_output)."""
-    script = CORE_DIR / state.config["script"]
+    script = AGENTS_DIR / state.config["script"]
     args   = state.config.get("args", [])
     try:
         result = subprocess.run(
             [sys.executable, str(script)] + args,
             capture_output=True, text=True,
-            timeout=300, cwd=str(CORE_DIR),
+            timeout=300, cwd=str(AGENTS_DIR),
         )
         if result.returncode == 0:
             return True, ""

@@ -50,8 +50,8 @@ MANIFEST_PATH = os.path.join(PROJECT_DIR, '.sync_session.json')
 OUTPUTS_DIR   = os.path.expanduser('~/Downloads')  # fallback search location
 
 SYNCABLE_FILES = {
-    'database.py', 'agent1_trader.py', 'agent2_research.py',
-    'agent3_sentiment.py', 'cleanup.py', 'heartbeat.py',
+    'database.py', 'trade_logic_agent.py', 'news_agent.py',
+    'market_sentiment_agent.py', 'cleanup.py', 'heartbeat.py',
     'health_check.py', 'shutdown.py', 'patch.py', 'watchdog.py',
     'install.py', 'sync.py', 'boot_sequence.py', 'portal.py',
     'synthos_monitor.py', 'digest_agent.py', 'generate_unlock_key.py', 'daily_digest.py', 'uninstall.py', 'qpush.sh', 'qpull.sh', 'migrate_to_synthos.sh', 'first_run.sh',

@@ -141,7 +141,7 @@ if db:
 
 # 1c. Last heartbeat per agent
 if db:
-    for agent in ['agent1_trader', 'agent2_research', 'agent3_sentiment']:
+    for agent in ['trade_logic_agent', 'news_agent', 'market_sentiment_agent']:
         try:
             hb = db.get_last_heartbeat(agent)
             if hb:
@@ -219,9 +219,9 @@ if portal_up:
 
 
 # ══════════════════════════════════════════════════════════
-# 2. RESEARCH TAB — Scout Signals (agent2_research)
+# 2. RESEARCH TAB — Scout Signals (news_agent)
 # ══════════════════════════════════════════════════════════
-section("2. RESEARCH TAB — Scout Signals (agent2_research)")
+section("2. RESEARCH TAB — Scout Signals (news_agent)")
 
 # 2a. Signals table row count
 if conn:
@@ -285,18 +285,18 @@ if db:
     except Exception as e:
         p("get_watching_signals", False, str(e))
 
-# 2f. Last agent2 run
+# 2f. Last news_agent run
 if conn:
     try:
         last_run = conn.execute("""
             SELECT timestamp, details FROM system_log
-            WHERE agent='agent2_research' OR agent='The Daily'
+            WHERE agent='news_agent' OR agent='Scout'
             ORDER BY timestamp DESC LIMIT 1
         """).fetchone()
-        p("agent2_research has run",
+        p("news_agent has run",
           last_run is not None,
           f"last={last_run['timestamp'][:16]} details={last_run['details'][:60]}"
-          if last_run else "No record of agent2 run in system_log",
+          if last_run else "No record of news_agent run in system_log",
           warn_only=True)
     except Exception as e:
         p("agent2 last run", False, str(e))
@@ -313,9 +313,9 @@ if portal_up:
 
 
 # ══════════════════════════════════════════════════════════
-# 3. MARKET CONTEXT — Pulse Scans (agent3_sentiment)
+# 3. MARKET CONTEXT — Pulse Scans (market_sentiment_agent)
 # ══════════════════════════════════════════════════════════
-section("3. MARKET CONTEXT — Pulse Scans (agent3_sentiment)")
+section("3. MARKET CONTEXT — Pulse Scans (market_sentiment_agent)")
 
 # 3a. scan_log row count
 if conn:
@@ -385,18 +385,18 @@ if conn:
     except Exception as e:
         p("Cascade events", False, str(e))
 
-# 3f. Last agent3 run
+# 3f. Last market_sentiment_agent run
 if conn:
     try:
         last_run = conn.execute("""
             SELECT timestamp, details FROM system_log
-            WHERE agent='agent3_sentiment' OR agent='The Pulse'
+            WHERE agent='market_sentiment_agent' OR agent='Pulse'
             ORDER BY timestamp DESC LIMIT 1
         """).fetchone()
-        p("agent3_sentiment has run",
+        p("market_sentiment_agent has run",
           last_run is not None,
           f"last={last_run['timestamp'][:16]} details={last_run['details'][:60]}"
-          if last_run else "No record of agent3 run in system_log",
+          if last_run else "No record of market_sentiment_agent run in system_log",
           warn_only=True)
     except Exception as e:
         p("agent3 last run", False, str(e))

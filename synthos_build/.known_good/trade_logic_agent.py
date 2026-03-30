@@ -1,5 +1,5 @@
 """
-agent1_trader.py — ExecutionAgent
+trade_logic_agent.py — Trade Logic Agent (ExecutionAgent)
 Synthos · Agent 1 · Version 2.0
 
 Runs:
@@ -51,6 +51,7 @@ from dotenv import load_dotenv
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
+sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from database import get_db, acquire_agent_lock, release_agent_lock
@@ -86,7 +87,7 @@ logging.basicConfig(
     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-log = logging.getLogger('agent1_trader')
+log = logging.getLogger('trade_logic_agent')
 
 
 # ── TRADING CONTROLS (all configurable thresholds) ────────────────────────────
@@ -290,7 +291,7 @@ class TradeDecisionLog:
         try:
             db.log_event(
                 "TRADE_DECISION",
-                agent="agent1_trader",
+                agent="trade_logic_agent",
                 details=json.dumps(machine)[:2000],  # FLAG: truncation — need dedicated table
             )
         except Exception as e:
@@ -1185,7 +1186,7 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
     }, "STRATEGY SUSPENDED — kill condition met" if kill else "performance within limits")
 
     if kill:
-        db.log_event("STRATEGY_KILL_CONDITION", agent="agent1_trader",
+        db.log_event("STRATEGY_KILL_CONDITION", agent="trade_logic_agent",
                      details=f"Sharpe={sharpe:.3f} DD={dd*100:.1f}% — suspended pending human review")
         log.critical("STRATEGY KILL CONDITION: Sharpe and drawdown both outside limits. Suspending new entries.")
         return False
@@ -1294,7 +1295,7 @@ def _enqueue_p0_alert(subject, body, event_type, related_ticker=None, related_si
         return False
     payload = {
         "event_type": event_type, "priority": 0, "subject": subject, "body": body,
-        "source_agent": "agent1_trader", "pi_id": pi_id, "audience": "customer",
+        "source_agent": "trade_logic_agent", "pi_id": pi_id, "audience": "customer",
         "related_ticker": related_ticker,
         "related_signal_id": str(related_signal_id) if related_signal_id else None,
         "payload": {"ticker": related_ticker, "signal_id": related_signal_id, "pi_id": pi_id},
@@ -1311,7 +1312,7 @@ def _direct_send_fallback(subject, body, reason="enqueue_failed"):
     log.warning(f"[FALLBACK] Direct send triggered — reason: {reason}")
     try:
         from database import get_db
-        get_db().log_event("P0_DIRECT_SEND_FALLBACK", agent="agent1_trader",
+        get_db().log_event("P0_DIRECT_SEND_FALLBACK", agent="trade_logic_agent",
                            details=f"reason={reason} subject={subject[:80]}")
     except Exception:
         pass
@@ -1433,7 +1434,7 @@ def run(session="open"):
              f"operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
     db.log_event("AGENT_START", agent="The Trader",
                  details=f"session={session} mode={TRADING_MODE} operating={OPERATING_MODE}")
-    db.log_heartbeat("agent1_trader", "RUNNING")
+    db.log_heartbeat("trade_logic_agent", "RUNNING")
 
     session_log = TradeDecisionLog(session=session)
 
@@ -1782,14 +1783,14 @@ def run(session="open"):
     total_value = portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in positions)
     log.info(f"Session complete — portfolio=${total_value:.2f} "
              f"positions={len(positions)} cash=${portfolio['cash']:.2f}")
-    db.log_heartbeat("agent1_trader", "OK", portfolio_value=total_value)
+    db.log_heartbeat("trade_logic_agent", "OK", portfolio_value=total_value)
     db.log_event("AGENT_COMPLETE", agent="The Trader",
                  details=f"session={session} positions={len(positions)}",
                  portfolio_value=total_value)
 
     try:
         from heartbeat import write_heartbeat
-        write_heartbeat(agent_name="agent1_trader", status="OK")
+        write_heartbeat(agent_name="trade_logic_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
@@ -1830,7 +1831,7 @@ if __name__ == '__main__':
         log.error("ALPACA_API_KEY not set — check .env")
         sys.exit(1)
 
-    acquire_agent_lock("agent1_trader.py")
+    acquire_agent_lock("trade_logic_agent.py")
     try:
         run(session=args.session)
     except KeyboardInterrupt:

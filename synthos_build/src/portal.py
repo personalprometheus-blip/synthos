@@ -1457,8 +1457,8 @@ async function loadLiveStatus() {
     // Agent running banner
     const agentEl = document.getElementById('agent-running-banner');
     if (s.agent_running) {
-      const names = {'agent1_trader.py':'The Trader','agent2_research.py':'The Daily',
-                     'agent3_sentiment.py':'The Pulse','agent4_audit.py':'Audit Agent'};
+      const names = {'trade_logic_agent.py':'Trade Logic','news_agent.py':'News',
+                     'market_sentiment_agent.py':'Market Sentiment','agent4_audit.py':'Audit Agent'};
       const name = names[s.agent_running] || s.agent_running;
       const mins = Math.floor((s.agent_running_secs||0) / 60);
       const secs = (s.agent_running_secs||0) % 60;
@@ -2010,9 +2010,9 @@ def api_system_health():
     try:
         from database import get_db
         db = get_db()
-        hb = db.get_last_heartbeat('agent1_trader')
+        hb = db.get_last_heartbeat('trade_logic_agent')
         if not hb:
-            hb = db.get_last_heartbeat('agent2_research')
+            hb = db.get_last_heartbeat('news_agent')
         if hb:
             health['claude_api'] = {
                 'status':    'ok',
@@ -2177,7 +2177,7 @@ def api_update():
 # Files allowed to be uploaded/managed
 MANAGED_FILES = {
     # Core agents
-    'agent1_trader.py', 'agent2_research.py', 'agent3_sentiment.py',
+    'trade_logic_agent.py', 'news_agent.py', 'market_sentiment_agent.py',
     # Infrastructure
     'database.py', 'heartbeat.py', 'boot_sequence.py', 'watchdog.py',
     'cleanup.py', 'shutdown.py', 'health_check.py', 'portal.py',

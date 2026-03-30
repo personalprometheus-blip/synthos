@@ -36,10 +36,10 @@ AGENT_LOCK_FILE = os.path.join(_PROJECT_DIR, '.agent_lock')
 
 # Callers that get DB priority (write the lock file)
 PRIORITY_AGENTS = {
-    'agent1_trader.py':    1,
-    'agent3_sentiment.py': 2,
-    'agent4_audit.py':     3,
-    'agent2_research.py':  4,
+    'trade_logic_agent.py':      1,
+    'market_sentiment_agent.py': 2,
+    'agent4_audit.py':           3,
+    'news_agent.py':             4,
 }
 
 # Callers that back off when locked (portal, heartbeat, digest)

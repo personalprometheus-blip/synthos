@@ -25,8 +25,11 @@ import sqlite3
 import traceback
 from datetime import datetime, timedelta
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, PROJECT_DIR)
+_TESTS_DIR  = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(_TESTS_DIR)   # synthos_build/
+CORE_DIR    = os.path.join(PROJECT_DIR, 'src')
+AGENTS_DIR  = os.path.join(PROJECT_DIR, 'agents')
+sys.path.insert(0, CORE_DIR)
 
 PASS = "  [PASS]"
 FAIL = "  [FAIL]"
@@ -63,13 +66,19 @@ def safe(fn, label):
 # ══════════════════════════════════════════════════════════
 section("1. FILE PRESENCE")
 
-required = [
-    "database.py", "heartbeat.py", "agent1_trader.py",
+required_core = [
+    "database.py", "heartbeat.py",
     "portal.py", "health_check.py", "boot_sequence.py",
     "synthos_monitor.py",
 ]
-for f in required:
-    path = os.path.join(PROJECT_DIR, f)
+required_agents = [
+    "trade_logic_agent.py", "news_agent.py", "market_sentiment_agent.py",
+]
+for f in required_core:
+    path = os.path.join(CORE_DIR, f)
+    p(f"File exists: {f}", os.path.exists(path))
+for f in required_agents:
+    path = os.path.join(AGENTS_DIR, f)
     p(f"File exists: {f}", os.path.exists(path))
 
 json_path = os.path.join(PROJECT_DIR, ".pending_approvals.json")
@@ -416,7 +425,7 @@ if conn and "pending_approvals" in tables:
 section("7. CODE PATH — NO JSON IN ACTIVE WORKFLOW")
 
 for fname, checks in {
-    "agent1_trader.py": [
+    "trade_logic_agent.py": [
         ("No PENDING_APPROVALS_FILE constant",
          lambda s: "PENDING_APPROVALS_FILE" not in s),
         ("No save_pending_approvals function",
@@ -435,7 +444,8 @@ for fname, checks in {
          lambda s: "update_approval_status" in s),
     ],
 }.items():
-    fpath = os.path.join(PROJECT_DIR, fname)
+    _agent_files = {'trade_logic_agent.py', 'news_agent.py', 'market_sentiment_agent.py'}
+    fpath = os.path.join(AGENTS_DIR if fname in _agent_files else CORE_DIR, fname)
     if os.path.exists(fpath):
         src = open(fpath).read()
         for label, check_fn in checks:

@@ -79,9 +79,9 @@ PROTECTED_DIRS = {
 
 # Files the patcher is allowed to update
 PATCHABLE_FILES = {
-    'agent1_trader.py',
-    'agent2_research.py',
-    'agent3_sentiment.py',
+    'trade_logic_agent.py',
+    'news_agent.py',
+    'market_sentiment_agent.py',
     'database.py',
     'cleanup.py',
     'heartbeat.py',

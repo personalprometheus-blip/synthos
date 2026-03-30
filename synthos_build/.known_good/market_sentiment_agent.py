@@ -1,5 +1,5 @@
 """
-agent3_sentiment.py — The Pulse (Sentiment Agent)
+market_sentiment_agent.py — Market Sentiment Agent (Pulse)
 Synthos · Agent 3
 
 Runs:
@@ -24,7 +24,7 @@ Free data sources:
   - Internal news_feed DB table (populated by Agent 2)
 
 Usage:
-  python3 agent3_sentiment.py
+  python3 market_sentiment_agent.py
 """
 
 import os
@@ -41,7 +41,9 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
+load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from database import get_db, acquire_agent_lock, release_agent_lock
 
@@ -66,7 +68,7 @@ logging.basicConfig(
     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-log = logging.getLogger('agent3_sentiment')
+log = logging.getLogger('market_sentiment_agent')
 
 
 # ── RETRY HELPERS ─────────────────────────────────────────────────────────
@@ -2423,7 +2425,7 @@ def run():
     log.info(f"The Pulse starting — {now.strftime('%H:%M ET')}")
 
     db.log_event("AGENT_START", agent="The Pulse")
-    db.log_heartbeat("agent3_sentiment", "RUNNING")
+    db.log_heartbeat("market_sentiment_agent", "RUNNING")
 
     # ── Phase 1: 27-gate Market Sentiment Spine ───────────────────────────
     sdl   = SentimentDecisionLog()
@@ -2645,7 +2647,7 @@ def run():
         f"portfolio=${portfolio['cash']:.2f}"
     )
 
-    db.log_heartbeat("agent3_sentiment", "OK", portfolio_value=portfolio['cash'])
+    db.log_heartbeat("market_sentiment_agent", "OK", portfolio_value=portfolio['cash'])
     db.log_event(
         "AGENT_COMPLETE", agent="The Pulse",
         details=(
@@ -2660,14 +2662,14 @@ def run():
     # Post heartbeat to monitor server
     try:
         from heartbeat import write_heartbeat
-        write_heartbeat(agent_name="agent3_sentiment", status="OK")
+        write_heartbeat(agent_name="market_sentiment_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    acquire_agent_lock("agent3_sentiment.py")
+    acquire_agent_lock("market_sentiment_agent.py")
     try:
         run()
     except KeyboardInterrupt:

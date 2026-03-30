@@ -38,7 +38,8 @@ SYNTHOS_VERSION = "1.2"
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))   # src/
 _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)                  # synthos_build/
-PROJECT_DIR = _SCRIPT_DIR                                   # sibling scripts live here
+PROJECT_DIR = _SCRIPT_DIR                                   # supporting scripts live here
+AGENTS_DIR  = os.path.join(_ROOT_DIR, 'agents')             # trading agents live here
 LOG_DIR     = os.path.join(_ROOT_DIR, 'logs')
 ENV_PATH    = os.path.join(_ROOT_DIR, 'user', '.env')
 
@@ -58,14 +59,18 @@ log = logging.getLogger('boot')
 # cleanup.py omitted: runs via cron, absence is non-fatal at boot
 REQUIRED_FILES = [
     'database.py',
-    'agent1_trader.py',
-    'agent2_research.py',
-    'agent3_sentiment.py',
     'heartbeat.py',
     'health_check.py',
     'shutdown.py',
     'watchdog.py',
     'portal.py',
+]
+
+# Trading agents live in agents/ — checked separately
+REQUIRED_AGENT_FILES = [
+    'trade_logic_agent.py',
+    'news_agent.py',
+    'market_sentiment_agent.py',
 ]
 
 BOOT_STEPS = []   # records pass/fail for each step
@@ -168,13 +173,16 @@ def step2_env():
 
 
 def step3_files():
-    """Step 3 — Verify all agent files are present."""
+    """Step 3 — Verify all required files are present."""
     log.info("Step 3/9 — Files")
     missing = [f for f in REQUIRED_FILES
                if not os.path.exists(os.path.join(PROJECT_DIR, f))]
+    missing += [f for f in REQUIRED_AGENT_FILES
+                if not os.path.exists(os.path.join(AGENTS_DIR, f))]
     if missing:
         return step("Agent files", False, f"missing: {', '.join(missing)}")
-    return step("Agent files", True, f"all {len(REQUIRED_FILES)} files present")
+    total = len(REQUIRED_FILES) + len(REQUIRED_AGENT_FILES)
+    return step("Agent files", True, f"all {total} files present")
 
 
 def step4_database():
@@ -317,7 +325,7 @@ def step8_monitor():
 def step9_initial_seed():
     """
     Step 9 — Seed intelligence data on first boot or if signals DB is empty.
-    Runs agent2_research.py to fetch last 45 days of congressional disclosures.
+    Runs news_agent.py to fetch last 45 days of congressional disclosures.
     Only runs if signals table is empty to avoid duplicating data on normal reboots.
     """
     log.info("Step 9/9 — Initial data seed")
@@ -333,9 +341,9 @@ def step9_initial_seed():
 
         # Empty DB — run initial seed
         log.info("Empty signals DB — running initial 45-day seed...")
-        research_path = os.path.join(PROJECT_DIR, 'agent2_research.py')
+        research_path = os.path.join(AGENTS_DIR, 'news_agent.py')
         if not os.path.exists(research_path):
-            return step("Data seed", False, "agent2_research.py not found")
+            return step("Data seed", False, "news_agent.py not found")
 
         log_path = os.path.join(LOG_DIR, 'daily.log')
         with open(log_path, 'a') as logf:

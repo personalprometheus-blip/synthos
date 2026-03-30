@@ -54,6 +54,7 @@ from urllib.parse import parse_qs, urlparse
 
 SYNTHOS_HOME: Path = Path(__file__).resolve().parent.parent
 CORE_DIR:     Path = SYNTHOS_HOME / "src"
+AGENTS_DIR:   Path = SYNTHOS_HOME / "agents"
 USER_DIR:     Path = SYNTHOS_HOME / "user"
 DATA_DIR:     Path = SYNTHOS_HOME / "data"
 LOG_DIR:      Path = SYNTHOS_HOME / "logs"
@@ -88,10 +89,13 @@ REQUIRED_PACKAGES = [
     "sendgrid",
 ]
 
+REQUIRED_AGENT_FILES = [
+    "trade_logic_agent.py",
+    "news_agent.py",
+    "market_sentiment_agent.py",
+]
+
 REQUIRED_CORE_FILES = [
-    "agent1_trader.py",
-    "agent2_research.py",
-    "agent3_sentiment.py",
     "database.py",
     "boot_sequence.py",
     "watchdog.py",
@@ -418,6 +422,7 @@ def verify_installation() -> tuple[bool, list[str]]:
 
     # 3. Required core files present
     missing_files = [f for f in REQUIRED_CORE_FILES if not (CORE_DIR / f).exists()]
+    missing_files += [f for f in REQUIRED_AGENT_FILES if not (AGENTS_DIR / f).exists()]
     if missing_files:
         failures.append(f"Missing core files: {', '.join(missing_files)}")
 

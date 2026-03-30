@@ -32,7 +32,9 @@ from pathlib import Path
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-PROJECT_DIR  = Path(__file__).parent
+PROJECT_DIR  = Path(__file__).parent.parent   # synthos_build/
+CORE_DIR     = PROJECT_DIR / "src"
+AGENTS_DIR   = PROJECT_DIR / "agents"
 LOG_DIR      = PROJECT_DIR / "logs"
 REPORT_FILE  = PROJECT_DIR / "logs" / "test_session.json"
 PID_FILE     = PROJECT_DIR / ".test_pids.json"
@@ -42,9 +44,9 @@ LOG_DIR.mkdir(exist_ok=True)
 # Agent registry — maps short name → script + log file + args
 AGENTS = {
     # ── Retail ────────────────────────────────────────────────────────────
-    "trader":    {"script": "agent1_trader.py",    "log": "trader.log",    "args": []},
-    "research":  {"script": "agent2_research.py",  "log": "research.log",  "args": []},
-    "sentiment": {"script": "agent3_sentiment.py", "log": "sentiment.log", "args": []},
+    "trader":    {"script": "trade_logic_agent.py",    "log": "trader.log",    "args": [], "dir": "agents"},
+    "research":  {"script": "news_agent.py",           "log": "research.log",  "args": [], "dir": "agents"},
+    "sentiment": {"script": "market_sentiment_agent.py","log": "sentiment.log", "args": [], "dir": "agents"},
     "portal":    {"script": "portal.py",           "log": "portal.log",    "args": []},
     "watchdog":  {"script": "watchdog.py",         "log": "watchdog.log",  "args": []},
     "monitor":   {"script": "synthos_monitor.py",  "log": "monitor.log",   "args": []},
@@ -141,11 +143,15 @@ def save_report():
 
 # ── AGENT CONTROL ─────────────────────────────────────────────────────────────
 
+def _agent_dir(cfg):
+    """Return the directory (AGENTS_DIR or CORE_DIR) where an agent's script lives."""
+    return AGENTS_DIR if cfg.get("dir") == "agents" else CORE_DIR
+
 def agent_exists(name):
     cfg = AGENTS.get(name)
     if not cfg:
         return False
-    return (PROJECT_DIR / cfg["script"]).exists()
+    return (_agent_dir(cfg) / cfg["script"]).exists()
 
 def is_running(pid):
     try:
@@ -160,7 +166,8 @@ def start_agent(name):
         err(f"Unknown agent: {name}")
         return None
 
-    script = PROJECT_DIR / cfg["script"]
+    script_dir = _agent_dir(cfg)
+    script = script_dir / cfg["script"]
     if not script.exists():
         warn(f"{name}: {cfg['script']} not found — skipping")
         return None
@@ -172,7 +179,7 @@ def start_agent(name):
                 [sys.executable, str(script)] + cfg["args"],
                 stdout=logf,
                 stderr=logf,
-                cwd=str(PROJECT_DIR),
+                cwd=str(script_dir),
             )
         time.sleep(1.0)
         if proc.poll() is None:
@@ -219,7 +226,7 @@ def print_status():
     for name in all_agents:
         cfg  = AGENTS[name]
         pid  = pids.get(name)
-        script_present = (PROJECT_DIR / cfg["script"]).exists()
+        script_present = (_agent_dir(cfg) / cfg["script"]).exists()
 
         if not script_present:
             status = f"{DIM}NOT FOUND{RST}"

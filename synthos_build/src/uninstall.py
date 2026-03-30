@@ -56,9 +56,9 @@ SYSTEM_COMMANDS = [
 CRON_PATTERNS = [
     'synthos',
     'quorum',
-    'agent1_trader',
-    'agent2_research',
-    'agent3_sentiment',
+    'trade_logic_agent',
+    'news_agent',
+    'market_sentiment_agent',
     'heartbeat.py',
     'cleanup.py',
     'shutdown.py',
@@ -246,7 +246,7 @@ def remove_backup_dirs(dry_run=False):
 def kill_running_processes(dry_run=False):
     """Kill any running Synthos/Quorum processes."""
     step("Stopping running processes")
-    patterns = ['agent1_trader', 'agent2_research', 'agent3_sentiment',
+    patterns = ['trade_logic_agent', 'news_agent', 'market_sentiment_agent',
                 'watchdog.py', 'portal.py', 'heartbeat.py', 'daily_digest.py',
                 'boot_sequence.py']
     found = False

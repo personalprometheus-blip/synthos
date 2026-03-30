@@ -1,5 +1,5 @@
 """
-agent2_research.py — Scout (Research Agent)
+news_agent.py — News Agent (Scout / Research Agent)
 Synthos · Agent 2
 
 Runs:
@@ -21,8 +21,8 @@ Every article produces a structured NewsDecisionLog recording each gate's inputs
 and result.
 
 Usage:
-  python3 agent2_research.py
-  python3 agent2_research.py --session=overnight
+  python3 news_agent.py
+  python3 news_agent.py --session=overnight
 """
 
 import os
@@ -40,7 +40,9 @@ from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
+load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from database import get_db, acquire_agent_lock, release_agent_lock
 
@@ -68,7 +70,7 @@ logging.basicConfig(
     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-log = logging.getLogger('agent2_research')
+log = logging.getLogger('news_agent')
 
 
 # ── RESEARCH CONTROLS ─────────────────────────────────────────────────────
@@ -2316,7 +2318,7 @@ def run(session="market"):
     log.info(f"Scout starting — session={session} time={now.strftime('%H:%M ET')}")
 
     db.log_event("AGENT_START", agent="Scout", details=f"session={session}")
-    db.log_heartbeat("agent2_research", "RUNNING")
+    db.log_heartbeat("news_agent", "RUNNING")
 
     # ── Gate 2: Benchmark regime (session-level, once per run) ────────────
     regime = gate2_benchmark(ctrl)
@@ -2683,7 +2685,7 @@ def run(session="market"):
         f"portfolio=${portfolio['cash']:.2f}"
     )
 
-    db.log_heartbeat("agent2_research", "OK", portfolio_value=portfolio['cash'])
+    db.log_heartbeat("news_agent", "OK", portfolio_value=portfolio['cash'])
     db.log_event(
         "AGENT_COMPLETE", agent="Scout",
         details=f"new={new_signals} queued={queued} discarded={discarded} skipped={skipped}",
@@ -2692,7 +2694,7 @@ def run(session="market"):
 
     try:
         from heartbeat import write_heartbeat
-        write_heartbeat(agent_name="agent2_research", status="OK")
+        write_heartbeat(agent_name="news_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
@@ -2705,7 +2707,7 @@ if __name__ == '__main__':
                         help='market=full scan, overnight=disclosures+congress only')
     args = parser.parse_args()
 
-    acquire_agent_lock("agent2_research.py")
+    acquire_agent_lock("news_agent.py")
     try:
         run(session=args.session)
     except KeyboardInterrupt:
