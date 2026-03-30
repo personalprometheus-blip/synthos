@@ -1221,6 +1221,53 @@ def queue_for_approval(signal, decision_data):
         log.error(f"queue_for_approval error: {e}")
         raise
 
+    _notify_approval_request(signal, decision_data)
+
+
+def _notify_approval_request(signal, decision_data):
+    """Send email notification when a trade is queued for approval."""
+    if not SENDGRID_API_KEY or not USER_EMAIL:
+        return
+    ticker     = signal.get('ticker', '?')
+    company    = signal.get('company', '')
+    confidence = signal.get('confidence', '')
+    politician = signal.get('politician', '')
+    price      = decision_data.get('price', 0)
+    max_trade  = decision_data.get('max_trade', 0)
+    shares     = decision_data.get('shares', 0)
+    vol_label  = decision_data.get('vol_label', '')
+    reasoning  = decision_data.get('reasoning', '')
+    headline   = signal.get('headline', '')
+    subject    = f"[Synthos] Trade approval required — {ticker}"
+    body = (
+        f"A trade signal is waiting for your approval in the portal.\n\n"
+        f"Ticker:      {ticker}"
+        + (f" ({company})" if company else "") + "\n"
+        f"Politician:  {politician}\n"
+        f"Price:       ${price:.2f}\n"
+        f"Shares:      {shares:.4f}\n"
+        f"Max trade:   ${max_trade:.2f}\n"
+        f"Volatility:  {vol_label}\n"
+        f"Confidence:  {confidence}\n\n"
+        f"Signal:\n{headline}\n\n"
+        f"Reasoning:\n{reasoning}\n\n"
+        f"Approve or reject at the portal (port {os.environ.get('PORTAL_PORT', '5001')})."
+    )
+    try:
+        import sendgrid as _sg
+        from sendgrid.helpers.mail import Mail
+        msg = Mail(
+            from_email=ALERT_FROM or 'alerts@synthos.local',
+            to_emails=USER_EMAIL,
+            subject=subject,
+            plain_text_content=body,
+        )
+        _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
+            request_body=msg.get())
+        log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {USER_EMAIL}")
+    except Exception as e:
+        log.warning(f"[SUPERVISED] Approval notification failed: {e}")
+
 def get_approved_trades():
     from database import get_db
     try:
