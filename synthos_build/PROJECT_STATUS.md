@@ -1,7 +1,7 @@
 # PROJECT STATUS — Synthos
 
 **Last Updated:** 2026-03-30
-**Current Phase:** Phase 5 — Deployment Pipeline (Phases 3 and 4 complete)
+**Current Phase:** Phase 5 — Deployment Pipeline complete; process_node repo initialized
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
 ---
@@ -12,7 +12,7 @@
 |------|------|------|--------|
 | [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 2W) | Trading agents, portal, signals.db | Active |
 | [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B / cloud) | Ops agents, licensing, backups, monitoring | Active |
-| TBD — repo not yet created | process_node (Pi 3) | News/signal ingestion pipeline, article enrichment, cross-node distribution | Hardware in hand; SD card arriving ~2026-03-31 |
+| [personalprometheus-blip/synthos-process](https://github.com/personalprometheus-blip/synthos-process) | process_node (Pi 3) | News/signal ingestion pipeline, article enrichment, Redis-based cross-node distribution | Repo initialized; hardware pending (SD card arriving ~2026-03-31) |
 
 ---
 
