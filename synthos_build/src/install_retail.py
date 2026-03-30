@@ -97,7 +97,9 @@ REQUIRED_CORE_FILES = [
     "watchdog.py",
     "health_check.py",
     "shutdown.py",
-    "cleanup.py",
+    # cleanup.py — not yet built; runs via cron for nightly DB maintenance;
+    # absence is non-fatal at install time (boot_sequence.py also omits it).
+    # Future implementation tracked in docs/milestones.md.
     "synthos_heartbeat.py",
     "portal.py",
     "patch.py",
@@ -223,7 +225,7 @@ def install_packages() -> bool:
 
 def bootstrap_database() -> bool:
     """
-    Initialize signals.db schema by importing database.py from core/.
+    Initialize signals.db schema by importing database.py from src/.
     If signals.db already exists, this is a no-op (migrations run on import).
     Never overwrites existing data.
     """
@@ -233,11 +235,11 @@ def bootstrap_database() -> bool:
 
     db_module = CORE_DIR / "database.py"
     if not db_module.exists():
-        _log_ui("  ✗ core/database.py not found — cannot bootstrap DB", "error")
+        _log_ui("  ✗ src/database.py not found — cannot bootstrap DB", "error")
         return False
 
     try:
-        # Import database.py dynamically from core/
+        # Import database.py dynamically from src/
         import importlib.util
         spec = importlib.util.spec_from_file_location("database", db_module)
         db_mod = importlib.util.module_from_spec(spec)
@@ -349,7 +351,7 @@ def run_health_check() -> bool:
     """
     hc_path = CORE_DIR / "health_check.py"
     if not hc_path.exists():
-        _log_ui("  ✗ health_check.py not found in core/", "error")
+        _log_ui("  ✗ health_check.py not found in src/", "error")
         return False
     try:
         result = subprocess.run(
