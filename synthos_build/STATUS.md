@@ -1,5 +1,11 @@
 # PROJECT STATUS
 
+> **REPO IDENTITY:** `personalprometheus-blip/synthos` — local: `/home/pi/synthos/synthos_build/`
+> **This repo owns:** retail_node (Pi 2W) — trading agents, portal, signals.db
+> **Also owns:** master project tracker (PROJECT_STATUS.md) for all phases/cross-repo blockers
+> **Companion:** `synthos-company` owns company_node (Pi 4B) agents — do NOT put company code here
+> **Separate:** `Sentinel` repo is unrelated to Synthos
+
 **Last Updated:** 2026-03-29
 **Current Phase:** Phase 3 — System Validation + Normalization Sprint
 **Overall Progress:** 2 of 6 phases complete
