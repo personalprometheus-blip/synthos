@@ -2416,6 +2416,101 @@ def gate27_final_signal(ctrl, state, sdl):
              f"bear<={ctrl.BEAR_THRESHOLD_FINAL} strong_bear<={ctrl.STRONG_BEAR_THRESHOLD}")
 
 
+def _handle_screening_requests(db):
+    """
+    Fulfill pending 'sentiment' screening requests from the sector screener.
+    Runs per-ticker put/call ratio, insider transaction, and volume analysis
+    using existing Pulse functions. Writes results back to sector_screening
+    and appends to the logic audit log.
+    """
+    import os as _os
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    pending = db.get_pending_screening_requests('sentiment')
+    if not pending:
+        return
+
+    log.info(f"Screening requests: fulfilling {len(pending)} sentiment requests")
+    ET_tz      = _ZI("America/New_York")
+    today      = _dt.now(ET_tz).strftime('%Y-%m-%d')
+    log_dir    = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                               'logs', 'logic_audits')
+    _os.makedirs(log_dir, exist_ok=True)
+    audit_path = _os.path.join(log_dir, f"{today}_pulse_screening.log")
+
+    audit_lines = [
+        "=" * 70,
+        f"PULSE — SCREENING SENTIMENT AUDIT  ({_dt.now(ET_tz).strftime('%Y-%m-%d %H:%M ET')})",
+        "-" * 70,
+    ]
+
+    for req in pending:
+        ticker = req['ticker']
+        run_id = req['run_id']
+
+        try:
+            put_call, put_call_avg = fetch_put_call_ratio(ticker)
+            insider                = fetch_sec_insider_transactions(ticker, days_back=30)
+            volume                 = fetch_volume_profile(ticker)
+            time.sleep(1)  # rate limit courtesy pause
+
+            tier, tier_label, cascade, summary = detect_cascade(
+                put_call, put_call_avg, insider, volume
+            )
+
+            # Normalise tier to 0-1 score (tier 1=critical=bearish, tier 4=quiet=bullish)
+            score = round({1: 0.1, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.5), 4)
+
+            if tier <= 2:
+                signal = 'bearish'
+            elif tier == 3:
+                signal = 'neutral'
+            else:
+                signal = 'bullish'
+
+            notes = (
+                f"Tier {tier} ({tier_label}). {summary}. "
+                f"Put/call={put_call:.2f} vs 30d avg={put_call_avg:.2f}. "
+                f"Insider net={insider.get('net_dollar', 'N/A')}. "
+                f"Volume vs avg={volume.get('today_vs_avg', 'N/A')}."
+            )
+
+            db.fulfill_screening_request(
+                run_id=run_id,
+                ticker=ticker,
+                request_type='sentiment',
+                signal=signal,
+                score=score,
+                notes=notes,
+            )
+
+            audit_lines += [
+                f"  {ticker}",
+                f"    Signal     : {signal.upper()}  (score {score:.2f}  |  tier {tier} — {tier_label})",
+                f"    Put/Call   : {put_call:.2f} (30d avg {put_call_avg:.2f})",
+                f"    Insider    : net {insider.get('net_dollar', 'unavailable')}",
+                f"    Volume     : {volume.get('today_vs_avg', 'unavailable')} vs average",
+                f"    Summary    : {summary}",
+                "",
+            ]
+            log.info(f"Screening sentiment {ticker}: {signal} tier={tier} score={score:.2f}")
+
+        except Exception as e:
+            log.warning(f"Screening sentiment failed for {ticker}: {e}")
+            db.fulfill_screening_request(
+                run_id=run_id, ticker=ticker, request_type='sentiment',
+                signal='neutral', score=0.5, notes=f"Error: {e}",
+            )
+            audit_lines += [f"  {ticker}: ERROR — {e}", ""]
+
+    audit_lines.append("=" * 70 + "\n")
+    with open(audit_path, 'a') as f:
+        f.write('\n'.join(audit_lines) + '\n')
+
+    log.info(f"Screening sentiment audit written: {audit_path}")
+
+
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
 
 def run():
@@ -2658,6 +2753,11 @@ def run():
         ),
         portfolio_value=portfolio['cash'],
     )
+
+    # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
+    # Check for pending sentiment screening requests from the sector screener.
+    # Reuses existing per-ticker scan functions (put/call, insider, volume).
+    _handle_screening_requests(db)
 
     # Post heartbeat to monitor server
     try:

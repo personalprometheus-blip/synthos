@@ -372,6 +372,47 @@ CREATE TABLE IF NOT EXISTS news_feed (
     created_at       TEXT    NOT NULL
 );
 
+-- ── SECTOR SCREENING ────────────────────────────────────────────────────
+-- Candidates identified by the sector screener for review before trading.
+-- Each run inserts a fresh set of rows. Portal reads the latest run_id.
+-- Status: considering / passed_to_bolt / rejected
+CREATE TABLE IF NOT EXISTS sector_screening (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id              TEXT    NOT NULL,      -- ISO timestamp of screener run
+    sector              TEXT    NOT NULL,      -- e.g. "Energy"
+    etf                 TEXT    NOT NULL,      -- e.g. "XLE"
+    etf_5yr_return      REAL,                  -- decimal e.g. 0.42 = +42%
+    ticker              TEXT    NOT NULL,
+    company             TEXT,
+    etf_weight_pct      REAL,                  -- weight in the ETF
+    news_signal         TEXT,                  -- "bullish" / "bearish" / "neutral" / "pending"
+    news_headline       TEXT,                  -- top headline from Scout
+    news_score          REAL,                  -- numeric score from Scout (0-1)
+    sentiment_signal    TEXT,                  -- "bullish" / "bearish" / "neutral" / "pending"
+    sentiment_score     REAL,                  -- numeric score from Pulse (0-1)
+    congressional_flag  TEXT,                  -- "recent_buy" / "recent_sell" / "none"
+    combined_score      REAL,                  -- weighted composite
+    status              TEXT    NOT NULL DEFAULT 'considering',
+    notes               TEXT,
+    created_at          TEXT    NOT NULL
+);
+
+-- ── SCREENING REQUESTS ───────────────────────────────────────────────────
+-- Inter-agent request queue. Sector screener writes requests here;
+-- Scout and Pulse read pending rows on each run and write results back
+-- to sector_screening. Rows are never deleted — archive is useful.
+-- Status: pending / fulfilled / failed
+CREATE TABLE IF NOT EXISTS screening_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          TEXT    NOT NULL,      -- links back to sector_screening run_id
+    requested_by    TEXT    NOT NULL,      -- e.g. "sector_screener"
+    ticker          TEXT    NOT NULL,
+    request_type    TEXT    NOT NULL,      -- "news" or "sentiment"
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    created_at      TEXT    NOT NULL,
+    fulfilled_at    TEXT
+);
+
 -- ── INDEXES ────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_signals_status        ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker        ON signals(ticker);
@@ -383,6 +424,10 @@ CREATE INDEX IF NOT EXISTS idx_approvals_status      ON pending_approvals(status
 CREATE INDEX IF NOT EXISTS idx_approvals_queued      ON pending_approvals(queued_at);
 CREATE INDEX IF NOT EXISTS idx_news_feed_created     ON news_feed(created_at);
 CREATE INDEX IF NOT EXISTS idx_news_feed_ticker      ON news_feed(ticker);
+CREATE INDEX IF NOT EXISTS idx_screening_run         ON sector_screening(run_id);
+CREATE INDEX IF NOT EXISTS idx_screening_ticker      ON sector_screening(ticker);
+CREATE INDEX IF NOT EXISTS idx_screen_req_status     ON screening_requests(status);
+CREATE INDEX IF NOT EXISTS idx_screen_req_type       ON screening_requests(request_type);
 """
 
 
@@ -1063,6 +1108,129 @@ class DB:
             c.execute("""
                 UPDATE urgent_flags SET acknowledged=1, acknowledged_at=? WHERE id=?
             """, (self.now(), flag_id))
+
+    # ── SECTOR SCREENING ──────────────────────────────────────────────────
+
+    def write_screening_run(self, run_id, sector, etf, etf_5yr_return, candidates):
+        """
+        Write a full set of screening candidates for one screener run.
+        candidates: list of dicts with keys:
+            ticker, company, etf_weight_pct
+        All signal fields start as 'pending'; Scout and Pulse fill them in.
+        """
+        now = self.now()
+        with self.conn() as c:
+            for cd in candidates:
+                c.execute("""
+                    INSERT INTO sector_screening
+                        (run_id, sector, etf, etf_5yr_return, ticker, company,
+                         etf_weight_pct, news_signal, sentiment_signal,
+                         congressional_flag, status, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    run_id, sector, etf, etf_5yr_return,
+                    cd['ticker'], cd.get('company', ''),
+                    cd.get('etf_weight_pct', 0.0),
+                    'pending', 'pending', 'none',
+                    'considering', now,
+                ))
+            # Issue screening requests for Scout and Pulse
+            for cd in candidates:
+                for req_type in ('news', 'sentiment'):
+                    c.execute("""
+                        INSERT INTO screening_requests
+                            (run_id, requested_by, ticker, request_type, status, created_at)
+                        VALUES (?,?,?,?,?,?)
+                    """, (run_id, 'sector_screener', cd['ticker'], req_type, 'pending', now))
+
+    def get_pending_screening_requests(self, request_type):
+        """Return pending requests of a given type (news or sentiment)."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM screening_requests
+                WHERE request_type=? AND status='pending'
+                ORDER BY created_at ASC
+            """, (request_type,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def fulfill_screening_request(self, run_id, ticker, request_type,
+                                  signal, score, headline=None, notes=None):
+        """
+        Called by Scout (request_type='news') or Pulse (request_type='sentiment')
+        to write results back into sector_screening and mark the request fulfilled.
+        """
+        now = self.now()
+        with self.conn() as c:
+            if request_type == 'news':
+                c.execute("""
+                    UPDATE sector_screening
+                    SET news_signal=?, news_score=?, news_headline=?
+                    WHERE run_id=? AND ticker=?
+                """, (signal, score, headline, run_id, ticker))
+            elif request_type == 'sentiment':
+                c.execute("""
+                    UPDATE sector_screening
+                    SET sentiment_signal=?, sentiment_score=?, notes=?
+                    WHERE run_id=? AND ticker=?
+                """, (signal, score, notes, run_id, ticker))
+            # Recompute combined_score and update status
+            row = c.execute("""
+                SELECT news_score, sentiment_score, etf_weight_pct
+                FROM sector_screening WHERE run_id=? AND ticker=?
+            """, (run_id, ticker)).fetchone()
+            if row:
+                ns = row['news_score'] or 0.0
+                ss = row['sentiment_score'] or 0.0
+                wt = min((row['etf_weight_pct'] or 0.0) / 25.0, 1.0)  # normalise weight
+                combined = round(ns * 0.40 + ss * 0.40 + wt * 0.20, 4)
+                c.execute("""
+                    UPDATE sector_screening SET combined_score=?
+                    WHERE run_id=? AND ticker=?
+                """, (combined, run_id, ticker))
+            # Mark request fulfilled
+            c.execute("""
+                UPDATE screening_requests
+                SET status='fulfilled', fulfilled_at=?
+                WHERE run_id=? AND ticker=? AND request_type=?
+            """, (now, run_id, ticker, request_type))
+
+    def flag_congressional_screening(self, ticker, flag):
+        """
+        Called by Bolt when it spots a congressional signal for a ticker
+        that is currently under sector screening consideration.
+        flag: 'recent_buy' | 'recent_sell' | 'none'
+        """
+        with self.conn() as c:
+            # Only update the most recent run's row for this ticker
+            c.execute("""
+                UPDATE sector_screening SET congressional_flag=?
+                WHERE ticker=? AND id=(
+                    SELECT id FROM sector_screening WHERE ticker=?
+                    ORDER BY created_at DESC LIMIT 1
+                )
+            """, (flag, ticker, ticker))
+
+    def get_latest_screening_run(self, sector=None):
+        """Return all candidates from the most recent screener run."""
+        with self.conn() as c:
+            if sector:
+                row = c.execute("""
+                    SELECT run_id FROM sector_screening
+                    WHERE sector=? ORDER BY created_at DESC LIMIT 1
+                """, (sector,)).fetchone()
+            else:
+                row = c.execute("""
+                    SELECT run_id FROM sector_screening
+                    ORDER BY created_at DESC LIMIT 1
+                """).fetchone()
+            if not row:
+                return []
+            run_id = row['run_id']
+            rows = c.execute("""
+                SELECT * FROM sector_screening WHERE run_id=?
+                ORDER BY combined_score DESC, etf_weight_pct DESC
+            """, (run_id,)).fetchall()
+            return [dict(r) for r in rows]
 
     # ── SYSTEM LOG & HEARTBEAT ─────────────────────────────────────────────
 

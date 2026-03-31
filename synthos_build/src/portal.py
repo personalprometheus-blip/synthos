@@ -1033,6 +1033,20 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .unlock-input:focus{border-color:rgba(0,245,212,0.4)}
 .unlock-note{font-size:11px;color:var(--muted);line-height:1.6}
 
+/* ── SIGNAL MODAL ── */
+.sig-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;display:none;align-items:center;justify-content:center}
+.sig-modal-overlay.open{display:flex}
+.sig-modal{background:#111520;border:1px solid var(--border2);border-radius:16px;width:min(560px,95vw);max-height:85vh;overflow-y:auto;padding:0}
+.sig-modal-head{padding:18px 20px 14px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px}
+.sig-modal-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0}
+.sig-modal-body{padding:16px 20px}
+.sig-modal-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px}
+.sig-modal-row:last-child{border-bottom:none}
+.sig-modal-label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em}
+.sig-modal-val{color:var(--text);font-family:var(--mono);font-size:11px}
+.sig-modal-close{margin-left:auto;cursor:pointer;color:var(--muted);font-size:18px;line-height:1;padding:2px 6px}
+.sig-modal-close:hover{color:var(--text)}
+
 /* ── TOAST ── */
 .toast{
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
@@ -1063,8 +1077,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="status-pill sp-dim" id="pill-monitor">
       <div class="status-dot dot-dim"></div>Monitor
     </div>
-    <div class="status-pill sp-dim" id="pill-claude">
-      <div class="status-dot dot-dim"></div>Claude API
+    <div class="status-pill sp-dim" id="pill-datafeed">
+      <div class="status-dot dot-dim"></div>Data Feed
     </div>
     <div class="status-pill sp-dim" id="pill-uptime">
       <div class="status-dot dot-dim dot-blink"></div><span id="uptime-val">Loading</span>
@@ -1073,6 +1087,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div class="header-nav">
     <button class="nav-btn active" onclick="showTab('dashboard')">Dashboard</button>
     <button class="nav-btn" onclick="showTab('intel')">Intelligence</button>
+    <button class="nav-btn" onclick="showTab('screening')">Screening</button>
     <button class="nav-btn" onclick="showTab('settings')">Settings</button>
     <button class="nav-btn" onclick="window.location='/logs'">Logs</button>
     <button class="nav-btn" onclick="window.location='/files'">Files</button>
@@ -1080,14 +1095,33 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             onclick="toggleKill()">
       {% if kill_active %}⛔ Halted{% else %}Kill Switch{% endif %}
     </button>
+    <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
   </div>
 </header>
+
+<!-- SIGNAL MODAL -->
+<div class="sig-modal-overlay" id="sig-modal-overlay" onclick="closeSigModal(event)">
+  <div class="sig-modal" id="sig-modal">
+    <div class="sig-modal-head">
+      <div class="sig-modal-icon" id="smi-icon"></div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.4" id="smi-headline"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px" id="smi-source"></div>
+      </div>
+      <span class="sig-modal-close" onclick="closeSigModal()">✕</span>
+    </div>
+    <div class="sig-modal-body" id="smi-body"></div>
+  </div>
+</div>
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
+
+  <!-- MARKET INDICES -->
+  <div id="market-indices-bar" style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap"></div>
 
   <!-- AGENT RUNNING BANNER -->
   <div id="agent-running-banner" style="display:none;align-items:center;gap:8px;
@@ -1272,6 +1306,17 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
 </div>
 
+<!-- ══════════════ SCREENING TAB ══════════════ -->
+<div class="page" id="tab-screening" style="display:none">
+
+  <div class="section-title">Sector Screening</div>
+  <div style="padding:0 4px 16px">
+    <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+    <div id="screening-grid" style="display:grid;gap:10px"></div>
+  </div>
+
+</div>
+
 <!-- ══════════════ SETTINGS TAB ══════════════ -->
 <div class="page" id="tab-settings" style="display:none">
 
@@ -1280,10 +1325,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="settings-section">
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6;padding:8px 10px;background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.15);border-radius:8px">
         &#9888; Keys are written directly to <code style="font-size:10px">.env</code> on this Pi. Leave a field blank to keep the existing value.
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Anthropic API Key</div><div class="setting-desc">Used by all three agents for Claude calls</div></div>
-        <input class="glass-input" type="password" id="k-anthropic" placeholder="sk-ant-..." style="width:160px">
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Alpaca API Key</div><div class="setting-desc">Paper or live trading account</div></div>
@@ -1368,6 +1409,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <select class="glass-select" id="s-close-mode">
           <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
           <option value="normal" {% if settings.close_session_mode == 'normal' %}selected{% endif %}>Normal</option>
+          <option value="aggressive" {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
         </select>
       </div>
       <div class="setting-row">
@@ -1427,12 +1469,13 @@ let allSignals = [];
 
 // ── TABS ──
 function showTab(t) {
-  ['dashboard','intel','settings'].forEach(id => {
+  ['dashboard','intel','screening','settings'].forEach(id => {
     document.getElementById('tab-'+id).style.display = id===t ? '' : 'none';
   });
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
   if (t === 'intel') loadIntel();
+  if (t === 'screening') loadScreening();
 }
 
 // ── TOAST ──
@@ -1498,7 +1541,6 @@ async function submitUnlockKey() {
 // ── SETTINGS ──
 async function saveKeys() {
   const fields = {
-    'ANTHROPIC_API_KEY': document.getElementById('k-anthropic').value,
     'ALPACA_API_KEY':    document.getElementById('k-alpaca-key').value,
     'ALPACA_SECRET_KEY': document.getElementById('k-alpaca-secret').value,
     'ALPACA_BASE_URL':   document.getElementById('k-alpaca-url').value,
@@ -1774,11 +1816,14 @@ async function loadHealth() {
       mp.className = 'status-pill sp-dim';
       mp.innerHTML = '<div class="status-dot dot-dim"></div>Monitor';
     }
-    // Claude pill
-    const cp = document.getElementById('pill-claude');
-    if (d.claude_api.status === 'ok') {
+    // Data feed pill
+    const cp = document.getElementById('pill-datafeed');
+    if (d.trading_mode && d.trading_mode !== 'unconfigured') {
       cp.className = 'status-pill sp-ok';
-      cp.innerHTML = '<div class="status-dot dot-on"></div>Claude API';
+      cp.innerHTML = '<div class="status-dot dot-on"></div>Data Feed';
+    } else {
+      cp.className = 'status-pill sp-dim';
+      cp.innerHTML = '<div class="status-dot dot-dim"></div>Data Feed';
     }
     // Uptime
     document.getElementById('uptime-val').textContent = d.uptime || 'N/A';
@@ -2035,8 +2080,16 @@ function renderIntelGrid(signals) {
   const sentiment = s => s.corroborated ? 'bull' : s.confidence === 'LOW' ? 'bear' : 'neut';
   const sentLabel = s => s.corroborated ? '↑ Bullish' : s.confidence === 'LOW' ? '↓ Bearish' : '— Neutral';
   const sentBadge = s => s.corroborated ? 'sb-bull' : s.confidence === 'LOW' ? 'sb-bear' : 'sb-neut';
-  const agentScore = s => s.confidence === 'HIGH' ? 85+Math.floor(Math.random()*10) : s.confidence === 'MEDIUM' ? 55+Math.floor(Math.random()*20) : 25+Math.floor(Math.random()*20);
-  const marketScore = s => Math.max(20, agentScore(s) - 5 - Math.floor(Math.random()*15));
+  const agentScore = s => {
+    const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'NOISE' ? 15 : 30;
+    const sent = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score || 0) * 20) : 0;
+    return Math.min(99, Math.max(5, base + sent));
+  };
+  const marketScore = s => {
+    const as = agentScore(s);
+    const adj = s.is_stale ? -12 : (s.corroborated ? 8 : 0);
+    return Math.min(99, Math.max(5, as - 8 + adj));
+  };
   const sentClass = s => agentScore(s) > 60 ? 'of-ab' : agentScore(s) < 40 ? 'of-ar' : 'of-an';
   const mSentClass = s => agentScore(s) > 60 ? 'of-mb' : agentScore(s) < 40 ? 'of-mr' : 'of-mn';
   const valClass = s => agentScore(s) > 60 ? 'oval-b' : agentScore(s) < 40 ? 'oval-r' : 'oval-n';
@@ -2044,7 +2097,7 @@ function renderIntelGrid(signals) {
     const as = agentScore(s); const ms = marketScore(s);
     const sent = sentiment(s);
     const col = colors[i%colors.length];
-    return `<div class="charm ${sent}">
+    return `<div class="charm ${sent}" style="cursor:pointer" onclick="openSigModal(${JSON.stringify(s).replace(/'/g,'&#39;')})">
       <div class="charm-top">
         <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
         <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
@@ -2070,6 +2123,38 @@ function renderIntelGrid(signals) {
       ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   }).join('');
+}
+
+function openSigModal(s) {
+  const colors = {HIGH:'rgba(0,245,212,0.15)',MEDIUM:'rgba(123,97,255,0.15)',LOW:'rgba(255,179,71,0.15)',NOISE:'rgba(85,86,102,0.2)'};
+  const conf = (s.confidence||'NOISE').toUpperCase();
+  const icon = document.getElementById('smi-icon');
+  icon.textContent = (s.ticker||'?').slice(0,4);
+  icon.style.background = colors[conf]||colors.NOISE;
+  icon.style.color = conf==='HIGH'?'var(--teal)':conf==='MEDIUM'?'var(--purple)':conf==='LOW'?'var(--amber)':'var(--muted)';
+  document.getElementById('smi-headline').textContent = s.headline||'No headline';
+  document.getElementById('smi-source').textContent = (s.source||'Unknown source') + ' · ' + (s.disc_date||'').slice(0,10);
+  const ascore = s.confidence==='HIGH'?87:s.confidence==='MEDIUM'?63:s.confidence==='LOW'?30:15;
+  const aAdj = Math.min(99,Math.max(5,ascore + (s.sentiment_score ? Math.round(Math.abs(s.sentiment_score)*20):0)));
+  const mAdj = Math.min(99,Math.max(5,aAdj - 8 + (s.is_stale?-12:s.corroborated?8:0)));
+  document.getElementById('smi-body').innerHTML = `
+    <div class="sig-modal-row"><span class="sig-modal-label">Signal</span><span class="sig-modal-val">${conf}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Ticker</span><span class="sig-modal-val">${s.ticker||'Unresolved'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Politician</span><span class="sig-modal-val">${s.politician||'—'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Staleness</span><span class="sig-modal-val">${s.staleness||'unknown'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Sentiment Score</span><span class="sig-modal-val">${s.sentiment_score != null ? s.sentiment_score.toFixed(3) : '—'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Synthos Score</span><span class="sig-modal-val">${aAdj}/100</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Market Alignment</span><span class="sig-modal-val">${mAdj}/100</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Status</span><span class="sig-modal-val">${s.is_stale?'Archive (stale)':s.corroborated?'Corroborated':'Active'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Source</span><span class="sig-modal-val">${s.source||'—'}</span></div>
+    <div class="sig-modal-row"><span class="sig-modal-label">Detected</span><span class="sig-modal-val">${(s.created_at||'').slice(0,16)}</span></div>
+  `;
+  document.getElementById('sig-modal-overlay').classList.add('open');
+}
+function closeSigModal(e) {
+  if (!e || e.target === document.getElementById('sig-modal-overlay')) {
+    document.getElementById('sig-modal-overlay').classList.remove('open');
+  }
 }
 
 // ── AUDIT PANEL ──
@@ -2127,6 +2212,76 @@ async function loadAudit() {
   } catch(e) {}
 }
 
+
+// -- SCREENING --
+async function loadScreening() {
+  const meta = document.getElementById('screening-meta');
+  const grid = document.getElementById('screening-grid');
+  meta.textContent = 'Loading...';
+  grid.innerHTML = '';
+  try {
+    const r = await fetch('/api/screening');
+    const d = await r.json();
+    const candidates = d.candidates || [];
+    if (!candidates.length) {
+      meta.textContent = 'No screening data yet. Run sector_screener.py to populate.';
+      return;
+    }
+    const c0 = candidates[0];
+    const ret5 = c0.etf_5yr_return != null ? ((c0.etf_5yr_return*100).toFixed(1)+'%') : 'N/A';
+    const retSign = c0.etf_5yr_return > 0 ? '+' : '';
+    meta.textContent = 'Sector: '+(c0.sector||'')+' | ETF: '+(c0.etf||'')+' | 5-Year Return: '+retSign+ret5+' | Run: '+(c0.run_id||'').slice(0,16)+' | '+candidates.length+' candidates';
+    const sigColor = s => s==='bullish'?'#00f5d4':s==='bearish'?'#ff4b6e':'#a0a0b0';
+    const sigLabel = s => s==='bullish'?'Bullish':s==='bearish'?'Bearish':s==='pending'?'Pending':'Neutral';
+    const pct = v => v!=null?(v*100).toFixed(0):'--';
+    const bar = (v,color) => v!=null ? '<div style="background:rgba(255,255,255,0.07);border-radius:4px;height:6px;width:100%;margin-top:4px"><div style="height:6px;border-radius:4px;width:'+pct(v)+'%;background:'+color+'"></div></div>' : '';
+    const congBadge = f => f==='recent_buy' ? '<span style="font-size:10px;background:rgba(0,245,212,0.15);color:#00f5d4;padding:2px 6px;border-radius:4px;margin-top:4px;display:inline-block">Congress: Buy</span>' : f==='recent_sell' ? '<span style="font-size:10px;background:rgba(255,75,110,0.15);color:#ff4b6e;padding:2px 6px;border-radius:4px;margin-top:4px;display:inline-block">Congress: Sell</span>' : '';
+    const scoreColor = cs => cs>=0.6?'#00f5d4':cs>=0.4?'#ffb347':'#ff4b6e';
+    grid.innerHTML = candidates.map((cd,i) => {
+      const ns=cd.news_signal||'pending', ss=cd.sentiment_signal||'pending', cs=cd.combined_score;
+      const nc=sigColor(ns), sc=sigColor(ss);
+      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 70px;gap:14px;align-items:start">'
+        +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
+        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--muted)">Weight: '+(cd.etf_weight_pct||0).toFixed(1)+'%</div>'
+        +congBadge(cd.congressional_flag)+'</div>'
+        +'<div><div style="font-size:10px;color:var(--muted)">NEWS</div>'
+        +'<div style="font-size:13px;font-weight:600;color:'+nc+'">'+sigLabel(ns)+'</div>'
+        +bar(cd.news_score,nc)
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">'+(cd.news_headline||'')+'</div></div>'
+        +'<div><div style="font-size:10px;color:var(--muted)">SENTIMENT</div>'
+        +'<div style="font-size:13px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
+        +bar(cd.sentiment_score,sc)
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(cd.sentiment_score!=null?'Score: '+pct(cd.sentiment_score)+'/100':'')+'</div></div>'
+        +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
+        +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
+        +'<div style="font-size:10px;color:var(--muted)">/100</div></div></div>';
+    }).join('');
+  } catch(e) {
+    meta.textContent = 'Error loading screening data.';
+  }
+}
+
+// ── MARKET INDICES ──
+async function loadMarketIndices() {
+  try {
+    const r = await fetch('/api/market-indices');
+    const d = await r.json();
+    const bar = document.getElementById('market-indices-bar');
+    if (!bar || !d.indices || !d.indices.length) return;
+    bar.innerHTML = d.indices.map(idx => {
+      const color = idx.up ? 'var(--teal)' : 'var(--pink)';
+      const arrow = idx.up ? '▲' : '▼';
+      return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 14px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em">${idx.label}</span>
+        <span style="font-size:13px;font-weight:700;color:var(--text);font-family:var(--mono)">$${idx.price.toFixed(2)}</span>
+        <span style="font-size:11px;font-weight:700;color:${color}">${arrow} ${Math.abs(idx.chg_pct).toFixed(2)}%</span>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
 // ── INIT ──
 updateClock();
 setInterval(updateClock, 1000);
@@ -2140,9 +2295,11 @@ loadLiveStatus();
 loadGraph(30);
 loadHealth();
 loadAudit();
+loadMarketIndices();
 setInterval(loadLiveStatus, 30000);
 setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
+setInterval(loadMarketIndices, 120000);
 </script>
 </body>
 </html>"""
@@ -2171,11 +2328,24 @@ def index():
 
     # Convert RSS_FEEDS_JSON back to human-readable lines for textarea
     rss_display = ''
-    if settings['rss_feeds_json']:
+    _rss_src = settings['rss_feeds_json']
+    if _rss_src:
         try:
             import json as _json
-            feeds = _json.loads(settings['rss_feeds_json'])
+            feeds = _json.loads(_rss_src)
             rss_display = '\n'.join(f"{f[0]} | {f[1]} | {f[2]}" for f in feeds)
+        except Exception:
+            rss_display = ''
+    if not rss_display:
+        # Show built-in defaults so user can see and edit them
+        import sys as _sys
+        _agent_dir = os.path.join(PROJECT_DIR, 'agents')
+        if _agent_dir not in _sys.path:
+            _sys.path.insert(0, _agent_dir)
+        try:
+            import news_agent as _na
+            _feeds = _na.get_rss_feeds()
+            rss_display = '\n'.join(f"{f[0]} | {f[1]} | {f[2]}" for f in _feeds)
         except Exception:
             rss_display = ''
 
@@ -2369,7 +2539,6 @@ def api_keys():
 
     # Whitelist of keys that can be updated via portal
     ALLOWED_KEYS = {
-        'ANTHROPIC_API_KEY',
         'ALPACA_API_KEY',
         'ALPACA_SECRET_KEY',
         'ALPACA_BASE_URL',
@@ -2499,6 +2668,62 @@ def api_watchlist():
         return jsonify({'signals': [], 'error': str(e)})
 
 
+@app.route('/api/screening')
+def api_screening():
+    """Latest sector screening run — candidates with news, sentiment, and congressional signals."""
+    try:
+        from database import get_db
+        candidates = get_db().get_latest_screening_run()
+        return jsonify({'candidates': candidates})
+    except Exception as e:
+        return jsonify({'candidates': [], 'error': str(e)})
+
+
+@app.route('/api/market-indices')
+def api_market_indices():
+    """Fetch intraday quote for SPY (S&P 500), QQQ (Nasdaq), DIA (Dow)."""
+    import requests as _req
+    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
+    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    if not alpaca_key:
+        return jsonify({'indices': [], 'error': 'no_key'})
+    symbols = ['SPY', 'QQQ', 'DIA']
+    labels  = {'SPY': 'S&P 500', 'QQQ': 'Nasdaq', 'DIA': 'Dow'}
+    headers = {'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret}
+    result  = []
+    try:
+        r = _req.get(
+            'https://data.alpaca.markets/v2/stocks/bars',
+            headers=headers,
+            params={'symbols': ','.join(symbols), 'timeframe': '1Day', 'limit': 2},
+            timeout=6,
+        )
+        r.raise_for_status()
+        data = r.json().get('bars', {})
+        for sym in symbols:
+            bars = data.get(sym, [])
+            if len(bars) >= 2:
+                prev_close = bars[-2]['c']
+                curr_close = bars[-1]['c']
+                chg_pct    = (curr_close - prev_close) / prev_close * 100
+            elif len(bars) == 1:
+                curr_close = bars[0]['c']
+                prev_close = bars[0]['o']
+                chg_pct    = (curr_close - prev_close) / prev_close * 100
+            else:
+                continue
+            result.append({
+                'symbol':  sym,
+                'label':   labels[sym],
+                'price':   round(curr_close, 2),
+                'chg_pct': round(chg_pct, 2),
+                'up':      chg_pct >= 0,
+            })
+    except Exception as e:
+        return jsonify({'indices': [], 'error': str(e)})
+    return jsonify({'indices': result})
+
+
 @app.route('/api/system-health')
 def api_system_health():
     """Monitor server connectivity, Claude API status, Pi uptime."""
@@ -2565,15 +2790,13 @@ LOGS_CSS = '<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{backgroun
 def logs_page():
     """Tail log files from the browser."""
     log_files = {
-        'trader':    'trader.log',
-        'daily':     'daily.log',
-        'pulse':     'pulse.log',
-        'heartbeat': 'heartbeat.log',
-        'boot':      'boot.log',
+        'trader':    'trade_logic_agent.log',
+        'scout':     'scout.log',
+        'pulse':     'market_sentiment_agent.log',
         'portal':    'portal.log',
         'watchdog':  'watchdog.log',
-        'cleanup':   'cleanup.log',
-        'audit':     'audit.log',
+        'boot':      'boot.log',
+        'monitor':   'monitor.log',
     }
     selected = request.args.get('file', 'trader')
     lines    = int(request.args.get('lines', 100))

@@ -134,6 +134,7 @@ class TradingControls:
     # Sizing (Gate 7)
     BASE_RISK_PER_TRADE       = float(os.environ.get('BASE_RISK_PER_TRADE', '0.01'))
     MAX_POSITION_PCT          = float(os.environ.get('MAX_POSITION_PCT', '0.10'))
+    MAX_TRADE_USD             = float(os.environ.get('MAX_TRADE_USD', '0'))    # 0 = no dollar cap
     DEFENSIVE_SIZE_FACTOR     = float(os.environ.get('DEFENSIVE_SIZE_FACTOR', '0.50'))
     AGGRESSIVE_SIZE_FACTOR    = float(os.environ.get('AGGRESSIVE_SIZE_FACTOR', '1.20'))
     TARGET_VOLATILITY         = float(os.environ.get('TARGET_VOLATILITY', '0.015'))
@@ -284,8 +285,8 @@ class TradeDecisionLog:
         }
 
     def commit(self, db):
-        """Write to system_log. FLAG: move to trade_decisions table."""
-        human = self.to_human()
+        """Write to system_log and logic_audits/. FLAG: move to trade_decisions table."""
+        human   = self.to_human()
         machine = self.to_machine()
         log.info("\n" + human)
         try:
@@ -296,6 +297,18 @@ class TradeDecisionLog:
             )
         except Exception as e:
             log.warning(f"TradeDecisionLog.commit failed: {e}")
+        # Also write to human-readable logic audit log
+        try:
+            import os as _os
+            audit_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                      'logs', 'logic_audits')
+            _os.makedirs(audit_dir, exist_ok=True)
+            today     = datetime.now(ET).strftime('%Y-%m-%d')
+            log_path  = _os.path.join(audit_dir, f"{today}_bolt_decisions.log")
+            with open(log_path, 'a') as f:
+                f.write(human + "\n")
+        except Exception as e:
+            log.warning(f"Audit log write failed (non-fatal): {e}")
 
 
 # ── REGIME STATE ──────────────────────────────────────────────────────────────
@@ -979,6 +992,12 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
     # Max cap: size <= max_position_pct * portfolio
     max_shares = (equity * C.MAX_POSITION_PCT) / price if price > 0 else 0
     size       = min(size, max_shares)
+
+    # Hard dollar cap: MAX_TRADE_USD overrides all sizing if set
+    if C.MAX_TRADE_USD > 0 and price > 0:
+        max_by_usd = C.MAX_TRADE_USD / price
+        size = min(size, max_by_usd)
+
     size       = round(max(size, 0.0001), 4)
 
     dollar_value = size * price
@@ -994,6 +1013,7 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
         "mode_adjustment": f"×{C.DEFENSIVE_SIZE_FACTOR if regime.mode=='DEFENSIVE' else C.AGGRESSIVE_SIZE_FACTOR if regime.mode=='AGGRESSIVE' else 1.0:.2f}",
         "drawdown_scale":  f"×{1.0-drawdown:.3f} (dd={drawdown*100:.1f}%)",
         "max_cap":         f"{max_shares:.4f} shares",
+        "usd_cap":         f"${C.MAX_TRADE_USD:.2f}" if C.MAX_TRADE_USD > 0 else "none",
         "final_size":      f"{size:.4f} shares @ ${price:.2f}",
     }, f"{size:.4f} shares × ${price:.2f} = ${dollar_value:.2f}")
 

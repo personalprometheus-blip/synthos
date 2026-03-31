@@ -2416,6 +2416,107 @@ def _state_to_confidence(state):
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
 
+def _fetch_yahoo_headlines(ticker, max_items=5):
+    """Fetch recent Yahoo Finance RSS headlines for a ticker. Returns list of strings."""
+    import feedparser as _fp
+    url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
+    try:
+        feed = _fp.parse(url)
+        return [e.get('title', '').strip() for e in feed.entries[:max_items] if e.get('title')]
+    except Exception as e:
+        log.warning(f"Yahoo RSS {ticker}: {e}")
+        return []
+
+
+def _score_headlines_for_screening(headlines):
+    """
+    Score a list of headlines using Scout's existing keyword logic.
+    Returns (signal_str, score_float, top_headline).
+      signal_str: 'bullish' | 'bearish' | 'neutral'
+      score_float: 0.0 – 1.0
+    """
+    if not headlines:
+        return 'neutral', 0.5, None
+
+    all_text = ' '.join(headlines)
+    tokens   = _tokenize(all_text)
+    total    = max(len(tokens), 1)
+    pos_ct   = _count_keywords(tokens, _POSITIVE)
+    neg_ct   = _count_keywords(tokens, _NEGATIVE)
+    raw      = (pos_ct - neg_ct) / total
+
+    # Normalise to 0-1 range (raw typically -0.2 to +0.2)
+    score = round(min(max((raw + 0.15) / 0.30, 0.0), 1.0), 4)
+
+    if raw > 0.02:
+        signal = 'bullish'
+    elif raw < -0.02:
+        signal = 'bearish'
+    else:
+        signal = 'neutral'
+
+    return signal, score, headlines[0]
+
+
+def _handle_screening_requests(db):
+    """
+    Fulfill pending 'news' screening requests from the sector screener.
+    Fetches Yahoo Finance headlines for each ticker, scores them, writes
+    results back to sector_screening, and appends to the logic audit log.
+    """
+    import os as _os
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+
+    pending = db.get_pending_screening_requests('news')
+    if not pending:
+        return
+
+    log.info(f"Screening requests: fulfilling {len(pending)} news requests")
+    ET_tz   = _ZI("America/New_York")
+    today   = _dt.now(ET_tz).strftime('%Y-%m-%d')
+    log_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                            'logs', 'logic_audits')
+    _os.makedirs(log_dir, exist_ok=True)
+    audit_path = _os.path.join(log_dir, f"{today}_scout_screening.log")
+
+    audit_lines = [
+        "=" * 70,
+        f"SCOUT — SCREENING NEWS AUDIT  ({_dt.now(ET_tz).strftime('%Y-%m-%d %H:%M ET')})",
+        "-" * 70,
+    ]
+
+    for req in pending:
+        ticker = req['ticker']
+        run_id = req['run_id']
+        headlines = _fetch_yahoo_headlines(ticker)
+        signal, score, top_headline = _score_headlines_for_screening(headlines)
+
+        db.fulfill_screening_request(
+            run_id=run_id,
+            ticker=ticker,
+            request_type='news',
+            signal=signal,
+            score=score,
+            headline=top_headline,
+        )
+
+        audit_lines += [
+            f"  {ticker}",
+            f"    Signal    : {signal.upper()}  (score {score:.2f})",
+            f"    Top headline: {top_headline or 'No recent news found'}",
+            f"    All headlines reviewed: {len(headlines)}",
+            "",
+        ]
+        log.info(f"Screening news {ticker}: {signal} score={score:.2f}")
+
+    audit_lines.append("=" * 70 + "\n")
+    with open(audit_path, 'a') as f:
+        f.write('\n'.join(audit_lines) + '\n')
+
+    log.info(f"Screening news audit written: {audit_path}")
+
+
 def run(session="market"):
     db   = get_db()
     ctrl = ResearchControls()
@@ -2882,6 +2983,11 @@ def run(session="market"):
         portfolio_value=portfolio['cash'],
     )
 
+    # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
+    # Check for pending news screening requests from the sector screener.
+    # For each ticker, fetch Yahoo Finance RSS headlines and score sentiment.
+    _handle_screening_requests(db)
+
     try:
         from heartbeat import write_heartbeat
         write_heartbeat(agent_name="news_agent", status="OK")
@@ -2893,9 +2999,10 @@ def run(session="market"):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Synthos — Scout (Research Agent)')
-    parser.add_argument('--session', choices=['market', 'overnight'], default='market',
-                        help='market=full scan, overnight=disclosures+congress only')
+    parser.add_argument('--session', choices=['market', 'overnight', 'seed'], default='market',
+                        help='market=full scan, overnight=disclosures+congress only, seed=45-day historical seed (maps to market)')
     args = parser.parse_args()
+    if args.session == 'seed': args.session = 'market'
 
     acquire_agent_lock("news_agent.py")
     try:
