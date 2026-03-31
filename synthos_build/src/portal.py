@@ -1263,9 +1263,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap" id="intel-filters">
     <button class="graph-tab active" onclick="filterIntel('all',this)">All</button>
     <button class="graph-tab" onclick="filterIntel('high',this)">High signal</button>
-    <button class="graph-tab" onclick="filterIntel('alert',this)">Alerts</button>
-    <button class="graph-tab" onclick="filterIntel('bull',this)">Bullish</button>
-    <button class="graph-tab" onclick="filterIntel('bear',this)">Bearish</button>
+    <button class="graph-tab" onclick="filterIntel('alert',this)">Corroborated</button>
+    <button class="graph-tab" onclick="filterIntel('bull',this)">Fresh</button>
+    <button class="graph-tab" onclick="filterIntel('bear',this)">Archive</button>
   </div>
   <div class="intel-grid" id="intel-grid">
     <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading intelligence...</div>
@@ -2006,7 +2006,10 @@ async function loadIntel() {
     const d = await r.json();
     const signals = d.signals || [];
     allSignals = signals;
-    document.getElementById('intel-count').textContent = signals.length + ' signals today';
+    const freshCount = signals.filter(s=>!s.is_stale).length;
+    const staleCount = signals.length - freshCount;
+    document.getElementById('intel-count').textContent =
+      freshCount + ' fresh' + (staleCount ? ' · ' + staleCount + ' archive' : '');
     renderIntelGrid(signals);
   } catch(e) {}
 }
@@ -2016,8 +2019,9 @@ function filterIntel(type, btn) {
   btn.classList.add('active');
   let filtered = allSignals;
   if (type === 'high') filtered = allSignals.filter(s=>s.confidence==='HIGH');
-  else if (type === 'bull') filtered = allSignals.filter(s=>!s.is_spousal);
-  else if (type === 'bear') filtered = allSignals.filter(s=>s.is_spousal);
+  else if (type === 'alert') filtered = allSignals.filter(s=>s.corroborated);
+  else if (type === 'bull') filtered = allSignals.filter(s=>!s.is_stale);
+  else if (type === 'bear') filtered = allSignals.filter(s=>s.is_stale);
   renderIntelGrid(filtered);
 }
 
@@ -2063,6 +2067,7 @@ function renderIntelGrid(signals) {
         </div>
       </div>
       ${s.corroborated ? `<div class="alert-strip"><div class="alert-dot"></div>Corroborated signal</div>` : ''}
+      ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   }).join('');
 }

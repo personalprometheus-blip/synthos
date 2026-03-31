@@ -2528,6 +2528,28 @@ def run(session="market"):
                      "SKIP", "no ticker resolved")
             ndl.decide("DISCARD", "NOISE", "no ticker resolved")
             ndl.commit(db)
+            # Write no-ticker articles to news_feed for Intel page display.
+            # These are macro/regulatory news items (Fed, BEA, EDGAR, etc.)
+            # that have no stock ticker but are still informative.
+            try:
+                db.write_news_feed_entry(
+                    congress_member = item.get("politician", ""),
+                    ticker          = "MACRO",
+                    signal_score    = "NOISE",
+                    sentiment_score = None,
+                    raw_headline    = headline,
+                    metadata        = {
+                        "source":      item.get("source"),
+                        "source_tier": source_tier,
+                        "staleness":   "unknown",
+                        "routing":     "STALE",
+                        "is_amended":  False,
+                        "is_spousal":  False,
+                    },
+                    source = "CONGRESS" if source_tier == 1 else "RSS",
+                )
+            except Exception:
+                pass
             skipped += 1
             continue
         ndl.ticker = ticker
@@ -2569,6 +2591,36 @@ def run(session="market"):
 
         # ── Gate 13: Timing exit ──────────────────────────────────────────
         if not state.timing_tradeable:
+            # Write to news_feed before discarding — stale articles still appear
+            # on the Intelligence page (portal enforces a 30-article floor).
+            _cm = item.get("politician", "")
+            _mw = db.get_member_weight(_cm).get("weight", 1.0) if _cm else 1.0
+            _bc = _state_to_confidence(state)
+            _at, _an = apply_member_weight(_bc, _mw)
+            try:
+                db.write_news_feed_entry(
+                    congress_member = _cm,
+                    ticker          = ticker,
+                    signal_score    = _at,
+                    sentiment_score = sentiment.get("score"),
+                    raw_headline    = headline,
+                    metadata        = {
+                        "source":          item.get("source"),
+                        "source_tier":     source_tier,
+                        "staleness":       staleness,
+                        "routing":         "STALE",
+                        "base_confidence": _bc,
+                        "member_weight":   _mw,
+                        "adj_numeric":     _an,
+                        "is_amended":      is_amended,
+                        "is_spousal":      is_spousal,
+                        "ind_etf":         item.get("ind_etf", ""),
+                        "sec_etf":         item.get("sector", ""),
+                    },
+                    source = "CONGRESS" if source_tier == 1 else "RSS",
+                )
+            except Exception:
+                pass
             ndl.decide("DISCARD", "NOISE", "gate13_timing: article too old / not tradeable")
             ndl.commit(db)
             skipped += 1

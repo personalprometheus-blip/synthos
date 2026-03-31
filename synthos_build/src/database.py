@@ -956,20 +956,66 @@ class DB:
             """, (cutoff,)).fetchall()
             return [{'date': r['date'], 'value': round(r['value'], 2)} for r in rows]
 
-    def get_watching_signals(self, limit=20):
-        """Signals Claude has scored — up to 45 days back, all confidence levels."""
+    def get_watching_signals(self, limit=100, min_floor=30):
+        """Return signals for the Intelligence page from news_feed.
+
+        Always returns at least min_floor articles — fresh signals first,
+        stale articles padded in to fill the floor. Field names are mapped
+        to what the portal's renderIntelGrid expects.
+        """
         with self.conn() as c:
-            cutoff = (datetime.now() - timedelta(days=45)).strftime('%Y-%m-%d')
-            rows = c.execute("""
-                SELECT * FROM signals
-                WHERE confidence IN ('HIGH', 'MEDIUM', 'LOW')
-                  AND created_at >= ?
-                ORDER BY
-                  CASE confidence WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 ELSE 3 END,
-                  created_at DESC
-                LIMIT ?
-            """, (cutoff, limit)).fetchall()
-            return [dict(r) for r in rows]
+            def _fetch(routing_filter, n):
+                if routing_filter == "fresh":
+                    rows = c.execute("""
+                        SELECT ticker, congress_member, signal_score,
+                               sentiment_score, raw_headline, metadata,
+                               source, timestamp, created_at
+                        FROM news_feed
+                        WHERE COALESCE(json_extract(metadata,'$.routing'),'?') != 'STALE'
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (n,)).fetchall()
+                else:
+                    rows = c.execute("""
+                        SELECT ticker, congress_member, signal_score,
+                               sentiment_score, raw_headline, metadata,
+                               source, timestamp, created_at
+                        FROM news_feed
+                        WHERE json_extract(metadata,'$.routing') = 'STALE'
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (n,)).fetchall()
+                return [dict(r) for r in rows]
+
+            fresh = _fetch("fresh", limit)
+            result = list(fresh)
+            if len(result) < min_floor:
+                result.extend(_fetch("stale", min_floor - len(result)))
+
+            # Map field names and flatten metadata for portal consumption
+            out = []
+            for r in result:
+                meta = {}
+                try:
+                    meta = json.loads(r.get('metadata') or '{}')
+                except Exception:
+                    pass
+                out.append({
+                    "ticker":       r.get("ticker") or "?",
+                    "politician":   r.get("congress_member") or "",
+                    "confidence":   r.get("signal_score") or "NOISE",
+                    "headline":     r.get("raw_headline") or "",
+                    "disc_date":    (r.get("timestamp") or r.get("created_at") or "")[:10],
+                    "created_at":   r.get("created_at") or "",
+                    "staleness":    meta.get("staleness") or "unknown",
+                    "sector":       meta.get("sec_etf") or meta.get("source") or "",
+                    "amount_range": meta.get("source") or "",
+                    "corroborated": meta.get("routing") in ("QUEUE", "WATCH"),
+                    "is_spousal":   bool(meta.get("is_spousal")),
+                    "source":       r.get("source") or "",
+                    "is_stale":     meta.get("routing") == "STALE",
+                })
+            return out
 
     # ── SCAN LOG ───────────────────────────────────────────────────────────
 
