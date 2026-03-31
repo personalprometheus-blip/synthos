@@ -902,6 +902,51 @@ class DB:
             """, (limit,)).fetchall()
             return [dict(r) for r in rows]
 
+    def get_news_headlines(self, category=None, limit=100, min_floor=30):
+        """Return display-only news headlines (source='NEWS') for the News panel.
+
+        Same 30-article minimum floor as Intel page. Optionally filters by
+        category ('Breaking', 'Markets', 'US', 'Global').
+        """
+        with self.conn() as c:
+            if category and category != 'all':
+                rows = c.execute("""
+                    SELECT raw_headline, metadata, created_at FROM news_feed
+                    WHERE source='NEWS'
+                      AND json_extract(metadata,'$.category')=?
+                    ORDER BY created_at DESC LIMIT ?
+                """, (category, max(limit, min_floor))).fetchall()
+            else:
+                rows = c.execute("""
+                    SELECT raw_headline, metadata, created_at FROM news_feed
+                    WHERE source='NEWS'
+                    ORDER BY created_at DESC LIMIT ?
+                """, (max(limit, min_floor),)).fetchall()
+
+            result = []
+            seen: set = set()
+            for r in rows:
+                meta = {}
+                try:
+                    meta = json.loads(r['metadata'] or '{}')
+                except Exception:
+                    pass
+                headline = r['raw_headline'] or ''
+                key = headline.lower()[:60]
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append({
+                    'headline':  headline,
+                    'source':    meta.get('source', 'Unknown'),
+                    'category':  meta.get('category', 'Breaking'),
+                    'link':      meta.get('link', ''),
+                    'pub_date':  meta.get('pub_date', ''),
+                    'staleness': meta.get('staleness', 'fresh'),
+                    'created_at': r['created_at'] or '',
+                })
+            return result
+
     def acknowledge_signal(self, signal_id):
         """Trader acknowledges it has acted on a signal."""
         with self.conn() as c:

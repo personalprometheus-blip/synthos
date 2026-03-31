@@ -1083,10 +1083,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="status-pill sp-dim" id="pill-uptime">
       <div class="status-dot dot-dim dot-blink"></div><span id="uptime-val">Loading</span>
     </div>
+    <div class="status-pill sp-dim" id="pill-memory" title="RAM usage">
+      <div class="status-dot dot-dim" id="mem-dot"></div><span id="mem-val">RAM</span>
+    </div>
   </div>
   <div class="header-nav">
     <button class="nav-btn active" onclick="showTab('dashboard')">Dashboard</button>
     <button class="nav-btn" onclick="showTab('intel')">Intelligence</button>
+    <button class="nav-btn" onclick="showTab('news')">News</button>
     <button class="nav-btn" onclick="showTab('screening')">Screening</button>
     <button class="nav-btn" onclick="showTab('settings')">Settings</button>
     <button class="nav-btn" onclick="window.location='/logs'">Logs</button>
@@ -1111,6 +1115,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <span class="sig-modal-close" onclick="closeSigModal()">✕</span>
     </div>
     <div class="sig-modal-body" id="smi-body"></div>
+  </div>
+</div>
+
+<!-- NEWS ARTICLE MODAL -->
+<div class="sig-modal-overlay" id="news-modal-overlay" onclick="closeNewsModal(event)" style="display:none">
+  <div class="sig-modal" id="news-modal" style="max-width:640px;width:94vw;max-height:88vh;overflow-y:auto">
+    <div class="sig-modal-head" style="align-items:flex-start;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px" id="nmi-cat-label"></div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);line-height:1.45" id="nmi-headline"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:5px" id="nmi-meta"></div>
+      </div>
+      <span class="sig-modal-close" onclick="closeNewsModal()" style="flex-shrink:0">✕</span>
+    </div>
+    <div id="nmi-img-wrap" style="margin:0 -20px;display:none">
+      <img id="nmi-img" src="" alt="" style="width:100%;max-height:260px;object-fit:cover;display:block">
+    </div>
+    <div class="sig-modal-body" id="nmi-body"></div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);text-align:center">
+      <a id="nmi-link" href="#" target="_blank" rel="noopener"
+         style="display:inline-flex;align-items:center;gap:6px;padding:9px 20px;border-radius:8px;background:var(--teal);color:#fff;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:0.03em">
+        Read full article ↗
+      </a>
+    </div>
   </div>
 </div>
 
@@ -1170,63 +1198,67 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="stat-val" style="font-size:13px;letter-spacing:0" id="stat-heartbeat">—</div>
       <div class="stat-sub">Last ping</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Mode</div>
-      <div class="stat-val" style="font-size:14px" id="stat-mode">{{ status.operating_mode }}</div>
-      <div class="stat-sub">{{ 'Paper' if status.get('trading_mode','PAPER') == 'PAPER' else 'Live' }} trading</div>
+    <div class="stat-card" id="stat-mode-card" style="{% if status.operating_mode == 'AUTONOMOUS' %}border-color:rgba(255,179,71,0.25){% endif %}">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="stat-label">Mode</div>
+        <div id="stat-mode-badge" style="padding:1px 7px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.05em;
+          {% if status.operating_mode == 'AUTONOMOUS' %}background:rgba(255,179,71,0.12);border:1px solid rgba(255,179,71,0.3);color:#ffb347
+          {% else %}background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.2);color:var(--teal){% endif %}">
+          {% if status.operating_mode == 'AUTONOMOUS' %}ACTIVE{% else %}DEFAULT{% endif %}
+        </div>
+      </div>
+      <div class="stat-val" style="font-size:13px;display:flex;align-items:center;gap:5px" id="stat-mode">
+        <span>{% if status.operating_mode == 'AUTONOMOUS' %}⚡{% else %}🎯{% endif %}</span>
+        <span>{{ status.operating_mode }}</span>
+      </div>
+      <div class="stat-sub" style="line-height:1.4">
+        {{ 'Paper' if status.get('trading_mode','PAPER') == 'PAPER' else 'Live' }} ·
+        <span id="auto-cap-label">{% if status.operating_mode == 'AUTONOMOUS' %}loading cap{% else %}approval required{% endif %}</span>
+      </div>
     </div>
   </div>
 
-  <!-- TWO COLUMN: GRAPH + POSITIONS -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-
-    <!-- PORTFOLIO GRAPH -->
-    <div class="glass teal-glow graph-card">
-      <div class="graph-header">
-        <div class="graph-title">Portfolio Value</div>
-        <div class="graph-tabs">
-          <button class="graph-tab active" onclick="loadGraph(30,this)">30D</button>
-          <button class="graph-tab" onclick="loadGraph(0,this)">All</button>
-        </div>
+  <!-- MULTI-SERIES MARKET CHART -->
+  <div class="glass teal-glow" style="margin-bottom:14px">
+    <div style="padding:12px 16px 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Market Overview</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap" id="chart-series-toggles">
+        <button class="graph-tab series-btn active" data-idx="0" onclick="toggleSeries(0,this)"
+          style="border-left:3px solid #00f5d4;padding-left:7px">Portfolio</button>
+        <button class="graph-tab series-btn active" data-idx="1" onclick="toggleSeries(1,this)"
+          style="border-left:3px solid #7b61ff;padding-left:7px">Nasdaq</button>
+        <button class="graph-tab series-btn active" data-idx="2" onclick="toggleSeries(2,this)"
+          style="border-left:3px solid #ffb347;padding-left:7px">Dow</button>
+        <button class="graph-tab series-btn active" data-idx="3" onclick="toggleSeries(3,this)"
+          style="border-left:3px solid #22d3ee;padding-left:7px">Bonds</button>
+        <button class="graph-tab series-btn active" data-idx="4" onclick="toggleSeries(4,this)"
+          style="border-left:3px solid #ff4b6e;padding-left:7px">Positions</button>
       </div>
-      <div class="graph-wrap">
-        <canvas id="portfolio-chart"></canvas>
-      </div>
-    </div>
-
-    <!-- OPEN POSITIONS -->
-    <div class="glass">
-      <div style="padding:14px 16px 8px;display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Open Positions</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="font-size:10px;color:var(--muted)" id="positions-count">Loading</div>
-          <div style="font-size:9px;color:var(--dim);font-family:var(--mono)" id="positions-refresh-ts"></div>
-        </div>
-      </div>
-      <div style="padding:0 16px 14px" id="positions-list">
-        <div class="empty-state"><div class="empty-icon">📊</div>Loading positions...</div>
+      <div style="display:flex;gap:4px" id="chart-time-tabs">
+        <button class="graph-tab active" onclick="loadMarketChart(36,this)">36H</button>
+        <button class="graph-tab" onclick="loadMarketChart(168,this)">7D</button>
+        <button class="graph-tab" onclick="loadMarketChart(720,this)">30D</button>
       </div>
     </div>
-
+    <div style="height:260px;padding:8px 8px 4px;position:relative">
+      <canvas id="market-chart"></canvas>
+      <div id="market-chart-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)">Loading chart…</div>
+    </div>
+    <div style="padding:4px 16px 10px;display:flex;gap:16px;font-size:10px;color:var(--dim);flex-wrap:wrap" id="chart-legend"></div>
   </div>
 
-  <!-- MODE BANNER -->
-  <div class="mode-banner" id="mode-banner">
-    {% if status.operating_mode == 'SUPERVISED' %}
-    <div class="mode-icon">🎯</div>
-    <div>
-      <div class="mode-title">Supervised Mode</div>
-      <div class="mode-desc">Claude proposes trades — you approve each one before execution</div>
+  <!-- COMPACT POSITIONS -->
+  <div class="glass" style="margin-bottom:14px">
+    <div style="padding:10px 16px 8px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Open Positions</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:10px;color:var(--muted)" id="positions-count">Loading</div>
+        <div style="font-size:9px;color:var(--dim);font-family:var(--mono)" id="positions-refresh-ts"></div>
+      </div>
     </div>
-    <div class="mode-badge mb-supervised">Default</div>
-    {% else %}
-    <div class="mode-icon">⚡</div>
-    <div>
-      <div class="mode-title">Autonomous Mode</div>
-      <div class="mode-desc" id="auto-mode-desc">Trades execute automatically · <span id="auto-cap-label">Loading cap...</span></div>
+    <div id="positions-list" style="padding:4px 0 2px">
+      <div class="empty-state"><div class="empty-icon">📊</div>Loading positions...</div>
     </div>
-    <div class="mode-badge mb-autonomous">Active</div>
-    {% endif %}
   </div>
 
   <!-- URGENT FLAGS MODAL -->
@@ -1314,6 +1346,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
   <div class="intel-grid" id="intel-grid">
     <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading intelligence...</div>
+  </div>
+</div>
+
+<!-- ══════════════ NEWS TAB ══════════════ -->
+<div class="page" id="tab-news" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
+      Market <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">News</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;background:rgba(255,255,255,0.04);border:1px solid var(--border);font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.05em;text-transform:uppercase">
+      <div class="status-dot dot-on" style="width:5px;height:5px"></div>
+      <span id="news-count">Loading</span>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Live headlines · MarketWatch · Display only — not used in signal calculations</div>
+  <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap" id="news-filters">
+    <button class="graph-tab active" onclick="switchNews('all',this)">All</button>
+    <button class="graph-tab" onclick="switchNews('Breaking',this)">Breaking</button>
+    <button class="graph-tab" onclick="switchNews('Markets',this)">Markets</button>
+    <button class="graph-tab" onclick="switchNews('US',this)">US</button>
+    <button class="graph-tab" onclick="switchNews('Global',this)">Global</button>
+  </div>
+  <div class="intel-grid" id="news-grid">
+    <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading news...</div>
   </div>
 </div>
 
@@ -1480,12 +1536,13 @@ let allSignals = [];
 
 // ── TABS ──
 function showTab(t) {
-  ['dashboard','intel','screening','settings'].forEach(id => {
+  ['dashboard','intel','news','screening','settings'].forEach(id => {
     document.getElementById('tab-'+id).style.display = id===t ? '' : 'none';
   });
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
   if (t === 'intel') loadIntel();
+  if (t === 'news') loadNews('all');
   if (t === 'screening') loadScreening();
 }
 
@@ -1634,130 +1691,219 @@ async function selfUpdate() {
 }
 
 // ── GRAPH ──
-async function loadGraph(days, btn) {
+// ── MULTI-SERIES MARKET CHART ──
+let marketChart = null;
+let _chartHours = 36;
+let _seriesVisible = [true, true, true, true, true]; // portfolio, nasdaq, dow, bonds, positions
+
+async function loadMarketChart(hours, btn) {
+  if (hours !== undefined) _chartHours = hours;
   if (btn) {
-    document.querySelectorAll('.graph-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#chart-time-tabs .graph-tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
+  const loading = document.getElementById('market-chart-loading');
+  if (loading) loading.style.display = 'flex';
   try {
-    const r = await fetch('/api/portfolio-history?days='+(days||365));
+    const r = await fetch('/api/market-chart-data?hours=' + _chartHours);
     const d = await r.json();
-    const hist = d.history || [];
-    const labels = hist.map(p => p.date.slice(5));
-    const values = hist.map(p => p.value);
-    const ctx = document.getElementById('portfolio-chart').getContext('2d');
-    if (chartInst) chartInst.destroy();
-    const grad = ctx.createLinearGradient(0,0,0,140);
-    grad.addColorStop(0, 'rgba(0,245,212,0.25)');
-    grad.addColorStop(1, 'rgba(0,245,212,0)');
-    chartInst = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          data: values,
-          borderColor: '#00f5d4',
-          borderWidth: 2,
-          fill: true,
-          backgroundColor: grad,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHitRadius: 8,
-        }]
+    buildMarketChart(d);
+  } catch(e) {
+    const loading2 = document.getElementById('market-chart-loading');
+    if (loading2) loading2.textContent = 'Chart data unavailable';
+  }
+}
+
+function buildMarketChart(d) {
+  const loading = document.getElementById('market-chart-loading');
+  const ctx = document.getElementById('market-chart');
+  if (!ctx) return;
+  if (loading) loading.style.display = 'none';
+
+  const labels = d.labels || [];
+  // Series definitions: [{label, color, data, type, fill, pointStyle}]
+  const seriesDef = [
+    {label:'Portfolio', color:'#00f5d4', fill:true,  pointRadius:0},
+    {label:'Nasdaq',    color:'#7b61ff', fill:false, pointRadius:0},
+    {label:'Dow',       color:'#ffb347', fill:false, pointRadius:0},
+    {label:'Bonds',     color:'#22d3ee', fill:false, pointRadius:0},
+    {label:'Positions', color:'#ff4b6e', fill:false, pointRadius:6, pointStyle:'triangle', showLine:false, type:'scatter'},
+  ];
+  const rawSeries = d.series || [];
+
+  const datasets = seriesDef.map((def, i) => {
+    const src = rawSeries[i] || [];
+    const cg  = ctx.getContext ? ctx.getContext('2d') : null;
+    let bg = def.color + '18';
+    if (def.fill && cg) {
+      const grad = cg.createLinearGradient(0,0,0,200);
+      grad.addColorStop(0, def.color + '30');
+      grad.addColorStop(1, def.color + '00');
+      bg = grad;
+    }
+    return {
+      label:           def.label,
+      data:            def.type === 'scatter'
+                         ? src.map((v,j) => v !== null ? {x: labels[j], y: v} : null).filter(Boolean)
+                         : src,
+      borderColor:     def.color,
+      backgroundColor: bg,
+      borderWidth:     def.type === 'scatter' ? 0 : 2,
+      fill:            def.fill ? 'origin' : false,
+      tension:         0.35,
+      pointRadius:     def.pointRadius,
+      pointHitRadius:  8,
+      pointStyle:      def.pointStyle || 'circle',
+      pointBackgroundColor: def.color,
+      showLine:        def.showLine !== false,
+      type:            def.type || 'line',
+      hidden:          !_seriesVisible[i],
+    };
+  });
+
+  if (marketChart) marketChart.destroy();
+  marketChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {duration:400, easing:'easeInOutQuart'},
+      interaction: {mode:'index', intersect:false},
+      plugins: {
+        legend: {display: false},
+        tooltip: {
+          backgroundColor: 'rgba(17,21,32,0.97)',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          titleColor: 'rgba(255,255,255,0.45)',
+          titleFont: {size:10},
+          bodyColor: '#e0ddd8',
+          bodyFont: {size:11},
+          padding: 10,
+          callbacks: {
+            label: ctx => {
+              if (ctx.datasetIndex === 4) return '  ▲ Position entry';
+              const v = ctx.parsed.y;
+              return `  ${ctx.dataset.label}: ${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+            }
+          }
+        }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: {duration: 600, easing:'easeInOutQuart'},
-        plugins: {legend:{display:false}, tooltip:{
-          backgroundColor:'rgba(17,21,32,0.95)',
-          borderColor:'rgba(0,245,212,0.3)',
-          borderWidth:1,
-          titleColor:'rgba(255,255,255,0.5)',
-          bodyColor:'#00f5d4',
-          bodyFont:{weight:'bold'},
-          callbacks:{label: ctx => '$' + ctx.parsed.y.toFixed(2)}
-        }},
-        scales: {
-          x: {grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:10},maxTicksLimit:6}},
-          y: {grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:10},callback:v=>'$'+v.toFixed(0)},position:'right'}
+      scales: {
+        x: {
+          grid: {color:'rgba(255,255,255,0.04)'},
+          ticks: {color:'rgba(255,255,255,0.3)', font:{size:10}, maxTicksLimit:8, maxRotation:0},
+        },
+        y: {
+          position: 'right',
+          grid: {color:'rgba(255,255,255,0.04)'},
+          ticks: {color:'rgba(255,255,255,0.3)', font:{size:10}, callback: v => (v>=0?'+':'')+v.toFixed(1)+'%'},
         }
       }
-    });
-  } catch(e) { console.log('Graph error:', e); }
+    }
+  });
+
+  // Update toggle button states from hidden state
+  document.querySelectorAll('.series-btn').forEach((btn,i) => {
+    const hidden = marketChart.getDatasetMeta(i).hidden;
+    btn.classList.toggle('active', !hidden);
+  });
+
+  // Legend row
+  const legend = document.getElementById('chart-legend');
+  if (legend) {
+    legend.innerHTML = seriesDef.map((s,i) =>
+      `<span style="display:flex;align-items:center;gap:4px;opacity:${_seriesVisible[i]?1:0.4}">
+        <span style="width:16px;height:2px;background:${s.color};display:inline-block;border-radius:2px"></span>
+        ${s.label}
+      </span>`
+    ).join('');
+  }
 }
+
+function toggleSeries(idx, btn) {
+  if (!marketChart) return;
+  const meta = marketChart.getDatasetMeta(idx);
+  meta.hidden = !meta.hidden;
+  _seriesVisible[idx] = !meta.hidden;
+  marketChart.update();
+  btn.classList.toggle('active', !meta.hidden);
+  // Update legend opacity
+  const legend = document.getElementById('chart-legend');
+  if (legend) {
+    const spans = legend.querySelectorAll('span');
+    if (spans[idx]) spans[idx].style.opacity = _seriesVisible[idx] ? '1' : '0.4';
+  }
+}
+
+// keep loadGraph as alias for portfolio-only backward compat (no longer called)
+async function loadGraph(days, btn) { loadMarketChart(days <= 30 ? 36 : 720, btn); }
 
 // ── STATUS LOAD ──
 function renderPositions(positions) {
   const el = document.getElementById('positions-list');
   const ct = document.getElementById('positions-count');
   const ts = document.getElementById('positions-refresh-ts');
-  const tracked  = (positions||[]).filter(p => !p.is_orphan);
-  const orphans  = (positions||[]).filter(p => p.is_orphan);
+  const tracked = (positions||[]).filter(p => !p.is_orphan);
+  const orphans = (positions||[]).filter(p => p.is_orphan);
   if (!positions || !positions.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>No open positions</div>';
+    el.innerHTML = '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
     ct.textContent = '0 open';
     return;
   }
   ct.textContent = tracked.length + ' tracked' + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
   if (ts) ts.textContent = 'Live · ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'}) + ' ET';
 
-  const colors = [
-    'background:linear-gradient(135deg,rgba(0,245,212,0.3),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.25);color:#00f5d4',
-    'background:linear-gradient(135deg,rgba(123,97,255,0.3),rgba(123,97,255,0.1));border:1px solid rgba(123,97,255,0.25);color:#a78bfa',
-    'background:linear-gradient(135deg,rgba(255,179,71,0.3),rgba(255,179,71,0.1));border:1px solid rgba(255,179,71,0.25);color:#ffb347',
-    'background:linear-gradient(135deg,rgba(255,75,110,0.3),rgba(255,75,110,0.1));border:1px solid rgba(255,75,110,0.25);color:#ff4b6e',
-  ];
+  const accentColors = ['#00f5d4','#7b61ff','#22d3ee','#a78bfa'];
 
-  const renderCard = (p, i, isOrphan) => {
-    const unreal  = p.unrealized_pl || 0;
-    const urealPct= p.unrealized_plpc || 0;
-    const dayPl   = p.day_pl || 0;
-    const dayPct  = p.day_plpc || 0;
-    const mktVal  = p.market_value || (p.current_price * p.shares) || 0;
-    const curPrice= p.current_price || p.entry_price || 0;
-    const avgEntry= p.avg_entry_price || p.entry_price || 0;
-    const plCls   = unreal >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const plSign  = unreal >= 0 ? '+' : '';
-    const daySign = dayPl >= 0 ? '+' : '';
-    const c = isOrphan
-      ? 'background:linear-gradient(135deg,rgba(255,179,71,0.2),rgba(255,179,71,0.06));border:1px solid rgba(255,179,71,0.35);color:#ffb347'
-      : colors[i % colors.length];
-    return `<div class="position-item" style="flex-direction:column;gap:0;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-        <div class="pos-icon" style="${c}">${(p.ticker||'?').slice(0,4)}</div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px">
-            <div class="pos-ticker">${p.ticker||'?'}</div>
-            ${isOrphan ? '<div style="padding:1px 6px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(255,179,71,0.15);border:1px solid rgba(255,179,71,0.3);color:#ffb347">ORPHAN</div>' : ''}
-          </div>
-          <div class="pos-shares">${(p.shares||0).toFixed(p.shares >= 1 ? 2 : 4)} shares · avg $${avgEntry.toFixed(2)}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:13px;font-weight:700;color:var(--text)">$${mktVal.toFixed(2)}</div>
-          <div style="font-size:10px;color:var(--muted)">@ $${curPrice.toFixed(2)}</div>
-        </div>
+  const renderRow = (p, i, isOrphan) => {
+    const unreal   = p.unrealized_pl || 0;
+    const urealPct = p.unrealized_plpc || 0;
+    const dayPl    = p.day_pl || 0;
+    const dayPct   = p.day_plpc || 0;
+    const mktVal   = p.market_value || (p.current_price * p.shares) || 0;
+    const curPrice = p.current_price || p.entry_price || 0;
+    const avgEntry = p.avg_entry_price || p.entry_price || 0;
+    const accent   = isOrphan ? '#ffb347' : accentColors[i % accentColors.length];
+    const plCol    = unreal >= 0 ? '#00f5d4' : '#ff4b6e';
+    const dayCol   = dayPl >= 0  ? 'rgba(0,245,212,0.7)' : 'rgba(255,75,110,0.7)';
+    const plSign   = unreal >= 0 ? '+' : '';
+    const daySign  = dayPl >= 0  ? '+' : '';
+    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;
+              padding:7px 16px;border-bottom:1px solid rgba(255,255,255,0.04);
+              ${isOrphan ? 'background:rgba(255,179,71,0.03)' : ''}">
+      <div style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+           font-size:9px;font-weight:800;letter-spacing:0.02em;
+           background:${accent}18;border:1px solid ${accent}40;color:${accent}">
+        ${(p.ticker||'?').slice(0,4)}
       </div>
-      <div style="display:flex;justify-content:space-between;padding:0 2px">
-        <div style="font-size:10px;color:var(--muted)">
-          <span style="color:${dayPl>=0?'rgba(0,245,212,0.7)':'rgba(255,75,110,0.7)'}">Today: ${daySign}$${Math.abs(dayPl).toFixed(2)} (${daySign}${Math.abs(dayPct).toFixed(2)}%)</span>
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="font-size:12px;font-weight:700;color:var(--text)">${p.ticker||'?'}</span>
+          ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(255,179,71,0.12);border:1px solid rgba(255,179,71,0.3);color:#ffb347">ORPHAN</span>' : ''}
         </div>
-        <div style="font-size:10px">
-          <span class="${plCls}" style="font-weight:600">${plSign}$${Math.abs(unreal).toFixed(2)}</span>
-          <span style="color:var(--muted);margin-left:3px">${plSign}${Math.abs(urealPct).toFixed(2)}% total</span>
-        </div>
+        <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:12px;font-weight:700;color:var(--text)">$${mktVal.toFixed(2)}</div>
+        <div style="font-size:10px;color:var(--dim)">@ $${curPrice.toFixed(2)}</div>
+      </div>
+      <div style="text-align:right;min-width:72px">
+        <div style="font-size:10px;color:${dayCol}">${daySign}$${Math.abs(dayPl).toFixed(2)}</div>
+        <div style="font-size:9px;color:var(--dim)">Today ${daySign}${Math.abs(dayPct).toFixed(2)}%</div>
+      </div>
+      <div style="text-align:right;min-width:68px">
+        <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
+        <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
     </div>`;
   };
 
   el.innerHTML = [
-    ...tracked.map((p,i) => renderCard(p, i, false)),
-    ...orphans.map((p,i) => renderCard(p, i, true)),
-  ].join('');
-
-  if (!el.innerHTML.trim()) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>No open positions</div>';
-  }
+    ...tracked.map((p,i) => renderRow(p, i, false)),
+    ...orphans.map((p,i) => renderRow(p, i, true)),
+  ].join('') || '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
 }
 
 function renderApprovals(approvals) {
@@ -1839,6 +1985,27 @@ async function loadHealth() {
     // Uptime
     document.getElementById('uptime-val').textContent = d.uptime || 'N/A';
     document.getElementById('pill-uptime').className = 'status-pill sp-dim';
+    // Memory pill
+    if (d.memory) {
+      const pct  = d.memory.ram_pct;
+      const used = d.memory.ram_used_mb;
+      const tot  = d.memory.ram_total_mb;
+      const mp   = document.getElementById('pill-memory');
+      const dot  = document.getElementById('mem-dot');
+      const lbl  = document.getElementById('mem-val');
+      lbl.textContent = `RAM ${pct}%`;
+      mp.title = `${used} MB / ${tot} MB used  ·  Swap ${d.memory.swap_pct}%  ·  CPU ${d.memory.cpu_pct}%`;
+      if (pct >= 85) {
+        mp.className = 'status-pill sp-err';
+        dot.className = 'status-dot dot-off';
+      } else if (pct >= 70) {
+        mp.className = 'status-pill sp-warn';
+        dot.className = 'status-dot dot-warn';
+      } else {
+        mp.className = 'status-pill sp-ok';
+        dot.className = 'status-dot dot-on';
+      }
+    }
   } catch(e) {}
 }
 
@@ -2330,7 +2497,7 @@ function updateClock() {
 }
 
 loadLiveStatus();
-loadGraph(30);
+loadMarketChart(36);
 loadHealth();
 loadAudit();
 loadMarketIndices();
@@ -2340,6 +2507,129 @@ setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
 setInterval(loadMarketIndices, 120000);
 setInterval(loadTraderActivity, 60000);
+
+// ── NEWS ──
+let _newsCat = 'all';
+const _metaCache = {};   // url → {image, description}
+let   _newsArticles = [];
+
+async function loadNews(category) {
+  if (category !== undefined) _newsCat = category;
+  const grid = document.getElementById('news-grid');
+  const cnt  = document.getElementById('news-count');
+  if (!grid) return;
+  try {
+    const r = await fetch('/api/news-headlines?category=' + encodeURIComponent(_newsCat));
+    const d = await r.json();
+    _newsArticles = d.articles || [];
+    cnt.textContent = _newsArticles.length + ' article' + (_newsArticles.length===1?'':'s');
+    if (!_newsArticles.length) {
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">No news articles yet — Scout will populate on next run</div>';
+      return;
+    }
+    grid.innerHTML = _newsArticles.map((a, idx) => {
+      const stale  = a.staleness && a.staleness !== 'fresh';
+      const cat    = a.category || 'Markets';
+      const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
+      const age    = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
+      const cached = a.link && _metaCache[a.link];
+      const imgHtml = cached && cached.image
+        ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${cached.image}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
+        : `<div class="news-img-placeholder" id="nip-${idx}" style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center"><span style="font-size:22px;opacity:0.18">📰</span></div>`;
+      return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative"
+                   onclick="openNewsModal(${idx})">
+        ${imgHtml}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
+          <span style="font-size:10px;font-weight:700;color:${catCol};text-transform:uppercase;letter-spacing:0.06em">${cat}</span>
+          <span style="font-size:10px;color:var(--muted)">${stale?'Archive · ':''}${age}</span>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--text);line-height:1.5;margin-bottom:5px">${escHtml(a.headline)}</div>
+        <div style="font-size:11px;color:var(--muted)">${a.source || 'MarketWatch'}</div>
+      </div>`;
+    }).join('');
+    // Lazy-load OG images for cards without cached data
+    _newsArticles.forEach((a, idx) => {
+      if (a.link && !_metaCache[a.link]) {
+        fetch('/api/article-meta?url=' + encodeURIComponent(a.link))
+          .then(r => r.json()).then(m => {
+            _metaCache[a.link] = m;
+            const ph = document.getElementById('nip-' + idx);
+            if (ph && m.image) {
+              ph.outerHTML = `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${m.image}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`;
+            }
+          }).catch(() => {});
+      }
+    });
+  } catch(e) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--red);font-size:13px">Error loading news</div>';
+  }
+}
+
+function switchNews(cat, btn) {
+  document.querySelectorAll('#news-filters .graph-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadNews(cat);
+}
+
+async function openNewsModal(idx) {
+  const a = _newsArticles[idx];
+  if (!a) return;
+  const cat    = a.category || 'Markets';
+  const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
+  const age    = a.pub_date ? timeSince(a.pub_date) : '';
+  // Populate static fields immediately
+  document.getElementById('nmi-cat-label').innerHTML = `<span style="color:${catCol}">${cat}</span>`;
+  document.getElementById('nmi-headline').textContent = a.headline;
+  document.getElementById('nmi-meta').textContent = (a.source || 'MarketWatch') + (age ? '  ·  ' + age : '');
+  document.getElementById('nmi-link').href = a.link || '#';
+  document.getElementById('nmi-body').innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center">Loading…</div>';
+  const imgWrap = document.getElementById('nmi-img-wrap');
+  imgWrap.style.display = 'none';
+  document.getElementById('nmi-img').src = '';
+  document.getElementById('news-modal-overlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  // Fetch OG meta (use cache if available)
+  let meta = a.link && _metaCache[a.link] ? _metaCache[a.link] : null;
+  if (!meta && a.link) {
+    try {
+      const r = await fetch('/api/article-meta?url=' + encodeURIComponent(a.link));
+      meta = await r.json();
+      _metaCache[a.link] = meta;
+    } catch(e) { meta = {}; }
+  }
+  if (meta && meta.image) {
+    const img = document.getElementById('nmi-img');
+    img.src = meta.image;
+    img.onerror = () => { imgWrap.style.display = 'none'; };
+    imgWrap.style.display = '';
+  }
+  const desc = meta && meta.description ? meta.description : '';
+  document.getElementById('nmi-body').innerHTML = desc
+    ? `<p style="font-size:13px;color:var(--text);line-height:1.7;margin:0">${escHtml(desc)}</p>`
+    : `<p style="font-size:12px;color:var(--muted);line-height:1.6;margin:0">No preview available — click the button below to read the full article on MarketWatch.</p>`;
+}
+
+function closeNewsModal(e) {
+  if (e && e.target !== document.getElementById('news-modal-overlay')) return;
+  document.getElementById('news-modal-overlay').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function timeSince(ts) {
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ','T')+'Z');
+  if (isNaN(d)) return ts;
+  const sec = Math.floor((Date.now() - d) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+setInterval(() => { if (document.getElementById('tab-news') && document.getElementById('tab-news').style.display !== 'none') loadNews(); }, 120000);
 </script>
 </body>
 </html>"""
@@ -2764,6 +3054,194 @@ def api_market_indices():
     return jsonify({'indices': result})
 
 
+@app.route('/api/market-chart-data')
+@login_required
+def api_market_chart_data():
+    """
+    Multi-series % change chart data for the last N hours.
+    Series: Portfolio (0), Nasdaq/QQQ (1), Dow/DIA (2), Bonds/BIL (3), Positions markers (4).
+    All normalized to % change from the first data point in the window.
+    """
+    hours = min(int(request.args.get('hours', 36)), 720)
+    import requests as _req
+    from datetime import timezone
+    from dateutil import parser as _dp
+
+    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
+    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    headers_alp   = {'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret}
+
+    now_utc  = datetime.utcnow()
+    start_dt = now_utc - timedelta(hours=hours)
+    start_s  = start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    # Choose bar timeframe based on window
+    if hours <= 48:
+        timeframe, limit = '1Hour', hours + 4
+    elif hours <= 200:
+        timeframe, limit = '4Hour', (hours // 4) + 8
+    else:
+        timeframe, limit = '1Day', (hours // 24) + 5
+
+    symbols = ['QQQ', 'DIA', 'BIL']
+    market_data = {}
+    try:
+        r = _req.get(
+            'https://data.alpaca.markets/v2/stocks/bars',
+            headers=headers_alp,
+            params={
+                'symbols': ','.join(symbols),
+                'timeframe': timeframe,
+                'start': start_s,
+                'limit': limit,
+                'feed': 'iex',
+            },
+            timeout=8,
+        )
+        if r.ok:
+            bars_resp = r.json().get('bars', {})
+            for sym in symbols:
+                market_data[sym] = bars_resp.get(sym, [])
+    except Exception:
+        pass
+
+    # Build shared time labels from QQQ (most bars) or whichever is longest
+    base_sym = max(symbols, key=lambda s: len(market_data.get(s, [])))
+    base_bars = market_data.get(base_sym, [])
+    if not base_bars:
+        return jsonify({'labels': [], 'series': [[], [], [], [], []]})
+
+    def fmt_label(ts_str):
+        try:
+            dt = _dp.parse(ts_str).astimezone(timezone.utc)
+            if hours <= 48:
+                return dt.strftime('%b %d %H:%M')
+            elif hours <= 200:
+                return dt.strftime('%b %d %H:%M')
+            else:
+                return dt.strftime('%b %d')
+        except Exception:
+            return ts_str[:13]
+
+    labels = [fmt_label(b['t']) for b in base_bars]
+    base_ts = [b['t'] for b in base_bars]
+
+    def normalize_bars(bars):
+        """Map bars to base_ts, return % change from first value."""
+        if not bars:
+            return [None] * len(base_ts)
+        # Build ts→close lookup
+        ts_map = {b['t'][:13]: b['c'] for b in bars}
+        # Also try exact match
+        ts_exact = {b['t']: b['c'] for b in bars}
+        vals = []
+        for bt in base_ts:
+            v = ts_exact.get(bt) or ts_map.get(bt[:13])
+            vals.append(v)
+        # Forward-fill nulls
+        last = None
+        filled = []
+        for v in vals:
+            if v is not None:
+                last = v
+            filled.append(last)
+        # Normalize to % change from first non-null
+        first = next((v for v in filled if v is not None), None)
+        if first is None or first == 0:
+            return [None] * len(filled)
+        return [round((v / first - 1) * 100, 4) if v is not None else None for v in filled]
+
+    qqq_series = normalize_bars(market_data.get('QQQ', []))
+    dia_series = normalize_bars(market_data.get('DIA', []))
+    bil_series = normalize_bars(market_data.get('BIL', []))
+
+    # Portfolio series from system_log heartbeats
+    portfolio_series = [None] * len(base_ts)
+    try:
+        from database import get_db
+        db = get_db()
+        cutoff_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+        with db.conn() as c:
+            port_rows = c.execute("""
+                SELECT timestamp, portfolio_value FROM system_log
+                WHERE portfolio_value IS NOT NULL AND portfolio_value > 0
+                  AND timestamp >= ?
+                ORDER BY timestamp ASC
+            """, (cutoff_str,)).fetchall()
+        if port_rows:
+            # Build hourly lookup
+            port_map = {}
+            for row in port_rows:
+                try:
+                    ts_key = row['timestamp'][:13]  # YYYY-MM-DD HH
+                    port_map[ts_key] = row['portfolio_value']
+                except Exception:
+                    pass
+            # Map to base_ts (convert UTC bar times to local key)
+            port_vals = []
+            for bt in base_ts:
+                # bt is like "2026-03-31T14:00:00Z" → key "2026-03-31 10" (ET is UTC-4)
+                try:
+                    dt_utc = _dp.parse(bt).replace(tzinfo=timezone.utc)
+                    # Try UTC key first, then ET
+                    key_utc = dt_utc.strftime('%Y-%m-%d %H')
+                    from datetime import timezone as _tz
+                    import zoneinfo
+                    try:
+                        et = dt_utc.astimezone(zoneinfo.ZoneInfo('America/New_York'))
+                        key_et = et.strftime('%Y-%m-%d %H')
+                    except Exception:
+                        key_et = key_utc
+                    v = port_map.get(key_et) or port_map.get(key_utc)
+                    port_vals.append(v)
+                except Exception:
+                    port_vals.append(None)
+            # Forward-fill
+            last = None
+            for i, v in enumerate(port_vals):
+                if v is not None:
+                    last = v
+                elif last is not None:
+                    port_vals[i] = last
+            # Normalize
+            first = next((v for v in port_vals if v is not None), None)
+            if first and first > 0:
+                portfolio_series = [round((v / first - 1) * 100, 4) if v is not None else None for v in port_vals]
+    except Exception:
+        pass
+
+    # Position entry markers — scatter points at entry timestamp
+    position_markers = [None] * len(base_ts)
+    try:
+        from database import get_db
+        db = get_db()
+        with db.conn() as c:
+            pos_rows = c.execute("""
+                SELECT ticker, entry_price, created_at FROM positions
+                WHERE created_at >= ?
+                ORDER BY created_at ASC
+            """, (start_dt.strftime('%Y-%m-%d %H:%M:%S'),)).fetchall()
+        for row in pos_rows:
+            try:
+                entry_key = row['created_at'][:13]
+                # Find nearest base_ts index
+                for j, bt in enumerate(base_ts):
+                    if bt[:13].replace('T', ' ') == entry_key:
+                        # Place marker at 0 (start of chart)
+                        position_markers[j] = 0
+                        break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return jsonify({
+        'labels':  labels,
+        'series':  [portfolio_series, qqq_series, dia_series, bil_series, position_markers],
+        'hours':   hours,
+    })
+
+
 @app.route('/api/system-health')
 def api_system_health():
     """Monitor server connectivity, Claude API status, Pi uptime."""
@@ -2821,6 +3299,38 @@ def api_system_health():
                 health['claude_api'] = {'status': 'unconfigured', 'last_call': None}
     except Exception:
         pass
+
+    # Memory / CPU
+    try:
+        import psutil
+        vm   = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        cpu  = psutil.cpu_percent(interval=0.2)
+        health['memory'] = {
+            'ram_pct':    round(vm.percent, 1),
+            'ram_used_mb': round((vm.total - vm.available) / 1024 / 1024),
+            'ram_total_mb': round(vm.total / 1024 / 1024),
+            'swap_pct':   round(swap.percent, 1),
+            'cpu_pct':    round(cpu, 1),
+        }
+        # Raise an urgent flag if RAM is critically high
+        if vm.percent >= 85:
+            try:
+                from database import get_db as _gdb
+                _db = _gdb()
+                severity = 'CRITICAL' if vm.percent >= 92 else 'WARNING'
+                _db.write_urgent_flag(
+                    flag_type  = 'HIGH_MEMORY',
+                    severity   = severity,
+                    message    = f"RAM usage at {vm.percent:.1f}% ({health['memory']['ram_used_mb']} MB / {health['memory']['ram_total_mb']} MB)",
+                    details    = health['memory'],
+                    clearable  = True,
+                )
+            except Exception:
+                pass
+    except ImportError:
+        health['memory'] = None
+
     return jsonify(health)
 
 
@@ -3670,6 +4180,52 @@ def news_feed_page():
     html = html.replace('{updated}', now_str)
     html = html.replace('{table_content}', table_content)
     return html
+
+
+_article_meta_cache: dict = {}
+
+@app.route('/api/article-meta')
+@login_required
+def api_article_meta():
+    """Fetch OG image + description for a news article URL. Cached in memory."""
+    url = request.args.get('url', '').strip()
+    if not url:
+        return jsonify({'image': None, 'description': None})
+    if url in _article_meta_cache:
+        return jsonify(_article_meta_cache[url])
+    result = {'image': None, 'description': None}
+    try:
+        import requests as _req
+        from bs4 import BeautifulSoup
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; Synthos/1.0; +https://synth-cloud.com)',
+            'Accept': 'text/html,application/xhtml+xml',
+        }
+        resp = _req.get(url, headers=headers, timeout=8, allow_redirects=True)
+        if resp.ok:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            def og(prop):
+                t = soup.find('meta', property=prop) or soup.find('meta', attrs={'name': prop})
+                return t['content'].strip() if t and t.get('content') else None
+            result['image']       = og('og:image') or og('twitter:image')
+            result['description'] = og('og:description') or og('twitter:description') or og('description')
+    except Exception:
+        pass
+    _article_meta_cache[url] = result
+    return jsonify(result)
+
+
+@app.route('/api/news-headlines')
+@login_required
+def api_news_headlines():
+    """Display-only news headlines from MarketWatch RSS (source='NEWS')."""
+    category = request.args.get('category')
+    if category == 'all':
+        category = None
+    from database import get_db
+    db = get_db()
+    articles = db.get_news_headlines(category=category, limit=100, min_floor=30)
+    return jsonify({'articles': articles, 'count': len(articles)})
 
 
 @app.route('/api/news-feed')

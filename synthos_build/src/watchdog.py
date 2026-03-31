@@ -299,8 +299,8 @@ def restore_snapshot() -> bool:
         restored = []
         for fname in SNAPSHOT_FILES:
             src = SNAPSHOT_DIR / fname
-            # restore to agents/ or src/ depending on where the live file belongs
-            dst_dir = AGENTS_DIR if fname in {a["script"] for a in WATCHED_AGENTS} else CORE_DIR
+            # Restore to wherever the live file actually lives (mirrors take_snapshot logic)
+            dst_dir = AGENTS_DIR if (AGENTS_DIR / fname).exists() else CORE_DIR
             dst = dst_dir / fname
             if src.exists():
                 if dst.exists():
@@ -446,12 +446,17 @@ def start_managed_service(agent_cfg: dict) -> bool:
     env      = os.environ.copy()
     env.update(agent_cfg.get("env", {}))
 
+    # Resolve script path: check agents/ first, then src/ (e.g. portal.py lives in src/)
+    script_path = AGENTS_DIR / script
+    if not script_path.exists():
+        script_path = CORE_DIR / script
+
     try:
         with open(log_file, "a") as lf:
             proc = subprocess.Popen(
-                [sys.executable, str(AGENTS_DIR / script)] + agent_cfg.get("args", []),
+                [sys.executable, str(script_path)] + agent_cfg.get("args", []),
                 stdout=lf, stderr=lf,
-                cwd=str(AGENTS_DIR), env=env,
+                cwd=str(script_path.parent), env=env,
             )
         time.sleep(2)
         if proc.poll() is None:
@@ -1083,4 +1088,18 @@ if __name__ == "__main__":
         else:
             print("No snapshot found")
     else:
-        watch_loop()
+        # Guard against duplicate daemon instances (boot_sequence + cron both fire at reboot)
+        pid_file = LOG_DIR / "watchdog.pid"
+        if pid_file.exists():
+            try:
+                existing_pid = int(pid_file.read_text().strip())
+                os.kill(existing_pid, 0)   # raises if process is gone
+                log.warning(f"Watchdog already running (pid={existing_pid}) — exiting")
+                sys.exit(0)
+            except (ValueError, ProcessLookupError, PermissionError):
+                pass   # stale PID file — safe to continue
+        pid_file.write_text(str(os.getpid()))
+        try:
+            watch_loop()
+        finally:
+            pid_file.unlink(missing_ok=True)

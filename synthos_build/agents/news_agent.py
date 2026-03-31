@@ -755,11 +755,9 @@ def get_rss_feeds():
         except Exception as e:
             log.warning(f"RSS_FEEDS_JSON parse error — using defaults: {e}")
     return [
-        # ── POLITICS / NEWS ───────────────────────────────────────────────
-        ["Reuters Politics",        "https://feeds.reuters.com/reuters/politicsNews",                                             2],
-        ["Associated Press",        "https://apnews.com/rss",                                                                     2],
+        # ── POLITICS / REGULATORY NEWS ────────────────────────────────────
+        # Reuters/AP/Politico removed — DNS fail / 404 / 403 as of 2026-03-31
         ["Bloomberg Politics",      "https://feeds.bloomberg.com/politics/news.rss",                                              3],
-        ["Politico",                "https://www.politico.com/rss/politicopicks.xml",                                             3],
         ["The Hill",                "https://thehill.com/feed",                                                                   3],
         ["Roll Call",               "https://rollcall.com/feed",                                                                  3],
 
@@ -802,6 +800,105 @@ def get_rss_feeds():
         # 13F-HR: institutional portfolio holdings (quarterly, lags 45 days)
         ["EDGAR 13F-HR",            "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=13F-HR&dateb=&owner=include&count=40&search_text=&output=atom", 2, _edgar_ua],
     ]
+
+
+# ── NEWS HEADLINE FEEDS (display-only, not in signal pipeline) ───────────────
+
+NEWS_FEEDS = [
+    # MarketWatch — confirmed live 2026-03-31
+    ("MW Market Pulse",        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",       "Markets"),
+    ("MW Bulletins",           "https://feeds.content.dowjones.io/public/rss/mw_bulletins",          "Breaking"),
+    ("MW Realtime Headlines",  "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",  "Markets"),
+]
+
+def _headline_key(headline: str) -> str:
+    """Normalised key for dedup — lowercase, letters/numbers only."""
+    import re
+    return re.sub(r'[^a-z0-9 ]', '', headline.lower()).strip()
+
+def _jaccard(a: str, b: str) -> float:
+    """Word-level Jaccard similarity between two strings."""
+    sa = set(a.split())
+    sb = set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+def fetch_and_store_news_headlines(db) -> int:
+    """Fetch MarketWatch and other display-only news feeds.
+
+    Articles are written directly to the news_feed table with source='NEWS'
+    and routing='NEWS' — they bypass the 22-gate signal pipeline entirely
+    and never affect trade decisions.
+
+    Returns number of new (non-duplicate) articles stored.
+    """
+    import requests as _req
+
+    # Pull last 24h headlines already stored for dedup
+    stored_keys: list[str] = []
+    try:
+        with db.conn() as c:
+            rows = c.execute("""
+                SELECT raw_headline FROM news_feed
+                WHERE source='NEWS'
+                  AND created_at >= datetime('now','-24 hours')
+            """).fetchall()
+        stored_keys = [_headline_key(r[0]) for r in rows if r[0]]
+    except Exception:
+        pass
+
+    ua = {"User-Agent": f"Synthos/1.0 ({os.environ.get('USER_EMAIL','synthos@synth-cloud.com')})"}
+    stored = 0
+
+    for feed_name, url, category in NEWS_FEEDS:
+        try:
+            resp = _req.get(url, headers=ua, timeout=10)
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.content)
+            if feed.bozo and not feed.entries:
+                log.warning(f"News feed parse issue: {feed_name}")
+                continue
+            count = 0
+            for entry in feed.entries[:20]:
+                title = (entry.get("title") or "").strip()
+                if not title:
+                    continue
+                key = _headline_key(title)
+                if not key:
+                    continue
+                # Duplicate check — skip if >70% similar to any stored headline
+                is_dup = any(_jaccard(key, sk) > 0.70 for sk in stored_keys)
+                if is_dup:
+                    continue
+                stored_keys.append(key)   # add to in-memory dedup set
+                pub = entry.get("published") or entry.get("updated") or ""
+                try:
+                    db.write_news_feed_entry(
+                        congress_member = "",
+                        ticker          = "",
+                        signal_score    = "NEWS",
+                        sentiment_score = None,
+                        raw_headline    = title,
+                        metadata        = {
+                            "source":   feed_name,
+                            "category": category,
+                            "link":     entry.get("link", url),
+                            "pub_date": pub[:25],
+                            "routing":  "NEWS",
+                            "staleness": "fresh",
+                        },
+                        source = "NEWS",
+                    )
+                    stored += 1
+                    count += 1
+                except Exception as e:
+                    log.warning(f"news_feed write failed ({feed_name}): {e}")
+            log.info(f"{feed_name}: stored {count} new headlines")
+        except Exception as e:
+            log.error(f"News feed fetch failed ({feed_name}): {e}")
+
+    return stored
 
 
 def fetch_rss_feeds():
@@ -2567,6 +2664,12 @@ def run(session="market"):
             all_raw.extend(results)
             if results is not None:
                 _record_source_fetch("RSS feeds", db)
+
+        # ── News headline feeds (display-only, bypass signal pipeline) ────
+        # No daily guard — dedup inside fetch_and_store_news_headlines handles
+        # repeat fetches; MW feeds update throughout the day.
+        news_stored = fetch_and_store_news_headlines(db)
+        log.info(f"News headline feeds: {news_stored} new headlines stored")
     else:
         # Overnight: disclosures + congress only
         if _source_fetched_recently("Congress.gov API", db):
