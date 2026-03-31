@@ -238,21 +238,274 @@ def agent_lock_status():
         return None
 
 
+def _fetch_alpaca_positions():
+    """Fetch live positions from Alpaca. Returns dict keyed by symbol, or {} on failure."""
+    import requests as _req
+    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
+    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    alpaca_url    = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    if not alpaca_key:
+        return {}
+    try:
+        headers = {
+            "APCA-API-KEY-ID":     alpaca_key,
+            "APCA-API-SECRET-KEY": alpaca_secret,
+        }
+        r = _req.get(f"{alpaca_url}/v2/positions", headers=headers, timeout=6)
+        r.raise_for_status()
+        return {p['symbol']: p for p in r.json()}
+    except Exception as e:
+        log.warning(f"Alpaca position fetch failed: {e}")
+        return {}
+
+
+def _enrich_positions(db_positions, alpaca_pos_map):
+    """
+    Merge DB positions with live Alpaca data.
+    Returns (enriched_list, orphan_list).
+      enriched: DB positions with current_price / market_value / pl fields populated
+      orphans:  Alpaca positions not in DB (shown as warnings)
+    """
+    db_tickers = set()
+    enriched = []
+    for p in db_positions:
+        ticker = p.get('ticker', '')
+        db_tickers.add(ticker)
+        ap = alpaca_pos_map.get(ticker, {})
+        entry = float(p.get('entry_price', 0) or 0)
+        shares = float(p.get('shares', 0) or 0)
+        cost = round(entry * shares, 2)
+        if ap:
+            cur_price   = float(ap.get('current_price', entry) or entry)
+            mkt_value   = float(ap.get('market_value', cost) or cost)
+            unreal_pl   = float(ap.get('unrealized_pl', 0) or 0)
+            unreal_plpc = float(ap.get('unrealized_plpc', 0) or 0)
+            day_pl      = float(ap.get('unrealized_intraday_pl', 0) or 0)
+            day_plpc    = float(ap.get('unrealized_intraday_plpc', 0) or 0)
+            avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
+        else:
+            cur_price   = entry
+            mkt_value   = cost
+            unreal_pl   = 0.0
+            unreal_plpc = 0.0
+            day_pl      = 0.0
+            day_plpc    = 0.0
+            avg_entry   = entry
+        enriched.append({
+            **p,
+            'current_price':    round(cur_price, 4),
+            'market_value':     round(mkt_value, 2),
+            'unrealized_pl':    round(unreal_pl, 2),
+            'unrealized_plpc':  round(unreal_plpc * 100, 2),
+            'day_pl':           round(day_pl, 2),
+            'day_plpc':         round(day_plpc * 100, 2),
+            'avg_entry_price':  round(avg_entry, 4),
+            'cost_basis':       round(cost, 2),
+            'is_orphan':        False,
+        })
+
+    orphans = []
+    for sym, ap in alpaca_pos_map.items():
+        if sym in db_tickers:
+            continue
+        shares    = float(ap.get('qty', 0) or 0)
+        cur_price = float(ap.get('current_price', 0) or 0)
+        mkt_value = float(ap.get('market_value', 0) or 0)
+        unreal_pl = float(ap.get('unrealized_pl', 0) or 0)
+        day_pl    = float(ap.get('unrealized_intraday_pl', 0) or 0)
+        day_plpc  = float(ap.get('unrealized_intraday_plpc', 0) or 0)
+        avg_entry = float(ap.get('avg_entry_price', cur_price) or cur_price)
+        orphans.append({
+            'ticker':           sym,
+            'company':          sym,
+            'shares':           shares,
+            'current_price':    round(cur_price, 4),
+            'market_value':     round(mkt_value, 2),
+            'avg_entry_price':  round(avg_entry, 4),
+            'cost_basis':       round(avg_entry * shares, 2),
+            'unrealized_pl':    round(unreal_pl, 2),
+            'unrealized_plpc':  round(float(ap.get('unrealized_plpc', 0) or 0) * 100, 2),
+            'day_pl':           round(day_pl, 2),
+            'day_plpc':         round(day_plpc * 100, 2),
+            'entry_price':      round(avg_entry, 4),
+            'status':           'OPEN',
+            'is_orphan':        True,
+            'pnl':              round(unreal_pl, 2),
+        })
+    return enriched, orphans
+
+
+def _enrich_flags(raw_flags, db_path):
+    """
+    Enrich raw urgent_flags rows with:
+      - human-readable title + description
+      - severity label (CRITICAL / WARNING / INFO / LOW)
+      - context from scan_log if available
+      - clearable flag (non-critical flags can be dismissed)
+    """
+    import sqlite3 as _sq
+
+    # Build a lookup: for each flag find the scan_log entry closest to (but not after)
+    # the flag's detected_at — this captures what actually triggered it.
+    # We index all cascade scans by ticker then match per flag below.
+    all_scans = {}   # ticker -> list of (scanned_at, event_summary)
+    try:
+        conn = _sq.connect(db_path)
+        conn.row_factory = _sq.Row
+        rows = conn.execute(
+            "SELECT ticker, event_summary, scanned_at FROM scan_log "
+            "WHERE cascade_detected=1 ORDER BY scanned_at ASC"
+        ).fetchall()
+        for r in rows:
+            all_scans.setdefault(r['ticker'], []).append(
+                {'summary': r['event_summary'], 'at': r['scanned_at']}
+            )
+        conn.close()
+    except Exception:
+        pass
+
+    def _best_scan(ticker, detected_at):
+        """Return the scan closest in time to when the flag was raised."""
+        candidates = all_scans.get(ticker, [])
+        if not candidates:
+            return {}
+        # prefer the scan at or just before detected_at
+        before = [s for s in candidates if s['at'] <= detected_at]
+        if before:
+            return before[-1]   # most recent before flag raised
+        return candidates[0]    # fallback: earliest available
+
+    scan_context = {}  # kept for compatibility — populated per-flag below
+
+    TIER_META = {
+        1: {'label': 'CRITICAL', 'color': 'critical',
+            'clearable': False, 'btn': 'Acknowledge'},
+        2: {'label': 'WARNING',  'color': 'warning',
+            'clearable': True,  'btn': 'Clear'},
+        3: {'label': 'INFO',     'color': 'info',
+            'clearable': True,  'btn': 'Dismiss'},
+        4: {'label': 'LOW',      'color': 'low',
+            'clearable': True,  'btn': 'Dismiss'},
+    }
+
+    def _parse_event(summary):
+        """Extract key fields from event_summary string."""
+        if not summary:
+            return {}
+        parts = {}
+        for seg in summary.split('|'):
+            seg = seg.strip()
+            if '=' in seg:
+                k, _, v = seg.partition('=')
+                parts[k.strip().lower()] = v.strip()
+            elif ':' in seg:
+                k, _, v = seg.partition(':')
+                parts[k.strip().lower()] = v.strip()
+        return parts
+
+    def _human_title(ticker, tier, parsed):
+        classification = parsed.get('classification', '').lower()
+        market_state   = parsed.get('market_sentiment', parsed.get('market_state', '')).lower()
+        if ticker == 'MARKET':
+            if 'panic' in classification or 'panic' in market_state:
+                return 'Market Panic Condition'
+            if 'strong_bear' in classification or 'strong_bear' in market_state:
+                return 'Strong Bearish Market'
+            if 'mild_bear' in classification or 'mild_bear' in market_state:
+                return 'Mild Bearish Market'
+            if 'conflict' in classification:
+                return 'Conflicted Market Signal'
+            if tier == 1:
+                return 'Market Risk Event'
+            return 'Market Sentiment Alert'
+        else:
+            if tier == 1:
+                return f'{ticker} — Cascade Alert'
+            if tier == 2:
+                return f'{ticker} — Elevated Activity'
+            return f'{ticker} — Monitoring Flag'
+
+    def _human_desc(ticker, tier, parsed, raw_summary):
+        classification = parsed.get('classification', '').lower()
+        regime         = parsed.get('regime', '')
+        score          = parsed.get('score', '')
+        confidence     = parsed.get('confidence', '')
+        warning        = parsed.get('warning', 'none')
+
+        if ticker == 'MARKET':
+            if 'panic' in classification:
+                return (
+                    f"A market-wide panic or stress condition was detected (regime: {regime}). "
+                    f"Agents are in RISK_OFF mode — no new positions will open until this flag is acknowledged. "
+                    f"Sentiment score: {score}, confidence: {confidence}."
+                )
+            if 'strong_bear' in classification:
+                return (
+                    f"Strong bearish market conditions detected (regime: {regime}). "
+                    f"SPY is in significant drawdown. Position sizing is reduced. "
+                    f"Sentiment score: {score}."
+                )
+            if 'mild_bear' in classification:
+                return (
+                    f"Mild bearish conditions detected (regime: {regime}). "
+                    f"Risk appetite is reduced. Score: {score}, confidence: {confidence}."
+                )
+            if 'conflict' in classification:
+                return (
+                    f"Mixed signals — market data is internally conflicted (regime: {regime}). "
+                    f"Agents are monitoring but not acting aggressively. "
+                    f"Score: {score}, confidence: {confidence}."
+                )
+            return raw_summary or f"Market flag detected. Tier {tier}. Regime: {regime}."
+        else:
+            return (
+                f"Unusual activity detected for {ticker}. "
+                f"Cascade conditions triggered at tier {tier}. "
+                + (f"Details: {raw_summary}" if raw_summary else "Review position and recent scan data.")
+            )
+
+    enriched = []
+    for f in raw_flags:
+        ticker      = f.get('ticker', '?')
+        tier        = f.get('tier', 3)
+        detected_at = f.get('detected_at', '')
+        meta        = TIER_META.get(tier, TIER_META[3])
+        ctx         = _best_scan(ticker, detected_at)
+        raw_s       = ctx.get('summary') or f.get('label') or ''
+        parsed      = _parse_event(raw_s)
+
+        enriched.append({
+            **f,
+            'severity':     meta['label'],
+            'color':        meta['color'],
+            'clearable':    meta['clearable'],
+            'btn_label':    meta['btn'],
+            'title':        _human_title(ticker, tier, parsed),
+            'description':  _human_desc(ticker, tier, parsed, raw_s),
+            'scan_summary': raw_s,
+            'scan_at':      ctx.get('at', f.get('detected_at', '')),
+        })
+
+    # Sort: critical first, then by detected_at desc
+    enriched.sort(key=lambda x: (x['tier'], x['detected_at']), reverse=False)
+    return enriched
+
+
 def get_system_status():
-    """Read live status from database. Backs off if agent holds lock."""
+    """Read live status from database, enriched with Alpaca real-time prices."""
     import time as _time
 
     # Check for agent lock — return cached/skeleton if locked
     lock = agent_lock_status()
     if lock:
         log.debug(f"Agent lock held by {lock['agent']} — portal backing off")
-        # Return skeleton with lock info — portal shows "agent running" state
         return {
             "portfolio_value": 0,
             "cash":            0,
             "realized_gains":  0,
             "open_positions":  0,
             "positions":       [],
+            "orphan_positions": [],
             "urgent_flags":    0,
             "last_heartbeat":  "Agent running",
             "kill_switch":     kill_switch_active(),
@@ -269,22 +522,39 @@ def get_system_status():
             db = get_db()
             portfolio  = db.get_portfolio()
             positions  = db.get_open_positions()
-            total      = round(portfolio['cash'] + sum(
-                p['entry_price'] * p['shares'] for p in positions), 2)
             last_hb    = db.get_last_heartbeat()
             flags      = db.get_urgent_flags()
+
+            # Enrich with Alpaca real-time data
+            alpaca_map           = _fetch_alpaca_positions()
+            enriched, orphans    = _enrich_positions(positions, alpaca_map)
+            all_positions        = enriched + orphans
+
+            # Enrich flags with human-readable context
+            enriched_flags = _enrich_flags([dict(f) for f in flags], db.path)
+            critical_count = sum(1 for f in enriched_flags if f['tier'] == 1)
+
+            # Portfolio value: cash + sum of current market values
+            market_value_total = sum(p['market_value'] for p in all_positions)
+            total = round(portfolio['cash'] + market_value_total, 2)
+
             return {
-                "portfolio_value": total,
-                "cash":            round(portfolio['cash'], 2),
-                "realized_gains":  round(portfolio.get('realized_gains', 0), 2),
-                "open_positions":  len(positions),
-                "positions":       positions,
-                "urgent_flags":    len(flags),
-                "last_heartbeat":  last_hb['timestamp'] if last_hb else "Never",
-                "kill_switch":     kill_switch_active(),
-                "operating_mode":  OPERATING_MODE,
-                "pi_id":           PI_ID,
-                "agent_running":   None,
+                "portfolio_value":  total,
+                "cash":             round(portfolio['cash'], 2),
+                "realized_gains":   round(portfolio.get('realized_gains', 0), 2),
+                "open_positions":   len(enriched),
+                "orphan_count":     len(orphans),
+                "positions":        all_positions,
+                "urgent_flags":     len(flags),
+                "critical_flags":   critical_count,
+                "flags_detail":     enriched_flags,
+                "last_heartbeat":   last_hb['timestamp'] if last_hb else "Never",
+                "kill_switch":      kill_switch_active(),
+                "operating_mode":   OPERATING_MODE,
+                "trading_mode":     os.environ.get('TRADING_MODE', 'PAPER'),
+                "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
+                "pi_id":            PI_ID,
+                "agent_running":    None,
             }
         except Exception as e:
             if 'locked' in str(e).lower() and attempt < 2:
@@ -292,18 +562,22 @@ def get_system_status():
                 continue
             log.error(f"Status read failed: {e}")
             return {
-                "error":           str(e),
-                "portfolio_value": 0,
-                "cash":            0,
-                "realized_gains":  0,
-                "open_positions":  0,
-                "positions":       [],
-                "urgent_flags":    0,
-                "last_heartbeat":  "Unavailable",
-                "kill_switch":     kill_switch_active(),
-                "operating_mode":  OPERATING_MODE,
-                "pi_id":           PI_ID,
-                "agent_running":   None,
+                "error":            str(e),
+                "portfolio_value":  0,
+                "cash":             0,
+                "realized_gains":   0,
+                "open_positions":   0,
+                "orphan_count":     0,
+                "positions":        [],
+                "urgent_flags":     0,
+                "flags_detail":     [],
+                "last_heartbeat":   "Unavailable",
+                "kill_switch":      kill_switch_active(),
+                "operating_mode":   OPERATING_MODE,
+                "trading_mode":     os.environ.get('TRADING_MODE', 'PAPER'),
+                "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
+                "pi_id":            PI_ID,
+                "agent_running":    None,
             }
 
 def load_pending_approvals():
@@ -850,12 +1124,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="stat-card" id="stat-positions-card">
       <div class="stat-label">Positions</div>
       <div class="stat-val" id="stat-positions">0</div>
-      <div class="stat-sub">Open</div>
+      <div class="stat-sub" id="stat-positions-sub">Open</div>
     </div>
-    <div class="stat-card" id="stat-flags-card">
+    <div class="stat-card" id="stat-flags-card" style="cursor:pointer" onclick="toggleFlagsModal()">
       <div class="stat-label">Flags</div>
       <div class="stat-val" id="stat-flags">0</div>
-      <div class="stat-sub">Urgent</div>
+      <div class="stat-sub" id="stat-flags-sub">click to view</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Heartbeat</div>
@@ -890,7 +1164,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="glass">
       <div style="padding:14px 16px 8px;display:flex;align-items:center;justify-content:space-between">
         <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Open Positions</div>
-        <div style="font-size:10px;color:var(--muted)" id="positions-count">Loading</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-size:10px;color:var(--muted)" id="positions-count">Loading</div>
+          <div style="font-size:9px;color:var(--dim);font-family:var(--mono)" id="positions-refresh-ts"></div>
+        </div>
       </div>
       <div style="padding:0 16px 14px" id="positions-list">
         <div class="empty-state"><div class="empty-icon">📊</div>Loading positions...</div>
@@ -912,37 +1189,38 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="mode-icon">⚡</div>
     <div>
       <div class="mode-title">Autonomous Mode</div>
-      <div class="mode-desc">Trades execute automatically per pre-authorized rules</div>
+      <div class="mode-desc" id="auto-mode-desc">Trades execute automatically · <span id="auto-cap-label">Loading cap...</span></div>
     </div>
     <div class="mode-badge mb-autonomous">Active</div>
     {% endif %}
   </div>
 
+  <!-- URGENT FLAGS MODAL -->
+  <div id="flags-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.75);backdrop-filter:blur(6px)" onclick="if(event.target===this)toggleFlagsModal()">
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:min(580px,94vw);background:var(--surface);border:1px solid var(--border);border-radius:18px;overflow:hidden;max-height:85vh;display:flex;flex-direction:column">
+      <!-- header -->
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">System Flags</div>
+        <div id="flags-modal-summary" style="font-size:10px;color:var(--muted)"></div>
+        <button onclick="toggleFlagsModal()" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:0 2px;margin-left:auto;line-height:1">×</button>
+      </div>
+      <!-- body -->
+      <div id="flags-modal-body" style="padding:14px 20px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:10px">
+        <div style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center">No active flags</div>
+      </div>
+    </div>
+  </div>
+
   <!-- TWO COLUMN: APPROVALS + WATCHLIST -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-
-    <!-- APPROVAL QUEUE -->
-    <div class="glass purple-glow">
-      <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Approval Queue</div>
-        <div style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;background:var(--purple2);border:1px solid rgba(123,97,255,0.3);color:var(--purple)" id="pending-badge">0 pending</div>
-      </div>
-      <div style="padding:0 16px 14px" id="approval-list">
-        <div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>
-      </div>
+  <!-- APPROVAL QUEUE / TRADE LOG -->
+  <div class="glass purple-glow" style="margin-bottom:16px">
+    <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase" id="queue-label">{% if status.operating_mode == 'AUTONOMOUS' %}Recent Signals{% else %}Approval Queue{% endif %}</div>
+      <div style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;background:var(--purple2);border:1px solid rgba(123,97,255,0.3);color:var(--purple)" id="pending-badge">0 pending</div>
     </div>
-
-    <!-- WHAT CLAUDE IS WATCHING -->
-    <div class="glass amber-glow">
-      <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:8px">
-        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Claude Watching</div>
-        <div style="font-size:10px;color:var(--muted)" id="watch-count"></div>
-      </div>
-      <div style="padding:0 16px 14px" id="watch-list">
-        <div class="empty-state"><div class="empty-icon">👁</div>Loading watchlist...</div>
-      </div>
+    <div style="padding:0 16px 14px" id="approval-list">
+      <div class="empty-state"><div class="empty-icon">✅</div>{% if status.operating_mode == 'AUTONOMOUS' %}No recent signals{% else %}No pending approvals{% endif %}</div>
     </div>
-
   </div>
 
   <!-- AUDIT PANEL -->
@@ -959,10 +1237,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <!-- AUTONOMOUS UNLOCK (supervised only) -->
   {% if status.operating_mode == 'SUPERVISED' %}
   <div class="glass" style="margin-bottom:16px">
-    <div style="padding:14px 16px 0;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Autonomous Mode</div>
+    <div style="padding:14px 16px 0;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Unlock Autonomous Mode</div>
     <div class="unlock-wrap">
-      <div class="unlock-note">Requires a live onboarding call with Synthos support. Contact <strong style="color:var(--text)">synthos.signal@gmail.com</strong> to schedule.</div>
-      <input type="password" class="unlock-input" id="unlock-key" placeholder="Enter unlock key from onboarding call">
+      <div class="unlock-note">Set <code>OPERATING_MODE=AUTONOMOUS</code> and <code>AUTONOMOUS_UNLOCK_KEY</code> in .env, then restart portal and agents.</div>
+      <input type="password" class="unlock-input" id="unlock-key" placeholder="Enter unlock key">
       <button class="save-btn" onclick="submitUnlockKey()">Submit Key</button>
     </div>
   </div>
@@ -1053,6 +1331,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div class="section-title">Trading Parameters</div>
   <div class="glass" style="margin-bottom:16px">
     <div class="settings-section">
+      <div class="setting-row">
+        <div><div class="setting-label">Max Trade Size (USD)</div><div class="setting-desc">Hard dollar cap per trade · 0 = no cap</div></div>
+        <input class="glass-input" type="number" id="s-max-trade-usd" min="0" value="{{ settings.max_trade_usd|int }}">
+        <span style="font-size:11px;color:var(--muted)">$</span>
+      </div>
       <div class="setting-row">
         <div><div class="setting-label">Max Position Size</div><div class="setting-desc">% of tradeable capital per position</div></div>
         <input class="glass-input" type="number" id="s-max-pos" min="1" max="100" value="{{ settings.max_position_pct }}">
@@ -1245,6 +1528,7 @@ async function saveKeys() {
 
 async function saveSettings() {
   const data = {
+    max_trade_usd:    document.getElementById('s-max-trade-usd').value,
     max_position_pct: document.getElementById('s-max-pos').value,
     max_sector_pct:   document.getElementById('s-max-sector').value,
     min_confidence:   document.getElementById('s-min-conf').value,
@@ -1354,95 +1638,123 @@ async function loadGraph(days, btn) {
 function renderPositions(positions) {
   const el = document.getElementById('positions-list');
   const ct = document.getElementById('positions-count');
+  const ts = document.getElementById('positions-refresh-ts');
+  const tracked  = (positions||[]).filter(p => !p.is_orphan);
+  const orphans  = (positions||[]).filter(p => p.is_orphan);
   if (!positions || !positions.length) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>No open positions</div>';
     ct.textContent = '0 open';
     return;
   }
-  ct.textContent = positions.length + ' open';
+  ct.textContent = tracked.length + ' tracked' + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
+  if (ts) ts.textContent = 'Live · ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'}) + ' ET';
+
   const colors = [
     'background:linear-gradient(135deg,rgba(0,245,212,0.3),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.25);color:#00f5d4',
     'background:linear-gradient(135deg,rgba(123,97,255,0.3),rgba(123,97,255,0.1));border:1px solid rgba(123,97,255,0.25);color:#a78bfa',
     'background:linear-gradient(135deg,rgba(255,179,71,0.3),rgba(255,179,71,0.1));border:1px solid rgba(255,179,71,0.25);color:#ffb347',
     'background:linear-gradient(135deg,rgba(255,75,110,0.3),rgba(255,75,110,0.1));border:1px solid rgba(255,75,110,0.25);color:#ff4b6e',
   ];
-  el.innerHTML = positions.map((p,i) => {
-    const pnl = (p.pnl || 0);
-    const pnlPct = p.entry_price ? ((pnl / (p.entry_price * p.shares)) * 100).toFixed(1) : '0.0';
-    const pnlCls = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-    const pnlSign = pnl >= 0 ? '+' : '';
-    const c = colors[i % colors.length];
-    return `<div class="position-item">
-      <div class="pos-icon" style="${c}">${(p.ticker||'?').slice(0,4)}</div>
-      <div class="pos-info">
-        <div class="pos-ticker">${p.ticker||'?'}</div>
-        <div class="pos-shares">${(p.shares||0).toFixed(2)} shares · $${(p.entry_price||0).toFixed(2)}</div>
+
+  const renderCard = (p, i, isOrphan) => {
+    const unreal  = p.unrealized_pl || 0;
+    const urealPct= p.unrealized_plpc || 0;
+    const dayPl   = p.day_pl || 0;
+    const dayPct  = p.day_plpc || 0;
+    const mktVal  = p.market_value || (p.current_price * p.shares) || 0;
+    const curPrice= p.current_price || p.entry_price || 0;
+    const avgEntry= p.avg_entry_price || p.entry_price || 0;
+    const plCls   = unreal >= 0 ? 'pnl-pos' : 'pnl-neg';
+    const plSign  = unreal >= 0 ? '+' : '';
+    const daySign = dayPl >= 0 ? '+' : '';
+    const c = isOrphan
+      ? 'background:linear-gradient(135deg,rgba(255,179,71,0.2),rgba(255,179,71,0.06));border:1px solid rgba(255,179,71,0.35);color:#ffb347'
+      : colors[i % colors.length];
+    return `<div class="position-item" style="flex-direction:column;gap:0;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div class="pos-icon" style="${c}">${(p.ticker||'?').slice(0,4)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="pos-ticker">${p.ticker||'?'}</div>
+            ${isOrphan ? '<div style="padding:1px 6px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(255,179,71,0.15);border:1px solid rgba(255,179,71,0.3);color:#ffb347">ORPHAN</div>' : ''}
+          </div>
+          <div class="pos-shares">${(p.shares||0).toFixed(p.shares >= 1 ? 2 : 4)} shares · avg $${avgEntry.toFixed(2)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">$${mktVal.toFixed(2)}</div>
+          <div style="font-size:10px;color:var(--muted)">@ $${curPrice.toFixed(2)}</div>
+        </div>
       </div>
-      <div class="pos-pnl">
-        <div class="pos-pnl-val ${pnlCls}">${pnlSign}$${Math.abs(pnl).toFixed(2)}</div>
-        <div class="pos-pnl-pct">${pnlSign}${pnlPct}%</div>
+      <div style="display:flex;justify-content:space-between;padding:0 2px">
+        <div style="font-size:10px;color:var(--muted)">
+          <span style="color:${dayPl>=0?'rgba(0,245,212,0.7)':'rgba(255,75,110,0.7)'}">Today: ${daySign}$${Math.abs(dayPl).toFixed(2)} (${daySign}${Math.abs(dayPct).toFixed(2)}%)</span>
+        </div>
+        <div style="font-size:10px">
+          <span class="${plCls}" style="font-weight:600">${plSign}$${Math.abs(unreal).toFixed(2)}</span>
+          <span style="color:var(--muted);margin-left:3px">${plSign}${Math.abs(urealPct).toFixed(2)}% total</span>
+        </div>
       </div>
     </div>`;
-  }).join('');
+  };
+
+  el.innerHTML = [
+    ...tracked.map((p,i) => renderCard(p, i, false)),
+    ...orphans.map((p,i) => renderCard(p, i, true)),
+  ].join('');
+
+  if (!el.innerHTML.trim()) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>No open positions</div>';
+  }
 }
 
 function renderApprovals(approvals) {
-  const pending = approvals.filter(a => a.status === 'PENDING_APPROVAL');
+  const isAuto  = (document.getElementById('stat-mode')||{}).textContent === 'AUTONOMOUS';
+  // In AUTONOMOUS mode show recent EXECUTED/APPROVED; in SUPERVISED show PENDING
+  const relevant = isAuto
+    ? approvals.filter(a => ['EXECUTED','APPROVED'].includes(a.status)).slice(-5).reverse()
+    : approvals.filter(a => a.status === 'PENDING_APPROVAL');
   const el = document.getElementById('approval-list');
   const badge = document.getElementById('pending-badge');
-  badge.textContent = pending.length + ' pending';
-  if (!pending.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>';
-    return;
+  const qLabel = document.getElementById('queue-label');
+  if (isAuto) {
+    if (qLabel) qLabel.textContent = 'Recent Signals';
+    badge.textContent = relevant.length + ' recent';
+    if (!relevant.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div>No signals executed yet</div>';
+      return;
+    }
+  } else {
+    badge.textContent = relevant.length + ' pending';
+    if (!relevant.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>';
+      return;
+    }
   }
-  el.innerHTML = pending.map(t => {
-    const conf = (t.confidence||'').toUpperCase();
+  el.innerHTML = relevant.map(t => {
+    const conf    = (t.confidence||'').toUpperCase();
     const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
     const reasoning = t.reasoning ? t.reasoning.slice(0,180) + (t.reasoning.length > 180 ? '...' : '') : '';
+    const statusBadge = isAuto
+      ? `<div style="font-size:8px;padding:2px 6px;border-radius:99px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.25);color:#00f5d4">${t.status}</div>`
+      : '';
+    const price   = t.price ? ` · $${parseFloat(t.price).toFixed(2)}` : '';
+    const shares  = t.shares ? ` · ${parseFloat(t.shares).toFixed(4)} sh` : '';
     return `<div class="trade-item">
       <div class="trade-header">
         <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
         <div class="trade-meta">
-          <div class="trade-headline">${t.ticker||'?'} · ${t.politician||'Unknown'}</div>
-          <div class="trade-sub">$${(t.amount_range||'?')} · ${t.staleness||'?'} · Queued ${(t.queued_at||'').slice(0,10)}</div>
+          <div class="trade-headline">${t.ticker||'?'} · ${t.politician||'Unknown'}${statusBadge}</div>
+          <div class="trade-sub">${(t.queued_at||t.executed_at||'').slice(0,16)}${price}${shares}</div>
         </div>
         <div class="conf-chip ${confCls}">${conf}</div>
       </div>
       ${reasoning ? `<div class="trade-reasoning">${reasoning}</div>` : ''}
-      <div class="trade-actions">
+      ${!isAuto ? `<div class="trade-actions">
         <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
         <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED')">✗ Reject</button>
-      </div>
+      </div>` : ''}
     </div>`;
   }).join('');
-}
-
-// ── WATCHLIST ──
-async function loadWatchlist() {
-  try {
-    const r = await fetch('/api/watchlist');
-    const d = await r.json();
-    const signals = d.signals || [];
-    const el = document.getElementById('watch-list');
-    const ct = document.getElementById('watch-count');
-    ct.textContent = signals.length + ' signals';
-    if (!signals.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">👁</div>No signals being watched</div>';
-      return;
-    }
-    el.innerHTML = signals.map(s => {
-      const conf = (s.confidence||'').toUpperCase();
-      const dotCls = conf === 'HIGH' ? 'wc-high' : conf === 'MEDIUM' ? 'wc-med' : 'wc-low';
-      return `<div class="watch-item">
-        <div class="watch-conf ${dotCls}"></div>
-        <div style="width:44px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text)">${s.ticker||'?'}</div>
-        <div>
-          <div class="watch-headline">${s.headline||s.politician||'No headline'}</div>
-          <div class="watch-meta">${conf} · ${s.staleness||'?'} · ${(s.created_at||'').slice(0,10)}</div>
-        </div>
-      </div>`;
-    }).join('');
-  } catch(e) {}
 }
 
 // ── SYSTEM HEALTH ──
@@ -1474,6 +1786,130 @@ async function loadHealth() {
   } catch(e) {}
 }
 
+// ── FLAGS MODAL ──
+let _flagsData = [];
+
+const FLAG_COLOR = {
+  critical: {bar:'#ff4b6e', bg:'rgba(255,75,110,0.08)',  border:'rgba(255,75,110,0.25)',  badge:'rgba(255,75,110,0.15)',  text:'#ff4b6e'},
+  warning:  {bar:'#ffb347', bg:'rgba(255,179,71,0.08)',  border:'rgba(255,179,71,0.25)',  badge:'rgba(255,179,71,0.15)',  text:'#ffb347'},
+  info:     {bar:'#00f5d4', bg:'rgba(0,245,212,0.06)',   border:'rgba(0,245,212,0.2)',    badge:'rgba(0,245,212,0.12)',   text:'#00f5d4'},
+  low:      {bar:'#556',    bg:'rgba(255,255,255,0.03)', border:'rgba(255,255,255,0.08)', badge:'rgba(255,255,255,0.06)', text:'var(--muted)'},
+};
+
+function renderFlagsModal() {
+  const body    = document.getElementById('flags-modal-body');
+  const summary = document.getElementById('flags-modal-summary');
+  if (!body) return;
+
+  if (!_flagsData || !_flagsData.length) {
+    body.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:28px 0;text-align:center"><div style="font-size:28px;margin-bottom:8px">✓</div>No active flags — system is clean.</div>';
+    if (summary) summary.textContent = '';
+    return;
+  }
+
+  const critical = _flagsData.filter(f => f.severity === 'CRITICAL').length;
+  const warnings = _flagsData.filter(f => f.severity === 'WARNING').length;
+  const other    = _flagsData.filter(f => !['CRITICAL','WARNING'].includes(f.severity)).length;
+  const parts = [];
+  if (critical) parts.push(`${critical} critical`);
+  if (warnings) parts.push(`${warnings} warning`);
+  if (other)    parts.push(`${other} info`);
+  if (summary)  summary.textContent = parts.join(' · ');
+
+  body.innerHTML = _flagsData.map(f => {
+    const c = FLAG_COLOR[f.color] || FLAG_COLOR.low;
+    const ts = (f.detected_at || '').slice(0, 16).replace('T', ' ');
+    const scanTs = f.scan_at ? f.scan_at.slice(0, 16) : '';
+    const clearBtn = f.clearable
+      ? `<button onclick="acknowledgeFlag(${f.id}, this)"
+           style="padding:5px 14px;border-radius:8px;border:1px solid ${c.border};
+                  background:${c.badge};color:${c.text};font-size:10px;font-weight:700;
+                  cursor:pointer;letter-spacing:0.05em;text-transform:uppercase">
+           ${f.btn_label || 'Clear'}
+         </button>`
+      : `<button onclick="acknowledgeFlag(${f.id}, this)"
+           style="padding:5px 14px;border-radius:8px;border:1px solid rgba(255,75,110,0.3);
+                  background:rgba(255,75,110,0.08);color:#ff4b6e;font-size:10px;font-weight:700;
+                  cursor:pointer;letter-spacing:0.05em;text-transform:uppercase">
+           Acknowledge
+         </button>`;
+    return `
+      <div id="flag-card-${f.id}" style="border-radius:12px;border:1px solid ${c.border};
+           background:${c.bg};overflow:hidden;position:relative">
+        <!-- left severity bar -->
+        <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${c.bar}"></div>
+        <div style="padding:12px 14px 12px 18px">
+          <!-- title row -->
+          <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px">
+            <div style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:800;
+                        letter-spacing:0.1em;background:${c.badge};color:${c.text};
+                        border:1px solid ${c.border};flex-shrink:0;margin-top:1px">
+              ${f.severity}
+            </div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);flex:1">${f.title}</div>
+            <div style="font-size:9px;color:var(--dim);font-family:var(--mono);flex-shrink:0;text-align:right">
+              ${ts}<br>Tier ${f.tier}
+            </div>
+          </div>
+          <!-- description -->
+          <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">
+            ${f.description}
+          </div>
+          <!-- source row -->
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <div style="font-size:10px;color:var(--dim);font-family:var(--mono)">
+              Source: ${f.ticker}
+              ${scanTs ? '· Last scan: ' + scanTs : ''}
+            </div>
+            ${clearBtn}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function acknowledgeFlag(id, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch('/api/flags/acknowledge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      // Remove card from modal and data array
+      const card = document.getElementById('flag-card-' + id);
+      if (card) card.style.opacity = '0.4';
+      _flagsData = _flagsData.filter(f => f.id !== id);
+      // Small delay then re-render
+      setTimeout(() => {
+        renderFlagsModal();
+        loadLiveStatus();
+      }, 400);
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Error';
+      toast('Failed to clear flag', 'err');
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Error';
+  }
+}
+
+function toggleFlagsModal() {
+  const modal = document.getElementById('flags-modal');
+  if (!modal) return;
+  if (modal.style.display !== 'none') {
+    modal.style.display = 'none';
+    return;
+  }
+  renderFlagsModal();
+  modal.style.display = 'block';
+}
+
 // ── LIVE STATUS ──
 async function loadLiveStatus() {
   try {
@@ -1489,6 +1925,13 @@ async function loadLiveStatus() {
     sv('stat-flags', s.urgent_flags||0);
     sv('stat-heartbeat', (s.last_heartbeat||'Never').slice(0,16));
     sv('stat-mode', s.operating_mode||'SUPERVISED');
+    // Position sub: show orphan warning
+    const posSub = document.getElementById('stat-positions-sub');
+    if (posSub) {
+      const orp = s.orphan_count || 0;
+      posSub.textContent = orp > 0 ? `Open · ${orp} orphan` : 'Open';
+      posSub.style.color = orp > 0 ? 'rgba(255,179,71,0.8)' : '';
+    }
     // Gains sub
     const gains = s.realized_gains||0;
     const gainEl = document.getElementById('stat-gains-sub');
@@ -1496,11 +1939,47 @@ async function loadLiveStatus() {
       gainEl.textContent = (gains>=0?'+':'') + '$'+gains.toFixed(2)+' realized';
       gainEl.style.color = gains>=0 ? 'rgba(0,245,212,0.6)' : 'rgba(255,75,110,0.6)';
     }
+    // Autonomous mode cap label
+    const capEl = document.getElementById('auto-cap-label');
+    if (capEl) {
+      const cap = s.max_trade_usd || 0;
+      capEl.textContent = cap > 0 ? '$' + cap.toFixed(0) + ' max per trade' : 'no dollar cap';
+    }
+    // Kill switch bar description
+    const descEl = document.getElementById('kill-desc');
+    if (descEl && !killState) {
+      const mode = s.operating_mode || 'SUPERVISED';
+      const cap  = s.max_trade_usd || 0;
+      descEl.textContent = mode === 'AUTONOMOUS'
+        ? 'Agents active · Autonomous · ' + (cap > 0 ? '$' + cap.toFixed(0) + ' cap per trade' : 'no trade cap')
+        : 'Agents active · Supervised mode · No new entries without approval';
+    }
+    // Flags — update data and stat card appearance
+    _flagsData = s.flags_detail || [];
+    const flagCount    = s.urgent_flags || 0;
+    const criticalCount= s.critical_flags || 0;
+    const fc = document.getElementById('stat-flags-card');
+    if (fc) fc.className = 'stat-card ' + (criticalCount > 0 ? 'pink' : flagCount > 0 ? '' : '');
+    const flagSub = document.getElementById('stat-flags-sub');
+    if (flagSub) {
+      if (criticalCount > 0) {
+        flagSub.textContent = criticalCount + ' critical · click to view';
+        flagSub.style.color = 'rgba(255,75,110,0.8)';
+      } else if (flagCount > 0) {
+        flagSub.textContent = 'warnings · click to view';
+        flagSub.style.color = 'rgba(255,179,71,0.8)';
+      } else {
+        flagSub.textContent = 'all clear';
+        flagSub.style.color = '';
+      }
+    }
+    // Re-render modal if it's open
+    if (document.getElementById('flags-modal').style.display !== 'none') renderFlagsModal();
     // Agent running banner
     const agentEl = document.getElementById('agent-running-banner');
     if (s.agent_running) {
-      const names = {'trade_logic_agent.py':'Trade Logic','news_agent.py':'News',
-                     'market_sentiment_agent.py':'Market Sentiment','agent4_audit.py':'Audit Agent'};
+      const names = {'trade_logic_agent.py':'Bolt (Trader)','news_agent.py':'Scout (News)',
+                     'market_sentiment_agent.py':'Pulse (Sentiment)','agent4_audit.py':'Audit Agent'};
       const name = names[s.agent_running] || s.agent_running;
       const mins = Math.floor((s.agent_running_secs||0) / 60);
       const secs = (s.agent_running_secs||0) % 60;
@@ -1515,10 +1994,9 @@ async function loadLiveStatus() {
     } else {
       if (agentEl) agentEl.style.display = 'none';
     }
-    if (fc) fc.className = 'stat-card ' + ((s.urgent_flags||0) > 0 ? 'pink' : '');
     renderPositions(s.positions||[]);
     renderApprovals(a);
-  } catch(e) {}
+  } catch(e) { console.log('Status load error:', e); }
 }
 
 // ── INTELLIGENCE ──
@@ -1655,12 +2133,10 @@ function updateClock() {
 
 loadLiveStatus();
 loadGraph(30);
-loadWatchlist();
 loadHealth();
 loadAudit();
 setInterval(loadLiveStatus, 30000);
 setInterval(loadHealth, 60000);
-setInterval(loadWatchlist, 120000);
 setInterval(loadAudit, 300000);
 </script>
 </body>
@@ -1673,6 +2149,7 @@ def get_current_settings():
     return {
         'max_position_pct':   int(float(os.environ.get('MAX_POSITION_PCT', '0.10')) * 100),
         'max_sector_pct':     int(float(os.environ.get('MAX_SECTOR_PCT', '25'))),
+        'max_trade_usd':      float(os.environ.get('MAX_TRADE_USD', '0')),
         'min_confidence':     os.environ.get('MIN_CONFIDENCE', 'MEDIUM'),
         'max_staleness':      os.environ.get('MAX_STALENESS', 'Aging'),
         'close_session_mode': os.environ.get('CLOSE_SESSION_MODE', 'conservative'),
@@ -1935,6 +2412,10 @@ def api_keys():
             pass
 
     return jsonify({'ok': len(errors) == 0, 'updated': updated, 'errors': errors})
+
+
+@app.route('/api/settings', methods=['POST'])
+@login_required
 def api_settings():
     """Save advanced settings to .env."""
     data = request.get_json(silent=True) or {}
@@ -1951,6 +2432,8 @@ def api_settings():
         if 'max_position_pct' in data:
             decimal_val = round(float(data['max_position_pct']) / 100, 4)
             update_env('MAX_POSITION_PCT', str(decimal_val))
+        if 'max_trade_usd' in data:
+            update_env('MAX_TRADE_USD', str(float(data['max_trade_usd'])))
         for form_key, env_key in mapping.items():
             if form_key in data:
                 update_env(env_key, str(data[form_key]))
@@ -2159,6 +2642,32 @@ def api_improvement_backlog():
         return jsonify({'tasks': tasks})
     except Exception:
         return jsonify({'tasks': []})
+
+
+@app.route('/api/flags/acknowledge', methods=['POST'])
+@login_required
+def api_flags_acknowledge():
+    """Acknowledge (clear/silence) an urgent flag by id."""
+    data    = request.get_json(silent=True) or {}
+    flag_id = data.get('id')
+    if not flag_id:
+        return jsonify({'ok': False, 'error': 'Missing id'}), 400
+    try:
+        sys.path.insert(0, PROJECT_DIR)
+        from database import get_db
+        db = get_db()
+        db.acknowledge_urgent_flag(flag_id)
+        db.log_event("FLAG_ACKNOWLEDGED", agent="portal",
+                     details=f"Flag id={flag_id} acknowledged via portal")
+        log.info(f"Flag {flag_id} acknowledged via portal")
+        return jsonify({'ok': True})
+    except Exception as e:
+        log.error(f"Flag acknowledge error: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/audit')
+def api_audit():
     """Latest audit result from agent4_audit.py."""
     audit_path = os.path.join(PROJECT_DIR, '.audit_latest.json')
     try:
@@ -2167,10 +2676,13 @@ def api_improvement_backlog():
     except Exception:
         return jsonify({
             'health_score': None,
-            'summary': 'No audit run yet — drag agent4_audit.py onto the file manager',
+            'summary': 'No audit run yet — agent4_audit.py has not executed',
             'critical': [], 'warnings': [], 'info_count': 0,
             'timestamp': None,
         })
+
+
+@app.route('/api/update', methods=['POST'])
 def api_update():
     """
     Pull latest from GitHub and restart portal.

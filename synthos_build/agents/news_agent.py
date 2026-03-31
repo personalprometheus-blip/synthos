@@ -734,7 +734,17 @@ def fetch_federal_register():
 
 
 def get_rss_feeds():
-    """Return RSS feed list. Reads RSS_FEEDS_JSON env var if set."""
+    """Return RSS feed list. Reads RSS_FEEDS_JSON env var if set.
+
+    Feeds that require custom HTTP headers are 4-element tuples:
+      [name, url, tier, headers_dict]
+    Standard feeds are 3-element tuples: [name, url, tier]
+    """
+    # EDGAR requires: User-Agent: <company/name> <contact-email>
+    _contact = os.environ.get('USER_EMAIL', os.environ.get('OWNER_EMAIL', 'synthos@synth-cloud.com'))
+    _edgar_ua = {"User-Agent": f"Synthos {_contact}"}
+    _gov_ua   = {"User-Agent": f"Synthos/1.0 ({_contact})"}
+
     rss_json = os.environ.get('RSS_FEEDS_JSON', '')
     if rss_json:
         try:
@@ -783,15 +793,36 @@ def get_rss_feeds():
         ["House Floor Today",       "https://www.congress.gov/rss/house-floor-today.xml",                                       2],
         ["Senate Floor Today",      "https://www.congress.gov/rss/senate-floor-today.xml",                                      2],
         ["FERC Energy Filings",     "https://ecollection.ferc.gov/api/rssfeed",                                                  2],
+
+        # ── EDGAR FILINGS (SEC — requires User-Agent per EDGAR policy) ─────
+        # Form 4: insider buy/sell transactions (most relevant for trading signals)
+        ["EDGAR Form 4",            "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&dateb=&owner=include&count=40&search_text=&output=atom",      1, _edgar_ua],
+        # 8-K: material corporate events (earnings surprises, M&A, FDA rulings, etc.)
+        ["EDGAR 8-K",               "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=40&search_text=&output=atom",    1, _edgar_ua],
+        # 13F-HR: institutional portfolio holdings (quarterly, lags 45 days)
+        ["EDGAR 13F-HR",            "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=13F-HR&dateb=&owner=include&count=40&search_text=&output=atom", 2, _edgar_ua],
     ]
 
 
 def fetch_rss_feeds():
-    """Fetch and parse all RSS feeds. Returns list of signal dicts."""
+    """Fetch and parse all RSS feeds. Returns list of signal dicts.
+
+    Feed tuples may be [name, url, tier] or [name, url, tier, headers].
+    When headers are present, the feed is pre-fetched via requests so
+    custom headers (e.g. SEC EDGAR User-Agent requirement) are sent.
+    """
+    import requests as _req
     results = []
-    for source_name, url, tier in get_rss_feeds():
+    for entry in get_rss_feeds():
+        source_name, url, tier = entry[0], entry[1], entry[2]
+        extra_headers = entry[3] if len(entry) > 3 else None
         try:
-            feed = feedparser.parse(url)
+            if extra_headers:
+                resp = _req.get(url, headers=extra_headers, timeout=10)
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            else:
+                feed = feedparser.parse(url)
             if feed.bozo and not feed.entries:
                 log.warning(f"RSS parse issue: {source_name}")
                 continue
