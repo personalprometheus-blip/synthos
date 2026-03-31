@@ -1257,6 +1257,17 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
+  <!-- TRADER ACTIVITY -->
+  <div class="glass" style="margin-bottom:16px">
+    <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Trader Activity</div>
+      <div style="font-size:10px;color:var(--dim);margin-left:auto" id="trader-activity-ts"></div>
+    </div>
+    <div id="trader-activity-list" style="padding:8px 16px 12px">
+      <div class="empty-state"><div class="empty-icon">⚡</div>Loading...</div>
+    </div>
+  </div>
+
   <!-- AUDIT PANEL -->
   <div class="glass" id="audit-panel" style="margin-bottom:16px">
     <div style="padding:14px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)">
@@ -2282,6 +2293,33 @@ async function loadMarketIndices() {
   } catch(e) {}
 }
 
+// ── TRADER ACTIVITY ──
+async function loadTraderActivity() {
+  try {
+    const r = await fetch('/api/trader-activity');
+    const d = await r.json();
+    const el = document.getElementById('trader-activity-list');
+    const ts = document.getElementById('trader-activity-ts');
+    if (!el) return;
+    const items = [];
+    // Recent scans
+    (d.scans||[]).forEach(s => {
+      const csc = s.cascade_detected ? ' <span style="color:var(--pink);font-size:9px">CASCADE</span>' : '';
+      items.push(`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:11px">
+        <div style="width:44px;font-weight:700;color:var(--teal);font-family:var(--mono);flex-shrink:0">${s.ticker||'?'}</div>
+        <div style="color:var(--muted);flex:1">${(s.event_summary||'Scanned').slice(0,60)}${csc}</div>
+        <div style="font-size:9px;color:var(--dim);white-space:nowrap">${(s.scanned_at||'').slice(11,16)}</div>
+      </div>`);
+    });
+    if (!items.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div>No recent trader scans</div>';
+    } else {
+      el.innerHTML = items.join('');
+      if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    }
+  } catch(e) {}
+}
+
 // ── INIT ──
 updateClock();
 setInterval(updateClock, 1000);
@@ -2296,10 +2334,12 @@ loadGraph(30);
 loadHealth();
 loadAudit();
 loadMarketIndices();
+loadTraderActivity();
 setInterval(loadLiveStatus, 30000);
 setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
 setInterval(loadMarketIndices, 120000);
+setInterval(loadTraderActivity, 60000);
 </script>
 </body>
 </html>"""
@@ -2892,6 +2932,33 @@ def api_flags_acknowledge():
     except Exception as e:
         log.error(f"Flag acknowledge error: {e}")
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/trader-activity')
+@login_required
+def api_trader_activity():
+    """Recent trader decisions — what Bolt has been scanning and acting on."""
+    try:
+        from database import get_db
+        db = get_db()
+        with db.conn() as c:
+            scans = c.execute("""
+                SELECT ticker, cascade_detected, event_summary, tier, scanned_at
+                FROM scan_log ORDER BY scanned_at DESC LIMIT 10
+            """).fetchall()
+            recent = c.execute("""
+                SELECT event, agent, details, timestamp
+                FROM system_log
+                WHERE event IN ('TRADE_EXECUTED','TRADE_QUEUED','SIGNAL_QUEUED',
+                                'NEWS_CLASSIFIED','AGENT_COMPLETE')
+                ORDER BY timestamp DESC LIMIT 20
+            """).fetchall()
+        return jsonify({
+            'scans':  [dict(r) for r in scans],
+            'recent': [dict(r) for r in recent],
+        })
+    except Exception as e:
+        return jsonify({'scans': [], 'recent': [], 'error': str(e)})
 
 
 @app.route('/api/audit')
