@@ -3064,7 +3064,7 @@ def api_market_chart_data():
     """
     hours = min(int(request.args.get('hours', 36)), 720)
     import requests as _req
-    from datetime import timezone
+    from datetime import timezone, timedelta
     from dateutil import parser as _dp
 
     alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
