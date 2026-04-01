@@ -62,7 +62,7 @@ BACKUP_DIR:   Path = DATA_DIR / "backup"
 CRASH_DIR:    Path = LOG_DIR / "crash_reports"
 SNAPSHOT_DIR: Path = SYNTHOS_HOME / ".known_good"
 ENV_PATH:     Path = USER_DIR / ".env"
-DB_PATH:      Path = DATA_DIR / "signals.db"
+DB_PATH:      Path = CORE_DIR / "signals.db"
 SENTINEL_PATH: Path = SYNTHOS_HOME / ".install_complete"
 PROGRESS_PATH: Path = SYNTHOS_HOME / ".install_progress.json"
 
@@ -85,7 +85,6 @@ REQUIRED_PACKAGES = [
     "requests",
     "python-dotenv",
     "anthropic",
-    "alpaca-trade-api",
     "sendgrid",
 ]
 
@@ -106,8 +105,8 @@ REQUIRED_CORE_FILES = [
     # Future implementation tracked in docs/milestones.md.
     "synthos_heartbeat.py",
     "retail_portal.py",
-    "patch.py",
-    "sync.py",
+    "retail_patch.py",
+    "retail_sync.py",
     # license_validator.py — DEFERRED_FROM_CURRENT_BASELINE
     # Retail entitlement validation is not implemented in the current release.
     # Remove from required files so installer can reach COMPLETE without it.
@@ -120,7 +119,7 @@ PROTECTED_PATHS = [
     ENV_PATH,                          # user/.env
     USER_DIR / "settings.json",        # user/settings.json
     USER_DIR / "agreements",           # user/agreements/
-    DB_PATH,                           # data/signals.db
+    DB_PATH,                           # src/signals.db
     BACKUP_DIR,                        # data/backup/
     SNAPSHOT_DIR,                      # .known_good/
     SYNTHOS_HOME / "consent_log.jsonl",# consent_log.jsonl
@@ -434,7 +433,6 @@ def verify_installation() -> tuple[bool, list[str]]:
         "requests": "requests",
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
-        "alpaca-trade-api": "alpaca_trade_api",
         "sendgrid": "sendgrid",
     }
     for pip_name, import_name in pkg_import_map.items():
