@@ -3335,7 +3335,49 @@ def api_system_health():
     return jsonify(health)
 
 
-LOGS_CSS = '<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{background:#0a0c14;color:#e0ddd8;font-family:sans-serif;min-height:100vh}\nheader{background:#111520;color:#e0ddd8;padding:0 2rem;height:52px;display:flex;\n       align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;\n       border-bottom:1px solid #1e2535}\n.wordmark{font-size:0.95rem;font-weight:600;letter-spacing:0.15em;color:#00f5d4}\n.nav{display:flex;gap:1rem;align-items:center}\n.nav a{color:#556;font-size:0.72rem;text-decoration:none;letter-spacing:0.08em}\n.nav a:hover{color:#aaa}\n.tabs{display:flex;gap:0;border-bottom:1px solid #1e2535;padding:0 2rem;\n      background:#111520;overflow-x:auto;flex-wrap:nowrap}\n.controls{padding:0.75rem 2rem;display:flex;gap:1rem;align-items:center;\n          background:#111520;border-bottom:1px solid #1e2535}\n.controls label{font-size:0.75rem;color:#556;font-weight:600;letter-spacing:0.08em;text-transform:uppercase}\nselect{font-size:0.8rem;padding:0.3rem 0.5rem;background:#161b28;border:1px solid #1e2535;\n       border-radius:6px;color:#e0ddd8}\n.log-box{font-family:monospace;font-size:0.75rem;line-height:1.7;color:#00f5d4;\n         padding:1rem 2rem;white-space:pre-wrap;word-break:break-all;\n         min-height:calc(100vh - 160px)}\n.refresh-btn{font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;\n             padding:0.3rem 0.75rem;border:1px solid #1e2535;\n             border-radius:6px;cursor:pointer;background:transparent;color:#556}\n.refresh-btn:hover{background:#1e2535;color:#e0ddd8}\n</style>'
+LOGS_CSS = '''<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0c14;color:#e0ddd8;font-family:sans-serif;min-height:100vh;display:flex;flex-direction:column}
+header{background:#111520;color:#e0ddd8;padding:0 2rem;height:52px;display:flex;
+       align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
+       border-bottom:1px solid #1e2535;flex-shrink:0}
+.wordmark{font-size:0.95rem;font-weight:600;letter-spacing:0.15em;color:#00f5d4}
+.nav{display:flex;gap:1rem;align-items:center}
+.nav a{color:#556;font-size:0.72rem;text-decoration:none;letter-spacing:0.08em}
+.nav a:hover{color:#aaa}
+.tabs{display:flex;gap:0;border-bottom:1px solid #1e2535;padding:0 2rem;
+      background:#111520;overflow-x:auto;flex-wrap:nowrap;flex-shrink:0}
+.controls{padding:0.75rem 2rem;display:flex;gap:1rem;align-items:center;
+          background:#111520;border-bottom:1px solid #1e2535;flex-shrink:0}
+.controls label{font-size:0.75rem;color:#556;font-weight:600;letter-spacing:0.08em;text-transform:uppercase}
+select{font-size:0.8rem;padding:0.3rem 0.5rem;background:#161b28;border:1px solid #1e2535;
+       border-radius:6px;color:#e0ddd8}
+.body-columns{display:flex;flex:1;min-height:0;overflow:hidden}
+.log-col{flex:1;min-width:0;overflow-y:auto;height:calc(100vh - 108px)}
+.log-box{font-family:monospace;font-size:0.75rem;line-height:1.7;color:#00f5d4;
+         padding:1rem 2rem;white-space:pre-wrap;word-break:break-all}
+.rss-col{width:300px;min-width:300px;border-left:1px solid #1e2535;overflow-y:auto;
+         height:calc(100vh - 108px);background:#0d0f1a;flex-shrink:0}
+.rss-header{padding:10px 14px;border-bottom:1px solid #1e2535;display:flex;
+            align-items:center;justify-content:space-between;position:sticky;top:0;
+            background:#0d0f1a;z-index:10}
+.rss-title{font-size:0.65rem;font-weight:700;letter-spacing:0.14em;
+           text-transform:uppercase;color:#556}
+.rss-dot{width:6px;height:6px;border-radius:50%;background:#00f5d4;
+         animation:rss-pulse 2s infinite;flex-shrink:0}
+@keyframes rss-pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.rss-item{padding:10px 14px;border-bottom:1px solid #111825;cursor:default}
+.rss-item:hover{background:#111520}
+.rss-source{font-size:0.62rem;font-weight:700;letter-spacing:0.08em;
+            text-transform:uppercase;color:#556;margin-bottom:3px}
+.rss-headline{font-size:0.72rem;line-height:1.45;color:#c8c4bc}
+.rss-age{font-size:0.6rem;color:#3a4055;margin-top:3px}
+.rss-empty{padding:24px 14px;font-size:0.72rem;color:#3a4055;text-align:center}
+.refresh-btn{font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;
+             padding:0.3rem 0.75rem;border:1px solid #1e2535;
+             border-radius:6px;cursor:pointer;background:transparent;color:#556}
+.refresh-btn:hover{background:#1e2535;color:#e0ddd8}
+</style>'''
 
 @app.route('/logs')
 def logs_page():
@@ -3404,10 +3446,91 @@ def logs_page():
     {fname} &middot; auto-refresh off
   </span>
 </div>
-<div class="log-box">{log_content_escaped}</div>
-<script>window.scrollTo(0, document.body.scrollHeight);</script>
+<div class="body-columns">
+  <div class="log-col">
+    <div class="log-box" id="log-content">{log_content_escaped}</div>
+  </div>
+  <div class="rss-col">
+    <div class="rss-header">
+      <span class="rss-title">Live RSS Feed</span>
+      <span class="rss-dot"></span>
+    </div>
+    <div id="rss-stream"><div class="rss-empty">Loading&hellip;</div></div>
+  </div>
+</div>
+<script>
+document.getElementById('log-content').scrollIntoView({{block:'end'}});
+function rssAge(ts) {{
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ','T'));
+  const s = Math.floor((Date.now() - d)/1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}}
+async function loadRss() {{
+  try {{
+    const r = await fetch('/api/rss-stream');
+    if (!r.ok) return;
+    const d = await r.json();
+    const items = d.items || [];
+    const el = document.getElementById('rss-stream');
+    if (!items.length) {{
+      el.innerHTML = '<div class="rss-empty">No feed data yet &mdash; Scout populates on next run</div>';
+      return;
+    }}
+    el.innerHTML = items.map(a => `
+      <div class="rss-item">
+        <div class="rss-source">${{a.source || 'RSS'}}</div>
+        <div class="rss-headline">${{a.headline}}</div>
+        <div class="rss-age">${{rssAge(a.created_at)}}</div>
+      </div>`).join('');
+  }} catch(e) {{}}
+}}
+loadRss();
+setInterval(loadRss, 90000);
+</script>
 </body></html>"""
     return html
+
+
+@app.route('/api/rss-stream')
+@login_required
+def api_rss_stream():
+    """RSS headlines for the logs-page side panel. Reads news_feed source=NEWS,
+    returns the 60 most recent items with source label and timestamp."""
+    try:
+        from retail_database import get_db as _gdb
+        db = _gdb()
+        with db.conn() as c:
+            rows = c.execute("""
+                SELECT raw_headline, metadata, created_at FROM news_feed
+                WHERE source = 'NEWS'
+                ORDER BY created_at DESC LIMIT 60
+            """).fetchall()
+        items = []
+        seen = set()
+        for r in rows:
+            headline = r['raw_headline'] or ''
+            key = headline.lower()[:60]
+            if key in seen:
+                continue
+            seen.add(key)
+            meta = {}
+            try:
+                meta = json.loads(r['metadata'] or '{}')
+            except Exception:
+                pass
+            items.append({
+                'headline':   headline,
+                'source':     meta.get('feed_name') or meta.get('source') or 'RSS',
+                'created_at': r['created_at'],
+                'link':       meta.get('link', ''),
+            })
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'items': [], 'error': str(e)})
 
 
 # ── BOOT ──────────────────────────────────────────────────────────────────
