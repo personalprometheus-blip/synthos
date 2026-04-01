@@ -2777,6 +2777,11 @@ def run(session="market"):
             if results is not None:
                 _record_source_fetch("Congress.gov API", db)
 
+        # Also refresh display-only news headlines overnight so portal is populated by morning
+        alpaca_stored = fetch_alpaca_news(db)
+        rss_stored    = fetch_and_store_news_headlines(db)
+        log.info(f"Overnight news refresh: {alpaca_stored + rss_stored} new (alpaca={alpaca_stored} rss={rss_stored})")
+
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
     # ── Process each item through 22-gate spine ───────────────────────────

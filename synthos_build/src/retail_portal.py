@@ -2502,6 +2502,7 @@ loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
+loadNews('all');
 setInterval(loadLiveStatus, 30000);
 setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
