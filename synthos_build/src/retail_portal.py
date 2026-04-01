@@ -3341,7 +3341,7 @@ def logs_page():
     """Tail log files from the browser."""
     log_files = {
         'trader':    'trade_logic_agent.log',
-        'scout':     'scout.log',
+        'scout':     'news_agent.log',
         'pulse':     'market_sentiment_agent.log',
         'portal':    'portal.log',
         'watchdog':  'watchdog.log',
