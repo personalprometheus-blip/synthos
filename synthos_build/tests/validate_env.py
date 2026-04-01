@@ -9,7 +9,7 @@ Run from the synthos project directory on the Pi:
 Checks every .env key used by the system:
   1. Key presence and non-empty value
   2. Format validation (URL shape, key prefix patterns, enum values)
-  3. Live connectivity tests (Alpaca, Anthropic, Congress.gov, SendGrid)
+  3. Live connectivity tests (Alpaca, Anthropic, Congress.gov, Resend)
   4. Cross-key consistency (TRADING_MODE vs ALPACA_BASE_URL, etc.)
   5. Redacted summary — shows what's set without exposing secrets
 
@@ -108,7 +108,7 @@ operating_mode = key_present('OPERATING_MODE',     required=True)
 print()
 # Important — degraded without these
 congress_key   = key_present('CONGRESS_API_KEY',   required=False)
-sendgrid_key   = key_present('SENDGRID_API_KEY',   required=False)
+resend_key     = key_present('RESEND_API_KEY',     required=False)
 alert_from     = key_present('ALERT_FROM',         required=False)
 alert_to       = key_present('ALERT_TO',           required=False)
 user_email     = key_present('USER_EMAIL',         required=False)
@@ -203,7 +203,7 @@ if operating_mode:
       ok,
       f"'{operating_mode}' — {'valid' if ok else 'must be SUPERVISED or AUTONOMOUS'}")
 
-# SendGrid from-address format
+# Alert from-address format
 if alert_from:
     ok = '@' in alert_from and '.' in alert_from.split('@')[-1]
     p("ALERT_FROM email format", ok,
@@ -344,39 +344,36 @@ if _req and congress_key:
 else:
     w("Congress.gov test skipped", "CONGRESS_API_KEY not set")
 
-# ── SendGrid ───────────────────────────────────────────────────────────────
-if _req and sendgrid_key and alert_from and alert_to:
-    print(f"\n  SendGrid:")
+# ── Resend ────────────────────────────────────────────────────────────────
+if _req and resend_key and alert_from and alert_to:
+    print(f"\n  Resend:")
     try:
-        # Just validate the key via /v3/user/profile — no email sent
+        # Validate key by listing domains — no email sent
         r = _req.get(
-            'https://api.sendgrid.com/v3/user/profile',
-            headers={'Authorization': f'Bearer {sendgrid_key}'},
+            'https://api.resend.com/domains',
+            headers={'Authorization': f'Bearer {resend_key}'},
             timeout=10,
         )
         if r.status_code == 200:
-            data     = r.json()
-            username = data.get('username', '?')
-            p("SendGrid API key", True,
-              f"Valid — account: {username}")
+            domains = r.json().get('data', [])
+            names   = ', '.join(d.get('name', '?') for d in domains) or '(none)'
+            p("Resend API key", True,
+              f"Valid — domains: {names}")
         elif r.status_code == 401:
-            p("SendGrid API key", False,
+            p("Resend API key", False,
               "401 Unauthorized — key invalid or revoked")
-        elif r.status_code == 403:
-            p("SendGrid API key", False,
-              "403 Forbidden — key may have restricted scopes (needs mail.send)")
         else:
-            p("SendGrid API key", False,
+            p("Resend API key", False,
               f"HTTP {r.status_code}: {r.text[:80]}")
     except Exception as e:
-        p("SendGrid API key", False, f"Connection failed: {e}")
-elif sendgrid_key and not (alert_from and alert_to):
-    w("SendGrid alert config incomplete",
-      "SENDGRID_API_KEY set but ALERT_FROM and/or ALERT_TO missing — "
+        p("Resend API key", False, f"Connection failed: {e}")
+elif resend_key and not (alert_from and alert_to):
+    w("Resend alert config incomplete",
+      "RESEND_API_KEY set but ALERT_FROM and/or ALERT_TO missing — "
       "protective exit emails will not send")
 else:
-    w("SendGrid test skipped",
-      "SENDGRID_API_KEY not set — protective exit emails disabled")
+    w("Resend test skipped",
+      "RESEND_API_KEY not set — protective exit emails disabled")
 
 # ── Monitor ────────────────────────────────────────────────────────────────
 if _req and monitor_url:

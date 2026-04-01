@@ -1410,8 +1410,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <input class="glass-input" type="password" id="k-congress" placeholder="Key..." style="width:160px">
       </div>
       <div class="setting-row">
-        <div><div class="setting-label">SendGrid API Key</div><div class="setting-desc">For email alerts and digests</div></div>
-        <input class="glass-input" type="password" id="k-sendgrid" placeholder="SG..." style="width:160px">
+        <div><div class="setting-label">Resend API Key</div><div class="setting-desc">For email alerts and digests</div></div>
+        <input class="glass-input" type="password" id="k-resend" placeholder="re_..." style="width:160px">
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Monitor URL</div><div class="setting-desc">Heartbeat destination</div></div>
@@ -1613,7 +1613,7 @@ async function saveKeys() {
     'ALPACA_SECRET_KEY': document.getElementById('k-alpaca-secret').value,
     'ALPACA_BASE_URL':   document.getElementById('k-alpaca-url').value,
     'CONGRESS_API_KEY':  document.getElementById('k-congress').value,
-    'SENDGRID_API_KEY':  document.getElementById('k-sendgrid').value,
+    'RESEND_API_KEY':    document.getElementById('k-resend').value,
     'MONITOR_URL':       document.getElementById('k-monitor-url').value,
     'MONITOR_TOKEN':     document.getElementById('k-monitor-token').value,
     'PORTAL_PASSWORD':   document.getElementById('k-portal-pw').value,
@@ -2874,7 +2874,7 @@ def api_keys():
         'ALPACA_SECRET_KEY',
         'ALPACA_BASE_URL',
         'CONGRESS_API_KEY',
-        'SENDGRID_API_KEY',
+        'RESEND_API_KEY',
         'MONITOR_TOKEN',
         'MONITOR_URL',
         'PORTAL_PASSWORD',

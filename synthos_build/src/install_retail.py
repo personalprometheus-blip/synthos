@@ -85,7 +85,6 @@ REQUIRED_PACKAGES = [
     "requests",
     "python-dotenv",
     "anthropic",
-    "sendgrid",
     "feedparser",
     "psutil",
 ]
@@ -457,7 +456,6 @@ def verify_installation() -> tuple[bool, list[str]]:
         "requests": "requests",
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
-        "sendgrid": "sendgrid",
     }
     for pip_name, import_name in pkg_import_map.items():
         try:
@@ -761,8 +759,8 @@ class WizardHandler(BaseHTTPRequestHandler):
           <input name="monitor_url" value="{cfg.get('monitor_url', '')}" placeholder="http://your-monitor-pi:5000">
           <label>Monitor Token</label>
           <input name="monitor_token" value="{cfg.get('monitor_token', 'changeme')}">
-          <label>SendGrid API Key (optional — protective exit emails)</label>
-          <input name="sendgrid_key" value="{cfg.get('sendgrid_key', '')}">
+          <label>Resend API Key (optional — protective exit emails)</label>
+          <input name="resend_key" value="{cfg.get('resend_key', '')}">
           <label>Alert From Address</label>
           <input name="alert_from" value="{cfg.get('alert_from', '')}" placeholder="alerts@yourdomain.com">
           <label>Your Email (alert recipient)</label>
@@ -960,7 +958,7 @@ class WizardHandler(BaseHTTPRequestHandler):
             _state["config"].update({
                 "monitor_url":        data.get("monitor_url", "").strip(),
                 "monitor_token":      data.get("monitor_token", "changeme").strip(),
-                "sendgrid_key":       data.get("sendgrid_key", "").strip(),
+                "resend_key":         data.get("resend_key", "").strip(),
                 "alert_from":         data.get("alert_from", "").strip(),
                 "user_email":         data.get("user_email", "").strip(),
                 "gmail_user":         data.get("gmail_user", "").strip(),
@@ -1099,7 +1097,7 @@ def repair_mode() -> int:
         "PORTAL_SECRET_KEY":    "_portal_secret_key",
         "MONITOR_URL":          "monitor_url",
         "MONITOR_TOKEN":        "monitor_token",
-        "SENDGRID_API_KEY":     "sendgrid_key",
+        "RESEND_API_KEY":       "resend_key",
         "ALERT_FROM":           "alert_from",
         "USER_EMAIL":           "user_email",
         "GMAIL_USER":           "gmail_user",

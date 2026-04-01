@@ -64,7 +64,7 @@ ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.marke
 TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
 OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
 AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
-SENDGRID_API_KEY  = os.environ.get('SENDGRID_API_KEY', '')
+RESEND_API_KEY    = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
 USER_EMAIL        = os.environ.get('USER_EMAIL', '')
 ET                = ZoneInfo("America/New_York")
@@ -1247,7 +1247,7 @@ def queue_for_approval(signal, decision_data):
 
 def _notify_approval_request(signal, decision_data):
     """Send email notification when a trade is queued for approval."""
-    if not SENDGRID_API_KEY or not USER_EMAIL:
+    if not RESEND_API_KEY or not USER_EMAIL:
         return
     ticker     = signal.get('ticker', '?')
     company    = signal.get('company', '')
@@ -1275,17 +1275,22 @@ def _notify_approval_request(signal, decision_data):
         f"Approve or reject at the portal (port {os.environ.get('PORTAL_PORT', '5001')})."
     )
     try:
-        import sendgrid as _sg
-        from sendgrid.helpers.mail import Mail
-        msg = Mail(
-            from_email=ALERT_FROM or 'alerts@synthos.local',
-            to_emails=USER_EMAIL,
-            subject=subject,
-            plain_text_content=body,
-        )
-        _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
-            request_body=msg.get())
-        log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {USER_EMAIL}")
+        import urllib.request as _urlreq, json as _json
+        _payload = _json.dumps({
+            "from":    ALERT_FROM or 'alerts@synthos.local',
+            "to":      [USER_EMAIL],
+            "subject": subject,
+            "text":    body,
+        }).encode()
+        _req = _urlreq.Request(
+            "https://api.resend.com/emails", data=_payload,
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                     "Content-Type": "application/json"})
+        with _urlreq.urlopen(_req, timeout=15) as _resp:
+            if _resp.status in (200, 201):
+                log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {USER_EMAIL}")
+            else:
+                log.warning(f"[SUPERVISED] Resend returned {_resp.status}")
     except Exception as e:
         log.warning(f"[SUPERVISED] Approval notification failed: {e}")
 
@@ -1336,17 +1341,25 @@ def _direct_send_fallback(subject, body, reason="enqueue_failed"):
                            details=f"reason={reason} subject={subject[:80]}")
     except Exception:
         pass
-    if SENDGRID_API_KEY and USER_EMAIL:
+    if RESEND_API_KEY and USER_EMAIL:
         try:
-            import sendgrid as _sg
-            from sendgrid.helpers.mail import Mail
-            msg = Mail(from_email=ALERT_FROM or 'alerts@synthos.local',
-                       to_emails=USER_EMAIL, subject=subject, plain_text_content=body)
-            _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
-                request_body=msg.get())
-            return True
+            import urllib.request as _urlreq, json as _json
+            _payload = _json.dumps({
+                "from":    ALERT_FROM or 'alerts@synthos.local',
+                "to":      [USER_EMAIL],
+                "subject": subject,
+                "text":    body,
+            }).encode()
+            _req = _urlreq.Request(
+                "https://api.resend.com/emails", data=_payload,
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                         "Content-Type": "application/json"})
+            with _urlreq.urlopen(_req, timeout=15) as _resp:
+                if _resp.status in (200, 201):
+                    return True
+                log.error(f"[FALLBACK] Resend returned {_resp.status}")
         except Exception as e:
-            log.error(f"[FALLBACK] SendGrid failed: {e}")
+            log.error(f"[FALLBACK] Resend failed: {e}")
     return False
 
 def send_protective_exit_email(ticker, reason, reasoning, entry_price,

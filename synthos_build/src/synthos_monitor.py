@@ -2,10 +2,10 @@
 Synthos Monitor Server
 =====================
 Runs on a dedicated Pi. Receives heartbeats from all Synthos instances,
-serves a command console dashboard, and sends SendGrid alerts when a Pi goes silent.
+serves a command console dashboard, and sends Resend alerts when a Pi goes silent.
 
 .env required:
-    SENDGRID_API_KEY=your_key_here
+    RESEND_API_KEY=your_key_here
     ALERT_FROM=alerts@yourdomain.com
     ALERT_TO=you@youremail.com
     SECRET_TOKEN=some_random_string
@@ -34,19 +34,14 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, request, jsonify, render_template_string
 from dotenv import load_dotenv
-try:
-    import sendgrid
-    from sendgrid.helpers.mail import Mail
-    _SENDGRID_AVAILABLE = True
-except ImportError:
-    _SENDGRID_AVAILABLE = False
+import urllib.request as _urlreq
 
 load_dotenv()
 
 app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SENDGRID_API_KEY     = os.getenv("SENDGRID_API_KEY")
+RESEND_API_KEY       = os.getenv("RESEND_API_KEY")
 ALERT_FROM           = os.getenv("ALERT_FROM", "alerts@example.com")
 ALERT_TO             = os.getenv("ALERT_TO", "you@example.com")
 # SECRET_TOKEN is the server-side env var name.
@@ -114,31 +109,35 @@ def in_alert_window():
     return ALERT_START_HOUR <= now_et.hour < ALERT_END_HOUR
 
 def send_alert(pi_id, last_seen):
-    if not SENDGRID_API_KEY:
-        print(f"[ALERT] No SendGrid key — would have alerted for {pi_id}")
+    if not RESEND_API_KEY:
+        print(f"[ALERT] No Resend key — would have alerted for {pi_id}")
         return
-    if not _SENDGRID_AVAILABLE:
-        print(f"[ALERT] sendgrid package not installed — would have alerted for {pi_id}. "
-              f"Run: pip install sendgrid")
-        return
+    import json as _json
     elapsed = round((now_utc() - last_seen).total_seconds() / 3600, 1)
-    message = Mail(
-        from_email=ALERT_FROM,
-        to_emails=ALERT_TO,
-        subject=f"⚠️ Synthos Alert — {pi_id} is silent",
-        html_content=f"""
-        <h2>Synthos Monitor Alert</h2>
-        <p><strong>{pi_id}</strong> has not sent a heartbeat in <strong>{elapsed} hours</strong>.</p>
-        <p>Last seen: {last_seen.strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-        <p>Check your Pi.</p>
-        """
-    )
+    payload = _json.dumps({
+        "from":    ALERT_FROM,
+        "to":      [ALERT_TO],
+        "subject": f"Synthos Alert — {pi_id} is silent",
+        "html":    (
+            f"<h2>Synthos Monitor Alert</h2>"
+            f"<p><strong>{pi_id}</strong> has not sent a heartbeat in "
+            f"<strong>{elapsed} hours</strong>.</p>"
+            f"<p>Last seen: {last_seen.strftime('%Y-%m-%d %H:%M:%S UTC')}</p>"
+            f"<p>Check your Pi.</p>"
+        ),
+    }).encode()
+    req = _urlreq.Request(
+        "https://api.resend.com/emails", data=payload,
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                 "Content-Type": "application/json"})
     try:
-        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-        sg.client.mail.send.post(request_body=message.get())
-        print(f"[ALERT] Sent alert for {pi_id}")
+        with _urlreq.urlopen(req, timeout=15) as resp:
+            if resp.status in (200, 201):
+                print(f"[ALERT] Sent alert for {pi_id}")
+            else:
+                print(f"[ALERT] Resend returned {resp.status} for {pi_id}")
     except Exception as e:
-        print(f"[ALERT] SendGrid error: {e}")
+        print(f"[ALERT] Resend error: {e}")
 
 def pi_status(data):
     """Returns 'active', 'fault', or 'offline'"""
