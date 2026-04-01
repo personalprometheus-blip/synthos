@@ -162,17 +162,17 @@ SEED_ITEMS = [
         title       = "T-08: Wire seed_backlog.py into company installer automatically",
         description = (
             "seed_backlog.py exists but must be run manually after company Pi install. "
-            "install_company.py (or boot_sequence.py on company node) should call "
+            "install_company.py (or retail_boot_sequence.py on company node) should call "
             "seed_backlog.py --write automatically on first boot if suggestions.json is empty. "
             "This ensures Blueprint and Patches have a populated backlog from day one "
             "without requiring an operator manual step. "
-            "Implementation: add a first-boot sentinel check in boot_sequence.py for the "
+            "Implementation: add a first-boot sentinel check in retail_boot_sequence.py for the "
             "company node; if data/suggestions.json is missing or empty, run seed_backlog.py."
         ),
         category     = "improvement",
         scope        = "company_internal",
         priority     = "medium",
-        target_files = ["synthos_build/boot_sequence.py"],
+        target_files = ["synthos_build/retail_boot_sequence.py"],
     ),
 
     make_suggestion(
@@ -225,7 +225,7 @@ SEED_ITEMS = [
         category     = "improvement",
         scope        = "retail",
         priority     = "low",
-        target_files = ["synthos_build/agent1_trader.py", "synthos_build/portal.py"],
+        target_files = ["synthos_build/process_agent1_trader.py", "synthos_build/retail_portal.py"],
     ),
 
     make_suggestion(
@@ -361,7 +361,7 @@ SEED_ITEMS = [
         target_files = [
             "synthos_build/free_public_api_source_list.html",
             "synthos_build/agent3_sentiment.py",
-            "synthos_build/database.py",
+            "synthos_build/retail_database.py",
         ],
     ),
 

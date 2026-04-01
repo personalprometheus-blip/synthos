@@ -59,14 +59,14 @@ CRON_PATTERNS = [
     'trade_logic_agent',
     'news_agent',
     'market_sentiment_agent',
-    'heartbeat.py',
+    'retail_heartbeat.py',
     'cleanup.py',
-    'shutdown.py',
-    'boot_sequence.py',
-    'health_check.py',
+    'retail_shutdown.py',
+    'retail_boot_sequence.py',
+    'retail_health_check.py',
     'daily_digest.py',
-    'portal.py',
-    'watchdog.py',
+    'retail_portal.py',
+    'retail_watchdog.py',
 ]
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
@@ -247,8 +247,8 @@ def kill_running_processes(dry_run=False):
     """Kill any running Synthos/Quorum processes."""
     step("Stopping running processes")
     patterns = ['trade_logic_agent', 'news_agent', 'market_sentiment_agent',
-                'watchdog.py', 'portal.py', 'heartbeat.py', 'daily_digest.py',
-                'boot_sequence.py']
+                'retail_watchdog.py', 'retail_portal.py', 'retail_heartbeat.py', 'daily_digest.py',
+                'retail_boot_sequence.py']
     found = False
     for pattern in patterns:
         try:

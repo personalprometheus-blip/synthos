@@ -90,22 +90,22 @@ REQUIRED_PACKAGES = [
 ]
 
 REQUIRED_AGENT_FILES = [
-    "trade_logic_agent.py",
-    "news_agent.py",
-    "market_sentiment_agent.py",
+    "retail_trade_logic_agent.py",
+    "retail_news_agent.py",
+    "retail_market_sentiment_agent.py",
 ]
 
 REQUIRED_CORE_FILES = [
-    "database.py",
-    "boot_sequence.py",
-    "watchdog.py",
-    "health_check.py",
-    "shutdown.py",
+    "retail_database.py",
+    "retail_boot_sequence.py",
+    "retail_watchdog.py",
+    "retail_health_check.py",
+    "retail_shutdown.py",
     # cleanup.py — not yet built; runs via cron for nightly DB maintenance;
     # absence is non-fatal at install time (boot_sequence.py also omits it).
     # Future implementation tracked in docs/milestones.md.
     "synthos_heartbeat.py",
-    "portal.py",
+    "retail_portal.py",
     "patch.py",
     "sync.py",
     # license_validator.py — DEFERRED_FROM_CURRENT_BASELINE
@@ -229,7 +229,7 @@ def install_packages() -> bool:
 
 def bootstrap_database() -> bool:
     """
-    Initialize signals.db schema by importing database.py from src/.
+    Initialize signals.db schema by importing retail_database.py from src/.
     If signals.db already exists, this is a no-op (migrations run on import).
     Never overwrites existing data.
     """
@@ -237,9 +237,9 @@ def bootstrap_database() -> bool:
         _log_ui(f"  → signals.db exists — skipping bootstrap (protected)")
         return True
 
-    db_module = CORE_DIR / "database.py"
+    db_module = CORE_DIR / "retail_database.py"
     if not db_module.exists():
-        _log_ui("  ✗ src/database.py not found — cannot bootstrap DB", "error")
+        _log_ui("  ✗ src/retail_database.py not found — cannot bootstrap DB", "error")
         return False
 
     try:
@@ -273,10 +273,10 @@ def register_cron() -> bool:
         _log_ui("  ⚠ crontab not found — add cron entries manually", "warning")
         return False
 
-    boot_script  = str(CORE_DIR / "boot_sequence.py")
-    watchdog     = str(CORE_DIR / "watchdog.py")
-    portal       = str(CORE_DIR / "portal.py")
-    shutdown_scr = str(CORE_DIR / "shutdown.py")
+    boot_script  = str(CORE_DIR / "retail_boot_sequence.py")
+    watchdog     = str(CORE_DIR / "retail_watchdog.py")
+    portal       = str(CORE_DIR / "retail_portal.py")
+    shutdown_scr = str(CORE_DIR / "retail_shutdown.py")
     boot_log     = str(LOG_DIR / "boot.log")
 
     new_entries = "\n".join([
@@ -350,12 +350,12 @@ def set_timezone() -> None:
 
 def run_health_check() -> bool:
     """
-    Run health_check.py as a subprocess.
+    Run retail_health_check.py as a subprocess.
     Returns True if exit code is 0.
     """
-    hc_path = CORE_DIR / "health_check.py"
+    hc_path = CORE_DIR / "retail_health_check.py"
     if not hc_path.exists():
-        _log_ui("  ✗ health_check.py not found in src/", "error")
+        _log_ui("  ✗ retail_health_check.py not found in src/", "error")
         return False
     try:
         result = subprocess.run(
@@ -365,20 +365,20 @@ def run_health_check() -> bool:
             env={**os.environ, "SYNTHOS_HOME": str(SYNTHOS_HOME)},
         )
         if result.returncode == 0:
-            _log_ui("  ✓ health_check.py passed")
+            _log_ui("  ✓ retail_health_check.py passed")
             return True
         else:
-            _log_ui(f"  ✗ health_check.py failed (exit {result.returncode})", "error")
+            _log_ui(f"  ✗ retail_health_check.py failed (exit {result.returncode})", "error")
             if result.stdout:
                 _log_ui(f"    stdout: {result.stdout[-500:]}", "error")
             if result.stderr:
                 _log_ui(f"    stderr: {result.stderr[-500:]}", "error")
             return False
     except subprocess.TimeoutExpired:
-        _log_ui("  ✗ health_check.py timed out after 120s", "error")
+        _log_ui("  ✗ retail_health_check.py timed out after 120s", "error")
         return False
     except Exception as exc:
-        _log_ui(f"  ✗ health_check.py exception: {exc}", "error")
+        _log_ui(f"  ✗ retail_health_check.py exception: {exc}", "error")
         return False
 
 
@@ -457,7 +457,7 @@ def verify_installation() -> tuple[bool, list[str]]:
 
     # 6. health_check
     if not run_health_check():
-        failures.append("health_check.py failed")
+        failures.append("retail_health_check.py failed")
 
     passed = len(failures) == 0
     return passed, failures
