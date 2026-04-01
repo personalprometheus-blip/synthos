@@ -518,7 +518,7 @@ def get_system_status():
     for attempt in range(3):
         try:
             sys.path.insert(0, PROJECT_DIR)
-            from database import get_db
+            from retail_database import get_db
             db = get_db()
             portfolio  = db.get_portfolio()
             positions  = db.get_open_positions()
@@ -583,7 +583,7 @@ def get_system_status():
 def load_pending_approvals():
     """Read approval queue from DB. Returns all rows (portal filters by status in JS)."""
     try:
-        from database import get_db
+        from retail_database import get_db
         return get_db().get_pending_approvals()
     except Exception as e:
         log.error(f"load_pending_approvals DB error: {e}")
@@ -2201,8 +2201,8 @@ async function loadLiveStatus() {
     // Agent running banner
     const agentEl = document.getElementById('agent-running-banner');
     if (s.agent_running) {
-      const names = {'trade_logic_agent.py':'Bolt (Trader)','news_agent.py':'Scout (News)',
-                     'market_sentiment_agent.py':'Pulse (Sentiment)','agent4_audit.py':'Audit Agent'};
+      const names = {'retail_trade_logic_agent.py':'Bolt (Trader)','retail_news_agent.py':'Scout (News)',
+                     'retail_market_sentiment_agent.py':'Pulse (Sentiment)','agent4_audit.py':'Audit Agent'};
       const name = names[s.agent_running] || s.agent_running;
       const mins = Math.floor((s.agent_running_secs||0) / 60);
       const secs = (s.agent_running_secs||0) % 60;
@@ -2402,7 +2402,7 @@ async function loadScreening() {
     const d = await r.json();
     const candidates = d.candidates || [];
     if (!candidates.length) {
-      meta.textContent = 'No screening data yet. Run sector_screener.py to populate.';
+      meta.textContent = 'No screening data yet. Run retail_sector_screener.py to populate.';
       return;
     }
     const c0 = candidates[0];
@@ -2673,7 +2673,7 @@ def index():
         if _agent_dir not in _sys.path:
             _sys.path.insert(0, _agent_dir)
         try:
-            import news_agent as _na
+            import retail_news_agent as _na
             _feeds = _na.get_rss_feeds()
             rss_display = '\n'.join(f"{f[0]} | {f[1]} | {f[2]}" for f in _feeds)
         except Exception:
@@ -2717,7 +2717,7 @@ def api_kill_switch():
                 f.write(f"Kill switch engaged at {now_et()}\n")
             log.warning("KILL SWITCH ENGAGED via portal")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("KILL_SWITCH_ENGAGED", agent="portal",
                                    details=f"Engaged via web portal at {now_et()}")
             except Exception:
@@ -2727,7 +2727,7 @@ def api_kill_switch():
                 os.remove(KILL_SWITCH_FILE)
             log.info("Kill switch cleared via portal")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("KILL_SWITCH_CLEARED", agent="portal",
                                    details=f"Cleared via web portal at {now_et()}")
             except Exception:
@@ -2750,7 +2750,7 @@ def api_approval():
         return jsonify({"ok": False, "error": "Invalid status"}), 400
 
     try:
-        from database import get_db
+        from retail_database import get_db
         db      = get_db()
         updated = db.update_approval_status(
             signal_id    = signal_id,
@@ -2792,7 +2792,7 @@ def api_unlock_autonomous():
     if key != AUTONOMOUS_UNLOCK_KEY:
         log.warning(f"Failed autonomous unlock attempt at {now_et()}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("AUTONOMOUS_UNLOCK_FAILED", agent="portal",
                                details=f"Bad key attempt at {now_et()}")
         except Exception:
@@ -2804,7 +2804,7 @@ def api_unlock_autonomous():
     log.info(f"Autonomous mode unlocked via portal at {now_et()}")
 
     try:
-        from database import get_db
+        from retail_database import get_db
         get_db().log_event("AUTONOMOUS_UNLOCKED", agent="portal",
                            details=f"Autonomous mode activated at {now_et()}")
     except Exception:
@@ -2850,7 +2850,7 @@ def api_feeds_save():
         os.environ['RSS_FEEDS_JSON'] = json.dumps(feeds)
         log.info(f"RSS feeds updated: {len(feeds)} feeds saved")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("RSS_FEEDS_UPDATED", agent="portal",
                                details=f"{len(feeds)} feeds saved")
         except Exception:
@@ -2909,7 +2909,7 @@ def api_keys():
     if updated:
         log.info(f"Keys updated via portal: {updated}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("KEYS_UPDATED", agent="portal",
                                details=f"Updated: {', '.join(updated)}")
         except Exception:
@@ -2943,7 +2943,7 @@ def api_settings():
                 update_env(env_key, str(data[form_key]))
         log.info(f"Settings updated: {list(data.keys())}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("SETTINGS_UPDATED", agent="portal",
                                details=str(data))
         except Exception:
@@ -2969,7 +2969,7 @@ def api_portfolio_history():
     """Portfolio value over time for the graph."""
     days = int(request.args.get('days', 30))
     try:
-        from database import get_db
+        from retail_database import get_db
         data = get_db().get_portfolio_history(days=days)
         # If we have less than 2 points, synthesize from current portfolio
         if len(data) < 2:
@@ -2991,7 +2991,7 @@ def api_portfolio_history():
 def api_watchlist():
     """Signals Claude is watching but has not acted on yet."""
     try:
-        from database import get_db
+        from retail_database import get_db
         signals = get_db().get_watching_signals(limit=10)
         return jsonify({'signals': signals})
     except Exception as e:
@@ -3002,7 +3002,7 @@ def api_watchlist():
 def api_screening():
     """Latest sector screening run — candidates with news, sentiment, and congressional signals."""
     try:
-        from database import get_db
+        from retail_database import get_db
         candidates = get_db().get_latest_screening_run()
         return jsonify({'candidates': candidates})
     except Exception as e:
@@ -3158,7 +3158,7 @@ def api_market_chart_data():
     # Portfolio series from system_log heartbeats
     portfolio_series = [None] * len(base_ts)
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         cutoff_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
         with db.conn() as c:
@@ -3213,7 +3213,7 @@ def api_market_chart_data():
     # Position entry markers — scatter points at entry timestamp
     position_markers = [None] * len(base_ts)
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         with db.conn() as c:
             pos_rows = c.execute("""
@@ -3281,11 +3281,11 @@ def api_system_health():
 
     # Claude API — check last successful agent run from DB
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
-        hb = db.get_last_heartbeat('trade_logic_agent')
+        hb = db.get_last_heartbeat('retail_trade_logic_agent')
         if not hb:
-            hb = db.get_last_heartbeat('news_agent')
+            hb = db.get_last_heartbeat('retail_news_agent')
         if hb:
             health['claude_api'] = {
                 'status':    'ok',
@@ -3316,7 +3316,7 @@ def api_system_health():
         # Raise an urgent flag if RAM is critically high
         if vm.percent >= 85:
             try:
-                from database import get_db as _gdb
+                from retail_database import get_db as _gdb
                 _db = _gdb()
                 severity = 'CRITICAL' if vm.percent >= 92 else 'WARNING'
                 _db.write_urgent_flag(
@@ -3432,7 +3432,7 @@ def api_flags_acknowledge():
         return jsonify({'ok': False, 'error': 'Missing id'}), 400
     try:
         sys.path.insert(0, PROJECT_DIR)
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         db.acknowledge_urgent_flag(flag_id)
         db.log_event("FLAG_ACKNOWLEDGED", agent="portal",
@@ -3449,7 +3449,7 @@ def api_flags_acknowledge():
 def api_trader_activity():
     """Recent trader decisions — what Bolt has been scanning and acting on."""
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         with db.conn() as c:
             scans = c.execute("""
@@ -3514,7 +3514,7 @@ def api_update():
             output = (result.stdout + result.stderr).strip()
             log.info(f"Self-update result: {output[:200]}")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("SELF_UPDATE", agent="portal",
                                    details=output[:200])
             except Exception:
@@ -3536,11 +3536,11 @@ def api_update():
 # Files allowed to be uploaded/managed
 MANAGED_FILES = {
     # Core agents
-    'trade_logic_agent.py', 'news_agent.py', 'market_sentiment_agent.py',
+    'retail_trade_logic_agent.py', 'retail_news_agent.py', 'retail_market_sentiment_agent.py',
     # Infrastructure
-    'database.py', 'heartbeat.py', 'boot_sequence.py', 'watchdog.py',
-    'cleanup.py', 'shutdown.py', 'health_check.py', 'portal.py',
-    'daily_digest.py', 'digest_agent.py', 'patch.py', 'sync.py',
+    'retail_database.py', 'retail_heartbeat.py', 'retail_boot_sequence.py', 'retail_watchdog.py',
+    'retail_cleanup.py', 'retail_shutdown.py', 'retail_health_check.py', 'retail_portal.py',
+    'daily_digest.py', 'digest_agent.py', 'retail_patch.py', 'retail_sync.py',
     'synthos_monitor.py', 'install.py',
     # Scripts
     'qpush.sh', 'qpull.sh', 'portal_cmd.sh', 'console_cmd.sh',
@@ -3663,11 +3663,11 @@ def api_files_upload():
             uploaded.append(fname)
             log.info(f"File uploaded via portal: {fname} ({os.path.getsize(dest)} bytes)")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("FILE_UPLOADED", agent="portal", details=fname)
             except Exception:
                 pass
-            if fname == 'portal.py':
+            if fname == 'retail_portal.py':
                 restart_portal = True
         except Exception as e:
             errors.append(f"{fname}: {str(e)}")
@@ -4076,7 +4076,7 @@ async function uploadFiles(files) {
 def get_news_feed_data(limit=100):
     """Fetch recent news feed entries from the database."""
     try:
-        from database import get_db
+        from retail_database import get_db
         return get_db().get_news_feed(limit=limit)
     except Exception as e:
         log.warning(f"get_news_feed_data error: {e}")
@@ -4222,7 +4222,7 @@ def api_news_headlines():
     category = request.args.get('category')
     if category == 'all':
         category = None
-    from database import get_db
+    from retail_database import get_db
     db = get_db()
     articles = db.get_news_headlines(category=category, limit=100, min_floor=30)
     return jsonify({'articles': articles, 'count': len(articles)})

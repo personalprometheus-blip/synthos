@@ -54,7 +54,7 @@ _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
@@ -1217,7 +1217,7 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
 # ── SUPERVISED MODE (KEEP from v1.x) ─────────────────────────────────────────
 
 def queue_for_approval(signal, decision_data):
-    from database import get_db
+    from retail_database import get_db
     try:
         get_db().queue_approval(
             signal_id  = signal['id'],
@@ -1290,7 +1290,7 @@ def _notify_approval_request(signal, decision_data):
         log.warning(f"[SUPERVISED] Approval notification failed: {e}")
 
 def get_approved_trades():
-    from database import get_db
+    from retail_database import get_db
     try:
         return get_db().get_pending_approvals(status_filter=['APPROVED'])
     except Exception as e:
@@ -1298,7 +1298,7 @@ def get_approved_trades():
         return []
 
 def mark_approval_executed(signal_id):
-    from database import get_db
+    from retail_database import get_db
     try:
         get_db().mark_approval_executed(signal_id)
     except Exception as e:
@@ -1331,7 +1331,7 @@ def _enqueue_p0_alert(subject, body, event_type, related_ticker=None, related_si
 def _direct_send_fallback(subject, body, reason="enqueue_failed"):
     log.warning(f"[FALLBACK] Direct send triggered — reason: {reason}")
     try:
-        from database import get_db
+        from retail_database import get_db
         get_db().log_event("P0_DIRECT_SEND_FALLBACK", agent="trade_logic_agent",
                            details=f"reason={reason} subject={subject[:80]}")
     except Exception:
@@ -1809,7 +1809,7 @@ def run(session="open"):
                  portfolio_value=total_value)
 
     try:
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="trade_logic_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")

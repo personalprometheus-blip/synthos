@@ -97,11 +97,11 @@ HISTORY_HOURS    = 24
 # Files included in known-good snapshot
 # Paths relative to their respective directories (agents/ or src/)
 SNAPSHOT_FILES = [
-    "trade_logic_agent.py",
-    "news_agent.py",
-    "market_sentiment_agent.py",
-    "database.py",
-    "heartbeat.py",
+    "retail_trade_logic_agent.py",
+    "retail_news_agent.py",
+    "retail_market_sentiment_agent.py",
+    "retail_database.py",
+    "retail_heartbeat.py",
 ]
 
 # Agents Watchdog monitors
@@ -111,31 +111,31 @@ WATCHED_AGENTS = [
     {
         "name":    "Bolt",
         "alias":   "Trade Logic",
-        "script":  "trade_logic_agent.py",
+        "script":  "retail_trade_logic_agent.py",
         "args":    [],
-        "log":     "trader.log",
+        "log":     "trade_logic_agent.log",
         "managed": False,
     },
     {
         "name":    "Scout",
         "alias":   "News",
-        "script":  "news_agent.py",
+        "script":  "retail_news_agent.py",
         "args":    ["--session=market"],
-        "log":     "daily.log",
+        "log":     "scout.log",
         "managed": False,
     },
     {
         "name":    "Pulse",
         "alias":   "Market Sentiment",
-        "script":  "market_sentiment_agent.py",
+        "script":  "retail_market_sentiment_agent.py",
         "args":    [],
-        "log":     "pulse.log",
+        "log":     "market_sentiment_agent.log",
         "managed": False,
     },
     {
         "name":    "Cleanup",
         "alias":   "Cleanup",
-        "script":  "cleanup.py",
+        "script":  "retail_cleanup.py",
         "args":    [],
         "log":     "cleanup.log",
         "managed": False,
@@ -143,7 +143,7 @@ WATCHED_AGENTS = [
     {
         "name":    "Portal",
         "alias":   "Portal",
-        "script":  "portal.py",
+        "script":  "retail_portal.py",
         "args":    [],
         "log":     "portal.log",
         "managed": True,

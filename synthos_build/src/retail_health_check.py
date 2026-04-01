@@ -259,7 +259,7 @@ def run():
 
     # Import DB
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         log.info("✓ Database module loaded")
     except Exception as e:
@@ -290,7 +290,7 @@ def run():
         portfolio    = db.get_portfolio()
         open_pos     = db.get_open_positions()
         total        = round(portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in open_pos), 2)
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(
             agent_name="health_check",
             status="REBOOT_OK" if not issues else "REBOOT_ISSUES"

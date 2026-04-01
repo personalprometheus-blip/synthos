@@ -7,7 +7,7 @@ to the Synthos Monitor server. Falls back gracefully if the monitor
 is unreachable — never blocks or crashes the calling agent.
 
 Usage (from any agent):
-    from heartbeat import write_heartbeat
+    from retail_heartbeat import write_heartbeat
     write_heartbeat(agent_name="agent1_trader", status="OK")
 
 .env keys used:
@@ -71,7 +71,7 @@ def _build_payload(agent_name: str, status: str) -> dict:
     }
 
     try:
-        from database import get_db
+        from retail_database import get_db
         db        = get_db()
         portfolio = db.get_portfolio()
         positions = db.get_open_positions()

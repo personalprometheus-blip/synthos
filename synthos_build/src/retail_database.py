@@ -9,7 +9,7 @@ All three agents import this module. It handles:
   - System logging
 
 Usage:
-  from database import DB
+  from retail_database import DB
   db = DB()
   db.log_heartbeat("agent1_trader", "OK", portfolio_value=102.34)
 """
@@ -944,6 +944,10 @@ class DB:
                     'pub_date':  meta.get('pub_date', ''),
                     'staleness': meta.get('staleness', 'fresh'),
                     'created_at': r['created_at'] or '',
+                    'summary':   meta.get('summary', ''),
+                    'image':     meta.get('image', None),
+                    'symbols':   meta.get('symbols', []),
+                    'provider':  meta.get('provider', 'rss'),
                 })
             return result
 

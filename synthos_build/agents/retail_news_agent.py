@@ -44,7 +44,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 # ANTHROPIC_API_KEY removed — Scout uses no LLM in classification decisions.
@@ -805,10 +805,12 @@ def get_rss_feeds():
 # ── NEWS HEADLINE FEEDS (display-only, not in signal pipeline) ───────────────
 
 NEWS_FEEDS = [
-    # MarketWatch — confirmed live 2026-03-31
-    ("MW Market Pulse",        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",       "Markets"),
-    ("MW Bulletins",           "https://feeds.content.dowjones.io/public/rss/mw_bulletins",          "Breaking"),
-    ("MW Realtime Headlines",  "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",  "Markets"),
+    # MarketWatch — feeds.marketwatch.com (NOT dowjones.io which returns stale 2024 data)
+    ("MarketWatch Top Stories", "http://feeds.marketwatch.com/marketwatch/topstories",     "Markets"),
+    # CNBC — confirmed live 2026
+    ("CNBC Business",           "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147", "Breaking"),
+    ("CNBC Finance",            "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", "Markets"),
+    ("CNBC Investing",          "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", "Markets"),
 ]
 
 def _headline_key(headline: str) -> str:
@@ -898,6 +900,99 @@ def fetch_and_store_news_headlines(db) -> int:
         except Exception as e:
             log.error(f"News feed fetch failed ({feed_name}): {e}")
 
+    return stored
+
+
+def fetch_alpaca_news(db) -> int:
+    """Fetch real-time news from Alpaca's Benzinga feed.
+
+    Uses the existing ALPACA_API_KEY / ALPACA_SECRET_KEY already in .env.
+    Bypasses the signal pipeline — stored as source='NEWS', routing='NEWS'.
+    Returns number of new articles stored.
+    """
+    import requests as _req
+
+    alpaca_key    = os.environ.get("ALPACA_API_KEY", "")
+    alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not alpaca_key:
+        return 0
+
+    # Pull last 24h stored Alpaca headlines for dedup
+    stored_keys: list[str] = []
+    try:
+        with db.conn() as c:
+            rows = c.execute("""
+                SELECT raw_headline FROM news_feed
+                WHERE source='NEWS'
+                  AND json_extract(metadata,'$.provider')='alpaca'
+                  AND created_at >= datetime('now','-24 hours')
+            """).fetchall()
+        stored_keys = [_headline_key(r[0]) for r in rows if r[0]]
+    except Exception:
+        pass
+
+    try:
+        resp = _req.get(
+            "https://data.alpaca.markets/v1beta1/news",
+            headers={
+                "APCA-API-KEY-ID":     alpaca_key,
+                "APCA-API-SECRET-KEY": alpaca_secret,
+            },
+            params={"limit": 50, "sort": "desc"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        log.warning(f"Alpaca news fetch failed: {e}")
+        return 0
+
+    items   = resp.json().get("news", [])
+    stored  = 0
+    for item in items:
+        headline = (item.get("headline") or "").strip()
+        if not headline:
+            continue
+        key = _headline_key(headline)
+        if not key:
+            continue
+        if any(_jaccard(key, sk) > 0.70 for sk in stored_keys):
+            continue
+        stored_keys.append(key)
+
+        # Pick category from symbols: if symbols present → Markets, else Breaking
+        syms = item.get("symbols") or []
+        category = "Markets" if syms else "Breaking"
+
+        # Image: Alpaca returns [{size, url}, ...]
+        images = item.get("images") or []
+        img_url = next((i.get("url") for i in images if i.get("size") in ("large","thumb")), None)
+
+        try:
+            db.write_news_feed_entry(
+                congress_member = "",
+                ticker          = syms[0] if syms else "",
+                signal_score    = "NEWS",
+                sentiment_score = None,
+                raw_headline    = headline,
+                metadata        = {
+                    "provider":  "alpaca",
+                    "source":    item.get("source", "Benzinga"),
+                    "category":  category,
+                    "link":      item.get("url", ""),
+                    "pub_date":  (item.get("created_at") or "")[:25],
+                    "summary":   (item.get("summary") or "")[:500],
+                    "image":     img_url,
+                    "symbols":   syms[:5],
+                    "routing":   "NEWS",
+                    "staleness": "fresh",
+                },
+                source = "NEWS",
+            )
+            stored += 1
+        except Exception as e:
+            log.warning(f"Alpaca news write failed: {e}")
+
+    log.info(f"Alpaca news: stored {stored} new headlines from {len(items)} fetched")
     return stored
 
 
@@ -2666,10 +2761,12 @@ def run(session="market"):
                 _record_source_fetch("RSS feeds", db)
 
         # ── News headline feeds (display-only, bypass signal pipeline) ────
-        # No daily guard — dedup inside fetch_and_store_news_headlines handles
-        # repeat fetches; MW feeds update throughout the day.
-        news_stored = fetch_and_store_news_headlines(db)
-        log.info(f"News headline feeds: {news_stored} new headlines stored")
+        # No daily guard — dedup inside each fetcher handles repeat runs.
+        # Alpaca (Benzinga) is real-time; RSS feeds update throughout the day.
+        alpaca_stored = fetch_alpaca_news(db)
+        rss_stored    = fetch_and_store_news_headlines(db)
+        news_stored   = alpaca_stored + rss_stored
+        log.info(f"News feeds: {news_stored} new (alpaca={alpaca_stored} rss={rss_stored})")
     else:
         # Overnight: disclosures + congress only
         if _source_fetched_recently("Congress.gov API", db):
@@ -3092,7 +3189,7 @@ def run(session="market"):
     _handle_screening_requests(db)
 
     try:
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="news_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
