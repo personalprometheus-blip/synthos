@@ -87,6 +87,7 @@ REQUIRED_PACKAGES = [
     "anthropic",
     "sendgrid",
     "feedparser",
+    "psutil",
 ]
 
 REQUIRED_AGENT_FILES = [
