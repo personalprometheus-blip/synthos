@@ -86,6 +86,7 @@ REQUIRED_PACKAGES = [
     "python-dotenv",
     "anthropic",
     "sendgrid",
+    "feedparser",
 ]
 
 REQUIRED_AGENT_FILES = [
