@@ -14,10 +14,22 @@ USAGE:
   python3 synthos_test.py --status         # show what's running
   python3 synthos_test.py --report         # print last session report
 
-AGENTS:
-  Retail:   trader, research, sentiment, portal, watchdog, monitor
-  Company:  patches, blueprint, sentinel, fidget,
-            librarian, scoop, vault, timekeeper
+ALIAS → DESCRIPTIVE NAME MAP:
+  Retail:   trader    = retail_trade_logic_agent.py
+            research  = retail_news_agent.py
+            sentiment = retail_market_sentiment_agent.py
+            screener  = retail_sector_screener.py
+            portal    = retail_portal.py
+            watchdog  = retail_watchdog.py
+            scheduler = retail_scheduler.py
+            monitor   = synthos_monitor.py
+
+  Company:  scoop     = scoop.py           (email queue daemon)
+            strongbox = strongbox.py        (backup manager)
+            server    = company_server.py   (ops server + dashboard)
+
+  Planned (not yet built):
+            timekeeper, vault, librarian, sentinel, fidget, patches, blueprint
 """
 
 import os
@@ -41,29 +53,29 @@ PID_FILE     = PROJECT_DIR / ".test_pids.json"
 
 LOG_DIR.mkdir(exist_ok=True)
 
-# Agent registry — maps short name → script + log file + args
+# Agent registry — maps alias → script + log file + args
+# Aliases are the short conversational names; scripts are the actual filenames.
 AGENTS = {
-    # ── Retail ────────────────────────────────────────────────────────────
-    "trader":    {"script": "trade_logic_agent.py",    "log": "trader.log",    "args": [], "dir": "agents"},
-    "research":  {"script": "news_agent.py",           "log": "research.log",  "args": [], "dir": "agents"},
-    "sentiment": {"script": "market_sentiment_agent.py","log": "sentiment.log", "args": [], "dir": "agents"},
-    "portal":    {"script": "portal.py",           "log": "portal.log",    "args": []},
-    "watchdog":  {"script": "watchdog.py",         "log": "watchdog.log",  "args": []},
-    "monitor":   {"script": "synthos_monitor.py",  "log": "monitor.log",   "args": []},
-    # ── Company ───────────────────────────────────────────────────────────
-    "patches":   {"script": "patches.py",          "log": "patches.log",   "args": ["--mode", "light"]},
-    "blueprint": {"script": "blueprint.py",        "log": "blueprint.log", "args": []},
-    "sentinel":  {"script": "sentinel.py",         "log": "sentinel.log",  "args": []},
-    "fidget":    {"script": "fidget.py",           "log": "fidget.log",    "args": []},
-    "librarian": {"script": "librarian.py",        "log": "librarian.log", "args": []},
+    # ── Retail Pi ─────────────────────────────────────────────────────────
+    "trader":    {"script": "retail_trade_logic_agent.py",      "log": "trader.log",    "args": [], "dir": "agents"},
+    "research":  {"script": "retail_news_agent.py",             "log": "research.log",  "args": [], "dir": "agents"},
+    "sentiment": {"script": "retail_market_sentiment_agent.py", "log": "sentiment.log", "args": [], "dir": "agents"},
+    "screener":  {"script": "retail_sector_screener.py",        "log": "screener.log",  "args": [], "dir": "agents"},
+    "portal":    {"script": "retail_portal.py",           "log": "portal.log",    "args": []},
+    "watchdog":  {"script": "retail_watchdog.py",         "log": "watchdog.log",  "args": []},
+    "scheduler": {"script": "retail_scheduler.py",        "log": "scheduler.log", "args": []},
+    "monitor":   {"script": "synthos_monitor.py",         "log": "monitor.log",   "args": []},
+    # ── Company Pi (built) ────────────────────────────────────────────────
     "scoop":     {"script": "scoop.py",            "log": "scoop.log",     "args": []},
-    "vault":     {"script": "vault.py",            "log": "vault.log",     "args": []},
-    "timekeeper":{"script": "timekeeper.py",       "log": "timekeeper.log","args": []},
+    "strongbox": {"script": "strongbox.py",        "log": "strongbox.log", "args": []},
+    "server":    {"script": "company_server.py",   "log": "company_server.log", "args": []},
+    # ── Company Pi (planned — not yet built) ──────────────────────────────
+    # timekeeper, vault, librarian, sentinel, fidget, patches, blueprint
 }
 
-RETAIL_AGENTS  = ["trader", "research", "sentiment", "portal", "watchdog", "monitor"]
-COMPANY_AGENTS = ["patches", "blueprint", "sentinel", "fidget",
-                  "librarian", "scoop", "vault", "timekeeper"]
+RETAIL_AGENTS  = ["trader", "research", "sentiment", "screener",
+                  "portal", "watchdog", "scheduler", "monitor"]
+COMPANY_AGENTS = ["scoop", "strongbox", "server"]
 
 # ── ANSI COLORS ───────────────────────────────────────────────────────────────
 

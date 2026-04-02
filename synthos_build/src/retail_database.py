@@ -34,16 +34,22 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 _PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 AGENT_LOCK_FILE = os.path.join(_PROJECT_DIR, '.agent_lock')
 
-# Callers that get DB priority (write the lock file)
+# Callers that get DB priority (write the lock file).
+# Lower number = higher priority. Agents not listed default to 99 (lowest).
 PRIORITY_AGENTS = {
-    'trade_logic_agent.py':      1,
-    'market_sentiment_agent.py': 2,
-    'agent4_audit.py':           3,
-    'news_agent.py':             4,
+    'retail_trade_logic_agent.py':      1,   # trader   — trade execution
+    'retail_market_sentiment_agent.py': 2,   # sentiment — cascade/deterioration
+    'retail_news_agent.py':             3,   # research  — signal scoring
+    'retail_sector_screener.py':        4,   # screener  — sector enrichment
 }
 
-# Callers that back off when locked (portal, heartbeat, digest)
-BACKOFF_CALLERS = {'portal.py', 'heartbeat.py', 'daily_digest.py', 'health_check.py'}
+# Callers that back off fast when DB is locked (max 5s wait, never block a request)
+BACKOFF_CALLERS = {
+    'retail_portal.py',
+    'retail_heartbeat.py',
+    'retail_health_check.py',
+    'daily_digest.py',
+}
 
 
 def acquire_agent_lock(agent_name):

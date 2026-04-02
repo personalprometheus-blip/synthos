@@ -370,9 +370,12 @@ SEED_ITEMS = [
         description = (
             "TOOL_DEPENDENCY_ARCHITECTURE.md classifies tool types (Bootstrap, Runtime, "
             "Maintenance, Repair, Security, Data, Observability) but does not explicitly "
-            "classify the company agents (Blueprint, Patches, Vault, Sentinel, Fidget, "
-            "Scoop, Librarian, Timekeeper, Strongbox). "
-            "Add a company agents section with the correct TDA classification for each. "
+            "classify the company agents. Built agents: scoop.py (Observability/Dispatch), "
+            "strongbox.py (Data/Backup), company_server.py (Runtime/API). "
+            "Planned agents (aliases → purpose): timekeeper=DB write gatekeeper, "
+            "vault=license/key manager, librarian=data archivist, sentinel=health watchdog, "
+            "fidget=keep-alive daemon, patches=bug detector, blueprint=config manager. "
+            "Add a company agents section with TDA classification for each built agent. "
             "No code change — documentation only."
         ),
         category     = "documentation",
