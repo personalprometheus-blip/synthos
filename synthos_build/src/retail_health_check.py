@@ -25,7 +25,7 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'user', '.env'))
 
 ALPACA_API_KEY  = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET   = os.environ.get('ALPACA_SECRET_KEY', '')

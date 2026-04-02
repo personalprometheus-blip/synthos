@@ -29,7 +29,7 @@ ALIAS → DESCRIPTIVE NAME MAP:
             server    = company_server.py   (ops server + dashboard)
 
   Planned (not yet built):
-            timekeeper, vault, librarian, sentinel, fidget, patches, blueprint
+            company_vault, company_archivist, company_sentinel, company_keepalive, company_auditor
 """
 
 import os
@@ -70,7 +70,7 @@ AGENTS = {
     "strongbox": {"script": "strongbox.py",        "log": "strongbox.log", "args": []},
     "server":    {"script": "company_server.py",   "log": "company_server.log", "args": []},
     # ── Company Pi (planned — not yet built) ──────────────────────────────
-    # timekeeper, vault, librarian, sentinel, fidget, patches, blueprint
+    # company_vault, company_archivist, company_sentinel, company_keepalive, company_auditor
 }
 
 RETAIL_AGENTS  = ["trader", "research", "sentiment", "screener",
@@ -308,7 +308,7 @@ def interactive_menu():
     def menu():
         print(f"\n  {BOLD}What do you want to do?{RST}")
         print(f"  {B}1{RST}  Start retail agents   (trader, research, sentiment, portal)")
-        print(f"  {B}2{RST}  Start company agents  (patches, sentinel, fidget, librarian...)")
+        print(f"  {B}2{RST}  Start company agents  (scoop, strongbox, server...)")
         print(f"  {B}3{RST}  Start a single agent")
         print(f"  {B}4{RST}  Stop all running agents")
         print(f"  {B}5{RST}  Show status")

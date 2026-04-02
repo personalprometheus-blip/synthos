@@ -46,8 +46,8 @@
 
 ## Phase 2 — Company Node + Validation Infrastructure ✅ COMPLETE
 
-- [x] Company node agents deployed: blueprint, sentinel, vault, patches, librarian, fidget, scoop, timekeeper
-- [x] patches.py bugs fixed (dry-run, timezone, continuous mode)
+- [x] Company node agents deployed: scoop, strongbox, company_server (planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive)
+- [x] company_auditor.py bugs fixed (dry-run, timezone, continuous mode)
 - [x] Heartbeat architecture resolved
 - [x] Full architectural reconciliation (26 conflicts logged in CONFLICT_LEDGER.md)
 - [x] Static validation report written
@@ -61,7 +61,7 @@
 
 **Goal:** Resolve all critical blockers identified in SYSTEM_VALIDATION_REPORT.md.
 
-- [x] **Step 1 (CODE):** Migrate suggestions pipeline — vault.py, sentinel.py, librarian.py, watchdog.py → `db_helpers.post_suggestion()`
+- [x] **Step 1 (CODE):** Migrate suggestions pipeline — company_vault.py, company_sentinel.py, company_archivist.py, retail_watchdog.py → `db_helpers.post_suggestion()`
 - [x] **Step 2 (CODE):** Migrate watchdog.py post_deploy_watch read → `db_helpers.get_active_deploy_watches()`
 - [x] **Step 3 (CODE):** Fix `watchdog.py` hardcoded `COMPANY_DATA_DIR` → env var
 - [x] **Step 4 (FILE MOVE):** Move strongbox.py to synthos-company/agents/

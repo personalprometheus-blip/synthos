@@ -12,8 +12,8 @@ Responsibilities:
 
 Does NOT:
   - Send email or SMS directly (Scoop owns delivery)
-  - Generate or revoke license keys (Vault owns this)
-  - Make compliance decisions (Vault owns this)
+  - Generate or revoke license keys (company_vault.py owns this)
+  - Make compliance decisions (company_vault.py owns this)
 
 Retail Pi backup staging:
   Retail Pis deposit compressed archives to

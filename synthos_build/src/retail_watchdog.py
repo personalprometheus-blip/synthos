@@ -494,7 +494,7 @@ def attempt_restart(state: AgentState) -> bool:
     Full 3-phase recovery:
       Phase 1: Retry current version up to MAX_RESTARTS times
       Phase 2: Restore known-good snapshot, retry MAX_RESTARTS_KG times
-      Phase 3: HALTED — alert Patches, wait for human
+      Phase 3: HALTED — alert company_auditor.py, wait for human
     """
     total    = state.restart_count
     managed  = state.config.get("managed", False)
@@ -636,7 +636,7 @@ def check_post_deploy_rollback(state: AgentState) -> bool:
                         f"met rollback condition: {trigger_condition}. "
                         f"Known-good {'restored' if restored else 'FAILED to restore'}."
                     ),
-                    fix="Review Friday push. Check Blueprint's BLUEPRINT_NOTES.md."
+                    fix="Review Friday push. Check deployment notes in synthos-company/documentation/."
                 )
                 return True
         except Exception:
@@ -706,7 +706,7 @@ def collect_system_snapshot() -> dict:
 
     try:
         import sqlite3
-        db_path = DATA_DIR / "signals.db"
+        db_path = USER_DIR / "signals.db"
         if db_path.exists():
             conn = sqlite3.connect(str(db_path), timeout=5)
             snapshot["db_size_mb"]     = round(db_path.stat().st_size / 1024 / 1024, 2)

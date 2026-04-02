@@ -23,7 +23,7 @@ See [docs/validation/SYSTEM_VALIDATION_REPORT.md](./docs/validation/SYSTEM_VALID
 | Node | Hardware | Role |
 |------|----------|------|
 | retail_node | Pi 2W | Trading agents, portal, local DB — this repo |
-| company_node | Pi 4B | Operational agents (blueprint, sentinel, patches, vault, etc.) |
+| company_node | Pi 4B | Operational agents (scoop, strongbox, company_server — planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) |
 | monitor_node | Pi 4B (same) | Heartbeat receiver, alert routing (port 5000) |
 
 ## Current Phase

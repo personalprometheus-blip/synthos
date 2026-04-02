@@ -60,11 +60,20 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 load_dotenv(BASE_DIR / '.env')
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-LISTEN_PORT      = int(os.environ.get('INTERROGATION_PORT', 5556))
+try:
+    LISTEN_PORT  = int(os.environ.get('INTERROGATION_PORT', 5556))
+except (ValueError, TypeError):
+    LISTEN_PORT  = 5556
 ACK_PORT         = LISTEN_PORT + 1          # Scout listens here for ACK
 RECV_TIMEOUT     = 1.0                      # seconds per recv — tight loop
-DUPLICATE_WINDOW = int(os.environ.get('INTERROGATION_DUPLICATE_WINDOW_HOURS', 6))
-RATE_LIMIT_HOUR  = int(os.environ.get('INTERROGATION_RATE_LIMIT_PER_HOUR', 3))
+try:
+    DUPLICATE_WINDOW = int(os.environ.get('INTERROGATION_DUPLICATE_WINDOW_HOURS', 6))
+except (ValueError, TypeError):
+    DUPLICATE_WINDOW = 6
+try:
+    RATE_LIMIT_HOUR  = int(os.environ.get('INTERROGATION_RATE_LIMIT_PER_HOUR', 3))
+except (ValueError, TypeError):
+    RATE_LIMIT_HOUR  = 3
 
 logging.basicConfig(
     level=logging.INFO,

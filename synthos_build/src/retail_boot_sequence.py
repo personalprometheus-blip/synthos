@@ -190,7 +190,7 @@ def step4_database():
     log.info("Step 4/9 — Database")
     try:
         import sqlite3
-        db_path = os.path.join(_ROOT_DIR, 'data', 'signals.db')
+        db_path = os.path.join(_ROOT_DIR, 'user', 'signals.db')
 
         if not os.path.exists(db_path):
             # Cold start — database will be created on first agent run
@@ -371,14 +371,14 @@ def step_interrogation_listener():
     and Bolt falls back to WATCH — trading continues safely.
     """
     log.info("Step — Interrogation listener")
-    listener_path = os.path.join(PROJECT_DIR, 'interrogation_listener.py')
+    listener_path = os.path.join(PROJECT_DIR, 'src', 'retail_interrogation_listener.py')
     if not os.path.exists(listener_path):
         return step("Interrogation listener", True,
-                    "interrogation_listener.py not found — skipping (signals will be UNVALIDATED)")
+                    "retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)")
     try:
         # Check if already running
         result = subprocess.run(
-            ['pgrep', '-f', 'interrogation_listener.py'],
+            ['pgrep', '-f', 'retail_interrogation_listener.py'],
             capture_output=True, text=True,
         )
         if result.stdout.strip():

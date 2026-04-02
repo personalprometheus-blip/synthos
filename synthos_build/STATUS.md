@@ -4,7 +4,7 @@
 > **This repo owns:** retail_node (Pi 2W) — trading agents, portal, signals.db
 > **Also owns:** master project tracker (PROJECT_STATUS.md) for all phases/cross-repo blockers
 > **Companion:** `synthos-company` owns company_node (Pi 4B) agents — do NOT put company code here
-> **Separate:** `Sentinel` repo is unrelated to Synthos
+> **Separate:** `pi-display` repo (formerly `Sentinel`) is a display project for the Pi 4B — unrelated to Synthos operation. Hooks in later as a vanity feature. Not the same as company_sentinel.py (planned Company Pi health watchdog).
 
 **Last Updated:** 2026-03-30
 **Current Phase:** Phase 5 — Deployment Pipeline
@@ -23,10 +23,10 @@
 - Approval queue: validate_03b passing 44/44
 
 ### Phase 2 — Company Node + Validation Infrastructure
-- Company node agents operational: blueprint, sentinel, vault, patches, librarian, fidget, scoop, timekeeper
+- Company node agents operational: scoop, strongbox, company_server (planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive)
 - validate_02.py passing 22/22 (portal surface)
 - validate_03b.py passing 44/44 (approval queue)
-- patches.py bugs fixed (dry-run, timezone, continuous mode)
+- company_auditor.py bugs fixed (dry-run, timezone, continuous mode)
 - Heartbeat architecture resolved (HEARTBEAT_RESOLUTION closed)
 - Full architectural reconciliation complete (26 conflicts identified and logged)
 - Static validation complete (STATIC_VALIDATION_REPORT.md)
@@ -103,9 +103,18 @@ Full blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
 
 ---
 
+## Deferred — Revisit When First Paying Customer Goes Live
+- **Heartbeat fallback service**: Company Pi and Monitor Pi currently have no external watchdog.
+  If either goes down, no alert can be sent (Scoop is on Company Pi; Monitor can't self-report).
+  Current plan: Google Apps Script dead man's switch (POST timestamp on schedule; Gmail alert if stale).
+  When paying customers are live, evaluate purpose-built services (Healthchecks.io, Cronitor) for
+  SMS alerts, status page, and multi-channel notification. For now, Google approach is sufficient.
+
+---
+
 ## Notes for AI Agents
 - This is a paper-trading-only system. TRADING_MODE must remain PAPER.
-- patches.py was killed for this work session — restart at end: `nohup python3 /home/pi/synthos-company/agents/patches.py --mode continuous >> logs/bug_finder.log 2>&1 &`
+- company_auditor.py was killed for this work session — restart at end: `nohup python3 /home/pi/synthos-company/agents/company_auditor.py --mode continuous >> logs/bug_finder.log 2>&1 &`
 - company_node repo is at `/home/pi/synthos-company/` — separate from this retail repo
 - Do NOT rename files or refactor architecture during the normalization sprint
 - See CLAUDE.md for full session context

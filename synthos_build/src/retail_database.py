@@ -163,7 +163,7 @@ def _wait_for_agent_lock(caller='unknown', max_wait=None):
     except Exception:
         release_agent_lock()
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'signals.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'user', 'signals.db')
 
 logging.basicConfig(
     level=logging.INFO,

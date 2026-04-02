@@ -131,8 +131,8 @@ SEED_ITEMS = [
             "Scout POSTs signal data to MONITOR_URL/api/news-feed when COMPANY_SUBSCRIPTION=true. "
             "No company agent currently handles this endpoint. "
             "Build a receiver on the company node that: (1) accepts the POST, (2) writes to a "
-            "company-side news_feed table or log, (3) makes signal history available to Patches "
-            "for pattern analysis and to Blueprint for backlog suggestions. "
+            "company-side news_feed table or log, (3) makes signal history available to company_auditor.py "
+            "for pattern analysis. "
             "This enables company-side learning from retail signal activity over time."
         ),
         category     = "improvement",
@@ -164,9 +164,9 @@ SEED_ITEMS = [
             "seed_backlog.py exists but must be run manually after company Pi install. "
             "install_company.py (or retail_boot_sequence.py on company node) should call "
             "seed_backlog.py --write automatically on first boot if suggestions.json is empty. "
-            "This ensures Blueprint and Patches have a populated backlog from day one "
+            "This ensures company_auditor.py has a populated backlog from day one "
             "without requiring an operator manual step. "
-            "Implementation: add a first-boot sentinel check in retail_boot_sequence.py for the "
+            "Implementation: add a first-boot install-complete check in retail_boot_sequence.py for the "
             "company node; if data/suggestions.json is missing or empty, run seed_backlog.py."
         ),
         category     = "improvement",
@@ -193,13 +193,13 @@ SEED_ITEMS = [
     ),
 
     make_suggestion(
-        title       = "T-15/T-16: Activate IP allowlisting enforcement in Sentinel",
+        title       = "T-15/T-16: Activate IP allowlisting enforcement in company_sentinel.py",
         description = (
             "config/allowed_ips.json is written by the installer with a stub list. "
-            "Sentinel reads this file but does not yet enforce it — heartbeat POSTs from "
+            "company_sentinel.py reads this file but does not yet enforce it — heartbeat POSTs from "
             "unknown IPs are logged but not rejected with 403. "
-            "When activated: Sentinel should return 403 for heartbeat POSTs from IPs not "
-            "in the allowed list, log the attempt, and alert Patches after 3+ attempts "
+            "When activated: company_sentinel.py should return 403 for heartbeat POSTs from IPs not "
+            "in the allowed list, log the attempt, and alert company_auditor.py after 3+ attempts "
             "from the same unknown IP within one hour. "
             "Deferred until: (1) the IP inventory is stable, (2) SSH access is confirmed "
             "from all expected locations. Activating prematurely will lock out the operator."
@@ -207,7 +207,7 @@ SEED_ITEMS = [
         category     = "security",
         scope        = "system_wide",
         priority     = "medium",
-        target_files = ["synthos_build/sentinel.py", "synthos_build/config/allowed_ips.json"],
+        target_files = ["synthos_build/company_sentinel.py", "synthos_build/config/allowed_ips.json"],
     ),
 
     # ── LOW PRIORITY ──────────────────────────────────────────────────────
@@ -323,7 +323,7 @@ SEED_ITEMS = [
             "(5) Tracks interrogation validation rates per Pi (% VALIDATED vs UNVALIDATED); "
             "(6) Surfaces anomalies: a Pi consistently diverging from peers warrants investigation. "
             "Output: a structured comparison JSON at /api/pi-comparison on synthos_monitor.py, "
-            "and a summary section in Patches' morning digest. "
+            "and a summary section in company_auditor.py's morning digest. "
             "Requires: all retail Pis already POST heartbeat + daily report to monitor — "
             "comparison log extends this existing data stream, no new Pi-side code needed."
         ),
@@ -372,9 +372,10 @@ SEED_ITEMS = [
             "Maintenance, Repair, Security, Data, Observability) but does not explicitly "
             "classify the company agents. Built agents: scoop.py (Observability/Dispatch), "
             "strongbox.py (Data/Backup), company_server.py (Runtime/API). "
-            "Planned agents (aliases → purpose): timekeeper=DB write gatekeeper, "
-            "vault=license/key manager, librarian=data archivist, sentinel=health watchdog, "
-            "fidget=keep-alive daemon, patches=bug detector, blueprint=config manager. "
+            "Planned agents (descriptive filenames → purpose): "
+            "company_vault.py=license/key manager, company_archivist.py=data archivist, "
+            "company_sentinel.py=health watchdog, company_keepalive.py=keep-alive daemon, "
+            "company_auditor.py=bug/issue detector. "
             "Add a company agents section with TDA classification for each built agent. "
             "No code change — documentation only."
         ),
