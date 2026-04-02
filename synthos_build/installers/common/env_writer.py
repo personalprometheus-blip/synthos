@@ -110,6 +110,8 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"OWNER_NAME={config.get('owner_name', '')}",
         f"OWNER_EMAIL={config.get('owner_email', '')}",
         f"OWNER_PASSWORD={config.get('owner_password', '')}",
+        f"# 'standard' or 'early_adopter' — controls which pricing experience you see.",
+        f"OWNER_PRICING_TIER={config.get('owner_pricing_tier', 'standard')}",
         f"# Populated automatically on first portal startup — do not edit manually.",
         f"OWNER_CUSTOMER_ID={config.get('owner_customer_id', '')}",
         f"STARTING_CAPITAL={config.get('starting_capital', '100')}",

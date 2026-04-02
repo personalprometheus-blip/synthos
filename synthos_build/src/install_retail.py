@@ -1102,6 +1102,7 @@ def repair_mode() -> int:
         "OWNER_NAME":           "owner_name",
         "OWNER_EMAIL":          "owner_email",
         "OWNER_PASSWORD":       "owner_password",
+        "OWNER_PRICING_TIER":   "owner_pricing_tier",
         "OWNER_CUSTOMER_ID":    "owner_customer_id",
         "STARTING_CAPITAL":     "starting_capital",
         "SUPPORT_EMAIL":        "support_email",

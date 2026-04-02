@@ -189,7 +189,8 @@ def _migrate_auth_db():
 # ── ACCOUNT MANAGEMENT ──────────────────────────────────────────────────────
 
 def create_customer(email: str, password: str, display_name: str = '',
-                    role: str = 'customer', auto_activate: bool = False) -> str:
+                    role: str = 'customer', auto_activate: bool = False,
+                    pricing_tier: str = 'standard') -> str:
     """
     Create a new customer account. Returns the customer ID (UUID).
     Raises ValueError if the email is already registered.
@@ -201,6 +202,9 @@ def create_customer(email: str, password: str, display_name: str = '',
     auto_activate=False (default, used for Stripe-webhook-created accounts via
       create_unverified_customer()):
       Account is inactive until the customer completes /setup-account flow.
+
+    pricing_tier: 'standard' (default) or 'early_adopter'. Locked in at creation
+      when auto_activate=True; left NULL for Stripe-flow accounts until activation.
     """
     email       = email.lower().strip()
     customer_id = str(uuid.uuid4())
@@ -221,8 +225,9 @@ def create_customer(email: str, password: str, display_name: str = '',
         c.execute(
             """INSERT INTO customers
                (id, email_hash, email_enc, display_name_enc, password_hash, role,
-                email_verified, subscription_status, pricing_locked_at, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                email_verified, subscription_status, pricing_tier,
+                pricing_locked_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 customer_id,
                 email_hash,
@@ -232,6 +237,7 @@ def create_customer(email: str, password: str, display_name: str = '',
                 role,
                 email_verified,
                 subscription_status,
+                pricing_tier,
                 pricing_locked_at,
                 now,
             )
@@ -239,7 +245,7 @@ def create_customer(email: str, password: str, display_name: str = '',
 
     # Create per-customer data directory (holds their signals.db)
     os.makedirs(os.path.join(CUSTOMERS_DIR, customer_id), exist_ok=True)
-    log.info(f"Created customer {customer_id} (role={role} auto_activate={auto_activate})")
+    log.info(f"Created customer {customer_id} (role={role} tier={pricing_tier} auto_activate={auto_activate})")
     return customer_id
 
 
@@ -685,7 +691,12 @@ def ensure_owner_customer() -> str | None:
     owner_email    = os.environ.get('OWNER_EMAIL', '').strip()
     owner_password = os.environ.get('OWNER_PASSWORD', '').strip()
     owner_name     = os.environ.get('OWNER_NAME', 'Owner').strip()
+    owner_tier     = os.environ.get('OWNER_PRICING_TIER', 'standard').strip()
     existing_id    = os.environ.get('OWNER_CUSTOMER_ID', '').strip()
+
+    if owner_tier not in ('standard', 'early_adopter'):
+        log.warning(f"OWNER_PRICING_TIER '{owner_tier}' invalid — defaulting to 'standard'")
+        owner_tier = 'standard'
 
     if not owner_email or not owner_password:
         log.info(
@@ -717,6 +728,7 @@ def ensure_owner_customer() -> str | None:
             display_name=owner_name,
             role='customer',
             auto_activate=True,
+            pricing_tier=owner_tier,
         )
         log.info(f"Owner customer account created: {customer_id} ({owner_email})")
     except ValueError:
