@@ -438,9 +438,9 @@ def verify_installation() -> tuple[bool, list[str]]:
         except OSError as exc:
             failures.append(f".env unreadable: {exc}")
 
-    # 2. signals.db exists
+    # 2. auth.db exists
     if not DB_PATH.exists():
-        failures.append("data/signals.db not found")
+        failures.append("data/auth.db not found")
 
     # 3. Required core files present
     missing_files = [f for f in REQUIRED_CORE_FILES if not (CORE_DIR / f).exists()]

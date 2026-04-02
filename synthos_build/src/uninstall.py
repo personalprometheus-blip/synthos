@@ -175,7 +175,7 @@ def backup_database(install_dir, dry_run=False):
     Before deleting, offer to save the signals.db trade history.
     This is the only thing that might have sentimental/analytical value.
     """
-    db_path = os.path.join(install_dir, 'signals.db')
+    db_path = os.path.join(install_dir, 'synthos_build', 'user', 'signals.db')
     if not os.path.exists(db_path):
         return
 

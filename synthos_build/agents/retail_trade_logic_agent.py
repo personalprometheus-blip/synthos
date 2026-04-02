@@ -1996,7 +1996,7 @@ if __name__ == '__main__':
         log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")
         sys.exit(1)
 
-    acquire_agent_lock(f"trade_logic_agent.py:{_CUSTOMER_ID or 'default'}")
+    acquire_agent_lock("retail_trade_logic_agent.py")
     try:
         run(session=args.session)
     except KeyboardInterrupt:

@@ -284,9 +284,9 @@ def run():
 
     # 5. Write heartbeat to monitor server
     try:
-        portfolio    = db.get_portfolio()
-        open_pos     = db.get_open_positions()
-        total        = round(portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in open_pos), 2)
+        portfolio    = db.get_portfolio() or {}
+        open_pos     = db.get_open_positions() or []
+        total        = round(portfolio.get('cash', 0.0) + sum(p['entry_price'] * p['shares'] for p in open_pos), 2)
         from retail_heartbeat import write_heartbeat
         write_heartbeat(
             agent_name="health_check",

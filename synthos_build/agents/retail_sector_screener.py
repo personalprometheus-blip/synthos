@@ -367,5 +367,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Synthos Sector Screener')
     parser.add_argument('--sector', default='Energy',
                         help='Sector to screen (default: Energy)')
-    args = parser.parse_args()
+    parser.add_argument('--customer-id', default=None,
+                        help='Customer UUID (passed by scheduler — screener is shared, value ignored)')
+    args, _ = parser.parse_known_args()
     run(sector=args.sector)

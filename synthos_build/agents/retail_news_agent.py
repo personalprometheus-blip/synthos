@@ -3021,7 +3021,7 @@ if __name__ == '__main__':
         except Exception as _e:
             log.warning(f"Could not load customer credentials from auth.db: {_e}")
 
-    acquire_agent_lock(f"news_agent.py:{_CUSTOMER_ID or 'default'}")
+    acquire_agent_lock("retail_news_agent.py")
     try:
         run(session=args.session)
     except KeyboardInterrupt:

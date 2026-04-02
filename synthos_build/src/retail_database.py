@@ -1567,6 +1567,22 @@ def get_db():
     return _db_instance
 
 
+_CUSTOMERS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'customers')
+
+def get_customer_db(customer_id: str) -> 'DB':
+    """
+    Return a DB instance scoped to a specific customer.
+    DB lives at data/customers/<customer_id>/signals.db.
+    Directory is created on first call if it doesn't exist.
+    Each agent process gets its own instance — no cross-customer sharing.
+    """
+    if not customer_id:
+        raise ValueError("customer_id must not be empty")
+    customer_dir = os.path.join(_CUSTOMERS_DIR, customer_id)
+    os.makedirs(customer_dir, exist_ok=True)
+    return DB(path=os.path.join(customer_dir, 'signals.db'))
+
+
 # ── SELF-TEST ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("Running database self-test...")

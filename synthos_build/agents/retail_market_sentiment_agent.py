@@ -2769,7 +2769,7 @@ def run():
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    acquire_agent_lock("market_sentiment_agent.py")
+    acquire_agent_lock("retail_market_sentiment_agent.py")
     try:
         run()
     except KeyboardInterrupt:
