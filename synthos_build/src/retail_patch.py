@@ -205,7 +205,7 @@ def smoke_test():
     Returns True if clean.
     """
     try:
-        result = os.popen(f'cd {PROJECT_DIR} && python3 -c "from database import DB; db = DB(); print(db.integrity_check())" 2>&1').read().strip()
+        result = os.popen(f'cd {PROJECT_DIR} && python3 -c "from retail_database import DB; db = DB(); print(db.integrity_check())" 2>&1').read().strip()
         if 'True' in result:
             log.info("Smoke test: database module OK")
             return True

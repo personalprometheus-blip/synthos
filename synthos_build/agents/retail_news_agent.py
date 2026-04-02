@@ -43,7 +43,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 # ANTHROPIC_API_KEY removed — News agent uses no LLM in classification decisions.
@@ -2574,6 +2574,10 @@ def run(session="market"):
         # No daily guard — dedup inside handles repeat fetches; updates hourly.
         news_stored = fetch_and_store_alpaca_display_news(db)
         log.info(f"Alpaca display news: {news_stored} new headlines stored")
+    else:
+        # Also refresh display-only news headlines overnight so portal is populated by morning
+        alpaca_stored = fetch_and_store_alpaca_display_news(db)
+        log.info(f"Overnight news refresh: {alpaca_stored} new headlines stored")
 
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
@@ -2987,7 +2991,7 @@ def run(session="market"):
     _handle_screening_requests(db)
 
     try:
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="news_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")

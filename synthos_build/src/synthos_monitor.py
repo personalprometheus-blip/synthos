@@ -116,6 +116,7 @@ def send_alert(pi_id, last_seen):
     if not RESEND_API_KEY:
         print(f"[ALERT] No Resend key — would have alerted for {pi_id}")
         return
+    import json as _json
     elapsed = round((now_utc() - last_seen).total_seconds() / 3600, 1)
     try:
         import requests as _req

@@ -54,7 +54,7 @@ _ROOT_DIR   = os.path.dirname(_SCRIPT_DIR)
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
@@ -1938,7 +1938,7 @@ def run(session="open"):
                  portfolio_value=total_value)
 
     try:
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="trade_logic_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")

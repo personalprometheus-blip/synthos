@@ -45,7 +45,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET                = ZoneInfo("America/New_York")
@@ -2761,7 +2761,7 @@ def run():
 
     # Post heartbeat to monitor server
     try:
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="market_sentiment_agent", status="OK")
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")

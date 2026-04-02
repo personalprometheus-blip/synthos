@@ -3209,7 +3209,7 @@ async function loadScreening() {
     const d = await r.json();
     const candidates = d.candidates || [];
     if (!candidates.length) {
-      meta.textContent = 'No screening data yet. Run sector_screener.py to populate.';
+      meta.textContent = 'No screening data yet. Run retail_sector_screener.py to populate.';
       return;
     }
     const c0 = candidates[0];
@@ -3309,6 +3309,7 @@ loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
+loadNews('all');
 setInterval(loadLiveStatus, 30000);
 setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
@@ -3525,7 +3526,7 @@ def api_kill_switch():
                 f.write(f"Kill switch engaged at {now_et()}\n")
             log.warning("KILL SWITCH ENGAGED via portal")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("KILL_SWITCH_ENGAGED", agent="portal",
                                    details=f"Engaged via web portal at {now_et()}")
             except Exception:
@@ -3535,7 +3536,7 @@ def api_kill_switch():
                 os.remove(KILL_SWITCH_FILE)
             log.info("Kill switch cleared via portal")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("KILL_SWITCH_CLEARED", agent="portal",
                                    details=f"Cleared via web portal at {now_et()}")
             except Exception:
@@ -3599,7 +3600,7 @@ def api_unlock_autonomous():
     if key != AUTONOMOUS_UNLOCK_KEY:
         log.warning(f"Failed autonomous unlock attempt at {now_et()}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("AUTONOMOUS_UNLOCK_FAILED", agent="portal",
                                details=f"Bad key attempt at {now_et()}")
         except Exception:
@@ -3611,7 +3612,7 @@ def api_unlock_autonomous():
     log.info(f"Autonomous mode unlocked via portal at {now_et()}")
 
     try:
-        from database import get_db
+        from retail_database import get_db
         get_db().log_event("AUTONOMOUS_UNLOCKED", agent="portal",
                            details=f"Autonomous mode activated at {now_et()}")
     except Exception:
@@ -3690,7 +3691,7 @@ def api_keys():
     if updated:
         log.info(f"Keys updated via portal: {updated}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("KEYS_UPDATED", agent="portal",
                                details=f"Updated: {', '.join(updated)}")
         except Exception:
@@ -3723,7 +3724,7 @@ def api_settings():
                 update_env(env_key, str(data[form_key]))
         log.info(f"Settings updated: {list(data.keys())}")
         try:
-            from database import get_db
+            from retail_database import get_db
             get_db().log_event("SETTINGS_UPDATED", agent="portal",
                                details=str(data))
         except Exception:
@@ -3841,7 +3842,7 @@ def api_market_chart_data():
     """
     hours = min(int(request.args.get('hours', 36)), 720)
     import requests as _req
-    from datetime import timezone
+    from datetime import timezone, timedelta
     from dateutil import parser as _dp
 
     alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
@@ -4058,7 +4059,7 @@ def api_system_health():
         db = _customer_db()
         hb = db.get_last_heartbeat('trade_logic_agent')
         if not hb:
-            hb = db.get_last_heartbeat('news_agent')
+            hb = db.get_last_heartbeat('retail_news_agent')
         if hb:
             health['claude_api'] = {
                 'status':    'ok',
@@ -4089,7 +4090,7 @@ def api_system_health():
         # Raise an urgent flag if RAM is critically high
         if vm.percent >= 85:
             try:
-                from database import get_db as _gdb
+                from retail_database import get_db as _gdb
                 _db = _gdb()
                 severity = 'CRITICAL' if vm.percent >= 92 else 'WARNING'
                 _db.write_urgent_flag(
@@ -4201,7 +4202,7 @@ def logs_page():
     """Tail log files from the browser."""
     log_files = {
         'trader':    'trade_logic_agent.log',
-        'scout':     'scout.log',
+        'scout':     'news_agent.log',
         'pulse':     'market_sentiment_agent.log',
         'portal':    'portal.log',
         'watchdog':  'watchdog.log',
@@ -4263,10 +4264,91 @@ def logs_page():
     {fname} &middot; auto-refresh off
   </span>
 </div>
-<div class="log-box">{log_content_escaped}</div>
-<script>window.scrollTo(0, document.body.scrollHeight);</script>
+<div class="body-columns">
+  <div class="log-col">
+    <div class="log-box" id="log-content">{log_content_escaped}</div>
+  </div>
+  <div class="rss-col">
+    <div class="rss-header">
+      <span class="rss-title">Live RSS Feed</span>
+      <span class="rss-dot"></span>
+    </div>
+    <div id="rss-stream"><div class="rss-empty">Loading&hellip;</div></div>
+  </div>
+</div>
+<script>
+document.getElementById('log-content').scrollIntoView({{block:'end'}});
+function rssAge(ts) {{
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ','T'));
+  const s = Math.floor((Date.now() - d)/1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}}
+async function loadRss() {{
+  try {{
+    const r = await fetch('/api/rss-stream');
+    if (!r.ok) return;
+    const d = await r.json();
+    const items = d.items || [];
+    const el = document.getElementById('rss-stream');
+    if (!items.length) {{
+      el.innerHTML = '<div class="rss-empty">No feed data yet &mdash; Scout populates on next run</div>';
+      return;
+    }}
+    el.innerHTML = items.map(a => `
+      <div class="rss-item">
+        <div class="rss-source">${{a.source || 'RSS'}}</div>
+        <div class="rss-headline">${{a.headline}}</div>
+        <div class="rss-age">${{rssAge(a.created_at)}}</div>
+      </div>`).join('');
+  }} catch(e) {{}}
+}}
+loadRss();
+setInterval(loadRss, 90000);
+</script>
 </body></html>"""
     return html
+
+
+@app.route('/api/rss-stream')
+@login_required
+def api_rss_stream():
+    """RSS headlines for the logs-page side panel. Reads news_feed source=NEWS,
+    returns the 60 most recent items with source label and timestamp."""
+    try:
+        from retail_database import get_db as _gdb
+        db = _gdb()
+        with db.conn() as c:
+            rows = c.execute("""
+                SELECT raw_headline, metadata, created_at FROM news_feed
+                WHERE source = 'NEWS'
+                ORDER BY created_at DESC LIMIT 60
+            """).fetchall()
+        items = []
+        seen = set()
+        for r in rows:
+            headline = r['raw_headline'] or ''
+            key = headline.lower()[:60]
+            if key in seen:
+                continue
+            seen.add(key)
+            meta = {}
+            try:
+                meta = json.loads(r['metadata'] or '{}')
+            except Exception:
+                pass
+            items.append({
+                'headline':   headline,
+                'source':     meta.get('feed_name') or meta.get('source') or 'RSS',
+                'created_at': r['created_at'],
+                'link':       meta.get('link', ''),
+            })
+        return jsonify({'items': items})
+    except Exception as e:
+        return jsonify({'items': [], 'error': str(e)})
 
 
 # ── BOOT ──────────────────────────────────────────────────────────────────
@@ -4371,7 +4453,7 @@ def api_update():
             output = (result.stdout + result.stderr).strip()
             log.info(f"Self-update result: {output[:200]}")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("SELF_UPDATE", agent="portal",
                                    details=output[:200])
             except Exception:
@@ -4393,11 +4475,11 @@ def api_update():
 # Files allowed to be uploaded/managed
 MANAGED_FILES = {
     # Core agents
-    'trade_logic_agent.py', 'news_agent.py', 'market_sentiment_agent.py',
+    'retail_trade_logic_agent.py', 'retail_news_agent.py', 'retail_market_sentiment_agent.py',
     # Infrastructure
-    'database.py', 'heartbeat.py', 'boot_sequence.py', 'watchdog.py',
-    'cleanup.py', 'shutdown.py', 'health_check.py', 'portal.py',
-    'daily_digest.py', 'digest_agent.py', 'patch.py', 'sync.py',
+    'retail_database.py', 'retail_heartbeat.py', 'retail_boot_sequence.py', 'retail_watchdog.py',
+    'retail_cleanup.py', 'retail_shutdown.py', 'retail_health_check.py', 'retail_portal.py',
+    'daily_digest.py', 'digest_agent.py', 'retail_patch.py', 'retail_sync.py',
     'synthos_monitor.py', 'install.py',
     # Scripts
     'qpush.sh', 'qpull.sh', 'portal_cmd.sh', 'console_cmd.sh',
@@ -4520,11 +4602,11 @@ def api_files_upload():
             uploaded.append(fname)
             log.info(f"File uploaded via portal: {fname} ({os.path.getsize(dest)} bytes)")
             try:
-                from database import get_db
+                from retail_database import get_db
                 get_db().log_event("FILE_UPLOADED", agent="portal", details=fname)
             except Exception:
                 pass
-            if fname == 'portal.py':
+            if fname == 'retail_portal.py':
                 restart_portal = True
         except Exception as e:
             errors.append(f"{fname}: {str(e)}")

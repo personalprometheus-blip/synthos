@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from database import get_db
+from retail_database import get_db
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY  = os.environ.get('ALPACA_API_KEY', '')

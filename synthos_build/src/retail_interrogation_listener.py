@@ -114,7 +114,7 @@ def validate(ticker, signal_id, price_summary):
     # ── Check 3: no duplicate active signal in DB ─────────────────────────
     try:
         sys.path.insert(0, str(BASE_DIR))
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         cutoff = (
             datetime.now(timezone.utc) - timedelta(hours=DUPLICATE_WINDOW)

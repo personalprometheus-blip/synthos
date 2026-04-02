@@ -30,7 +30,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 ALPACA_API_KEY  = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET   = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE_URL = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
-SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM      = os.environ.get('ALERT_FROM', '')
 ALERT_TO        = os.environ.get('ALERT_TO', os.environ.get('USER_EMAIL', ''))
 TRADING_MODE    = os.environ.get('TRADING_MODE', 'PAPER')
@@ -96,7 +96,7 @@ def _enqueue_alert(subject: str, message: str, priority: int,
 def send_alert(message: str) -> bool:
     """
     Send health alert. Primary: Scoop enqueue (P1).
-    Fallback: SendGrid direct send if enqueue fails.
+    Fallback: Resend direct send if enqueue fails.
     Gmail SMTP path available — uncomment in .env and below when configured.
     """
     subject    = "Synthos Health Alert"
@@ -107,31 +107,28 @@ def send_alert(message: str) -> bool:
     if _enqueue_alert(subject, message, priority, event_type):
         return True
 
-    # Fallback: SendGrid direct
-    if SENDGRID_API_KEY and ALERT_FROM and ALERT_TO:
+    # Fallback: Resend direct
+    if RESEND_API_KEY and ALERT_FROM and ALERT_TO:
         try:
-            import requests as _req
-            r = _req.post(
-                'https://api.sendgrid.com/v3/mail/send',
-                headers={
-                    'Authorization': f'Bearer {SENDGRID_API_KEY}',
-                    'Content-Type':  'application/json',
-                },
-                json={
-                    'personalizations': [{'to': [{'email': ALERT_TO}]}],
-                    'from':             {'email': ALERT_FROM},
-                    'subject':          subject,
-                    'content':          [{'type': 'text/plain', 'value': message}],
-                },
-                timeout=10,
-            )
-            if r.status_code in (200, 202):
-                log.info(f"Health alert sent via SendGrid → {ALERT_TO}")
-                return True
-            else:
-                log.error(f"SendGrid returned {r.status_code}: {r.text[:100]}")
+            import urllib.request as _urlreq, json as _json
+            _payload = _json.dumps({
+                "from":    ALERT_FROM,
+                "to":      [ALERT_TO],
+                "subject": subject,
+                "text":    message,
+            }).encode()
+            _req = _urlreq.Request(
+                "https://api.resend.com/emails", data=_payload,
+                headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                         "Content-Type": "application/json"})
+            with _urlreq.urlopen(_req, timeout=10) as r:
+                if r.status in (200, 201):
+                    log.info(f"Health alert sent via Resend → {ALERT_TO}")
+                    return True
+                else:
+                    log.error(f"Resend returned {r.status}")
         except Exception as e:
-            log.error(f"SendGrid fallback failed: {e}")
+            log.error(f"Resend fallback failed: {e}")
 
     # ── Gmail SMTP path (uncomment when GMAIL_USER / GMAIL_APP_PASSWORD set) ──
     # GMAIL_USER     = os.environ.get('GMAIL_USER', '')
@@ -259,7 +256,7 @@ def run():
 
     # Import DB
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         log.info("✓ Database module loaded")
     except Exception as e:
@@ -290,7 +287,7 @@ def run():
         portfolio    = db.get_portfolio()
         open_pos     = db.get_open_positions()
         total        = round(portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in open_pos), 2)
-        from heartbeat import write_heartbeat
+        from retail_heartbeat import write_heartbeat
         write_heartbeat(
             agent_name="health_check",
             status="REBOOT_OK" if not issues else "REBOOT_ISSUES"

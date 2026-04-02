@@ -10,7 +10,7 @@ critical fails.
 Boot order:
   1. Wait for network
   2. Verify project integrity (.env, files, DB)
-  3. Run health_check.py
+  3. Run retail_health_check.py
   4. Start watchdog in background
   5. Write boot heartbeat
   6. Log boot complete — cron takes over
@@ -58,19 +58,19 @@ log = logging.getLogger('boot')
 # Required files — if any are missing boot halts
 # cleanup.py omitted: runs via cron, absence is non-fatal at boot
 REQUIRED_FILES = [
-    'database.py',
-    'heartbeat.py',
-    'health_check.py',
-    'shutdown.py',
-    'watchdog.py',
-    'portal.py',
+    'retail_database.py',
+    'retail_heartbeat.py',
+    'retail_health_check.py',
+    'retail_shutdown.py',
+    'retail_watchdog.py',
+    'retail_portal.py',
 ]
 
 # Trading agents live in agents/ — checked separately
 REQUIRED_AGENT_FILES = [
-    'trade_logic_agent.py',
-    'news_agent.py',
-    'market_sentiment_agent.py',
+    'retail_trade_logic_agent.py',
+    'retail_news_agent.py',
+    'retail_market_sentiment_agent.py',
 ]
 
 BOOT_STEPS = []   # records pass/fail for each step
@@ -211,14 +211,14 @@ def step4_database():
 
 def step5_health_check():
     """
-    Step 5 — Run health_check.py.
+    Step 5 — Run retail_health_check.py.
     Non-fatal — if it times out or fails, boot continues.
     Uses 30s timeout since Alpaca can be slow on cold boot.
     """
     log.info("Step 5/9 — Health check")
-    hc_path = os.path.join(PROJECT_DIR, 'health_check.py')
+    hc_path = os.path.join(PROJECT_DIR, 'retail_health_check.py')
     if not os.path.exists(hc_path):
-        return step("Health check", True, "health_check.py not found — skipping")
+        return step("Health check", True, "retail_health_check.py not found — skipping")
     try:
         result = subprocess.run(
             [sys.executable, hc_path],
@@ -245,9 +245,9 @@ def step5_health_check():
 def step6_watchdog():
     """Step 6 — Start watchdog in background."""
     log.info("Step 6/9 — Watchdog")
-    wd_path = os.path.join(PROJECT_DIR, 'watchdog.py')
+    wd_path = os.path.join(PROJECT_DIR, 'retail_watchdog.py')
     if not os.path.exists(wd_path):
-        return step("Watchdog", False, "watchdog.py not found")
+        return step("Watchdog", False, "retail_watchdog.py not found")
     try:
         global watchdog_process
         log_path = os.path.join(LOG_DIR, 'watchdog.log')
@@ -269,9 +269,9 @@ def step6_watchdog():
 def step7_portal():
     """Step 7 — Start portal web server in background."""
     log.info("Step 7/9 — Portal")
-    portal_path = os.path.join(PROJECT_DIR, 'portal.py')
+    portal_path = os.path.join(PROJECT_DIR, 'retail_portal.py')
     if not os.path.exists(portal_path):
-        return step("Portal", False, "portal.py not found — portal unavailable")
+        return step("Portal", False, "retail_portal.py not found — portal unavailable")
     try:
         log_path = os.path.join(LOG_DIR, 'portal.log')
         with open(log_path, 'a') as logf:
@@ -325,13 +325,13 @@ def step8_monitor():
 def step9_initial_seed():
     """
     Step 9 — Seed intelligence data on first boot or if signals DB is empty.
-    Runs news_agent.py to fetch last 45 days of congressional disclosures.
+    Runs retail_news_agent.py to fetch last 45 days of congressional disclosures.
     Only runs if signals table is empty to avoid duplicating data on normal reboots.
     """
     log.info("Step 9/9 — Initial data seed")
     try:
         sys.path.insert(0, PROJECT_DIR)
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         # Check if signals table has data
         with db.conn() as c:
@@ -341,9 +341,9 @@ def step9_initial_seed():
 
         # Empty DB — run initial seed
         log.info("Empty signals DB — running initial 45-day seed...")
-        research_path = os.path.join(AGENTS_DIR, 'news_agent.py')
+        research_path = os.path.join(AGENTS_DIR, 'retail_news_agent.py')
         if not os.path.exists(research_path):
-            return step("Data seed", False, "news_agent.py not found")
+            return step("Data seed", False, "retail_news_agent.py not found")
 
         log_path = os.path.join(LOG_DIR, 'daily.log')
         with open(log_path, 'a') as logf:
@@ -455,7 +455,7 @@ def write_boot_heartbeat():
     """Write boot event to database and Google Sheets if configured."""
     try:
         sys.path.insert(0, PROJECT_DIR)
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
         db.log_event(
             "BOOT_COMPLETE",
@@ -466,7 +466,7 @@ def write_boot_heartbeat():
         log.warning(f"Could not write to DB: {e}")
 
     try:
-        hb_path = os.path.join(PROJECT_DIR, 'heartbeat.py')
+        hb_path = os.path.join(PROJECT_DIR, 'retail_heartbeat.py')
         if os.path.exists(hb_path):
             subprocess.run(
                 [sys.executable, hb_path, '--agent', 'boot_sequence', '--status', 'BOOT_OK'],

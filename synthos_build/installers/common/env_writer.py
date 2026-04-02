@@ -179,6 +179,7 @@ def build_company_env(config: dict) -> str:
         f"ALERT_FROM={config.get('alert_from', '')}",
         f"ALERT_TO={config.get('alert_to', '')}",
         f"OPS_EMAIL={config.get('ops_email', '')}",
+        f"OPERATOR_EMAIL={config.get('operator_email', '')}",
         f"",
         f"# ── SCOOP SETTINGS ────────────────────────────────────────────",
         f"SCOOP_POLL_S={config.get('scoop_poll_s', '5')}",

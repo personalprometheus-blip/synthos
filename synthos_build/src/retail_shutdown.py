@@ -36,7 +36,7 @@ def run():
     log.info("Synthos graceful shutdown starting — Saturday maintenance window")
 
     try:
-        from database import get_db
+        from retail_database import get_db
         db = get_db()
     except Exception as e:
         log.error(f"Cannot load database: {e}")
