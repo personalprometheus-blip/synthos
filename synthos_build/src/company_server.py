@@ -34,7 +34,7 @@ import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, render_template_string, request, url_for
@@ -241,7 +241,10 @@ def api_queue():
 
     status = request.args.get("status", "pending")
     pi_id  = request.args.get("pi_id")
-    limit  = min(int(request.args.get("limit", 50)), 200)
+    try:
+        limit = min(int(request.args.get("limit", 50)), 200)
+    except (ValueError, TypeError):
+        limit = 50
 
     try:
         with _db_conn() as conn:
@@ -752,7 +755,10 @@ def company_logs():
         ), 401
 
     selected = request.args.get('file', 'scoop')
-    lines    = int(request.args.get('lines', 100))
+    try:
+        lines = int(request.args.get('lines', 100))
+    except (ValueError, TypeError):
+        lines = 100
     fname    = _COMPANY_LOG_FILES.get(selected, 'scoop.log')
     fpath    = os.path.join(LOG_DIR, fname)
 
@@ -835,9 +841,34 @@ def console():
     return render_template_string(DASHBOARD_HTML)
 
 
+# ── Retention ─────────────────────────────────────────────────────────────────
+_PI_EVENTS_RETAIN_DAYS = int(os.getenv("PI_EVENTS_RETAIN_DAYS", "30"))
+
+def trim_pi_events():
+    """
+    Delete pi_events rows older than PI_EVENTS_RETAIN_DAYS (default 30 days).
+    Run on startup to prevent unbounded table growth.
+    """
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=_PI_EVENTS_RETAIN_DAYS)).isoformat()
+    try:
+        with _db_conn() as conn:
+            result  = conn.execute(
+                "DELETE FROM pi_events WHERE recorded_at < ?", (cutoff_iso,)
+            )
+            deleted = result.rowcount
+        if deleted:
+            print(f"[Company] Trimmed {deleted} pi_events rows older than {_PI_EVENTS_RETAIN_DAYS} days")
+    except Exception as e:
+        print(f"[Company] Warning: pi_events trim failed: {e}")
+
+
 # ── Boot ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
+    trim_pi_events()
+    if SECRET_TOKEN in ("changeme", ""):
+        print(f"[Company] ⚠  WARNING: SECRET_TOKEN is not set or is the default 'changeme'.")
+        print(f"[Company] ⚠  Set SECRET_TOKEN in .env before exposing this server.")
     print(f"[Company] Running on port {PORT}")
     print(f"[Company] Console at http://0.0.0.0:{PORT}/console?token=<SECRET_TOKEN>")
     print(f"[Company] DB at {DB_PATH}")

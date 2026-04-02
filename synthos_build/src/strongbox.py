@@ -72,7 +72,6 @@ USER_DIR     = _BUILD_DIR / "user"                      # synthos_build/user/
 STAGING_DIR  = _BUILD_DIR / ".backup_staging"           # synthos_build/.backup_staging/
 
 BACKUP_STATUS_FILE = DATA_DIR / "backup_status.json"
-SCOOP_TRIGGER_FILE = DATA_DIR / "scoop_trigger.json"
 
 load_dotenv(USER_DIR / ".env", override=True)
 
@@ -83,9 +82,11 @@ R2_ACCOUNT_ID      = os.environ.get("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY      = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_KEY      = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 ENCRYPTION_KEY_B64 = os.environ.get("BACKUP_ENCRYPTION_KEY", "")
-STALE_HOURS        = 48   # hours before a missing backup triggers CRITICAL
+# Hours before a missing or outdated backup triggers a CRITICAL alert.
+# Override with STRONGBOX_STALE_HOURS in .env (default: 48h).
+STALE_HOURS        = int(os.environ.get("STRONGBOX_STALE_HOURS", "48"))
 
-COMPANY_DB = Path(os.environ.get("COMPANY_DB", str(DATA_DIR / "company.db")))
+COMPANY_DB    = Path(os.environ.get("COMPANY_DB", str(DATA_DIR / "company.db")))
 COMPANY_PI_ID = "company-pi"
 
 # ── LOGGING ───────────────────────────────────────────────────────────────────
@@ -144,10 +145,6 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _r2_key(pi_id: str, date_str: str) -> str:
-    return f"{R2_BUCKET}/{pi_id}/{date_str}/synthos_backup_{pi_id}_{date_str}.tar.gz.enc"
-
-
 def _r2_object_key(pi_id: str, date_str: str) -> str:
     """S3 object key (no bucket prefix)."""
     return f"{pi_id}/{date_str}/synthos_backup_{pi_id}_{date_str}.tar.gz.enc"
@@ -169,30 +166,46 @@ def _save_status(status: dict) -> None:
 
 def _alert_scoop(alert_type: str, pi_id: str, message: str) -> None:
     """
-    Write an alert entry to scoop_trigger.json.
-    Scoop reads this file and delivers the notification — Strongbox never
-    sends email directly.
-    """
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    existing = []
-    if SCOOP_TRIGGER_FILE.exists():
-        try:
-            existing = json.loads(SCOOP_TRIGGER_FILE.read_text())
-            if not isinstance(existing, list):
-                existing = []
-        except (json.JSONDecodeError, OSError):
-            existing = []
+    Insert a P0 CRITICAL alert directly into scoop_queue in company.db so that
+    the Scoop daemon picks it up and dispatches via Resend.
 
-    existing.append({
-        "type":      alert_type,
-        "source":    "strongbox",
-        "pi_id":     pi_id,
-        "message":   message,
-        "queued_at": _now_utc().isoformat(),
-        "delivered": False,
-    })
-    SCOOP_TRIGGER_FILE.write_text(json.dumps(existing, indent=2))
-    log.warning("Scoop alert queued: [%s] %s — %s", alert_type, pi_id, message)
+    Strongbox never sends email directly — all delivery is Scoop's job.
+    All backup alerts are P0 (critical) so they bypass MIN_PRIORITY filtering
+    and are dispatched immediately on the next Scoop tick.
+    """
+    import uuid as _uuid
+    import sqlite3 as _sqlite3
+
+    subject = f"[Synthos] CRITICAL: {alert_type.replace('_', ' ').title()} — {pi_id}"
+    body    = (
+        f"Strongbox backup alert\n\n"
+        f"Type:    {alert_type}\n"
+        f"Pi:      {pi_id}\n"
+        f"Message: {message}\n"
+        f"Time:    {_now_utc().isoformat()}\n\n"
+        f"Check strongbox.log for details."
+    )
+    payload = json.dumps({"alert_type": alert_type, "pi_id": pi_id})
+    now     = _now_utc().isoformat()
+    item_id = str(_uuid.uuid4())
+
+    try:
+        conn = _sqlite3.connect(str(COMPANY_DB), timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            """INSERT INTO scoop_queue
+               (id, event_type, priority, subject, body,
+                source_agent, pi_id, payload, status,
+                queued_at, dispatch_attempts)
+               VALUES (?, ?, 0, ?, ?, 'strongbox', ?, ?, 'pending', ?, 0)""",
+            (item_id, alert_type, subject, body, pi_id, payload, now),
+        )
+        conn.commit()
+        conn.close()
+        log.warning("Scoop alert queued (P0): [%s] %s — %s", alert_type, pi_id, message)
+    except Exception as exc:
+        # Last-resort: if we can't reach the DB, at least it's in the log
+        log.error("Failed to queue Scoop alert (DB unavailable): %s — %s", alert_type, exc)
 
 
 # ── CORE OPERATIONS ──────────────────────────────────────────────────────────

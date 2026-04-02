@@ -64,6 +64,23 @@ MAX_ATTEMPTS      = int(os.getenv("SCOOP_MAX_ATTEMPTS", 3))
 RETRY_DELAY_S     = int(os.getenv("SCOOP_RETRY_DELAY_S", 60))
 DRY_RUN           = os.getenv("SCOOP_DRY_RUN", "").lower() in ("1", "true", "yes")
 
+# ── Email volume controls ──────────────────────────────────────────────────────
+# SCOOP_ENABLED — master dispatch switch.
+#   false (default): Scoop runs, queues build up, nothing is sent.
+#                    Set to true when ready to receive alerts.
+#   true:            Live dispatching via Resend.
+#
+# SCOOP_MIN_PRIORITY — lowest-priority items that will be dispatched.
+#   0 (default): only P0 CRITICAL alerts are sent. Keeps email volume minimal.
+#   1:            P0 + P1 HIGH
+#   2:            P0 + P1 + P2 MEDIUM
+#   3:            all alerts (P0–P3)
+#
+# Items above MIN_PRIORITY stay 'pending' until the threshold is raised —
+# they are never dropped, just deferred.
+ENABLED      = os.getenv("SCOOP_ENABLED",      "false").lower() in ("1", "true", "yes")
+MIN_PRIORITY = int(os.getenv("SCOOP_MIN_PRIORITY", "0"))   # 0 = critical only
+
 # Age (seconds) a pending item must be before Scoop will dispatch it.
 # P0 dispatches immediately; higher priorities get a small hold window.
 PRIORITY_HOLD_S = {
@@ -111,7 +128,8 @@ def _db_conn():
 def _eligible_items():
     """
     Return pending items whose priority hold window has elapsed,
-    that haven't exceeded MAX_ATTEMPTS, ordered by priority then age.
+    that haven't exceeded MAX_ATTEMPTS, and are within SCOOP_MIN_PRIORITY,
+    ordered by priority then age.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
     results = []
@@ -121,9 +139,10 @@ def _eligible_items():
                 """SELECT * FROM scoop_queue
                    WHERE status = 'pending'
                    AND   dispatch_attempts < ?
+                   AND   priority <= ?
                    ORDER BY priority ASC, queued_at ASC
                    LIMIT 50""",
-                (MAX_ATTEMPTS,),
+                (MAX_ATTEMPTS, MIN_PRIORITY),
             ).fetchall()
     except Exception as e:
         print(f"[Scoop] DB fetch error: {e}")
@@ -268,6 +287,9 @@ def _dispatch(item: dict) -> tuple[bool, str]:
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def _drain_batch():
     """Fetch and dispatch one batch of eligible items."""
+    if not ENABLED:
+        return 0   # Standby — queue builds, nothing sent until SCOOP_ENABLED=true
+
     items = _eligible_items()
     if not items:
         return 0
@@ -297,7 +319,14 @@ def _drain_batch():
 
 def run():
     """Main daemon loop."""
+    priority_label = {0: "P0 CRITICAL only", 1: "P0–P1", 2: "P0–P2", 3: "all (P0–P3)"}
     print(f"[Scoop] Starting — poll={POLL_S}s  max_attempts={MAX_ATTEMPTS}  db={DB_PATH}")
+    if not ENABLED:
+        print(f"[Scoop] ⏸  STANDBY — SCOOP_ENABLED=false  "
+              f"Queue will build; no emails sent until enabled and restarted.")
+    else:
+        print(f"[Scoop] ▶  LIVE — dispatching {priority_label.get(MIN_PRIORITY, f'P0–P{MIN_PRIORITY}')} "
+              f"(SCOOP_MIN_PRIORITY={MIN_PRIORITY})")
     if DRY_RUN:
         print(f"[Scoop] ⚠  DRY RUN mode — emails will NOT be sent")
     if not RESEND_API_KEY:
@@ -319,13 +348,17 @@ def run():
     while _running:
         try:
             processed = _drain_batch()
-            if processed == 0 and tick % 60 == 0:
-                # Heartbeat log every ~5 minutes (60 ticks × 5s) when idle
-                print(f"[Scoop] idle — queue clear")
         except Exception as e:
             print(f"[Scoop] Unhandled error in drain loop: {e}")
 
         tick += 1
+        # Heartbeat log every ~5 minutes (60 ticks × 5s) when idle/standby
+        if processed == 0 and tick % 60 == 0:
+            if ENABLED:
+                print(f"[Scoop] idle — queue clear (min_priority=P{MIN_PRIORITY})")
+            else:
+                print(f"[Scoop] standby — SCOOP_ENABLED=false, dispatch paused")
+
         # Sleep in small increments so SIGTERM is caught quickly
         for _ in range(POLL_S):
             if not _running:
