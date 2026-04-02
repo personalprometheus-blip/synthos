@@ -37,6 +37,9 @@ USAGE:
   # Show patch history:
   python3 retail_patch.py --history
 
+  # Health check all three nodes:
+  python3 retail_patch.py --check-nodes
+
   # Check GitHub for updates:
   python3 retail_patch.py --check-remote [--dry-run]
 """
@@ -505,6 +508,286 @@ def show_status():
     print("=" * 70 + "\n")
 
 
+# ── CROSS-NODE HEALTH CHECK ───────────────────────────────────────────────
+
+# Retail agents that are expected to heartbeat into signals.db.
+# Maps agent_name (as stored in system_log) → display label
+RETAIL_AGENTS = {
+    'trade_logic_agent':      'Trade Logic',
+    'news_agent':             'News',
+    'market_sentiment_agent': 'Market Sentiment',
+}
+
+# Stale threshold in seconds for agent heartbeat warnings
+_HB_WARN_S  = 2 * 3600   # > 2 h  → warn (yellow)
+_HB_DEAD_S  = 6 * 3600   # > 6 h  → dead (red)
+
+
+def _fmt_age(seconds: float) -> str:
+    """Human-readable age string from seconds."""
+    if seconds < 120:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    return f"{h}h {m}m" if m else f"{h}h"
+
+
+def _http_get(url: str, headers: dict | None = None, timeout: int = 6) -> tuple[dict | None, str | None]:
+    """
+    Simple HTTP GET returning (json_dict, error_str).
+    No external dependencies — uses urllib only.
+    """
+    try:
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json_loads(r.read().decode('utf-8')), None
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}"
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _check_retail_node() -> list[str]:
+    """
+    Audit the local retail node. Returns a list of formatted status lines.
+    Checks: file presence, Python syntax, DB integrity, agent heartbeats,
+    and portal liveness.
+    """
+    lines = []
+    TICK, WARN, DEAD = "✓", "!", "✗"
+
+    # ── File presence + syntax ────────────────────────────────────────────
+    missing  = []
+    bad_syn  = []
+    present  = 0
+    for fname, subdir in PATCHABLE_FILE_MAP.items():
+        path = resolve_local_path(fname)
+        if not os.path.exists(path):
+            missing.append(f"{subdir}/{fname}")
+            continue
+        present += 1
+        if fname.endswith('.py'):
+            ok, err = validate_python(path)
+            if not ok:
+                bad_syn.append(f"{fname}: {err}")
+
+    total = len(PATCHABLE_FILE_MAP)
+    file_icon = TICK if not missing else DEAD
+    lines.append(f"  {file_icon} Files: {present}/{total} present"
+                 + (f"  — missing: {', '.join(missing)}" if missing else ""))
+    for e in bad_syn:
+        lines.append(f"  {DEAD} Syntax error — {e}")
+
+    # ── Database integrity ────────────────────────────────────────────────
+    if os.path.exists(DB_PATH):
+        try:
+            size_mb = os.path.getsize(DB_PATH) / 1_048_576
+            conn    = sqlite3.connect(DB_PATH, timeout=5)
+            result  = conn.execute("PRAGMA integrity_check").fetchone()
+            conn.close()
+            ok_str  = result[0] if result else "no result"
+            icon    = TICK if ok_str == "ok" else DEAD
+            lines.append(f"  {icon} Database: {ok_str} (signals.db {size_mb:.1f} MB)")
+        except Exception as exc:
+            lines.append(f"  {DEAD} Database: could not check — {exc}")
+    else:
+        lines.append(f"  {WARN} Database: signals.db not found (cold start or wrong path)")
+
+    # ── Agent heartbeats ──────────────────────────────────────────────────
+    lines.append("  Agent heartbeats (from signals.db):")
+    now_ts = datetime.utcnow()
+    if os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=5)
+            conn.row_factory = sqlite3.Row
+            for agent_key, label in RETAIL_AGENTS.items():
+                row = conn.execute("""
+                    SELECT timestamp FROM system_log
+                    WHERE event='HEARTBEAT' AND agent=?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (agent_key,)).fetchone()
+                if not row:
+                    lines.append(f"    {WARN}  {label:<22} never seen (not yet deployed?)")
+                    continue
+                try:
+                    hb_ts   = datetime.fromisoformat(str(row['timestamp']).replace('Z', ''))
+                    age_s   = (now_ts - hb_ts).total_seconds()
+                    age_str = _fmt_age(age_s)
+                    if age_s > _HB_DEAD_S:
+                        icon = DEAD
+                        note = "DEAD"
+                    elif age_s > _HB_WARN_S:
+                        icon = WARN
+                        note = "stale"
+                    else:
+                        icon = TICK
+                        note = ""
+                    lines.append(f"    {icon}  {label:<22} last seen {age_str} ago"
+                                 + (f"  ({note})" if note else ""))
+                except Exception as e:
+                    lines.append(f"    {WARN}  {label:<22} timestamp parse error: {e}")
+            conn.close()
+        except Exception as exc:
+            lines.append(f"    {WARN} Could not read heartbeats: {exc}")
+    else:
+        lines.append(f"    {WARN} Skipped — signals.db not found")
+
+    # ── Portal liveness ───────────────────────────────────────────────────
+    portal_port = os.environ.get('PORTAL_PORT', '5001')
+    portal_url  = f"http://localhost:{portal_port}/health"
+    data, err   = _http_get(portal_url, timeout=3)
+    if err:
+        lines.append(f"  {WARN} Portal ({portal_url}): {err}")
+    else:
+        lines.append(f"  {TICK} Portal (:{portal_port}): responding")
+
+    return lines
+
+
+def _check_monitor_node() -> list[str]:
+    """
+    Check the monitor node via HTTP GET {MONITOR_URL}/health.
+    Returns a list of formatted status lines.
+    """
+    lines  = []
+    TICK, WARN, DEAD = "✓", "!", "✗"
+    url    = os.environ.get('MONITOR_URL', '').rstrip('/')
+    token  = os.environ.get('MONITOR_TOKEN', '')
+
+    if not url:
+        lines.append(f"  {WARN} MONITOR_URL not set — skipping monitor node check")
+        return lines
+
+    data, err = _http_get(f"{url}/health", timeout=6)
+    if err:
+        lines.append(f"  {DEAD} Unreachable ({url}/health): {err}")
+        return lines
+
+    status    = data.get("status", "unknown")
+    pi_count  = data.get("pi_count", 0)
+    pis       = data.get("pis", [])
+
+    icon = TICK if status == "ok" else DEAD
+    lines.append(f"  {icon} Monitor online — {pi_count} Pi(s) in registry")
+
+    for pi in pis:
+        age_s   = pi.get("age_secs", 0)
+        label   = pi.get("label") or pi.get("pi_id", "unknown")
+        st      = pi.get("status", "unknown")
+        age_str = _fmt_age(age_s)
+        if age_s > _HB_DEAD_S:
+            icon = DEAD
+        elif age_s > _HB_WARN_S:
+            icon = WARN
+        else:
+            icon = TICK
+        lines.append(f"    {icon}  {label:<22} {st:<10} last hb {age_str} ago")
+
+    if not pis:
+        lines.append(f"    {WARN} No Pis currently registered")
+
+    return lines
+
+
+def _check_company_node() -> list[str]:
+    """
+    Check the company node via HTTP GET {COMPANY_URL}/health.
+    Returns a list of formatted status lines.
+    """
+    lines = []
+    TICK, WARN, DEAD = "✓", "!", "✗"
+    url   = os.environ.get('COMPANY_URL', '').rstrip('/')
+
+    if not url:
+        lines.append(f"  {WARN} COMPANY_URL not set — skipping company node check")
+        return lines
+
+    data, err = _http_get(f"{url}/health", timeout=6)
+    if err:
+        lines.append(f"  {DEAD} Unreachable ({url}/health): {err}")
+        return lines
+
+    ok      = data.get("ok", False)
+    queue   = data.get("queue", {})
+    pending = queue.get("PENDING", 0)
+    failed  = queue.get("FAILED", 0)
+    sent    = queue.get("SENT", 0)
+    skipped = queue.get("SKIPPED", 0)
+
+    icon = TICK if ok else DEAD
+    lines.append(f"  {icon} Company node online — Scoop queue: "
+                 f"{pending} pending, {failed} failed, {sent} sent, {skipped} skipped")
+
+    if pending > 0:
+        lines.append(f"  {WARN} {pending} item(s) waiting in dispatch queue")
+    if failed > 0:
+        lines.append(f"  {DEAD} {failed} item(s) in FAILED state — manual retry may be needed")
+
+    return lines
+
+
+def check_all_nodes() -> bool:
+    """
+    Print a full health report across all three Synthos nodes:
+      - Retail node (local): files, syntax, DB, agent heartbeats, portal
+      - Monitor node (MONITOR_URL): Pi registry, heartbeat ages
+      - Company node (COMPANY_URL): Scoop queue counts
+
+    Returns True if no critical issues found.
+    """
+    import json as _json   # local import — avoid polluting module namespace
+
+    sep    = "═" * 62
+    now_et = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    issues = 0
+
+    print(f"\n{sep}")
+    print(f"  SYNTHOS NODE HEALTH — {now_et}")
+    print(sep)
+
+    # ── Retail node ───────────────────────────────────────────────────────
+    print("\n  RETAIL NODE (local)")
+    for line in _check_retail_node():
+        if line.strip().startswith("✗"):
+            issues += 1
+        print(line)
+
+    # ── Monitor node ──────────────────────────────────────────────────────
+    monitor_url = os.environ.get('MONITOR_URL', '(not set)')
+    print(f"\n  MONITOR NODE ({monitor_url})")
+    for line in _check_monitor_node():
+        if line.strip().startswith("✗"):
+            issues += 1
+        print(line)
+
+    # ── Company node ──────────────────────────────────────────────────────
+    company_url = os.environ.get('COMPANY_URL', '(not set)')
+    print(f"\n  COMPANY NODE ({company_url})")
+    for line in _check_company_node():
+        if line.strip().startswith("✗"):
+            issues += 1
+        print(line)
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    print(f"\n{sep}")
+    if issues == 0:
+        print("  ✓ All nodes healthy — no critical issues")
+    else:
+        print(f"  ✗ {issues} critical issue(s) found — review output above")
+    print(f"{sep}\n")
+
+    return issues == 0
+
+
+# helper used inside check_all_nodes — import json at module level below
+import json as _json_mod
+
+def json_loads(s: str) -> dict:
+    return _json_mod.loads(s)
+
+
 # ── GITHUB REMOTE UPDATE ──────────────────────────────────────────────────
 
 GITHUB_REPO     = "personalprometheus-blip/synthos"
@@ -693,6 +976,7 @@ Examples:
     parser.add_argument('--history',      action='store_true', help='Show patch history')
     parser.add_argument('--status',       action='store_true', help='Show file protection / patchable status')
     parser.add_argument('--check-remote', action='store_true', help='Fetch updates from GitHub and apply')
+    parser.add_argument('--check-nodes',  action='store_true', help='Health check all three nodes (retail, monitor, company)')
     parser.add_argument('--version',      action='store_true', help='Show local version')
 
     args = parser.parse_args()
@@ -703,6 +987,10 @@ Examples:
         print(f"\nLocal version:  v{local}")
         print(f"GitHub repo:    {GITHUB_REPO}@{GITHUB_BRANCH}")
         print()
+
+    elif args.check_nodes:
+        success = check_all_nodes()
+        sys.exit(0 if success else 1)
 
     elif args.check_remote:
         success = check_remote(dry_run=args.dry_run)
@@ -739,6 +1027,7 @@ Examples:
         print("  Roll back file:    python3 retail_patch.py --rollback retail_trade_logic_agent.py")
         print("  See history:       python3 retail_patch.py --history")
         print("  Check protection:  python3 retail_patch.py --status")
+        print("  Node health:       python3 retail_patch.py --check-nodes")
         print("  GitHub update:     python3 retail_patch.py --check-remote")
         print("  Preview update:    python3 retail_patch.py --check-remote --dry-run")
         print()

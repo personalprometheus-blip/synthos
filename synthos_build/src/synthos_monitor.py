@@ -1259,6 +1259,31 @@ def console():
     return render_template_string(DASHBOARD, secret_token=SECRET_TOKEN)
 
 # keep old / route as JSON redirect
+@app.route("/health")
+def health():
+    """
+    Unauthenticated health check for the monitor node itself.
+    Returns a compact status snapshot used by retail_patch.py --check-nodes
+    and any external uptime monitor.
+    """
+    with registry_lock:
+        pi_count = len(pi_registry)
+        pis      = []
+        for pi_id, data in pi_registry.items():
+            age_s = int((now_utc() - data["last_seen"]).total_seconds())
+            pis.append({
+                "pi_id":   pi_id,
+                "label":   data.get("label", pi_id),
+                "status":  pi_status(data),
+                "age_secs": age_s,
+            })
+    return jsonify({
+        "status":   "ok",
+        "pi_count": pi_count,
+        "pis":      pis,
+    }), 200
+
+
 @app.route("/")
 def index():
     return jsonify({"status": "Synthos Monitor online", "console": "/console", "api": "/api/status"})
