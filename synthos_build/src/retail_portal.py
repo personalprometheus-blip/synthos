@@ -5877,6 +5877,7 @@ def api_admin_scheduler_history():
 if __name__ == '__main__':
     auth.init_auth_db()
     auth.ensure_admin_account()
+    auth.ensure_owner_customer()
     log.info(f"Synthos Portal starting on port {PORT}")
     log.info(f"Pi: {PI_ID} | Mode: {OPERATING_MODE}")
     log.info(f"Kill switch: {'ACTIVE' if kill_switch_active() else 'clear'}")

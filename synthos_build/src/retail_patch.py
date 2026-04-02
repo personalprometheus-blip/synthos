@@ -109,6 +109,10 @@ PATCHABLE_FILE_MAP = {
     'uninstall.py':                     'src',
     'seed_backlog.py':                  'src',
 
+    # ── Backup system ─────────────────────────────────────────────────────
+    'retail_backup.py':                 'src',
+    'strongbox.py':                     'src',
+
     # ── Company node (co-deployed on Pi 4B) ───────────────────────────────
     'company_server.py':                'src',
     'scoop.py':                         'src',

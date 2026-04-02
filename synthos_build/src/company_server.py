@@ -703,6 +703,42 @@ _COMPANY_LOG_FILES = {
 }
 
 
+# ── Retail backup receiver ────────────────────────────────────────────────────
+_BUILD_DIR    = os.path.dirname(_HERE)   # synthos_build/ (parent of src/)
+_STAGING_ROOT = os.path.join(_BUILD_DIR, ".backup_staging")
+
+
+@app.route("/receive_backup", methods=["POST"])
+def receive_backup():
+    """
+    Accept a .tar.gz backup archive from a retail Pi and stage it for Strongbox.
+    Auth: X-Token header or token cookie (same as /console).
+    Form fields: pi_id (str), archive (file)
+    """
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+
+    pi_id = (request.form.get("pi_id") or "").strip()
+    if not pi_id or "/" in pi_id or ".." in pi_id:
+        return jsonify({"error": "valid pi_id required"}), 400
+
+    f = request.files.get("archive")
+    if not f:
+        return jsonify({"error": "archive file required"}), 400
+
+    staging_dir = os.path.join(_STAGING_ROOT, pi_id)
+    os.makedirs(staging_dir, exist_ok=True)
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fname = f"synthos_backup_{pi_id}_{date_str}.tar.gz"
+    fpath = os.path.join(staging_dir, fname)
+    f.save(fpath)
+
+    size_kb = os.path.getsize(fpath) / 1024
+    print(f"[Company] Staged backup: {fname} ({size_kb:.1f} KB) from pi_id={pi_id}")
+    return jsonify({"ok": True, "staged": fname, "size_kb": round(size_kb, 1)}), 200
+
+
 @app.route("/logs")
 def company_logs():
     """Tail company-side log files — same token auth as console."""

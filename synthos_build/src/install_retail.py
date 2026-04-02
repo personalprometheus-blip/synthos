@@ -706,12 +706,14 @@ class WizardHandler(BaseHTTPRequestHandler):
     def page_personal(self) -> bytes:
         cfg = _state["config"]
         body = f"""
-        <div class="card-sub">Tell us about yourself.</div>
+        <div class="card-sub">Tell us about yourself. This creates your trading account — separate from the admin account.</div>
         <form method="POST" action="/personal">
           <label>Your full name</label>
           <input name="owner_name" value="{cfg.get('owner_name', '')}" required>
           <label>Your email address</label>
           <input name="owner_email" type="email" value="{cfg.get('owner_email', '')}" required>
+          <label>Portal password <span style="font-size:0.8em;opacity:0.6">(used to log in as yourself)</span></label>
+          <input name="owner_password" type="password" value="{cfg.get('owner_password', '')}" required minlength="10" autocomplete="new-password">
           <label>Pi node ID (e.g. synthos-pi-1)</label>
           <input name="pi_id" value="{cfg.get('pi_id', 'synthos-pi-1')}">
           <button class="btn" type="submit">Next →</button>
@@ -933,9 +935,10 @@ class WizardHandler(BaseHTTPRequestHandler):
 
         if path == "/personal":
             _state["config"].update({
-                "owner_name":  data.get("owner_name", "").strip(),
-                "owner_email": data.get("owner_email", "").strip(),
-                "pi_id":       data.get("pi_id", "synthos-pi-1").strip(),
+                "owner_name":     data.get("owner_name", "").strip(),
+                "owner_email":    data.get("owner_email", "").strip(),
+                "owner_password": data.get("owner_password", "").strip(),
+                "pi_id":          data.get("pi_id", "synthos-pi-1").strip(),
             })
             self._redirect("/api-keys")
 
@@ -1098,6 +1101,8 @@ def repair_mode() -> int:
         "PI_EMAIL":             "pi_email",
         "OWNER_NAME":           "owner_name",
         "OWNER_EMAIL":          "owner_email",
+        "OWNER_PASSWORD":       "owner_password",
+        "OWNER_CUSTOMER_ID":    "owner_customer_id",
         "STARTING_CAPITAL":     "starting_capital",
         "SUPPORT_EMAIL":        "support_email",
         "PORTAL_PORT":          "portal_port",
