@@ -54,6 +54,7 @@ _HERE    = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_HERE, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH  = os.getenv("COMPANY_DB_PATH", os.path.join(DATA_DIR, "company.db"))
+LOG_DIR  = os.path.join(os.path.dirname(_HERE), "logs")   # synthos_build/logs/
 
 # ── Database ──────────────────────────────────────────────────────────────────
 @contextmanager
@@ -456,6 +457,7 @@ td.mono{font-family:var(--mono);font-size:11px}
   <span class="wordmark">SYNTHOS</span>
   <span class="header-badge">Company Node</span>
   <div class="header-right">
+    <a href="/logs" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="View logs">Logs</a>
     <span class="clock" id="clock">--:--:-- ET</span>
     <div class="live-pill"><div class="live-dot"></div>LIVE</div>
   </div>
@@ -662,6 +664,119 @@ setInterval(refresh, 15000);
 </script>
 </body>
 </html>"""
+
+
+# ── Logs page ─────────────────────────────────────────────────────────────────
+_COMPANY_LOGS_CSS = (
+    '<style>'
+    '*{box-sizing:border-box;margin:0;padding:0}'
+    'body{background:#080b12;color:#e0ddd8;font-family:sans-serif;min-height:100vh}'
+    'header{background:#0e1220;color:#e0ddd8;padding:0 2rem;height:52px;display:flex;'
+    '       align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;'
+    '       border-bottom:1px solid #1a2030}'
+    '.wordmark{font-size:0.95rem;font-weight:600;letter-spacing:0.15em;color:#00f5d4}'
+    '.nav{display:flex;gap:1rem;align-items:center}'
+    '.nav a{color:#556;font-size:0.72rem;text-decoration:none;letter-spacing:0.08em}'
+    '.nav a:hover{color:#aaa}'
+    '.tabs{display:flex;gap:0;border-bottom:1px solid #1a2030;padding:0 2rem;'
+    '      background:#0e1220;overflow-x:auto;flex-wrap:nowrap}'
+    '.controls{padding:0.75rem 2rem;display:flex;gap:1rem;align-items:center;'
+    '          background:#0e1220;border-bottom:1px solid #1a2030}'
+    '.controls label{font-size:0.75rem;color:#556;font-weight:600;letter-spacing:0.08em;text-transform:uppercase}'
+    'select{font-size:0.8rem;padding:0.3rem 0.5rem;background:#161b28;border:1px solid #1a2030;'
+    '       border-radius:6px;color:#e0ddd8}'
+    '.log-box{font-family:monospace;font-size:0.75rem;line-height:1.7;color:#00f5d4;'
+    '         padding:1rem 2rem;white-space:pre-wrap;word-break:break-all;'
+    '         min-height:calc(100vh - 140px)}'
+    '.refresh-btn{font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;'
+    '             padding:0.3rem 0.75rem;border:1px solid #1a2030;'
+    '             border-radius:6px;cursor:pointer;background:transparent;color:#556}'
+    '.refresh-btn:hover{background:#1a2030;color:#e0ddd8}'
+    '</style>'
+)
+
+_COMPANY_LOG_FILES = {
+    'scoop':       'scoop.log',
+    'server':      'company_server.log',
+    'monitor':     'monitor.log',
+    'node_health': 'node_health.log',
+}
+
+
+@app.route("/logs")
+def company_logs():
+    """Tail company-side log files — same token auth as console."""
+    if not _authorized():
+        return (
+            "<html><body style='font-family:monospace;background:#080b12;color:#fff;padding:40px'>"
+            "<h2>Synthos Company Logs</h2>"
+            "<p style='color:rgba(255,255,255,0.5)'>Pass <code>?token=SECRET_TOKEN</code> "
+            "or set <code>X-Token</code> header to access logs.</p>"
+            "</body></html>"
+        ), 401
+
+    selected = request.args.get('file', 'scoop')
+    lines    = int(request.args.get('lines', 100))
+    fname    = _COMPANY_LOG_FILES.get(selected, 'scoop.log')
+    fpath    = os.path.join(LOG_DIR, fname)
+
+    content = ''
+    if os.path.exists(fpath):
+        try:
+            with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+                all_lines = f.readlines()
+            content = ''.join(all_lines[-lines:])
+        except Exception as e:
+            content = f'Error reading log: {e}'
+    else:
+        content = f'Log file not found: {fpath}'
+
+    tabs = ''.join(
+        f'<a href="/logs?file={k}&lines={lines}" '
+        f'style="padding:6px 14px;font-family:monospace;font-size:0.72rem;'
+        f'letter-spacing:0.08em;text-transform:uppercase;text-decoration:none;'
+        f'border-bottom:2px solid {"#00f5d4" if k == selected else "transparent"};'
+        f'color:{"#00f5d4" if k == selected else "#556"};display:inline-block">{k}</a>'
+        for k in _COMPANY_LOG_FILES
+    )
+
+    line_opts = ''.join(
+        f'<option value="{n}" {"selected" if n == lines else ""}>{n} lines</option>'
+        for n in [50, 100, 200, 500]
+    )
+
+    log_escaped = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos Company Logs</title>
+{_COMPANY_LOGS_CSS}
+</head>
+<body>
+<header>
+  <div class="wordmark">SYNTHOS · COMPANY LOGS</div>
+  <div class="nav">
+    <a href="/console">&#8592; Console</a>
+    <a href="/logs?file={selected}&lines={lines}" onclick="location.reload();return false">&#8635; Refresh</a>
+  </div>
+</header>
+<div class="tabs">{tabs}</div>
+<div class="controls">
+  <label>Lines</label>
+  <select onchange="window.location='/logs?file={selected}&lines='+this.value">{line_opts}</select>
+  <button class="refresh-btn" onclick="location.reload()">&#8635; Refresh</button>
+  <span style="font-size:0.72rem;color:#556;margin-left:auto">{fname}</span>
+</div>
+<div class="log-box" id="log-content">{log_escaped}</div>
+<script>
+  document.getElementById('log-content').scrollIntoView({{block:'end'}});
+</script>
+</body>
+</html>"""
+
+    return html
 
 
 @app.route("/")

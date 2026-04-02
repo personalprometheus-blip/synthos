@@ -72,6 +72,8 @@ load_dotenv(os.path.join(_BUILD_DIR, 'user', '.env'))
 PATCH_DIR  = os.path.join(_BUILD_DIR, '.patches')   # hidden patch history
 DB_PATH    = os.path.join(_BUILD_DIR, 'user', 'signals.db')
 BACKUP_DIR = os.path.join(_BUILD_DIR, 'backups')
+LOG_DIR    = os.path.join(_BUILD_DIR, 'logs')
+NODE_HEALTH_LOG = os.path.join(LOG_DIR, 'node_health.log')
 
 # ── FILE MAP — filename → subdirectory relative to synthos_build/ ──────────
 #
@@ -735,6 +737,7 @@ def check_all_nodes() -> bool:
       - Monitor node (MONITOR_URL): Pi registry, heartbeat ages
       - Company node (COMPANY_URL): Scoop queue counts
 
+    Output is written to both stdout and NODE_HEALTH_LOG (append mode).
     Returns True if no critical issues found.
     """
     import json as _json   # local import — avoid polluting module namespace
@@ -743,40 +746,55 @@ def check_all_nodes() -> bool:
     now_et = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     issues = 0
 
-    print(f"\n{sep}")
-    print(f"  SYNTHOS NODE HEALTH — {now_et}")
-    print(sep)
+    # Collect all output lines so we can write to both stdout and log file
+    out_lines: list[str] = []
+
+    def _emit(line: str = ""):
+        out_lines.append(line)
+        print(line)
+
+    _emit(f"\n{sep}")
+    _emit(f"  SYNTHOS NODE HEALTH — {now_et}")
+    _emit(sep)
 
     # ── Retail node ───────────────────────────────────────────────────────
-    print("\n  RETAIL NODE (local)")
+    _emit("\n  RETAIL NODE (local)")
     for line in _check_retail_node():
         if line.strip().startswith("✗"):
             issues += 1
-        print(line)
+        _emit(line)
 
     # ── Monitor node ──────────────────────────────────────────────────────
     monitor_url = os.environ.get('MONITOR_URL', '(not set)')
-    print(f"\n  MONITOR NODE ({monitor_url})")
+    _emit(f"\n  MONITOR NODE ({monitor_url})")
     for line in _check_monitor_node():
         if line.strip().startswith("✗"):
             issues += 1
-        print(line)
+        _emit(line)
 
     # ── Company node ──────────────────────────────────────────────────────
     company_url = os.environ.get('COMPANY_URL', '(not set)')
-    print(f"\n  COMPANY NODE ({company_url})")
+    _emit(f"\n  COMPANY NODE ({company_url})")
     for line in _check_company_node():
         if line.strip().startswith("✗"):
             issues += 1
-        print(line)
+        _emit(line)
 
     # ── Summary ───────────────────────────────────────────────────────────
-    print(f"\n{sep}")
+    _emit(f"\n{sep}")
     if issues == 0:
-        print("  ✓ All nodes healthy — no critical issues")
+        _emit("  ✓ All nodes healthy — no critical issues")
     else:
-        print(f"  ✗ {issues} critical issue(s) found — review output above")
-    print(f"{sep}\n")
+        _emit(f"  ✗ {issues} critical issue(s) found — review output above")
+    _emit(f"{sep}\n")
+
+    # ── Write to log file ─────────────────────────────────────────────────
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        with open(NODE_HEALTH_LOG, 'a', encoding='utf-8') as lf:
+            lf.write('\n'.join(out_lines) + '\n')
+    except Exception as log_err:
+        print(f"[patch] Warning: could not write node health log: {log_err}")
 
     return issues == 0
 

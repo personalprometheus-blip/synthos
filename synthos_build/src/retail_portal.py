@@ -4201,13 +4201,14 @@ LOGS_CSS = '<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{backgroun
 def logs_page():
     """Tail log files from the browser."""
     log_files = {
-        'trader':    'trade_logic_agent.log',
-        'scout':     'news_agent.log',
-        'pulse':     'market_sentiment_agent.log',
-        'portal':    'portal.log',
-        'watchdog':  'watchdog.log',
-        'boot':      'boot.log',
-        'monitor':   'monitor.log',
+        'trader':      'trade_logic_agent.log',
+        'scout':       'news_agent.log',
+        'pulse':       'market_sentiment_agent.log',
+        'portal':      'portal.log',
+        'watchdog':    'watchdog.log',
+        'boot':        'boot.log',
+        'monitor':     'monitor.log',
+        'node_health': 'node_health.log',
     }
     selected = request.args.get('file', 'trader')
     lines    = int(request.args.get('lines', 100))
