@@ -58,15 +58,18 @@ from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
-ALPACA_SECRET     = os.environ.get('ALPACA_SECRET_KEY', '')
+ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
 ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
 OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
 AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
-SENDGRID_API_KEY  = os.environ.get('SENDGRID_API_KEY', '')
+RESEND_API_KEY    = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
 USER_EMAIL        = os.environ.get('USER_EMAIL', '')
+# COMPANY_URL routes Scoop events to the Company Node (Pi 4B running company_server.py).
+# Falls back to MONITOR_URL if not set (monitor will proxy if it has COMPANY_URL configured).
+COMPANY_URL       = os.environ.get('COMPANY_URL', '').rstrip('/')
 ET                = ZoneInfo("America/New_York")
 MAX_RETRIES       = 3
 
@@ -78,9 +81,44 @@ if TRADING_MODE not in ('PAPER', 'LIVE'):
 if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:
     print("ERROR: TRADING_MODE=LIVE but ALPACA_BASE_URL points to paper endpoint.")
     sys.exit(1)
-if OPERATING_MODE == 'AUTONOMOUS' and not AUTONOMOUS_KEY:
-    print("ERROR: OPERATING_MODE=AUTONOMOUS requires AUTONOMOUS_UNLOCK_KEY in .env")
+if OPERATING_MODE in ('AUTONOMOUS', 'AUTOMATIC') and not AUTONOMOUS_KEY:
+    print(f"ERROR: OPERATING_MODE={OPERATING_MODE} requires AUTONOMOUS_UNLOCK_KEY in .env")
     sys.exit(1)
+
+# ── MULTI-TENANT ROUTING ──────────────────────────────────────────────────────
+# Set at startup from --customer-id arg. None = single-tenant / env-based (legacy).
+_CUSTOMER_ID: 'str | None' = None
+
+def _db():
+    """Return per-customer signals.db if --customer-id was given, else the shared system DB."""
+    if _CUSTOMER_ID:
+        from retail_database import get_customer_db
+        return get_customer_db(_CUSTOMER_ID)
+    return get_db()
+
+
+def _customer_email() -> str:
+    """Resolve the notification email for this run.
+
+    Multi-tenant: look up the customer's verified email from auth.db
+    (email is stored encrypted — auth.decrypt_field handles decryption).
+    Single-tenant / env-based fallback: return USER_EMAIL env var.
+    """
+    if _CUSTOMER_ID:
+        try:
+            import auth as _auth
+            customer = _auth.get_customer_by_id(_CUSTOMER_ID)
+            if customer and customer['email_enc']:
+                return _auth.decrypt_field(customer['email_enc'])
+        except Exception as _e:
+            log.warning(f"Could not resolve customer email from auth.db: {_e}")
+    return USER_EMAIL
+
+
+def _is_supervised() -> bool:
+    """True when the active operating mode requires trade approval.
+    Handles both old env terminology (SUPERVISED) and new portal terminology (MANAGED)."""
+    return OPERATING_MODE in ('SUPERVISED', 'MANAGED')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -388,7 +426,7 @@ class AlpacaClient:
         self.base_url = ALPACA_BASE_URL.rstrip('/')
         self.headers  = {
             "APCA-API-KEY-ID":     ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_SECRET,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
             "Content-Type":        "application/json",
         }
 
@@ -438,7 +476,7 @@ class AlpacaClient:
         start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {
             "APCA-API-KEY-ID":     ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_SECRET,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
         }
         try:
             r = requests.get(
@@ -1217,9 +1255,8 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
 # ── SUPERVISED MODE (KEEP from v1.x) ─────────────────────────────────────────
 
 def queue_for_approval(signal, decision_data):
-    from database import get_db
     try:
-        get_db().queue_approval(
+        _db().queue_approval(
             signal_id  = signal['id'],
             ticker     = signal['ticker'],
             company    = signal.get('company', ''),
@@ -1246,9 +1283,44 @@ def queue_for_approval(signal, decision_data):
 
 
 def _notify_approval_request(signal, decision_data):
-    """Send email notification when a trade is queued for approval."""
-    if not SENDGRID_API_KEY or not USER_EMAIL:
+    """
+    Send email notification when a trade is queued for approval.
+
+    Dedup guard: if this signal_id already has a PENDING_APPROVAL row that
+    predates this session (i.e. was inserted more than 60s ago), skip the
+    email — it was already notified and the user hasn't acted on it yet.
+    This is a secondary safety net; the primary guard is db.acknowledge_signal()
+    being called immediately after queue_for_approval() in the main loop.
+    """
+    recipient = _customer_email()
+    if not RESEND_API_KEY or not recipient:
         return
+
+    # Secondary dedup: check if already notified for this signal
+    try:
+        existing = _db().get_pending_approvals(status_filter=['PENDING_APPROVAL'])
+        for row in existing:
+            if str(row.get('id')) == str(signal.get('id')):
+                import time as _time
+                try:
+                    from datetime import timezone as _tz
+                    queued_at = row.get('queued_at', '')
+                    if queued_at:
+                        queued_ts = datetime.fromisoformat(
+                            queued_at.replace('Z', '+00:00')
+                        ).timestamp()
+                        age_s = _time.time() - queued_ts
+                        if age_s > 60:
+                            log.info(
+                                f"[NOTIFY] Skipping duplicate approval email for "
+                                f"{signal.get('ticker','?')} — already notified "
+                                f"{int(age_s)}s ago (id={signal.get('id','?')})"
+                            )
+                            return
+                except Exception:
+                    pass
+    except Exception:
+        pass
     ticker     = signal.get('ticker', '?')
     company    = signal.get('company', '')
     confidence = signal.get('confidence', '')
@@ -1275,32 +1347,34 @@ def _notify_approval_request(signal, decision_data):
         f"Approve or reject at the portal (port {os.environ.get('PORTAL_PORT', '5001')})."
     )
     try:
-        import sendgrid as _sg
-        from sendgrid.helpers.mail import Mail
-        msg = Mail(
-            from_email=ALERT_FROM or 'alerts@synthos.local',
-            to_emails=USER_EMAIL,
-            subject=subject,
-            plain_text_content=body,
+        requests.post(
+            'https://api.resend.com/emails',
+            headers={
+                'Authorization': f'Bearer {RESEND_API_KEY}',
+                'Content-Type':  'application/json',
+            },
+            json={
+                'from':    ALERT_FROM or 'alerts@synthos.local',
+                'to':      [recipient],
+                'subject': subject,
+                'text':    body,
+            },
+            timeout=10,
         )
-        _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
-            request_body=msg.get())
-        log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {USER_EMAIL}")
+        log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {recipient}")
     except Exception as e:
         log.warning(f"[SUPERVISED] Approval notification failed: {e}")
 
 def get_approved_trades():
-    from database import get_db
     try:
-        return get_db().get_pending_approvals(status_filter=['APPROVED'])
+        return _db().get_pending_approvals(status_filter=['APPROVED'])
     except Exception as e:
         log.error(f"get_approved_trades error: {e}")
         return []
 
 def mark_approval_executed(signal_id):
-    from database import get_db
     try:
-        get_db().mark_approval_executed(signal_id)
+        _db().mark_approval_executed(signal_id)
     except Exception as e:
         log.error(f"mark_approval_executed error: {e}")
 
@@ -1308,45 +1382,96 @@ def mark_approval_executed(signal_id):
 # ── PROTECTIVE EXIT (KEEP from v1.x) ─────────────────────────────────────────
 
 def _enqueue_p0_alert(subject, body, event_type, related_ticker=None, related_signal_id=None):
-    monitor_url   = os.environ.get('MONITOR_URL', '').rstrip('/')
-    monitor_token = os.environ.get('MONITOR_TOKEN', '')
-    pi_id         = os.environ.get('PI_ID', 'synthos-pi')
-    if not monitor_url:
+    """
+    Route a P0 alert to the Scoop queue on the Company Node.
+
+    Routing priority:
+      1. COMPANY_URL  — direct to company_server.py (preferred)
+      2. MONITOR_URL  — monitor proxies to company node if COMPANY_URL is set there
+                        (backward-compat: works during transition before COMPANY_URL is deployed)
+
+    Includes customer_email in payload so Scoop can dispatch without a
+    separate auth.db lookup on the Company Pi.
+    """
+    pi_id  = os.environ.get('PI_ID', 'synthos-pi')
+    # Prefer Company Node; fall back to Monitor Node proxy
+    target_url = COMPANY_URL or os.environ.get('MONITOR_URL', '').rstrip('/')
+    token      = (
+        os.environ.get('SECRET_TOKEN')
+        or os.environ.get('COMPANY_TOKEN')
+        or os.environ.get('MONITOR_TOKEN', '')
+    )
+    if not target_url:
+        log.warning("[ENQUEUE] Neither COMPANY_URL nor MONITOR_URL set — cannot enqueue")
         return False
+
+    # Pre-resolve customer email so Scoop doesn't need auth.db access
+    customer_email = ""
+    try:
+        customer_email = _customer_email() or ""
+    except Exception:
+        pass
+
     payload = {
-        "event_type": event_type, "priority": 0, "subject": subject, "body": body,
-        "source_agent": "trade_logic_agent", "pi_id": pi_id, "audience": "customer",
-        "related_ticker": related_ticker,
+        "event_type":        event_type,
+        "priority":          0,
+        "subject":           subject,
+        "body":              body,
+        "source_agent":      "Trade Logic",
+        "pi_id":             pi_id,
+        "audience":          "customer",
+        "related_ticker":    related_ticker,
         "related_signal_id": str(related_signal_id) if related_signal_id else None,
-        "payload": {"ticker": related_ticker, "signal_id": related_signal_id, "pi_id": pi_id},
+        "payload": {
+            "ticker":           related_ticker,
+            "signal_id":        related_signal_id,
+            "pi_id":            pi_id,
+            "customer_email":   customer_email,   # Scoop uses this as To: address
+        },
     }
     try:
-        r = requests.post(f"{monitor_url}/api/enqueue", json=payload,
-                          headers={"X-Token": monitor_token, "Content-Type": "application/json"},
-                          timeout=3)
-        return r.status_code == 200
-    except Exception:
+        r = requests.post(
+            f"{target_url}/api/enqueue",
+            json=payload,
+            headers={"X-Token": token, "Content-Type": "application/json"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            log.info(f"[ENQUEUE] P0 queued via {'company' if COMPANY_URL else 'monitor'} node")
+            return True
+        log.warning(f"[ENQUEUE] Non-200 response: {r.status_code} {r.text[:120]}")
+        return False
+    except Exception as e:
+        log.warning(f"[ENQUEUE] Request failed: {e}")
         return False
 
 def _direct_send_fallback(subject, body, reason="enqueue_failed"):
     log.warning(f"[FALLBACK] Direct send triggered — reason: {reason}")
     try:
-        from database import get_db
-        get_db().log_event("P0_DIRECT_SEND_FALLBACK", agent="trade_logic_agent",
-                           details=f"reason={reason} subject={subject[:80]}")
+        _db().log_event("P0_DIRECT_SEND_FALLBACK", agent="trade_logic_agent",
+                        details=f"reason={reason} subject={subject[:80]}")
     except Exception:
         pass
-    if SENDGRID_API_KEY and USER_EMAIL:
+    recipient = _customer_email()
+    if RESEND_API_KEY and recipient:
         try:
-            import sendgrid as _sg
-            from sendgrid.helpers.mail import Mail
-            msg = Mail(from_email=ALERT_FROM or 'alerts@synthos.local',
-                       to_emails=USER_EMAIL, subject=subject, plain_text_content=body)
-            _sg.SendGridAPIClient(api_key=SENDGRID_API_KEY).client.mail.send.post(
-                request_body=msg.get())
+            requests.post(
+                'https://api.resend.com/emails',
+                headers={
+                    'Authorization': f'Bearer {RESEND_API_KEY}',
+                    'Content-Type':  'application/json',
+                },
+                json={
+                    'from':    ALERT_FROM or 'alerts@synthos.local',
+                    'to':      [recipient],
+                    'subject': subject,
+                    'text':    body,
+                },
+                timeout=10,
+            )
             return True
         except Exception as e:
-            log.error(f"[FALLBACK] SendGrid failed: {e}")
+            log.error(f"[FALLBACK] Resend failed: {e}")
     return False
 
 def send_protective_exit_email(ticker, reason, reasoning, entry_price,
@@ -1386,17 +1511,17 @@ def sync_bil_reserve(db, alpaca):
             buy = min(delta, max(0.0, free_cash - 1.0))
             if buy >= C.BIL_REBALANCE_THRESHOLD:
                 if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
-                    db.log_event("BIL_BUY", agent="The Trader",
+                    db.log_event("BIL_BUY", agent="Trade Logic",
                                  details=f"Bought ${buy:.2f} BIL")
         else:
             sell = abs(delta)
             if sell >= bil_value * 0.99:
                 if alpaca.close_position(C.BIL_TICKER):
-                    db.log_event("BIL_SELL", agent="The Trader",
+                    db.log_event("BIL_SELL", agent="Trade Logic",
                                  details=f"Sold all BIL (${bil_value:.2f})")
             else:
                 if alpaca._submit_notional(C.BIL_TICKER, sell, "sell"):
-                    db.log_event("BIL_SELL", agent="The Trader",
+                    db.log_event("BIL_SELL", agent="Trade Logic",
                                  details=f"Sold ${sell:.2f} BIL")
     except Exception as e:
         log.error(f"[BIL] sync error: {e}")
@@ -1422,7 +1547,7 @@ def reconcile_with_alpaca(db, alpaca):
         ghosts  = db_tickers - alpaca_tickers
         for t in orphans:
             log.critical(f"ORPHAN: {t} in Alpaca but not DB")
-            db.log_event("ORPHAN_POSITION", agent="The Trader", details=f"Ticker {t}")
+            db.log_event("ORPHAN_POSITION", agent="Trade Logic", details=f"Ticker {t}")
         for t in ghosts:
             log.critical(f"GHOST: {t} in DB but not Alpaca")
             for pos in db.get_open_positions():
@@ -1446,13 +1571,13 @@ def reconcile_with_alpaca(db, alpaca):
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────────
 
 def run(session="open"):
-    db     = get_db()
+    db     = _db()
     alpaca = AlpacaClient()
     now    = datetime.now(ET)
 
     log.info(f"ExecutionAgent starting — session={session} mode={TRADING_MODE} "
              f"operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
-    db.log_event("AGENT_START", agent="The Trader",
+    db.log_event("AGENT_START", agent="Trade Logic",
                  details=f"session={session} mode={TRADING_MODE} operating={OPERATING_MODE}")
     db.log_heartbeat("trade_logic_agent", "RUNNING")
 
@@ -1612,13 +1737,13 @@ def run(session="open"):
                             entry_price=pos['entry_price'], exit_price=current_price,
                             shares=pos['shares'], pnl_dollar=pnl,
                         )
-                    db.log_event(exit_reason, agent="The Trader",
+                    db.log_event(exit_reason, agent="Trade Logic",
                                  details=f"{pos['ticker']} exit=${current_price:.2f} pnl=${pnl:+.2f}")
                     log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
             pos_log.commit(db)
 
-    # ── SUPERVISED MODE: execute user-approved trades
-    if OPERATING_MODE == 'SUPERVISED':
+    # ── SUPERVISED/MANAGED MODE: execute user-approved trades
+    if _is_supervised():
         approved = get_approved_trades()
         for approval in approved:
             try:
@@ -1758,9 +1883,13 @@ def run(session="open"):
                     "session":   session,
                 }
 
-                if OPERATING_MODE == 'SUPERVISED':
+                if _is_supervised():
                     queue_for_approval(signal, decision_data)
-                    log.info(f"[SUPERVISED] {signal['ticker']} queued for portal approval")
+                    # Acknowledge the signal so it leaves the QUEUED pool and is not
+                    # re-processed on the next session run. The approval row in
+                    # pending_approvals is the source of truth until user decides.
+                    db.acknowledge_signal(signal['id'])
+                    log.info(f"[SUPERVISED/MANAGED] {signal['ticker']} queued for portal approval")
                 else:
                     # AUTONOMOUS MODE ⚠️ UNDER REVIEW — live trading not yet authorized
                     order = alpaca.submit_order(signal['ticker'], size, "buy")
@@ -1804,7 +1933,7 @@ def run(session="open"):
     log.info(f"Session complete — portfolio=${total_value:.2f} "
              f"positions={len(positions)} cash=${portfolio['cash']:.2f}")
     db.log_heartbeat("trade_logic_agent", "OK", portfolio_value=total_value)
-    db.log_event("AGENT_COMPLETE", agent="The Trader",
+    db.log_event("AGENT_COMPLETE", agent="Trade Logic",
                  details=f"session={session} positions={len(positions)}",
                  portfolio_value=total_value)
 
@@ -1845,13 +1974,29 @@ def run(session="open"):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Synthos — ExecutionAgent (Agent 1)')
     parser.add_argument('--session', choices=['open', 'midday', 'close'], default='open')
+    parser.add_argument('--customer-id', default=None,
+                        help='Customer UUID — routes DB and Alpaca credentials to per-customer sources')
     args = parser.parse_args()
 
+    # ── Multi-tenant: load per-customer credentials if --customer-id is given ──
+    if args.customer_id:
+        _CUSTOMER_ID = args.customer_id
+        try:
+            import auth as _auth
+            _ak, _sk = _auth.get_alpaca_credentials(args.customer_id)
+            if _ak:
+                ALPACA_API_KEY = _ak
+                ALPACA_SECRET_KEY  = _sk
+            OPERATING_MODE = _auth.get_operating_mode(args.customer_id)
+            log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE}")
+        except Exception as _e:
+            log.warning(f"Could not load customer credentials from auth.db: {_e}")
+
     if not ALPACA_API_KEY:
-        log.error("ALPACA_API_KEY not set — check .env")
+        log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")
         sys.exit(1)
 
-    acquire_agent_lock("trade_logic_agent.py")
+    acquire_agent_lock(f"trade_logic_agent.py:{_CUSTOMER_ID or 'default'}")
     try:
         run(session=args.session)
     except KeyboardInterrupt:

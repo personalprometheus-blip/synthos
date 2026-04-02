@@ -1,25 +1,27 @@
 """
-portal.py — Synthos Web Portal
-Synthos
+retail_portal.py — Synthos Multi-Tenant Web Portal
+Synthos · v3.0
 
-Serves the operator portal on port 5001.
-Provides: kill switch, supervised mode trade approval queue,
-          system status, autonomous mode unlock gate.
+Serves the customer portal at portal.synth-cloud.com (Cloudflare tunnel → port 5001).
 
-Runs continuously on the Pi:
-  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/portal.py &
+Access control layers (in order):
+  1. login_required      — must have a valid session
+  2. is_access_allowed() — email verified + subscription active (admin exempt)
+  3. construction_required — admin 2FA OTP gate for under-construction routes
 
-Or add to crontab:
-  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/portal.py >> /home/pi/synthos/synthos_build/logs/portal.log 2>&1 &
-
-Access at: http://raspberrypi.local:5001
-           http://10.0.0.224:5001  (or your Pi's IP)
-
-.env keys used:
-  AUTONOMOUS_UNLOCK_KEY   — key issued after onboarding call
-  OPERATING_MODE          — SUPERVISED or AUTONOMOUS
-  PI_ID                   — display name
-  PORTAL_PASSWORD         — optional basic auth (recommended)
+.env keys (v3.0):
+  PORTAL_SECRET_KEY       — Flask session secret
+  PORTAL_PORT             — default 5001
+  ENCRYPTION_KEY          — Fernet key for auth.db encryption
+  ADMIN_EMAIL             — admin account email
+  ADMIN_PASSWORD          — admin account password
+  CONSTRUCTION_MODE       — 'true' locks public signup routes behind admin 2FA
+  RESEND_API_KEY          — for approval emails, verification emails (Resend.com)
+  ALERT_FROM              — verified sender email (must be from a Resend-verified domain)
+  STRIPE_SECRET_KEY       — Stripe backend key (wired when Stripe integration is added)
+  STRIPE_WEBHOOK_SECRET   — Stripe webhook signing secret
+  STRIPE_PRICE_ID         — Stripe Price ID for standard subscription
+  STRIPE_EARLY_ADOPTER_PRICE_ID — Stripe Price ID for early-adopter rate
 """
 
 import os
@@ -27,10 +29,12 @@ import sys
 import json
 import logging
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from functools import wraps
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify, render_template_string, redirect, session
+from flask import Flask, request, jsonify, render_template_string, redirect, session, flash
 from dotenv import load_dotenv
+import auth
 
 _SCRIPT_DIR          = os.path.dirname(os.path.abspath(__file__))   # src/
 _ROOT_DIR            = os.path.dirname(_SCRIPT_DIR)                  # synthos_build/
@@ -48,6 +52,24 @@ AUTONOMOUS_UNLOCK_KEY = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 OPERATING_MODE       = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
 MONITOR_URL          = os.environ.get('MONITOR_URL', 'http://localhost:5000')
 MONITOR_TOKEN        = os.environ.get('MONITOR_TOKEN', 'synthos-default-token')
+RESEND_API_KEY           = os.environ.get('RESEND_API_KEY', '')
+ALERT_FROM               = os.environ.get('ALERT_FROM', '')
+ADMIN_EMAIL              = os.environ.get('ADMIN_EMAIL', '')
+STRIPE_WEBHOOK_SECRET    = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_SECRET_KEY        = os.environ.get('STRIPE_SECRET_KEY', '')
+# Base URL used to build /setup-account links in setup emails.
+# Defaults to localhost for dev; set to https://portal.synth-cloud.com in prod.
+PORTAL_BASE_URL          = os.environ.get('PORTAL_BASE_URL', '').rstrip('/')
+
+# ── CONSTRUCTION MODE ─────────────────────────────────────────────────────
+# When true, public-facing signup/subscription routes show a "coming soon" page.
+# Admin users must pass a one-time email OTP to access construction-locked routes.
+# Set CONSTRUCTION_MODE=false in .env to open the gates when ready to launch.
+CONSTRUCTION_MODE    = os.environ.get('CONSTRUCTION_MODE', 'true').lower() == 'true'
+
+# In-memory OTP store — one slot, TTL enforced on use
+# {'otp': str, 'expires_at': datetime, 'session_key': str}
+_construction_otp: dict = {}
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -58,6 +80,131 @@ log = logging.getLogger('portal')
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('PORTAL_SECRET_KEY', secrets.token_hex(32))
+
+
+# ── CONSTRUCTION LOCK HELPERS ─────────────────────────────────────────────
+
+def _send_construction_otp() -> bool:
+    """
+    Generate a 6-digit OTP, store it in memory with a 10-minute TTL,
+    and email it to ADMIN_EMAIL via Resend.
+    Returns True if sent, False if Resend not configured.
+    """
+    if not RESEND_API_KEY or not ADMIN_EMAIL or not ALERT_FROM:
+        log.warning("Construction OTP: Resend not configured — cannot send OTP email")
+        return False
+
+    otp = str(secrets.randbelow(900000) + 100000)  # 100000–999999
+    _construction_otp['otp']        = otp
+    _construction_otp['expires_at'] = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    try:
+        import urllib.request, json as _json
+        payload = _json.dumps({
+            "from":    ALERT_FROM,
+            "to":      [ADMIN_EMAIL],
+            "subject": "Synthos Construction Access Code",
+            "text": (
+                f"Your Synthos construction access code is: {otp}\n\n"
+                f"Valid for 10 minutes.\n"
+                f"Enter this code at portal.synth-cloud.com/admin/construction-verify\n\n"
+                f"If you did not request this, someone with admin credentials is "
+                f"attempting to access construction routes — check immediately."
+            ),
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type":  "application/json",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+        log.info(f"Construction OTP sent to {ADMIN_EMAIL}")
+        return True
+    except Exception as e:
+        log.error(f"Construction OTP email failed: {e}")
+        return False
+
+
+def _verify_construction_otp(entered: str) -> bool:
+    """Validate entered OTP against stored value. Clears OTP on success."""
+    stored     = _construction_otp.get('otp', '')
+    expires_at = _construction_otp.get('expires_at')
+    if not stored or not expires_at:
+        return False
+    if datetime.now(timezone.utc) > expires_at:
+        _construction_otp.clear()
+        return False
+    if secrets.compare_digest(entered.strip(), stored):
+        _construction_otp.clear()
+        return True
+    return False
+
+
+def construction_required(f):
+    """
+    Decorator for routes that are under construction.
+    Non-admin users: shown the construction / coming-soon page.
+    Admin users: must pass a one-time email OTP challenge for this session.
+    When CONSTRUCTION_MODE=false: passes through to the route with no gate.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not CONSTRUCTION_MODE:
+            return f(*args, **kwargs)
+        if not is_admin():
+            return render_template_string(_CONSTRUCTION_PAGE_HTML), 200
+        if not session.get('construction_unlocked'):
+            session['construction_redirect'] = request.path
+            return redirect('/admin/construction-verify')
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _send_setup_email(email: str, setup_link: str, display_name: str = '') -> bool:
+    """
+    Send a password-setup / account-activation email to a new customer via Resend.
+    Called after account creation (admin-triggered or Stripe webhook).
+    """
+    if not RESEND_API_KEY or not ALERT_FROM:
+        log.warning(f"Setup email: Resend not configured — skipping email to {email}")
+        return False
+    name = display_name or 'there'
+    try:
+        import urllib.request, json as _json
+        payload = _json.dumps({
+            "from":    f"Synthos <{ALERT_FROM}>",
+            "to":      [email],
+            "subject": "Set up your Synthos account",
+            "text": (
+                f"Hi {name},\n\n"
+                f"Your Synthos account is ready. Click the link below to set your "
+                f"password and activate your account:\n\n"
+                f"{setup_link}\n\n"
+                f"This link expires in 48 hours.\n\n"
+                f"Once activated, you can log in at portal.synth-cloud.com\n\n"
+                f"— The Synthos Team"
+            ),
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type":  "application/json",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+        log.info(f"Setup email sent to {email}")
+        return True
+    except Exception as e:
+        log.error(f"Setup email failed for {email}: {e}")
+        return False
+
 
 # Custom Jinja filter for file timestamps
 @app.template_filter('timestamp_to_date')
@@ -79,6 +226,18 @@ def login_required(f):
     return decorated
 
 
+def admin_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_authenticated():
+            return redirect('/login')
+        if not is_admin():
+            return jsonify({"error": "Admin access required"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ── AUTH ──────────────────────────────────────────────────────────────────
 
 LOGIN_HTML = """<!DOCTYPE html>
@@ -86,11 +245,11 @@ LOGIN_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos Portal — Sign In</title>
+<title>Synthos — Sign In</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root { --bg:#f5f0e8; --surface:#ede8df; --border:#c8bfaa; --text:#1a1612; --muted:#7a7060;
-        --green:#2d6a1f; --red:#8b1a1a; --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif; }
+        --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif; }
 * { box-sizing:border-box; margin:0; padding:0; }
 body { background:var(--bg); color:var(--text); font-family:var(--sans);
        min-height:100vh; display:flex; align-items:center; justify-content:center; }
@@ -98,7 +257,7 @@ body { background:var(--bg); color:var(--text); font-family:var(--sans);
         padding:2rem; width:100%; max-width:340px; }
 .wordmark { font-family:var(--mono); font-size:1rem; font-weight:600; letter-spacing:0.12em;
             margin-bottom:0.25rem; }
-.pi-id { font-family:var(--mono); font-size:0.72rem; color:var(--muted); margin-bottom:1.5rem; }
+.tagline { font-family:var(--mono); font-size:0.72rem; color:var(--muted); margin-bottom:1.75rem; }
 label { font-size:0.75rem; font-weight:600; letter-spacing:0.08em; text-transform:uppercase;
         color:var(--muted); display:block; margin-bottom:0.3rem; }
 input { font-family:var(--mono); font-size:0.9rem; padding:0.55rem 0.75rem;
@@ -118,11 +277,13 @@ button:hover { background:#333; }
 <body>
 <div class="card">
   <div class="wordmark">SYNTHOS</div>
-  <div class="pi-id">{{ pi_id }} · Portal</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
   <form method="POST" action="/login">
+    <label>Email</label>
+    <input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com">
     <label>Password</label>
-    <input type="password" name="password" autofocus autocomplete="current-password">
+    <input type="password" name="password" autocomplete="current-password">
     <button type="submit">SIGN IN →</button>
   </form>
 </div>
@@ -131,43 +292,653 @@ button:hover { background:#333; }
 
 
 def is_authenticated():
-    if not PORTAL_PASSWORD:
-        return True  # no password set — open access (local network only)
-    from flask import session
-    return session.get('authenticated') is True
+    """Returns True if the current session has a valid customer_id."""
+    return session.get('customer_id') is not None
 
-def require_login():
-    from flask import redirect
-    return redirect('/login')
+
+def is_admin():
+    """Returns True if the current session belongs to an admin account."""
+    return session.get('role') == 'admin'
+
 
 @app.before_request
 def check_auth():
-    if request.path in ('/login', '/logout'):
-        return  # always allow login page
+    # Routes that are always public — no session required
+    public_routes = {'/login', '/logout', '/sso', '/check-email',
+                     '/admin/construction-verify'}
+    if request.path in public_routes:
+        return
+    # Token-based routes are public (the token IS the auth)
+    if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/'):
+        return
+    # Stripe webhook — authenticated by Stripe signature, not session
+    if request.path == '/webhook/stripe':
+        return
     if not is_authenticated():
-        return require_login()
+        return redirect('/login')
 
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    from flask import session, redirect
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-        if password == PORTAL_PASSWORD:
-            session['authenticated'] = True
-            session.permanent = True
-            return redirect('/')
-        return render_template_string(LOGIN_HTML, pi_id=PI_ID, error="Incorrect password")
     if is_authenticated():
-        return redirect('/')
-    return render_template_string(LOGIN_HTML, pi_id=PI_ID, error=None)
+        return redirect('/admin' if is_admin() else '/')
+
+    if request.method == 'POST':
+        email    = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+
+        # ── Primary: account-based auth via auth.db ──
+        if email:
+            try:
+                customer = auth.get_customer_by_email(email)
+                if customer and auth.verify_password(password, customer['password_hash']):
+                    # ── Access gate: subscription + email verification ──────────
+                    allowed, reason = auth.is_access_allowed(customer['id'], customer['role'])
+                    if not allowed:
+                        if reason == 'unverified':
+                            # Account created but setup link not yet completed
+                            return redirect('/check-email?reason=unverified')
+                        elif reason in ('past_due', 'inactive', 'cancelled'):
+                            return redirect('/subscribe?reason=' + reason)
+                        else:
+                            log.warning(f"Login denied: {customer['id']} reason={reason}")
+                            return render_template_string(LOGIN_HTML, error="Account access denied. Contact support.")
+
+                    session.clear()
+                    session['customer_id']  = customer['id']
+                    session['role']         = customer['role']
+                    session['display_name'] = auth.get_display_name(customer)
+                    session['access_reason']= reason   # 'active'|'trialing'|'grace_period'|'admin'
+                    session.permanent       = True
+                    auth.record_login(customer['id'])
+                    log.info(f"Login: {customer['id']} (role={customer['role']} access={reason})")
+                    return redirect('/admin' if customer['role'] == 'admin' else '/')
+            except Exception as e:
+                log.error(f"Auth error during login: {e}")
+
+        # ── Fallback: legacy PORTAL_PASSWORD for admin (migration window) ──
+        if not email and PORTAL_PASSWORD and password == PORTAL_PASSWORD:
+            session.clear()
+            session['customer_id']  = 'admin'
+            session['role']         = 'admin'
+            session['display_name'] = 'Admin'
+            session.permanent       = True
+            log.info("Login: legacy PORTAL_PASSWORD admin access")
+            return redirect('/admin')
+
+        return render_template_string(LOGIN_HTML, error="Incorrect email or password")
+
+    return render_template_string(LOGIN_HTML, error=None)
 
 
 @app.route('/logout')
 def logout():
-    from flask import session, redirect
     session.clear()
     return redirect('/login')
+
+
+# ── CUSTOMER ACQUISITION PIPELINE ROUTES ─────────────────────────────────
+# These routes form the customer onboarding flow:
+#   /subscribe              → pricing / sign-up gate (construction-locked until launch)
+#   /check-email            → holding page shown after account creation
+#   /setup-account/<token>  → password setup form (token from welcome email)
+#   /verify-email/<token>   → alias for setup-account (legacy compatibility)
+#   /webhook/stripe         → Stripe payment webhook (wired when Stripe is integrated)
+#
+# The grace-period warning banner is injected into the customer dashboard
+# when session['access_reason'] == 'grace_period'.
+
+
+_CONSTRUCTION_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Coming Soon</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 12px; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
+    .status { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
+              padding: 24px; margin-bottom: 32px; }
+    .dot { width: 10px; height: 10px; background: #f59e0b; border-radius: 50%;
+           display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+    .status-text { font-size: 15px; color: #ccc; }
+    .sub { color: #666; font-size: 12px; margin-top: 24px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <div class="status">
+    <span class="dot"></span>
+    <span class="status-text">Platform launching soon</span>
+  </div>
+  <p class="sub">
+    We're putting the finishing touches on things.<br>
+    Check back shortly — or email us at synthos.signal@gmail.com<br>
+    to be notified when we go live.
+  </p>
+</div>
+</body>
+</html>"""
+
+
+_CHECK_EMAIL_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Check Your Email</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 12px; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
+    .icon { font-size: 48px; margin-bottom: 24px; }
+    h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #e0e0e0; }
+    p { color: #999; font-size: 13px; line-height: 1.7; margin-bottom: 12px; }
+    .note { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
+            padding: 16px; margin-top: 24px; font-size: 12px; color: #666; }
+    a { color: #6b8cff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <div class="icon">📬</div>
+  <h2>Check your inbox</h2>
+  <p>We've sent a setup link to your email address.<br>
+     Click the link to set your password and activate your account.</p>
+  <p>The link expires in 48 hours.</p>
+  <div class="note">
+    Didn't receive it? Check your spam folder, or
+    <a href="mailto:synthos.signal@gmail.com">contact support</a>.
+  </div>
+</div>
+</body>
+</html>"""
+
+
+_SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Set Your Password</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 420px; width: 100%; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 8px; text-align: center; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
+               text-align: center; margin-bottom: 40px; }
+    h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+    p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
+    label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
+            text-transform: uppercase; margin-bottom: 6px; }
+    input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
+            padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 14px;
+            margin-bottom: 20px; outline: none; }
+    input:focus { border-color: #6b8cff; }
+    button { width: 100%; background: #4f46e5; color: #fff; border: none;
+             border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
+             font-weight: 600; cursor: pointer; letter-spacing: 1px; }
+    button:hover { background: #6b8cff; }
+    .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
+             padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
+    .rule { font-size: 11px; color: #555; margin-top: -12px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <h2>Set your password</h2>
+  <p>Choose a strong password to complete your account setup.
+     You'll use this to log in at portal.synth-cloud.com</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <label>Password</label>
+    <input type="password" name="password" autofocus autocomplete="new-password"
+           placeholder="At least 12 characters" minlength="12">
+    <div class="rule">Minimum 12 characters</div>
+    <label>Confirm Password</label>
+    <input type="password" name="confirm" autocomplete="new-password"
+           placeholder="Re-enter your password">
+    <button type="submit">ACTIVATE ACCOUNT →</button>
+  </form>
+</div>
+</body>
+</html>"""
+
+
+_SUBSCRIBE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Subscribe</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 12px; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
+    .notice { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
+              padding: 24px; margin-bottom: 24px; }
+    .notice p { color: #ccc; font-size: 14px; line-height: 1.7; }
+    .reason { background: #2a1a00; border: 1px solid #7a4a00; border-radius: 8px;
+              padding: 14px 18px; font-size: 13px; color: #f59e0b; margin-bottom: 24px; }
+    a { color: #6b8cff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .sub { color: #555; font-size: 12px; margin-top: 24px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  {% if reason == 'past_due' %}
+  <div class="reason">⚠ Payment required — your grace period has ended</div>
+  {% elif reason == 'cancelled' %}
+  <div class="reason">Your subscription has been cancelled</div>
+  {% else %}
+  <div class="reason">A subscription is required to access the platform</div>
+  {% endif %}
+  <div class="notice">
+    <p>Subscription management is coming soon.<br>
+       Contact <a href="mailto:synthos.signal@gmail.com">synthos.signal@gmail.com</a>
+       to reactivate your account or for billing questions.</p>
+  </div>
+  <p class="sub"><a href="/login">← Back to login</a></p>
+</div>
+</body>
+</html>"""
+
+
+_CONSTRUCTION_VERIFY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Construction Access</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 420px; width: 100%; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 8px; text-align: center; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
+               text-align: center; margin-bottom: 40px; }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+    p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
+    label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
+            text-transform: uppercase; margin-bottom: 6px; }
+    input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
+            padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 20px;
+            letter-spacing: 8px; text-align: center; margin-bottom: 20px; outline: none; }
+    input:focus { border-color: #f59e0b; }
+    .send-btn { background: none; border: 1px solid #444; border-radius: 6px;
+                padding: 10px 16px; color: #888; font-family: inherit; font-size: 12px;
+                cursor: pointer; margin-bottom: 20px; width: 100%; }
+    .send-btn:hover { border-color: #666; color: #ccc; }
+    button[type=submit] { width: 100%; background: #92400e; color: #fff; border: none;
+             border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
+             font-weight: 600; cursor: pointer; letter-spacing: 1px; }
+    button[type=submit]:hover { background: #b45309; }
+    .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
+             padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
+    .info { background: #1a1a2e; border: 1px solid #333; border-radius: 6px;
+            padding: 12px; color: #6b8cff; font-size: 13px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Construction Access</div>
+  <h2>Admin verification required</h2>
+  <p>This route is under construction. An access code has been sent to the admin
+     email address. Enter the 6-digit code below to proceed.</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  {% if sent %}<div class="info">✓ Code sent to admin email — valid for 10 minutes</div>{% endif %}
+  <form method="POST">
+    <label>Access Code</label>
+    <input type="text" name="otp" autofocus maxlength="6" placeholder="000000"
+           inputmode="numeric" autocomplete="one-time-code">
+    <button type="submit">VERIFY →</button>
+  </form>
+  <br>
+  <form method="POST" action="/admin/construction-send-otp">
+    <button type="submit" class="send-btn">Resend code to admin email</button>
+  </form>
+</div>
+</body>
+</html>"""
+
+
+@app.route('/check-email')
+def check_email_page():
+    """Holding page shown after account creation — instructs customer to check inbox."""
+    return render_template_string(_CHECK_EMAIL_HTML), 200
+
+
+@app.route('/setup-account/<token>', methods=['GET', 'POST'])
+def setup_account(token):
+    """
+    Password setup page. Token is single-use, 48h expiry.
+    GET  — shows password setup form
+    POST — validates passwords, calls auth.activate_account(), redirects to login
+    """
+    customer = auth.consume_verify_token(token)
+    if not customer:
+        return render_template_string(_SETUP_ACCOUNT_HTML,
+                                      error="This setup link is invalid or has expired. "
+                                            "Contact support for a new link."), 400
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm', '')
+
+        if len(password) < 12:
+            return render_template_string(_SETUP_ACCOUNT_HTML,
+                                          error="Password must be at least 12 characters.")
+        if password != confirm:
+            return render_template_string(_SETUP_ACCOUNT_HTML,
+                                          error="Passwords do not match.")
+
+        try:
+            auth.activate_account(customer['id'], password)
+            log.info(f"Account activated via setup link: {customer['id']}")
+            return redirect('/login?activated=1')
+        except Exception as e:
+            log.error(f"Account activation failed: {e}")
+            return render_template_string(_SETUP_ACCOUNT_HTML,
+                                          error="Activation failed — please try again or contact support.")
+
+    return render_template_string(_SETUP_ACCOUNT_HTML, error=None)
+
+
+@app.route('/verify-email/<token>')
+def verify_email(token):
+    """Alias for /setup-account — handles older-format links."""
+    return redirect(f'/setup-account/{token}')
+
+
+@app.route('/subscribe')
+def subscribe_page():
+    """
+    Subscription gate page. Shown when a customer's access is denied due to
+    inactive/cancelled/past_due subscription.
+    Construction-locked: admin must pass OTP to see the full version.
+    Public visitors in construction mode see the coming-soon page.
+    """
+    reason = request.args.get('reason', 'inactive')
+    if CONSTRUCTION_MODE and not (is_authenticated() and is_admin()):
+        return render_template_string(_CONSTRUCTION_PAGE_HTML), 200
+    return render_template_string(_SUBSCRIBE_HTML, reason=reason)
+
+
+@app.route('/webhook/stripe', methods=['POST'])
+def stripe_webhook():
+    """
+    Stripe webhook receiver.
+
+    Verifies the Stripe-Signature header using STRIPE_WEBHOOK_SECRET (stdlib
+    HMAC-SHA256 — no stripe SDK required).
+
+    Events handled:
+      checkout.session.completed    → create_unverified_customer()
+                                      + generate_verify_token()
+                                      + _send_setup_email()
+      invoice.payment_succeeded     → update_subscription(status='active')
+      invoice.payment_failed        → mark_grace_period() (7-day window)
+      customer.subscription.deleted → update_subscription(status='cancelled')
+
+    All other event types are acknowledged with 200 and ignored.
+    Stripe requires a 200 within 30s or it retries — heavy work runs inline
+    (Pi is idle during non-market hours; acceptable latency).
+    """
+    import hmac
+    import hashlib
+
+    payload   = request.data          # raw bytes — must not use request.json
+    sig_header = request.headers.get('Stripe-Signature', '')
+
+    # ── Signature verification ────────────────────────────────────────────────
+    if not STRIPE_WEBHOOK_SECRET:
+        log.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET not set — rejecting")
+        return jsonify({"error": "webhook secret not configured"}), 500
+
+    try:
+        # Stripe-Signature format: t=<timestamp>,v1=<sig>[,v1=<sig2>...]
+        parts     = {k: v for k, v in (p.split('=', 1) for p in sig_header.split(',')
+                                        if '=' in p)}
+        timestamp = parts.get('t', '')
+        v1_sigs   = [v for k, v in parts.items() if k == 'v1']
+
+        if not timestamp or not v1_sigs:
+            log.warning("Stripe webhook: malformed Stripe-Signature header")
+            return jsonify({"error": "invalid signature header"}), 400
+
+        # Guard against replay attacks (5-minute tolerance)
+        import time as _time
+        try:
+            ts_age = abs(_time.time() - int(timestamp))
+            if ts_age > 300:
+                log.warning(f"Stripe webhook: timestamp too old ({ts_age:.0f}s) — replay?")
+                return jsonify({"error": "timestamp too old"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        signed_payload = f"{timestamp}.".encode() + payload
+        expected_sig = hmac.new(
+            STRIPE_WEBHOOK_SECRET.encode(),
+            signed_payload,
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not any(hmac.compare_digest(expected_sig, sig) for sig in v1_sigs):
+            log.warning("Stripe webhook: signature mismatch — rejecting")
+            return jsonify({"error": "signature verification failed"}), 400
+
+    except Exception as e:
+        log.error(f"Stripe webhook signature check error: {e}")
+        return jsonify({"error": "signature check failed"}), 400
+
+    # ── Parse event ───────────────────────────────────────────────────────────
+    try:
+        event      = json.loads(payload)
+        event_type = event.get('type', '')
+        obj        = event.get('data', {}).get('object', {})
+    except Exception as e:
+        log.error(f"Stripe webhook: could not parse JSON body: {e}")
+        return jsonify({"error": "invalid JSON"}), 400
+
+    log.info(f"Stripe webhook: {event_type} id={event.get('id','?')[:20]}")
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    if event_type == 'checkout.session.completed':
+        # New subscriber — create account, email setup link
+        stripe_customer_id = obj.get('customer', '')
+        stripe_sub_id      = obj.get('subscription', '')
+        customer_email     = (
+            obj.get('customer_details', {}).get('email')
+            or obj.get('customer_email', '')
+        )
+
+        if not customer_email or not stripe_customer_id:
+            log.error(
+                f"checkout.session.completed missing email or customer id — "
+                f"email={bool(customer_email)} cid={bool(stripe_customer_id)}"
+            )
+            return jsonify({"error": "missing customer data"}), 400
+
+        # Idempotency: if account already exists, just resend setup email
+        existing = auth.get_customer_by_stripe_id(stripe_customer_id)
+        if existing:
+            customer_id   = existing['id']
+            display_name  = auth.get_display_name(existing) or ''
+            log.info(f"checkout.session.completed: customer already exists {customer_id} — resending setup email")
+        else:
+            try:
+                customer_id = auth.create_unverified_customer(
+                    email=customer_email,
+                    stripe_customer_id=stripe_customer_id,
+                    pricing_tier='standard',
+                )
+                display_name = ''
+                log.info(f"New customer created: {customer_id} via checkout.session.completed")
+            except ValueError as e:
+                # Email already registered (duplicate webhook delivery)
+                log.warning(f"checkout.session.completed duplicate: {e}")
+                row = auth.get_customer_by_email(customer_email)
+                if row:
+                    customer_id  = row['id']
+                    display_name = auth.get_display_name(row) or ''
+                else:
+                    return jsonify({"error": str(e)}), 409
+
+        # Generate setup token and build link
+        token      = auth.generate_verify_token(customer_id)
+        base       = PORTAL_BASE_URL or f"http://localhost:{PORTAL_PORT}"
+        setup_link = f"{base}/setup-account/{token}"
+
+        email_ok = _send_setup_email(customer_email, setup_link, display_name)
+        if not email_ok:
+            log.warning(
+                f"Setup email failed for {customer_id} — token={token[:8]}… "
+                f"link={setup_link}"
+            )
+
+        # Update subscription record if we have a subscription ID
+        if stripe_sub_id:
+            auth.update_subscription(
+                customer_id=customer_id,
+                stripe_customer_id=stripe_customer_id,
+                subscription_id=stripe_sub_id,
+                status='inactive',   # becomes 'active' on invoice.payment_succeeded
+            )
+
+        return jsonify({"ok": True, "customer_id": customer_id}), 200
+
+    elif event_type == 'invoice.payment_succeeded':
+        stripe_customer_id = obj.get('customer', '')
+        stripe_sub_id      = obj.get('subscription', '')
+
+        customer = auth.get_customer_by_stripe_id(stripe_customer_id)
+        if not customer:
+            log.warning(f"invoice.payment_succeeded: no customer for stripe_id={stripe_customer_id}")
+            return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
+
+        auth.update_subscription(
+            customer_id=customer['id'],
+            stripe_customer_id=stripe_customer_id,
+            subscription_id=stripe_sub_id,
+            status='active',
+        )
+        log.info(f"Subscription activated: {customer['id']}")
+        return jsonify({"ok": True}), 200
+
+    elif event_type == 'invoice.payment_failed':
+        stripe_customer_id = obj.get('customer', '')
+
+        customer = auth.get_customer_by_stripe_id(stripe_customer_id)
+        if not customer:
+            log.warning(f"invoice.payment_failed: no customer for stripe_id={stripe_customer_id}")
+            return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
+
+        auth.mark_grace_period(customer['id'], days=7)
+        log.info(f"Grace period started for {customer['id']} (invoice.payment_failed)")
+        return jsonify({"ok": True}), 200
+
+    elif event_type == 'customer.subscription.deleted':
+        stripe_customer_id = obj.get('customer', '')
+        stripe_sub_id      = obj.get('id', '')
+
+        customer = auth.get_customer_by_stripe_id(stripe_customer_id)
+        if not customer:
+            log.warning(f"subscription.deleted: no customer for stripe_id={stripe_customer_id}")
+            return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
+
+        auth.update_subscription(
+            customer_id=customer['id'],
+            stripe_customer_id=stripe_customer_id,
+            subscription_id=stripe_sub_id,
+            status='cancelled',
+        )
+        log.info(f"Subscription cancelled: {customer['id']}")
+        return jsonify({"ok": True}), 200
+
+    else:
+        # Acknowledge all other event types — Stripe retries on non-2xx
+        log.debug(f"Stripe webhook: unhandled event type '{event_type}' — acknowledged")
+        return jsonify({"ok": True, "note": f"event type '{event_type}' not handled"}), 200
+
+
+@app.route('/admin/construction-verify', methods=['GET', 'POST'])
+def construction_verify():
+    """
+    Admin OTP verification for construction-locked routes.
+    GET  — show form (sends OTP automatically on first visit)
+    POST — validate entered OTP, unlock session if correct
+    """
+    if not is_authenticated() or not is_admin():
+        return redirect('/login')
+
+    sent  = False
+    error = None
+
+    if request.method == 'GET':
+        # Auto-send OTP when admin first hits this page
+        if not _construction_otp.get('otp'):
+            sent = _send_construction_otp()
+        else:
+            sent = True  # Already sent this session
+
+    elif request.method == 'POST':
+        otp_entered = request.form.get('otp', '')
+        if _verify_construction_otp(otp_entered):
+            session['construction_unlocked'] = True
+            redirect_to = session.pop('construction_redirect', '/subscribe')
+            log.info(f"Construction access granted to admin {session.get('customer_id')}")
+            return redirect(redirect_to)
+        else:
+            error = "Incorrect or expired code. Request a new one below."
+
+    return render_template_string(_CONSTRUCTION_VERIFY_HTML, error=error, sent=sent)
+
+
+@app.route('/admin/construction-send-otp', methods=['POST'])
+def construction_send_otp():
+    """Resend the construction OTP to admin email."""
+    if not is_authenticated() or not is_admin():
+        return redirect('/login')
+    _send_construction_otp()
+    return redirect('/admin/construction-verify?sent=1')
 
 
 @app.route('/sso')
@@ -206,13 +977,36 @@ def sso_login():
         log.error(f'SSO token error: {e}')
         return redirect(f'{LOGIN_URL}/login?error=token_error')
 
-    session['authenticated'] = True
-    session.permanent = True
-    log.info(f'SSO login: {email}')
-    return redirect('/')
+    customer = auth.get_customer_by_email(email)
+    if not customer:
+        log.warning(f'SSO login for unknown email: {email}')
+        return redirect(f'{LOGIN_URL}/login?error=user_not_found')
+
+    allowed, reason = auth.is_access_allowed(customer['id'], customer['role'])
+    if not allowed:
+        log.warning(f'SSO login denied: {customer["id"]} reason={reason}')
+        return redirect(f'{LOGIN_URL}/login?error=access_denied&reason={reason}')
+
+    session.clear()
+    session['customer_id']  = customer['id']
+    session['role']         = customer['role']
+    session['display_name'] = auth.get_display_name(customer)
+    session['access_reason']= reason
+    session.permanent       = True
+    auth.record_login(customer['id'])
+    log.info(f'SSO login: {customer["id"]} ({email}) access={reason}')
+    return redirect('/admin' if customer['role'] == 'admin' else '/')
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
+
+def _customer_db():
+    """Return the signals.db instance for the currently logged-in customer."""
+    sys.path.insert(0, PROJECT_DIR)
+    from retail_database import get_customer_db
+    customer_id = session.get('customer_id', 'default')
+    return get_customer_db(customer_id)
+
 
 def now_et():
     return datetime.now(ET).strftime('%Y-%m-%d %H:%M:%S ET')
@@ -238,12 +1032,30 @@ def agent_lock_status():
         return None
 
 
+def _get_customer_alpaca_creds():
+    """Return (api_key, secret_key, base_url) for the current session's customer.
+    Reads from auth.db (encrypted). Falls back to env vars for backward compatibility."""
+    alpaca_url = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    customer_id = session.get('customer_id')
+    if customer_id and customer_id != 'admin':
+        try:
+            api_key, secret_key = auth.get_alpaca_credentials(customer_id)
+            if api_key:
+                return api_key, secret_key, alpaca_url
+        except Exception as e:
+            log.warning(f"Could not load Alpaca creds from auth.db for {customer_id}: {e}")
+    # Fallback: env (covers admin sessions and migration period)
+    return (
+        os.environ.get('ALPACA_API_KEY', ''),
+        os.environ.get('ALPACA_SECRET_KEY', ''),
+        alpaca_url,
+    )
+
+
 def _fetch_alpaca_positions():
-    """Fetch live positions from Alpaca. Returns dict keyed by symbol, or {} on failure."""
+    """Fetch live positions from Alpaca for the current customer. Returns dict keyed by symbol."""
     import requests as _req
-    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
-    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
-    alpaca_url    = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    alpaca_key, alpaca_secret, alpaca_url = _get_customer_alpaca_creds()
     if not alpaca_key:
         return {}
     try:
@@ -517,9 +1329,7 @@ def get_system_status():
 
     for attempt in range(3):
         try:
-            sys.path.insert(0, PROJECT_DIR)
-            from database import get_db
-            db = get_db()
+            db = _customer_db()
             portfolio  = db.get_portfolio()
             positions  = db.get_open_positions()
             last_hb    = db.get_last_heartbeat()
@@ -581,10 +1391,9 @@ def get_system_status():
             }
 
 def load_pending_approvals():
-    """Read approval queue from DB. Returns all rows (portal filters by status in JS)."""
+    """Read approval queue from customer's DB. Returns all rows (portal filters by status in JS)."""
     try:
-        from database import get_db
-        return get_db().get_pending_approvals()
+        return _customer_db().get_pending_approvals()
     except Exception as e:
         log.error(f"load_pending_approvals DB error: {e}")
         return []
@@ -1093,15 +1902,40 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <button class="nav-btn" onclick="showTab('news')">News</button>
     <button class="nav-btn" onclick="showTab('screening')">Screening</button>
     <button class="nav-btn" onclick="showTab('settings')">Settings</button>
-    <button class="nav-btn" onclick="window.location='/logs'">Logs</button>
-    <button class="nav-btn" onclick="window.location='/files'">Files</button>
-    <button class="nav-btn danger {% if kill_active %}engaged{% endif %}" id="kill-nav-btn"
-            onclick="toggleKill()">
-      {% if kill_active %}⛔ Halted{% else %}Kill Switch{% endif %}
+    <button class="nav-btn {% if operating_mode == 'AUTOMATIC' %}sp-warn{% endif %}"
+            id="mode-nav-btn" onclick="toggleMode()"
+            title="{% if operating_mode == 'AUTOMATIC' %}Automatic — bot executes trades{% else %}Managed — you approve all trades{% endif %}">
+      {% if operating_mode == 'AUTOMATIC' %}⚡ Automatic{% else %}🎯 Managed{% endif %}
     </button>
     <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
   </div>
 </header>
+
+{% if grace_warning %}
+<!-- GRACE PERIOD WARNING BANNER -->
+<div id="grace-banner" style="
+  background:linear-gradient(90deg,rgba(245,158,11,0.18) 0%,rgba(245,158,11,0.08) 100%);
+  border-bottom:2px solid var(--amber,#f59e0b);
+  padding:10px 24px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  flex-wrap:wrap;
+">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:18px">⚠️</span>
+    <div>
+      <span style="font-size:13px;font-weight:700;color:var(--amber,#f59e0b)">Payment past due — your access expires soon.</span>
+      <span style="font-size:12px;color:var(--muted);margin-left:8px">Update your payment method to keep your account active.</span>
+    </div>
+  </div>
+  <a href="/subscribe?reason=past_due"
+     style="display:inline-block;padding:7px 18px;border-radius:7px;background:var(--amber,#f59e0b);color:#1a1a2e;font-size:12px;font-weight:700;text-decoration:none;letter-spacing:0.03em;white-space:nowrap">
+    Update Payment →
+  </a>
+</div>
+{% endif %}
 
 <!-- SIGNAL MODAL -->
 <div class="sig-modal-overlay" id="sig-modal-overlay" onclick="closeSigModal(event)">
@@ -1156,18 +1990,18 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     padding:10px 16px;border-radius:12px;margin-bottom:12px;
     background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.2)"></div>
 
-  <!-- KILL SWITCH BAR -->
-  <div class="kill-bar {% if not kill_active %}clear{% endif %}" id="kill-bar">
+  <!-- MODE STATUS BAR -->
+  <div class="kill-bar {% if operating_mode != 'AUTOMATIC' %}clear{% endif %}" id="mode-bar">
     <div>
-      <div class="kill-label">
-        {% if kill_active %}⛔ System Halted{% else %}● System Running{% endif %}
+      <div class="kill-label" id="mode-bar-label">
+        {% if operating_mode == 'AUTOMATIC' %}⚡ Automatic Mode{% else %}● Managed Mode{% endif %}
       </div>
-      <div class="kill-desc" id="kill-desc">
-        {% if kill_active %}All agents suspended. No new trades will execute.{% else %}Agents active · Supervised mode · No new entries without approval{% endif %}
+      <div class="kill-desc" id="mode-bar-desc">
+        {% if operating_mode == 'AUTOMATIC' %}Bot executes trades autonomously — no approval required{% else %}All trade decisions require your approval before execution{% endif %}
       </div>
     </div>
-    <button class="kill-btn {% if kill_active %}resume{% endif %}" id="kill-btn" onclick="toggleKill()">
-      {% if kill_active %}Resume System{% else %}Halt All Agents{% endif %}
+    <button class="kill-btn {% if operating_mode == 'AUTOMATIC' %}resume{% endif %}" id="mode-bar-btn" onclick="toggleMode()">
+      {% if operating_mode == 'AUTOMATIC' %}Switch to Managed{% else %}Switch to Automatic{% endif %}
     </button>
   </div>
 
@@ -1406,12 +2240,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <input class="glass-input" type="text" id="k-alpaca-url" placeholder="https://paper-api.alpaca.markets" style="width:260px">
       </div>
       <div class="setting-row">
-        <div><div class="setting-label">Congress API Key</div><div class="setting-desc">api.congress.gov disclosure feed</div></div>
-        <input class="glass-input" type="password" id="k-congress" placeholder="Key..." style="width:160px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">SendGrid API Key</div><div class="setting-desc">For email alerts and digests</div></div>
-        <input class="glass-input" type="password" id="k-sendgrid" placeholder="SG..." style="width:160px">
+        <div><div class="setting-label">Resend API Key</div><div class="setting-desc">For email alerts and account setup emails</div></div>
+        <input class="glass-input" type="password" id="k-resend" placeholder="re_..." style="width:160px">
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Monitor URL</div><div class="setting-desc">Heartbeat destination</div></div>
@@ -1509,20 +2339,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
-  <div class="section-title">RSS Feed Sources</div>
-  <div class="glass" style="margin-bottom:16px">
-    <div class="settings-section">
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">
-        One feed per line: <code style="background:rgba(255,255,255,0.06);padding:1px 5px;border-radius:4px;font-size:10px">Name | URL | Tier</code>
-        (tier: 2=wire, 3=press). Leave blank for built-in defaults.
-      </div>
-      <textarea id="s-rss" rows="5" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:11px;resize:vertical;outline:none"
-        placeholder="Reuters RSS | https://feeds.reuters.com/reuters/politicsNews | 2">{{ rss_display }}</textarea>
-      <div style="margin-top:10px">
-        <button class="save-btn" onclick="saveFeeds()">Save Feeds</button>
-      </div>
-    </div>
-  </div>
 
 </div>
 
@@ -1554,27 +2370,30 @@ function toast(msg, type='ok') {
   setTimeout(() => el.classList.remove('show'), 2500);
 }
 
-// ── KILL SWITCH ──
-async function toggleKill() {
-  const engage = !killState;
-  const r = await fetch('/api/kill-switch', {
+// ── MODE TOGGLE ──
+async function toggleMode() {
+  const current = document.getElementById('mode-nav-btn').textContent.trim().includes('Automatic') ? 'AUTOMATIC' : 'MANAGED';
+  const next    = current === 'AUTOMATIC' ? 'MANAGED' : 'AUTOMATIC';
+  const r = await fetch('/api/set-mode', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({engage})
+    body: JSON.stringify({mode: next})
   });
   const d = await r.json();
   if (d.ok) {
-    killState = engage;
-    document.getElementById('kill-bar').className = 'kill-bar' + (engage ? '' : ' clear');
-    document.getElementById('kill-btn').textContent = engage ? 'Resume System' : 'Halt All Agents';
-    document.getElementById('kill-btn').className = 'kill-btn' + (engage ? ' resume' : '');
-    document.getElementById('kill-desc').textContent = engage
-      ? 'All agents suspended. No new trades will execute.'
-      : 'Agents active · Supervised mode · No new entries without approval';
-    const navBtn = document.getElementById('kill-nav-btn');
-    navBtn.textContent = engage ? '⛔ Halted' : 'Kill Switch';
-    navBtn.className = 'nav-btn danger' + (engage ? ' engaged' : '');
-    toast(engage ? '⛔ System halted' : '✓ System resumed', engage ? 'err' : 'ok');
+    const isAuto = next === 'AUTOMATIC';
+    const navBtn = document.getElementById('mode-nav-btn');
+    navBtn.textContent = isAuto ? '⚡ Automatic' : '🎯 Managed';
+    navBtn.className   = 'nav-btn' + (isAuto ? ' sp-warn' : '');
+    navBtn.title       = isAuto ? 'Automatic — bot executes trades' : 'Managed — you approve all trades';
+    document.getElementById('mode-bar').className = 'kill-bar' + (isAuto ? '' : ' clear');
+    document.getElementById('mode-bar-label').textContent = isAuto ? '⚡ Automatic Mode' : '● Managed Mode';
+    document.getElementById('mode-bar-desc').textContent  = isAuto
+      ? 'Bot executes trades autonomously — no approval required'
+      : 'All trade decisions require your approval before execution';
+    document.getElementById('mode-bar-btn').textContent = isAuto ? 'Switch to Managed' : 'Switch to Automatic';
+    document.getElementById('mode-bar-btn').className   = 'kill-btn' + (isAuto ? ' resume' : '');
+    toast(isAuto ? '⚡ Switched to Automatic mode' : '🎯 Switched to Managed mode', isAuto ? 'warn' : 'ok');
   }
 }
 
@@ -1612,8 +2431,7 @@ async function saveKeys() {
     'ALPACA_API_KEY':    document.getElementById('k-alpaca-key').value,
     'ALPACA_SECRET_KEY': document.getElementById('k-alpaca-secret').value,
     'ALPACA_BASE_URL':   document.getElementById('k-alpaca-url').value,
-    'CONGRESS_API_KEY':  document.getElementById('k-congress').value,
-    'SENDGRID_API_KEY':  document.getElementById('k-sendgrid').value,
+    'RESEND_API_KEY':    document.getElementById('k-resend').value,
     'MONITOR_URL':       document.getElementById('k-monitor-url').value,
     'MONITOR_TOKEN':     document.getElementById('k-monitor-token').value,
     'PORTAL_PASSWORD':   document.getElementById('k-portal-pw').value,
@@ -1649,17 +2467,6 @@ async function saveSettings() {
   const r = await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
   const d = await r.json();
   toast(d.ok ? '✓ Settings saved' : 'Save failed: '+d.error, d.ok ? 'ok' : 'err');
-}
-
-async function saveFeeds() {
-  const raw = document.getElementById('s-rss').value.trim();
-  const feeds = raw ? raw.split('\n').filter(Boolean).map(l => {
-    const p = l.split('|').map(s => s.trim());
-    return [p[0]||'', p[1]||'', parseInt(p[2]||3)];
-  }) : [];
-  const r = await fetch('/api/feeds', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({feeds})});
-  const d = await r.json();
-  toast(d.ok ? '✓ Feeds saved' : 'Save failed', d.ok ? 'ok' : 'err');
 }
 
 async function selfUpdate() {
@@ -2201,8 +3008,8 @@ async function loadLiveStatus() {
     // Agent running banner
     const agentEl = document.getElementById('agent-running-banner');
     if (s.agent_running) {
-      const names = {'trade_logic_agent.py':'Bolt (Trader)','news_agent.py':'Scout (News)',
-                     'market_sentiment_agent.py':'Pulse (Sentiment)','agent4_audit.py':'Audit Agent'};
+      const names = {'retail_trade_logic_agent.py':'Trade Logic','retail_news_agent.py':'News',
+                     'retail_market_sentiment_agent.py':'Market Sentiment','retail_sector_screener.py':'Sector Screener'};
       const name = names[s.agent_running] || s.agent_running;
       const mins = Math.floor((s.agent_running_secs||0) / 60);
       const secs = (s.agent_running_secs||0) % 60;
@@ -2524,7 +3331,7 @@ async function loadNews(category) {
     _newsArticles = d.articles || [];
     cnt.textContent = _newsArticles.length + ' article' + (_newsArticles.length===1?'':'s');
     if (!_newsArticles.length) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">No news articles yet — Scout will populate on next run</div>';
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">No news articles yet — News agent will populate on next run</div>';
       return;
     }
     grid.innerHTML = _newsArticles.map((a, idx) => {
@@ -2646,7 +3453,6 @@ def get_current_settings():
         'max_staleness':      os.environ.get('MAX_STALENESS', 'Aging'),
         'close_session_mode': os.environ.get('CLOSE_SESSION_MODE', 'conservative'),
         'spousal_weight':     os.environ.get('SPOUSAL_WEIGHT', 'reduced'),
-        'rss_feeds_json':     os.environ.get('RSS_FEEDS_JSON', ''),
     }
 
 
@@ -2656,28 +3462,9 @@ def index():
     # This means the page renders in <100ms regardless of DB state
     settings  = get_current_settings()
 
-    # Convert RSS_FEEDS_JSON back to human-readable lines for textarea
-    rss_display = ''
-    _rss_src = settings['rss_feeds_json']
-    if _rss_src:
-        try:
-            import json as _json
-            feeds = _json.loads(_rss_src)
-            rss_display = '\n'.join(f"{f[0]} | {f[1]} | {f[2]}" for f in feeds)
-        except Exception:
-            rss_display = ''
-    if not rss_display:
-        # Show built-in defaults so user can see and edit them
-        import sys as _sys
-        _agent_dir = os.path.join(PROJECT_DIR, 'agents')
-        if _agent_dir not in _sys.path:
-            _sys.path.insert(0, _agent_dir)
-        try:
-            import news_agent as _na
-            _feeds = _na.get_rss_feeds()
-            rss_display = '\n'.join(f"{f[0]} | {f[1]} | {f[2]}" for f in _feeds)
-        except Exception:
-            rss_display = ''
+    # Per-customer operating mode from auth.db (falls back to env for legacy admin)
+    customer_id    = session.get('customer_id', 'admin')
+    operating_mode = auth.get_operating_mode(customer_id) if customer_id != 'admin' else OPERATING_MODE
 
     # Safe skeleton status — JS will overwrite with live data
     skeleton_status = {
@@ -2688,26 +3475,47 @@ def index():
         "positions":       [],
         "urgent_flags":    0,
         "last_heartbeat":  "Loading...",
-        "kill_switch":     kill_switch_active(),
-        "operating_mode":  OPERATING_MODE,
+        "operating_mode":  operating_mode,
         "pi_id":           PI_ID,
     }
+
+    # Grace period banner — shown when customer is past_due but within the 7-day window
+    grace_warning = (session.get('access_reason') == 'grace_period')
 
     return render_template_string(
         PORTAL_HTML,
         status=skeleton_status,
         approvals=[],
         pending_count=0,
-        kill_active=kill_switch_active(),
+        operating_mode=operating_mode,
         pi_id=PI_ID,
         settings=settings,
-        rss_display=rss_display,
         portal_password_set=bool(PORTAL_PASSWORD),
         async_load=True,
+        grace_warning=grace_warning,
     )
 
 
+@app.route('/api/set-mode', methods=['POST'])
+@login_required
+def api_set_mode():
+    """Toggle between MANAGED (approve all trades) and AUTOMATIC (bot executes) per customer."""
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode', '').upper()
+    if mode not in ('MANAGED', 'AUTOMATIC'):
+        return jsonify({"ok": False, "error": "mode must be MANAGED or AUTOMATIC"}), 400
+    customer_id = session.get('customer_id', 'admin')
+    try:
+        auth.set_operating_mode(customer_id, mode)
+        log.info(f"Operating mode set to {mode} for customer {customer_id}")
+        return jsonify({"ok": True, "mode": mode})
+    except Exception as e:
+        log.error(f"set-mode error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route('/api/kill-switch', methods=['POST'])
+@admin_required
 def api_kill_switch():
     data   = request.get_json(silent=True) or {}
     engage = data.get('engage', True)
@@ -2750,8 +3558,7 @@ def api_approval():
         return jsonify({"ok": False, "error": "Invalid status"}), 400
 
     try:
-        from database import get_db
-        db      = get_db()
+        db      = _customer_db()
         updated = db.update_approval_status(
             signal_id    = signal_id,
             status       = status,
@@ -2813,67 +3620,20 @@ def api_unlock_autonomous():
     return jsonify({"ok": True})
 
 
-@app.route('/api/feeds', methods=['GET'])
-def api_feeds_get():
-    """Return current RSS feed list from env."""
-    import json
-    rss_json = os.environ.get('RSS_FEEDS_JSON', '')
-    if rss_json:
-        try:
-            feeds = json.loads(rss_json)
-            return jsonify({"feeds": feeds})
-        except Exception:
-            pass
-    # Return defaults
-    defaults = [
-        ["Reuters RSS",          "https://feeds.reuters.com/reuters/politicsNews", 2],
-        ["Associated Press RSS", "https://apnews.com/rss",                         2],
-        ["Politico RSS",         "https://www.politico.com/rss/politicopicks.xml", 3],
-        ["The Hill RSS",         "https://thehill.com/feed",                       3],
-        ["Roll Call RSS",        "https://rollcall.com/feed",                      3],
-        ["Bloomberg RSS",        "https://feeds.bloomberg.com/politics/news.rss",  3],
-    ]
-    return jsonify({"feeds": defaults})
-
-
-@app.route('/api/feeds', methods=['POST'])
-def api_feeds_save():
-    """Save RSS feed list to .env as JSON."""
-    import json
-    data  = request.get_json(silent=True) or {}
-    feeds = data.get('feeds', [])
-    if not isinstance(feeds, list):
-        return jsonify({"ok": False, "error": "feeds must be a list"}), 400
-    try:
-        update_env('RSS_FEEDS_JSON', json.dumps(feeds))
-        # Reload env so agent2 picks it up on next run
-        os.environ['RSS_FEEDS_JSON'] = json.dumps(feeds)
-        log.info(f"RSS feeds updated: {len(feeds)} feeds saved")
-        try:
-            from database import get_db
-            get_db().log_event("RSS_FEEDS_UPDATED", agent="portal",
-                               details=f"{len(feeds)} feeds saved")
-        except Exception:
-            pass
-        return jsonify({"ok": True, "count": len(feeds)})
-    except Exception as e:
-        log.error(f"RSS feed save error: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @app.route('/api/keys', methods=['POST'])
 @login_required
 def api_keys():
-    """Update API keys in .env — writes to disk and reloads env."""
+    """Update API keys. Alpaca credentials are stored encrypted in auth.db;
+    other system keys write to .env."""
     data = request.get_json(silent=True) or {}
 
-    # Whitelist of keys that can be updated via portal
+    # Alpaca credentials go to auth.db (encrypted), not .env
+    ALPACA_KEYS = {'ALPACA_API_KEY', 'ALPACA_SECRET_KEY'}
+
+    # Whitelist of keys that write to .env
     ALLOWED_KEYS = {
-        'ALPACA_API_KEY',
-        'ALPACA_SECRET_KEY',
         'ALPACA_BASE_URL',
-        'CONGRESS_API_KEY',
-        'SENDGRID_API_KEY',
+        'RESEND_API_KEY',
         'MONITOR_TOKEN',
         'MONITOR_URL',
         'PORTAL_PASSWORD',
@@ -2887,6 +3647,27 @@ def api_keys():
 
     updated = []
     errors  = []
+
+    # ── Handle Alpaca credentials → auth.db ──
+    alpaca_key    = data.pop('ALPACA_API_KEY', None)
+    alpaca_secret = data.pop('ALPACA_SECRET_KEY', None)
+    if alpaca_key or alpaca_secret:
+        customer_id = session.get('customer_id')
+        if not customer_id or customer_id == 'admin':
+            errors.append("ALPACA_API_KEY: no customer session to store credentials against")
+        else:
+            try:
+                # Fetch existing values to avoid wiping one when only the other is submitted
+                existing_key, existing_secret = auth.get_alpaca_credentials(customer_id)
+                new_key    = alpaca_key.strip()    if alpaca_key    else existing_key
+                new_secret = alpaca_secret.strip() if alpaca_secret else existing_secret
+                auth.set_alpaca_credentials(customer_id, new_key, new_secret)
+                if alpaca_key:
+                    updated.append('ALPACA_API_KEY')
+                if alpaca_secret:
+                    updated.append('ALPACA_SECRET_KEY')
+            except Exception as e:
+                errors.append(f"ALPACA credentials: {str(e)}")
 
     for key, value in data.items():
         if key not in ALLOWED_KEYS:
@@ -2929,7 +3710,6 @@ def api_settings():
         'max_staleness':      'MAX_STALENESS',
         'close_session_mode': 'CLOSE_SESSION_MODE',
         'spousal_weight':     'SPOUSAL_WEIGHT',
-        'rss_feeds_json':     'RSS_FEEDS_JSON',
     }
     try:
         # MAX_POSITION_PCT: form sends integer percent (10), agent reads decimal (0.10)
@@ -2969,11 +3749,11 @@ def api_portfolio_history():
     """Portfolio value over time for the graph."""
     days = int(request.args.get('days', 30))
     try:
-        from database import get_db
-        data = get_db().get_portfolio_history(days=days)
+        db = _customer_db()
+        data = db.get_portfolio_history(days=days)
         # If we have less than 2 points, synthesize from current portfolio
         if len(data) < 2:
-            p = get_db().get_portfolio()
+            p = db.get_portfolio()
             from datetime import datetime, timedelta
             today = datetime.now().strftime('%Y-%m-%d')
             start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
@@ -2991,8 +3771,7 @@ def api_portfolio_history():
 def api_watchlist():
     """Signals Claude is watching but has not acted on yet."""
     try:
-        from database import get_db
-        signals = get_db().get_watching_signals(limit=10)
+        signals = _customer_db().get_watching_signals(limit=10)
         return jsonify({'signals': signals})
     except Exception as e:
         return jsonify({'signals': [], 'error': str(e)})
@@ -3002,8 +3781,7 @@ def api_watchlist():
 def api_screening():
     """Latest sector screening run — candidates with news, sentiment, and congressional signals."""
     try:
-        from database import get_db
-        candidates = get_db().get_latest_screening_run()
+        candidates = _customer_db().get_latest_screening_run()
         return jsonify({'candidates': candidates})
     except Exception as e:
         return jsonify({'candidates': [], 'error': str(e)})
@@ -3013,8 +3791,7 @@ def api_screening():
 def api_market_indices():
     """Fetch intraday quote for SPY (S&P 500), QQQ (Nasdaq), DIA (Dow)."""
     import requests as _req
-    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
-    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
     if not alpaca_key:
         return jsonify({'indices': [], 'error': 'no_key'})
     symbols = ['SPY', 'QQQ', 'DIA']
@@ -3067,8 +3844,7 @@ def api_market_chart_data():
     from datetime import timezone
     from dateutil import parser as _dp
 
-    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
-    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
     headers_alp   = {'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret}
 
     now_utc  = datetime.utcnow()
@@ -3158,8 +3934,7 @@ def api_market_chart_data():
     # Portfolio series from system_log heartbeats
     portfolio_series = [None] * len(base_ts)
     try:
-        from database import get_db
-        db = get_db()
+        db = _customer_db()
         cutoff_str = start_dt.strftime('%Y-%m-%d %H:%M:%S')
         with db.conn() as c:
             port_rows = c.execute("""
@@ -3213,8 +3988,7 @@ def api_market_chart_data():
     # Position entry markers — scatter points at entry timestamp
     position_markers = [None] * len(base_ts)
     try:
-        from database import get_db
-        db = get_db()
+        db = _customer_db()
         with db.conn() as c:
             pos_rows = c.execute("""
                 SELECT ticker, entry_price, created_at FROM positions
@@ -3281,8 +4055,7 @@ def api_system_health():
 
     # Claude API — check last successful agent run from DB
     try:
-        from database import get_db
-        db = get_db()
+        db = _customer_db()
         hb = db.get_last_heartbeat('trade_logic_agent')
         if not hb:
             hb = db.get_last_heartbeat('news_agent')
@@ -3334,9 +4107,96 @@ def api_system_health():
     return jsonify(health)
 
 
+@app.route('/api/admin/system-metrics')
+@admin_required
+def api_admin_system_metrics():
+    """Live system metrics for admin panel: CPU, RAM, disk, temperature, uptime."""
+    import time as _time
+    metrics = {
+        'cpu_pct':    None,
+        'ram':        None,
+        'disk':       None,
+        'temp_c':     None,
+        'uptime':     None,
+        'load_avg':   None,
+        'customer_count': None,
+    }
+
+    try:
+        import psutil
+
+        # CPU — 0.5s sample
+        metrics['cpu_pct'] = round(psutil.cpu_percent(interval=0.5), 1)
+
+        # RAM
+        vm = psutil.virtual_memory()
+        metrics['ram'] = {
+            'total_mb':  round(vm.total / 1024 / 1024),
+            'used_mb':   round(vm.used  / 1024 / 1024),
+            'pct':       vm.percent,
+        }
+
+        # Disk — measure the synthos_build root
+        du = psutil.disk_usage(_ROOT_DIR)
+        metrics['disk'] = {
+            'total_gb': round(du.total / 1024 / 1024 / 1024, 1),
+            'used_gb':  round(du.used  / 1024 / 1024 / 1024, 1),
+            'pct':      du.percent,
+        }
+
+        # Temperature (Pi-specific via /sys; psutil fallback)
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp') as f:
+                metrics['temp_c'] = round(int(f.read().strip()) / 1000, 1)
+        except Exception:
+            try:
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    first = next(iter(temps.values()))
+                    if first:
+                        metrics['temp_c'] = round(first[0].current, 1)
+            except Exception:
+                metrics['temp_c'] = None
+
+        # Load average (Unix only)
+        try:
+            la = psutil.getloadavg()
+            metrics['load_avg'] = {'1m': round(la[0], 2), '5m': round(la[1], 2), '15m': round(la[2], 2)}
+        except AttributeError:
+            metrics['load_avg'] = None
+
+    except ImportError:
+        pass
+
+    # Uptime via /proc/uptime (Pi) or boot_time (psutil fallback)
+    try:
+        with open('/proc/uptime') as f:
+            secs = float(f.readline().split()[0])
+        h, rem = divmod(int(secs), 3600)
+        m = rem // 60
+        metrics['uptime'] = f"{h}h {m}m" if h else f"{m}m"
+    except Exception:
+        try:
+            import psutil as _ps
+            secs = int(_time.time() - _ps.boot_time())
+            h, rem = divmod(secs, 3600)
+            metrics['uptime'] = f"{h}h {rem//60}m"
+        except Exception:
+            metrics['uptime'] = 'N/A'
+
+    # Customer count from auth.db
+    try:
+        metrics['customer_count'] = auth.customer_count()
+    except Exception:
+        pass
+
+    return jsonify(metrics)
+
+
 LOGS_CSS = '<style>\n*{box-sizing:border-box;margin:0;padding:0}\nbody{background:#0a0c14;color:#e0ddd8;font-family:sans-serif;min-height:100vh}\nheader{background:#111520;color:#e0ddd8;padding:0 2rem;height:52px;display:flex;\n       align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;\n       border-bottom:1px solid #1e2535}\n.wordmark{font-size:0.95rem;font-weight:600;letter-spacing:0.15em;color:#00f5d4}\n.nav{display:flex;gap:1rem;align-items:center}\n.nav a{color:#556;font-size:0.72rem;text-decoration:none;letter-spacing:0.08em}\n.nav a:hover{color:#aaa}\n.tabs{display:flex;gap:0;border-bottom:1px solid #1e2535;padding:0 2rem;\n      background:#111520;overflow-x:auto;flex-wrap:nowrap}\n.controls{padding:0.75rem 2rem;display:flex;gap:1rem;align-items:center;\n          background:#111520;border-bottom:1px solid #1e2535}\n.controls label{font-size:0.75rem;color:#556;font-weight:600;letter-spacing:0.08em;text-transform:uppercase}\nselect{font-size:0.8rem;padding:0.3rem 0.5rem;background:#161b28;border:1px solid #1e2535;\n       border-radius:6px;color:#e0ddd8}\n.log-box{font-family:monospace;font-size:0.75rem;line-height:1.7;color:#00f5d4;\n         padding:1rem 2rem;white-space:pre-wrap;word-break:break-all;\n         min-height:calc(100vh - 160px)}\n.refresh-btn{font-size:0.72rem;letter-spacing:0.08em;text-transform:uppercase;\n             padding:0.3rem 0.75rem;border:1px solid #1e2535;\n             border-radius:6px;cursor:pointer;background:transparent;color:#556}\n.refresh-btn:hover{background:#1e2535;color:#e0ddd8}\n</style>'
 
 @app.route('/logs')
+@admin_required
 def logs_page():
     """Tail log files from the browser."""
     log_files = {
@@ -3431,9 +4291,7 @@ def api_flags_acknowledge():
     if not flag_id:
         return jsonify({'ok': False, 'error': 'Missing id'}), 400
     try:
-        sys.path.insert(0, PROJECT_DIR)
-        from database import get_db
-        db = get_db()
+        db = _customer_db()
         db.acknowledge_urgent_flag(flag_id)
         db.log_event("FLAG_ACKNOWLEDGED", agent="portal",
                      details=f"Flag id={flag_id} acknowledged via portal")
@@ -3447,10 +4305,9 @@ def api_flags_acknowledge():
 @app.route('/api/trader-activity')
 @login_required
 def api_trader_activity():
-    """Recent trader decisions — what Bolt has been scanning and acting on."""
+    """Recent trader decisions — what Trade Logic has been scanning and acting on."""
     try:
-        from database import get_db
-        db = get_db()
+        db = _customer_db()
         with db.conn() as c:
             scans = c.execute("""
                 SELECT ticker, cascade_detected, event_summary, tier, scanned_at
@@ -3605,7 +4462,7 @@ def get_managed_files():
 
 
 @app.route('/files')
-@login_required
+@admin_required
 def files_page():
     """File manager — list and upload files."""
     managed = get_managed_files()
@@ -4074,10 +4931,9 @@ async function uploadFiles(files) {
 # ── NEWS FEED ──────────────────────────────────────────────────────────────
 
 def get_news_feed_data(limit=100):
-    """Fetch recent news feed entries from the database."""
+    """Fetch recent news feed entries from the customer's database."""
     try:
-        from database import get_db
-        return get_db().get_news_feed(limit=limit)
+        return _customer_db().get_news_feed(limit=limit)
     except Exception as e:
         log.warning(f"get_news_feed_data error: {e}")
         return []
@@ -4126,7 +4982,7 @@ NEWS_FEED_HTML = """<!DOCTYPE html>
   </div>
 </header>
 <div class="page-title">Signal Activity Feed</div>
-<div class="subtitle">All signals evaluated by Scout — including WATCH and DISCARD decisions. Auto-refreshes every 60s.</div>
+<div class="subtitle">All signals evaluated by the News agent — including WATCH and DISCARD decisions. Auto-refreshes every 60s.</div>
 <div class="refresh-note">Showing last {count} entries &middot; last updated {updated}</div>
 <div class="table-wrap">
 {table_content}
@@ -4137,7 +4993,7 @@ NEWS_FEED_HTML = """<!DOCTYPE html>
 @app.route('/news')
 @login_required
 def news_feed_page():
-    """News feed — all signals evaluated by Scout (QUEUE, WATCH, DISCARD)."""
+    """News feed — all signals evaluated by the News agent (QUEUE, WATCH, DISCARD)."""
     rows = get_news_feed_data(limit=100)
     now_str = datetime.now(ET).strftime('%Y-%m-%d %H:%M ET')
 
@@ -4222,8 +5078,7 @@ def api_news_headlines():
     category = request.args.get('category')
     if category == 'all':
         category = None
-    from database import get_db
-    db = get_db()
+    db = _customer_db()
     articles = db.get_news_headlines(category=category, limit=100, min_floor=30)
     return jsonify({'articles': articles, 'count': len(articles)})
 
@@ -4231,13 +5086,714 @@ def api_news_headlines():
 @app.route('/api/news-feed')
 @login_required
 def api_news_feed():
-    """JSON endpoint — Scout writes here; also readable by company Pi."""
+    """JSON endpoint — News agent writes here; also readable by company Pi."""
     rows = get_news_feed_data(limit=100)
     return jsonify({'entries': rows, 'count': len(rows)})
 
 
+# ── ADMIN PORTAL ───────────────────────────────────────────────────────────
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0c14;--surface:#111520;--surface2:#161b28;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:rgba(255,255,255,0.88);--muted:rgba(255,255,255,0.35);--dim:rgba(255,255,255,0.18);
+  --teal:#00f5d4;--teal2:rgba(0,245,212,0.12);
+  --pink:#ff4b6e;--pink2:rgba(255,75,110,0.12);
+  --amber:#ffb347;--amber2:rgba(255,179,71,0.12);
+  --purple:#7b61ff;--green:#22c55e;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15);border-radius:99px}
+
+/* HEADER */
+.header{position:sticky;top:0;z-index:100;background:rgba(10,12,20,0.9);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;gap:16px}
+.wordmark{font-family:var(--mono);font-size:1rem;font-weight:600;letter-spacing:0.15em;color:var(--teal);
+  text-shadow:0 0 20px rgba(0,245,212,0.4);flex-shrink:0}
+.admin-badge{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:0.12em;
+  padding:2px 8px;border-radius:99px;background:rgba(123,97,255,0.15);
+  border:1px solid rgba(123,97,255,0.35);color:#7b61ff;text-transform:uppercase}
+.header-nav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.nav-btn{padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;letter-spacing:0.04em;
+  cursor:pointer;background:transparent;border:1px solid var(--border);color:var(--muted);
+  font-family:var(--sans);transition:all 0.15s}
+.nav-btn:hover{background:var(--surface2);color:var(--text);border-color:var(--border2)}
+.nav-btn.active{background:var(--teal2);border-color:rgba(0,245,212,0.3);color:var(--teal)}
+.nav-btn.danger{border-color:rgba(255,75,110,0.3);color:var(--pink)}
+.nav-btn.danger:hover{background:var(--pink2)}
+.nav-btn.danger.engaged{background:var(--pink2);border-color:rgba(255,75,110,0.5);color:var(--pink)}
+
+/* LAYOUT */
+.page{max-width:1280px;margin:0 auto;padding:20px 24px}
+.section-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.glass{border-radius:16px;border:1px solid var(--border);background:var(--surface);position:relative;overflow:hidden}
+.glass::before{content:'';position:absolute;top:0;left:20%;right:20%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)}
+
+/* METRIC CARDS */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;position:relative}
+.metric-label{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.metric-val{font-family:var(--mono);font-size:1.5rem;font-weight:600;color:var(--text);margin-bottom:4px}
+.metric-sub{font-size:11px;color:var(--muted)}
+.metric-bar{height:4px;border-radius:99px;background:rgba(255,255,255,0.07);margin-top:8px;overflow:hidden}
+.metric-bar-fill{height:100%;border-radius:99px;transition:width 0.4s}
+.bar-ok{background:var(--teal)}
+.bar-warn{background:var(--amber)}
+.bar-err{background:var(--pink)}
+.temp-ok{color:var(--teal)}
+.temp-warn{color:var(--amber)}
+.temp-err{color:var(--pink)}
+
+/* TABLE */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead tr{border-bottom:1px solid var(--border2)}
+th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:0.08em;
+  text-transform:uppercase;color:var(--muted);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;
+  letter-spacing:0.05em;text-transform:uppercase}
+.badge-managed{background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.2)}
+.badge-auto{background:var(--amber2);color:var(--amber);border:1px solid rgba(255,179,71,0.25)}
+.badge-admin{background:rgba(123,97,255,0.12);color:#7b61ff;border:1px solid rgba(123,97,255,0.25)}
+.badge-ok{background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.2)}
+.badge-warn{background:rgba(245,158,11,0.12);color:var(--amber,#f59e0b);border:1px solid rgba(245,158,11,0.25)}
+.badge-off{background:rgba(255,255,255,0.04);color:var(--muted);border:1px solid var(--border)}
+.action-btn{padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;
+  background:transparent;border:1px solid var(--border);color:var(--muted);font-family:var(--sans);
+  transition:all 0.15s;letter-spacing:0.03em;margin-right:4px}
+.action-btn:hover{background:var(--surface2);color:var(--text);border-color:var(--border2)}
+.action-btn.danger{border-color:rgba(255,75,110,0.3);color:var(--pink)}
+.action-btn.danger:hover{background:var(--pink2)}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);
+  z-index:200;display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:16px;
+  padding:24px;width:100%;max-width:440px;position:relative}
+.modal h3{font-size:14px;font-weight:700;margin-bottom:16px;color:var(--text)}
+.modal label{font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:4px;margin-top:12px}
+.modal label:first-of-type{margin-top:0}
+.modal input{font-family:var(--mono);font-size:13px;padding:8px 12px;border:1px solid var(--border2);
+  border-radius:8px;background:var(--surface2);color:var(--text);width:100%}
+.modal input:focus{outline:none;border-color:var(--teal)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+.btn-primary{padding:8px 20px;background:var(--teal);color:#0a0c14;border:none;border-radius:8px;
+  font-size:12px;font-weight:700;letter-spacing:0.08em;cursor:pointer;font-family:var(--sans)}
+.btn-primary:hover{background:#00d4b8}
+.btn-cancel{padding:8px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);
+  border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans)}
+.btn-cancel:hover{background:var(--surface2);color:var(--text)}
+
+/* KILL BAR */
+.kill-bar{background:rgba(255,75,110,0.08);border-bottom:1px solid rgba(255,75,110,0.2);
+  padding:8px 24px;display:flex;align-items:center;justify-content:space-between}
+.kill-bar.clear{display:none}
+
+/* TABS */
+.tab{display:none}.tab.active{display:block}
+.toast{position:fixed;bottom:24px;right:24px;padding:10px 18px;border-radius:10px;font-size:13px;
+  font-weight:600;z-index:999;opacity:0;transition:opacity 0.2s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.ok{background:rgba(0,245,212,0.15);border:1px solid rgba(0,245,212,0.3);color:var(--teal)}
+.toast.err{background:var(--pink2);border:1px solid rgba(255,75,110,0.3);color:var(--pink)}
+</style>
+</head>
+<body>
+
+<div id="toast" class="toast"></div>
+
+<header class="header">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="admin-badge">Admin</div>
+  <div class="header-nav">
+    <button class="nav-btn active" onclick="showTab('system')" id="tab-system-btn">System</button>
+    <button class="nav-btn" onclick="showTab('scheduler')" id="tab-scheduler-btn">Scheduler</button>
+    <button class="nav-btn" onclick="showTab('customers')" id="tab-customers-btn">Customers</button>
+    <button class="nav-btn" onclick="window.location='/logs'">Logs</button>
+    <button class="nav-btn" onclick="window.location='/files'">Files</button>
+    <button class="nav-btn danger {% if kill_active %}engaged{% endif %}" id="kill-nav-btn" onclick="toggleKill()">
+      {% if kill_active %}⛔ Halted{% else %}Kill Switch{% endif %}
+    </button>
+    <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
+  </div>
+</header>
+
+<div class="kill-bar {% if not kill_active %}clear{% endif %}" id="kill-bar">
+  <span style="font-size:12px;font-weight:600;color:var(--pink)">⛔ System Halted — all agent trading suspended</span>
+  <button class="action-btn" onclick="toggleKill()">Resume System</button>
+</div>
+
+<!-- ── SYSTEM TAB ── -->
+<div class="page tab active" id="tab-system">
+
+  <div class="section-title">Hardware</div>
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-label">CPU</div>
+      <div class="metric-val" id="m-cpu">—</div>
+      <div class="metric-sub" id="m-load">Load avg —</div>
+      <div class="metric-bar"><div class="metric-bar-fill bar-ok" id="m-cpu-bar" style="width:0%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Memory</div>
+      <div class="metric-val" id="m-ram">—</div>
+      <div class="metric-sub" id="m-ram-sub">— MB used</div>
+      <div class="metric-bar"><div class="metric-bar-fill bar-ok" id="m-ram-bar" style="width:0%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Storage</div>
+      <div class="metric-val" id="m-disk">—</div>
+      <div class="metric-sub" id="m-disk-sub">— GB used</div>
+      <div class="metric-bar"><div class="metric-bar-fill bar-ok" id="m-disk-bar" style="width:0%"></div></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Temperature</div>
+      <div class="metric-val temp-ok" id="m-temp">—</div>
+      <div class="metric-sub">Processor °C</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Uptime</div>
+      <div class="metric-val" id="m-uptime" style="font-size:1.1rem">—</div>
+      <div class="metric-sub">Since last boot</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Customers</div>
+      <div class="metric-val" id="m-customers">{{ customer_count }}</div>
+      <div class="metric-sub">Active accounts</div>
+    </div>
+  </div>
+
+  <div class="section-title">Processes</div>
+  <div class="glass" style="padding:0">
+    <table>
+      <thead><tr>
+        <th>Process</th><th>Status</th><th>PID</th><th>CPU %</th><th>RAM MB</th><th>Uptime</th>
+      </tr></thead>
+      <tbody id="proc-table"><tr><td colspan="6" style="color:var(--muted);padding:16px">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ── SCHEDULER TAB ── -->
+<div class="page tab" id="tab-scheduler">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div class="section-title" style="margin-bottom:0;flex:1">Recent Session Runs</div>
+    <button class="nav-btn" style="margin-left:16px" onclick="loadScheduler()">↻ Refresh</button>
+  </div>
+
+  <div class="glass" style="padding:0">
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Session</th><th>Started</th><th>Duration</th><th>Status</th>
+          <th>Pipeline</th><th>Customers OK</th><th>Failures</th>
+        </tr></thead>
+        <tbody id="scheduler-table"><tr><td colspan="7" style="color:var(--muted);padding:16px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="section-title">Per-Step Breakdown</div>
+    <div id="scheduler-detail" style="color:var(--muted);font-size:13px;padding:8px 0">
+      Click a row above to see step details.
+    </div>
+  </div>
+
+</div>
+
+<!-- ── CUSTOMERS TAB ── -->
+<div class="page tab" id="tab-customers">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div class="section-title" style="margin-bottom:0;flex:1">Customer Accounts</div>
+    <button class="nav-btn active" style="margin-left:16px" onclick="openCreateModal()">+ New Customer</button>
+  </div>
+
+  <div class="glass" style="padding:0">
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Email</th><th>Mode</th><th>Role</th>
+          <th>Alpaca</th><th>Verified</th><th>Subscription</th><th>Tier</th>
+          <th>Last Login</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="customer-table"><tr><td colspan="11" style="color:var(--muted);padding:16px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── CREATE CUSTOMER MODAL ── -->
+<div class="modal-overlay" id="create-modal">
+  <div class="modal">
+    <h3>New Customer Account</h3>
+    <label>Display Name</label>
+    <input type="text" id="new-name" placeholder="e.g. Jane Smith">
+    <label>Email</label>
+    <input type="email" id="new-email" placeholder="customer@example.com">
+    <label>Password</label>
+    <input type="password" id="new-password" placeholder="Strong password">
+    <label>Alpaca API Key <span style="font-weight:400;color:var(--muted)">(optional — set later)</span></label>
+    <input type="text" id="new-alpaca-key" placeholder="PK...">
+    <label>Alpaca Secret Key</label>
+    <input type="password" id="new-alpaca-secret" placeholder="...">
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeCreateModal()">Cancel</button>
+      <button class="btn-primary" onclick="createCustomer()">Create Account</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ALPACA MODAL ── -->
+<div class="modal-overlay" id="alpaca-modal">
+  <div class="modal">
+    <h3 id="alpaca-modal-title">Update Alpaca Credentials</h3>
+    <input type="hidden" id="alpaca-customer-id">
+    <label>Alpaca API Key</label>
+    <input type="text" id="edit-alpaca-key" placeholder="PK...">
+    <label>Alpaca Secret Key</label>
+    <input type="password" id="edit-alpaca-secret" placeholder="...">
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeAlpacaModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveAlpaca()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── TABS ──
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('[id^="tab-"][id$="-btn"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  const btn = document.getElementById('tab-' + name + '-btn');
+  if (btn) btn.classList.add('active');
+  if (name === 'customers')  loadCustomers();
+  if (name === 'scheduler')  loadScheduler();
+}
+
+// ── TOAST ──
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + type;
+  setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ── KILL SWITCH ──
+let killState = {{ 'true' if kill_active else 'false' }};
+async function toggleKill() {
+  const engage = !killState;
+  const r = await fetch('/api/kill-switch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engage})});
+  const d = await r.json();
+  if (d.ok) {
+    killState = engage;
+    document.getElementById('kill-bar').className = 'kill-bar' + (engage ? '' : ' clear');
+    const nb = document.getElementById('kill-nav-btn');
+    nb.textContent = engage ? '⛔ Halted' : 'Kill Switch';
+    nb.className = 'nav-btn danger' + (engage ? ' engaged' : '');
+    toast(engage ? '⛔ System halted' : '✓ System resumed', engage ? 'err' : 'ok');
+  }
+}
+
+// ── SYSTEM METRICS ──
+function barClass(pct) { return pct >= 85 ? 'bar-err' : pct >= 65 ? 'bar-warn' : 'bar-ok'; }
+function tempClass(t)  { return t >= 75 ? 'temp-err' : t >= 60 ? 'temp-warn' : 'temp-ok'; }
+
+async function loadMetrics() {
+  try {
+    const d = await fetch('/api/admin/system-metrics').then(r => r.json());
+
+    if (d.cpu_pct !== null) {
+      document.getElementById('m-cpu').textContent = d.cpu_pct + '%';
+      const bar = document.getElementById('m-cpu-bar');
+      bar.style.width = d.cpu_pct + '%';
+      bar.className = 'metric-bar-fill ' + barClass(d.cpu_pct);
+    }
+    if (d.load_avg) {
+      document.getElementById('m-load').textContent = `Load ${d.load_avg['1m']} / ${d.load_avg['5m']} / ${d.load_avg['15m']}`;
+    }
+    if (d.ram) {
+      document.getElementById('m-ram').textContent = d.ram.pct + '%';
+      document.getElementById('m-ram-sub').textContent = `${d.ram.used_mb} / ${d.ram.total_mb} MB`;
+      const bar = document.getElementById('m-ram-bar');
+      bar.style.width = d.ram.pct + '%';
+      bar.className = 'metric-bar-fill ' + barClass(d.ram.pct);
+    }
+    if (d.disk) {
+      document.getElementById('m-disk').textContent = d.disk.pct + '%';
+      document.getElementById('m-disk-sub').textContent = `${d.disk.used_gb} / ${d.disk.total_gb} GB`;
+      const bar = document.getElementById('m-disk-bar');
+      bar.style.width = d.disk.pct + '%';
+      bar.className = 'metric-bar-fill ' + barClass(d.disk.pct);
+    }
+    if (d.temp_c !== null && d.temp_c !== undefined) {
+      const el = document.getElementById('m-temp');
+      el.textContent = d.temp_c + '°C';
+      el.className = 'metric-val ' + tempClass(d.temp_c);
+    }
+    if (d.uptime) document.getElementById('m-uptime').textContent = d.uptime;
+    if (d.customer_count !== null) document.getElementById('m-customers').textContent = d.customer_count;
+
+    loadProcesses();
+  } catch(e) { console.error('metrics error', e); }
+}
+
+async function loadProcesses() {
+  try {
+    const d = await fetch('/api/admin/processes').then(r => r.json());
+    const tbody = document.getElementById('proc-table');
+    if (!d.processes || !d.processes.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:16px">No monitored processes found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.processes.map(p => `
+      <tr>
+        <td style="font-family:var(--mono);font-size:12px">${p.name}</td>
+        <td><span class="badge ${p.running ? 'badge-ok' : 'badge-off'}">${p.running ? 'Running' : 'Stopped'}</span></td>
+        <td style="font-family:var(--mono);color:var(--muted)">${p.pid || '—'}</td>
+        <td style="font-family:var(--mono)">${p.cpu_pct !== null ? p.cpu_pct + '%' : '—'}</td>
+        <td style="font-family:var(--mono)">${p.ram_mb !== null ? p.ram_mb + ' MB' : '—'}</td>
+        <td style="color:var(--muted);font-size:12px">${p.uptime || '—'}</td>
+      </tr>`).join('');
+  } catch(e) {}
+}
+
+// ── CUSTOMERS ──
+async function loadCustomers() {
+  try {
+    const d = await fetch('/api/admin/customers').then(r => r.json());
+    const tbody = document.getElementById('customer-table');
+    if (!d.customers || !d.customers.length) {
+      tbody.innerHTML = '<tr><td colspan="11" style="color:var(--muted);padding:16px">No customers yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = d.customers.map(c => {
+      const subStatus = c.subscription_status || 'inactive';
+      const subBadge  = subStatus === 'active'    ? 'badge-ok'
+                      : subStatus === 'past_due'  ? 'badge-warn'
+                      : subStatus === 'trialing'  ? 'badge-managed'
+                      : 'badge-off';
+      const tierLabel = c.pricing_tier === 'early_adopter' ? '🌟 Early' : (c.pricing_tier || 'standard');
+      return `<tr>
+        <td style="font-weight:600">${esc(c.display_name || '—')}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--muted)">${esc(c.email)}</td>
+        <td><span class="badge ${c.operating_mode === 'AUTOMATIC' ? 'badge-auto' : 'badge-managed'}">${c.operating_mode}</span></td>
+        <td><span class="badge ${c.role === 'admin' ? 'badge-admin' : 'badge-off'}">${c.role}</span></td>
+        <td><span class="badge ${c.has_alpaca ? 'badge-ok' : 'badge-off'}">${c.has_alpaca ? '✓' : 'Not Set'}</span></td>
+        <td><span class="badge ${c.email_verified ? 'badge-ok' : 'badge-off'}">${c.email_verified ? '✓' : 'Pending'}</span></td>
+        <td><span class="badge ${subBadge}">${subStatus}</span></td>
+        <td style="font-size:12px;color:var(--muted)">${tierLabel}</td>
+        <td style="color:var(--muted);font-size:12px">${c.last_login ? c.last_login.substring(0,16).replace('T',' ') : 'Never'}</td>
+        <td><span class="badge ${c.is_active ? 'badge-ok' : 'badge-off'}">${c.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td>
+          <button class="action-btn" onclick="openAlpacaModal('${c.id}','${esc(c.display_name)}')">Alpaca</button>
+          ${c.is_active && c.role !== 'admin' ? `<button class="action-btn danger" onclick="deactivateCustomer('${c.id}','${esc(c.display_name)}')">Deactivate</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('customers error', e); }
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── CREATE CUSTOMER ──
+function openCreateModal()  { document.getElementById('create-modal').classList.add('open'); document.getElementById('new-name').focus(); }
+function closeCreateModal() { document.getElementById('create-modal').classList.remove('open'); }
+
+async function createCustomer() {
+  const name    = document.getElementById('new-name').value.trim();
+  const email   = document.getElementById('new-email').value.trim();
+  const pass    = document.getElementById('new-password').value;
+  const akey    = document.getElementById('new-alpaca-key').value.trim();
+  const asecret = document.getElementById('new-alpaca-secret').value.trim();
+
+  if (!email || !pass) { toast('Email and password required', 'err'); return; }
+
+  const r = await fetch('/api/admin/customers', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({email, password:pass, display_name:name, alpaca_key:akey, alpaca_secret:asecret})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    closeCreateModal();
+    ['new-name','new-email','new-password','new-alpaca-key','new-alpaca-secret'].forEach(id => document.getElementById(id).value='');
+    toast('✓ Customer created');
+    loadCustomers();
+    document.getElementById('m-customers').textContent = parseInt(document.getElementById('m-customers').textContent||0) + 1;
+  } else {
+    toast(d.error || 'Failed to create customer', 'err');
+  }
+}
+
+// ── ALPACA ──
+function openAlpacaModal(id, name) {
+  document.getElementById('alpaca-customer-id').value = id;
+  document.getElementById('alpaca-modal-title').textContent = 'Alpaca — ' + name;
+  document.getElementById('edit-alpaca-key').value = '';
+  document.getElementById('edit-alpaca-secret').value = '';
+  document.getElementById('alpaca-modal').classList.add('open');
+  document.getElementById('edit-alpaca-key').focus();
+}
+function closeAlpacaModal() { document.getElementById('alpaca-modal').classList.remove('open'); }
+
+async function saveAlpaca() {
+  const id     = document.getElementById('alpaca-customer-id').value;
+  const key    = document.getElementById('edit-alpaca-key').value.trim();
+  const secret = document.getElementById('edit-alpaca-secret').value.trim();
+  if (!key || !secret) { toast('Both fields required', 'err'); return; }
+  const r = await fetch(`/api/admin/customers/${id}/alpaca`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({alpaca_key:key, alpaca_secret:secret})
+  });
+  const d = await r.json();
+  if (d.ok) { closeAlpacaModal(); toast('✓ Alpaca credentials saved'); loadCustomers(); }
+  else       { toast(d.error || 'Failed to save', 'err'); }
+}
+
+// ── DEACTIVATE ──
+async function deactivateCustomer(id, name) {
+  if (!confirm(`Deactivate ${name}? They will no longer be able to log in.`)) return;
+  const r = await fetch(`/api/admin/customers/${id}/deactivate`, {method:'POST'});
+  const d = await r.json();
+  if (d.ok) { toast('Customer deactivated'); loadCustomers(); }
+  else       { toast(d.error || 'Failed', 'err'); }
+}
+
+// ── SCHEDULER HISTORY ──
+let _schedHistory = [];
+
+async function loadScheduler() {
+  const tbody = document.getElementById('scheduler-table');
+  tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:16px">Loading...</td></tr>';
+  try {
+    const d = await fetch('/api/admin/scheduler-history').then(r => r.json());
+    _schedHistory = d.history || [];
+    if (!_schedHistory.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);padding:16px">No runs recorded yet — scheduler hasn\'t fired</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _schedHistory.map((run, i) => {
+      const start   = run.started_at.substring(0,16).replace('T',' ');
+      const s_ms    = new Date(run.started_at).getTime();
+      const e_ms    = new Date(run.finished_at).getTime();
+      const dur     = isNaN(s_ms)||isNaN(e_ms) ? '—' : ((e_ms - s_ms)/1000).toFixed(1) + 's';
+      const steps   = Object.values(run.steps || {});
+      const pipeline = Object.keys(run.steps || {}).map(s=>s.replace('retail_','').replace('_agent.py','').replace('.py','')).join(' → ');
+      const totalOk  = steps.reduce((a,s)=>a+(s.ok||0),0);
+      const totalFail= steps.reduce((a,s)=>a+(s.failed||0)+(s.timeout||0),0);
+      const badge    = run.status === 'ok'
+        ? '<span class="badge badge-ok">OK</span>'
+        : '<span class="badge badge-auto">Partial</span>';
+      return `<tr style="cursor:pointer" onclick="showSchedulerDetail(${i})">
+        <td style="font-family:var(--mono);font-size:12px;font-weight:600">${run.session}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--muted)">${start}</td>
+        <td style="font-family:var(--mono);font-size:12px">${dur}</td>
+        <td>${badge}</td>
+        <td style="font-size:12px;color:var(--muted)">${pipeline}</td>
+        <td style="font-family:var(--mono);color:var(--green)">${totalOk}</td>
+        <td style="font-family:var(--mono);color:${totalFail?'var(--pink)':'var(--muted)'}">${totalFail||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="7" style="color:var(--pink);padding:16px">Error loading history: ${e}</td></tr>`;
+  }
+}
+
+function showSchedulerDetail(idx) {
+  const run  = _schedHistory[idx];
+  const el   = document.getElementById('scheduler-detail');
+  if (!run || !run.steps) { el.innerHTML = 'No step data.'; return; }
+  const rows = Object.entries(run.steps).map(([script, step]) => {
+    const name    = script.replace('retail_','').replace('_agent.py','').replace('.py','');
+    const cust    = step.customers || {};
+    const custRows = Object.entries(cust).map(([cid, outcome]) =>
+      `<span style="font-family:var(--mono);font-size:11px;margin-right:8px;color:${
+        outcome==='ok'?'var(--teal)':outcome==='failed'?'var(--pink)':'var(--amber)'
+      }">${cid.substring(0,8)} ${outcome}</span>`
+    ).join('');
+    return `<div style="margin-bottom:12px;padding:10px 14px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+      <div style="font-weight:600;margin-bottom:6px">${name}
+        <span style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:8px">
+          ${step.ok||0} ok · ${(step.failed||0)+(step.timeout||0)} fail
+        </span>
+      </div>
+      <div>${custRows || '<span style="color:var(--muted);font-size:11px">No per-customer data</span>'}</div>
+    </div>`;
+  }).join('');
+  const start = run.started_at.substring(0,16).replace('T',' ');
+  el.innerHTML = `<div style="margin-bottom:8px;font-size:12px;color:var(--muted)">
+    Session <strong style="color:var(--text)">${run.session}</strong> · ${start}
+  </div>${rows}`;
+}
+
+// ── INIT ──
+loadMetrics();
+setInterval(loadMetrics, 12000);
+</script>
+</body>
+</html>"""
+
+
+@app.route('/admin')
+@admin_required
+def admin_portal():
+    """Admin dashboard — system metrics, customer management."""
+    return render_template_string(
+        ADMIN_HTML,
+        kill_active=kill_switch_active(),
+        customer_count=auth.customer_count(),
+    )
+
+
+@app.route('/api/admin/customers')
+@admin_required
+def api_admin_customers():
+    """List all customer accounts (decrypted display info, no secrets)."""
+    try:
+        return jsonify({'customers': auth.list_customers()})
+    except Exception as e:
+        log.error(f"admin customers list error: {e}")
+        return jsonify({'customers': [], 'error': str(e)}), 500
+
+
+@app.route('/api/admin/customers', methods=['POST'])
+@admin_required
+def api_admin_create_customer():
+    """Create a new customer account."""
+    data         = request.get_json(silent=True) or {}
+    email        = data.get('email', '').strip()
+    password     = data.get('password', '')
+    display_name = data.get('display_name', '').strip()
+    alpaca_key   = data.get('alpaca_key', '').strip()
+    alpaca_secret= data.get('alpaca_secret', '').strip()
+
+    if not email or not password:
+        return jsonify({'ok': False, 'error': 'email and password required'}), 400
+    try:
+        # auto_activate=True: admin-provisioned accounts bypass email verification pipeline
+        customer_id = auth.create_customer(email, password, display_name=display_name,
+                                           auto_activate=True)
+        if alpaca_key and alpaca_secret:
+            auth.set_alpaca_credentials(customer_id, alpaca_key, alpaca_secret)
+        log.info(f"Admin created customer {customer_id} ({email}) — auto-activated")
+        return jsonify({'ok': True, 'id': customer_id})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 409
+    except Exception as e:
+        log.error(f"create customer error: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/customers/<customer_id>/alpaca', methods=['POST'])
+@admin_required
+def api_admin_set_alpaca(customer_id):
+    """Set Alpaca credentials for a customer."""
+    data   = request.get_json(silent=True) or {}
+    key    = data.get('alpaca_key', '').strip()
+    secret = data.get('alpaca_secret', '').strip()
+    if not key or not secret:
+        return jsonify({'ok': False, 'error': 'Both alpaca_key and alpaca_secret required'}), 400
+    try:
+        auth.set_alpaca_credentials(customer_id, key, secret)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/customers/<customer_id>/deactivate', methods=['POST'])
+@admin_required
+def api_admin_deactivate_customer(customer_id):
+    """Deactivate a customer account (soft delete)."""
+    if customer_id == session.get('customer_id'):
+        return jsonify({'ok': False, 'error': 'Cannot deactivate your own account'}), 400
+    try:
+        auth.deactivate_customer(customer_id)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/processes')
+@admin_required
+def api_admin_processes():
+    """List monitored agent processes with PID, CPU, RAM, uptime."""
+    import time as _time
+    WATCHED = [
+        ('trade_logic_agent',      'retail_trade_logic_agent.py'),
+        ('news_agent',             'retail_news_agent.py'),
+        ('market_sentiment_agent', 'retail_market_sentiment_agent.py'),
+        ('sector_screener',        'retail_sector_screener.py'),
+        ('portal',                 'retail_portal.py'),
+    ]
+    results = []
+    try:
+        import psutil
+        for name, script in WATCHED:
+            entry = {'name': name, 'running': False, 'pid': None, 'cpu_pct': None, 'ram_mb': None, 'uptime': None}
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'cpu_percent', 'memory_info', 'create_time']):
+                try:
+                    cmdline = ' '.join(proc.info.get('cmdline') or [])
+                    if script in cmdline:
+                        entry['running']  = True
+                        entry['pid']      = proc.info['pid']
+                        entry['cpu_pct']  = round(proc.info['cpu_percent'] or 0, 1)
+                        entry['ram_mb']   = round((proc.info['memory_info'].rss or 0) / 1024 / 1024, 1)
+                        secs = int(_time.time() - (proc.info.get('create_time') or _time.time()))
+                        h, rem = divmod(secs, 3600)
+                        entry['uptime'] = f"{h}h {rem//60}m" if h else f"{rem//60}m"
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            results.append(entry)
+    except ImportError:
+        results = [{'name': n, 'running': False, 'pid': None, 'cpu_pct': None, 'ram_mb': None, 'uptime': None} for n, _ in WATCHED]
+
+    return jsonify({'processes': results})
+
+
+@app.route('/api/admin/scheduler-history')
+@admin_required
+def api_admin_scheduler_history():
+    """Return recent scheduler run history from scheduler_history.json."""
+    history_file = os.path.join(_ROOT_DIR, 'logs', 'scheduler_history.json')
+    try:
+        if not os.path.exists(history_file):
+            return jsonify({'history': [], 'note': 'No runs recorded yet'})
+        with open(history_file) as f:
+            history = json.load(f)
+        return jsonify({'history': history[:50]})
+    except Exception as e:
+        return jsonify({'history': [], 'error': str(e)})
+
+
 # ── START ──────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    auth.init_auth_db()
+    auth.ensure_admin_account()
     log.info(f"Synthos Portal starting on port {PORT}")
     log.info(f"Pi: {PI_ID} | Mode: {OPERATING_MODE}")
     log.info(f"Kill switch: {'ACTIVE' if kill_switch_active() else 'clear'}")

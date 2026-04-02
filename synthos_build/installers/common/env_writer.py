@@ -95,7 +95,6 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"ALPACA_SECRET_KEY={config.get('alpaca_secret', '')}",
         f"ALPACA_BASE_URL={config.get('alpaca_base_url', 'https://paper-api.alpaca.markets')}",
         f"TRADING_MODE={config.get('trading_mode', 'PAPER')}",
-        f"CONGRESS_API_KEY={config.get('congress_key', '')}",
         f"",
         f"# ── OPERATING MODE ────────────────────────────────────────────",
         f"OPERATING_MODE={config.get('operating_mode', 'SUPERVISED')}",
@@ -117,13 +116,21 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"PORTAL_PORT={config.get('portal_port', '5001')}",
         f"PORTAL_PASSWORD={config.get('portal_password', '')}",
         f"PORTAL_SECRET_KEY={generated_secret_key}",
+        f"# Public URL used to build /setup-account links in setup emails.",
+        f"# Set to https://portal.synth-cloud.com when Cloudflare tunnel is active.",
+        f"PORTAL_BASE_URL={config.get('portal_base_url', '')}",
         f"",
         f"# ── MONITOR / DEAD MAN SWITCH ─────────────────────────────────",
         f"MONITOR_URL={config.get('monitor_url', '')}",
         f"MONITOR_TOKEN={config.get('monitor_token', 'changeme')}",
         f"",
-        f"# ── ALERTS (SENDGRID) ─────────────────────────────────────────",
-        f"SENDGRID_API_KEY={config.get('sendgrid_key', '')}",
+        f"# ── COMPANY NODE (Scoop queue) ────────────────────────────────",
+        f"# Set to http://<company-pi-ip>:5010 to route Scoop events direct.",
+        f"# If unset, events proxy via MONITOR_URL (monitor must have COMPANY_URL set).",
+        f"COMPANY_URL={config.get('company_url', '')}",
+        f"",
+        f"# ── ALERTS (RESEND) ───────────────────────────────────────────",
+        f"RESEND_API_KEY={config.get('resend_key', '')}",
         f"ALERT_FROM={config.get('alert_from', '')}",
         f"USER_EMAIL={config.get('user_email', '')}",
         f"",
@@ -145,10 +152,10 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
     return "\n".join(lines)
 
 
-def build_company_env(config: dict, db_path: str) -> str:
+def build_company_env(config: dict) -> str:
     """
-    Build the env file content for a company node.
-    COMPANY_MODE=true is always written — no license checks on company Pi.
+    Build the .env file content for a Company Node (Pi 4B).
+    Used by company_server.py (Flask, port 5010) and scoop.py (queue drain daemon).
     Returns the full file content as a string.
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -159,35 +166,25 @@ def build_company_env(config: dict, db_path: str) -> str:
         f"# DO NOT SHARE — contains company secrets",
         f"# chmod 600 enforced by installer",
         f"",
-        f"# ── NODE TYPE ─────────────────────────────────────────────────",
+        f"# ── NODE IDENTITY ─────────────────────────────────────────────",
         f"COMPANY_MODE=true",
+        f"SECRET_TOKEN={config.get('secret_token', '')}",
+        f"PORT={config.get('port', '5010')}",
         f"",
         f"# ── DATABASE ──────────────────────────────────────────────────",
-        f"DATABASE_PATH={db_path}",
+        f"COMPANY_DB_PATH={config.get('company_db_path', '')}",
         f"",
-        f"# ── SENDGRID (Scoop delivery) ─────────────────────────────────",
-        f"SENDGRID_API_KEY={config.get('sendgrid_key', '')}",
-        f"SENDGRID_FROM={config.get('sendgrid_from', '')}",
-        f"OPERATOR_EMAIL={config.get('operator_email', '')}",
+        f"# ── RESEND (Scoop email dispatch) ─────────────────────────────",
+        f"RESEND_API_KEY={config.get('resend_key', '')}",
+        f"ALERT_FROM={config.get('alert_from', '')}",
+        f"ALERT_TO={config.get('alert_to', '')}",
+        f"OPS_EMAIL={config.get('ops_email', '')}",
         f"",
-        f"# ── LICENSE KEY INFRASTRUCTURE ────────────────────────────────",
-        f"KEY_SIGNING_SECRET={config.get('key_signing_secret', '')}",
-        f"VAULT_URL={config.get('vault_url', '')}",
-        f"",
-        f"# ── SERVICE PORTS ─────────────────────────────────────────────",
-        f"COMMAND_PORT={config.get('command_port', '5002')}",
-        f"INSTALLER_PORT={config.get('installer_port', '5003')}",
-        f"HEARTBEAT_PORT={config.get('heartbeat_port', '5004')}",
-        f"",
-        f"# ── SCHEDULER ─────────────────────────────────────────────────",
-        f"SCHEDULER_TIMEOUT_SEC={config.get('scheduler_timeout', '120')}",
-        f"MARKET_HOURS_START={config.get('market_hours_start', '0930')}",
-        f"MARKET_HOURS_END={config.get('market_hours_end', '1600')}",
-        f"MARKET_TIMEZONE={config.get('market_timezone', 'US/Eastern')}",
-        f"",
-        f"# ── GITHUB ────────────────────────────────────────────────────",
-        f"GITHUB_TOKEN={config.get('github_token', '')}",
-        f"GITHUB_REPO={config.get('github_repo', '')}",
+        f"# ── SCOOP SETTINGS ────────────────────────────────────────────",
+        f"SCOOP_POLL_S={config.get('scoop_poll_s', '5')}",
+        f"SCOOP_MAX_ATTEMPTS={config.get('scoop_max_attempts', '3')}",
+        f"SCOOP_RETRY_DELAY_S={config.get('scoop_retry_delay_s', '60')}",
+        f"SCOOP_DRY_RUN={config.get('scoop_dry_run', 'false')}",
         f"",
     ]
     return "\n".join(lines)

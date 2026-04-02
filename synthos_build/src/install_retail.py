@@ -62,7 +62,7 @@ BACKUP_DIR:   Path = DATA_DIR / "backup"
 CRASH_DIR:    Path = LOG_DIR / "crash_reports"
 SNAPSHOT_DIR: Path = SYNTHOS_HOME / ".known_good"
 ENV_PATH:     Path = USER_DIR / ".env"
-DB_PATH:      Path = DATA_DIR / "signals.db"
+DB_PATH:      Path = DATA_DIR / "auth.db"      # v3.0: auth.db is the primary DB; signals.db is per-customer
 SENTINEL_PATH: Path = SYNTHOS_HOME / ".install_complete"
 PROGRESS_PATH: Path = SYNTHOS_HOME / ".install_progress.json"
 
@@ -77,7 +77,7 @@ from installers.common.env_writer import write_env, build_retail_env
 
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
-SYNTHOS_VERSION = "1.1"
+SYNTHOS_VERSION = "3.0"
 INSTALLER_PORT  = 8080
 
 REQUIRED_PACKAGES = [
@@ -86,33 +86,32 @@ REQUIRED_PACKAGES = [
     "python-dotenv",
     "anthropic",
     "alpaca-trade-api",
-    "sendgrid",
+    "resend",
+    "cryptography",       # Fernet encryption for auth.db (v3.0)
+    "itsdangerous",
+    "psutil",
+    "python-dateutil",    # Date parsing used in retail_portal.py
 ]
 
 REQUIRED_AGENT_FILES = [
     "retail_trade_logic_agent.py",
     "retail_news_agent.py",
     "retail_market_sentiment_agent.py",
+    "retail_sector_screener.py",        # v3.0 — required in open session pipeline
 ]
 
 REQUIRED_CORE_FILES = [
     "retail_database.py",
-    "retail_boot_sequence.py",
-    "retail_watchdog.py",
-    "retail_health_check.py",
-    "retail_shutdown.py",
-    # cleanup.py — not yet built; runs via cron for nightly DB maintenance;
-    # absence is non-fatal at install time (boot_sequence.py also omits it).
-    # Future implementation tracked in docs/milestones.md.
-    "synthos_heartbeat.py",
+    "auth.py",                          # v3.0 — customer auth + Fernet encryption
     "retail_portal.py",
-    "patch.py",
-    "sync.py",
+    "retail_scheduler.py",              # v3.0 — systemd session orchestrator
+    "retail_watchdog.py",
+    "retail_boot_sequence.py",
     # license_validator.py — DEFERRED_FROM_CURRENT_BASELINE
     # Retail entitlement validation is not implemented in the current release.
-    # Remove from required files so installer can reach COMPLETE without it.
     # Future implementation tracked in docs/milestones.md (Retail Entitlement).
-    "uninstall.py",
+    # patch.py, sync.py, uninstall.py — v1.x utilities, not required in v3.0
+    # retail_health_check.py, retail_shutdown.py — future; not yet built
 ]
 
 # Files that must never be overwritten or deleted during rerun
@@ -120,7 +119,8 @@ PROTECTED_PATHS = [
     ENV_PATH,                          # user/.env
     USER_DIR / "settings.json",        # user/settings.json
     USER_DIR / "agreements",           # user/agreements/
-    DB_PATH,                           # data/signals.db
+    DB_PATH,                           # data/auth.db (v3.0 primary DB)
+    DATA_DIR / "customers",            # data/customers/ — per-customer signals.db dirs
     BACKUP_DIR,                        # data/backup/
     SNAPSHOT_DIR,                      # .known_good/
     SYNTHOS_HOME / "consent_log.jsonl",# consent_log.jsonl
@@ -397,7 +397,7 @@ def verify_installation() -> tuple[bool, list[str]]:
     else:
         required_keys = [
             "ANTHROPIC_API_KEY", "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
-            "CONGRESS_API_KEY", "OPERATING_MODE", "OWNER_NAME",
+            "OPERATING_MODE", "OWNER_NAME",
             "PORTAL_SECRET_KEY",
             # LICENSE_KEY — DEFERRED_FROM_CURRENT_BASELINE
             # Key is still collected during setup and written to .env for future use.
@@ -435,7 +435,7 @@ def verify_installation() -> tuple[bool, list[str]]:
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
         "alpaca-trade-api": "alpaca_trade_api",
-        "sendgrid": "sendgrid",
+        "resend": "resend",
     }
     for pip_name, import_name in pkg_import_map.items():
         try:
@@ -733,14 +733,20 @@ class WizardHandler(BaseHTTPRequestHandler):
     def page_alerts(self) -> bytes:
         cfg = _state["config"]
         body = f"""
-        <div class="card-sub">Optional: configure alerts and the monitor server.</div>
+        <div class="card-sub">Optional: configure alerts and the monitor/company servers.</div>
         <form method="POST" action="/alerts">
           <label>Monitor Server URL (optional)</label>
           <input name="monitor_url" value="{cfg.get('monitor_url', '')}" placeholder="http://your-monitor-pi:5000">
           <label>Monitor Token</label>
           <input name="monitor_token" value="{cfg.get('monitor_token', 'changeme')}">
-          <label>SendGrid API Key (optional — protective exit emails)</label>
-          <input name="sendgrid_key" value="{cfg.get('sendgrid_key', '')}">
+          <label>Company Node URL (optional — routes Scoop events direct to Pi 4B)</label>
+          <input name="company_url" value="{cfg.get('company_url', '')}" placeholder="http://your-company-pi:5010">
+          <small style="color:#888;display:block;margin:-8px 0 10px">
+            If set, alert events go directly to the Company Node (bypasses monitor proxy).
+            Leave blank if the Monitor Node has COMPANY_URL set, or if not yet installed.
+          </small>
+          <label>Resend API Key (optional — protective exit emails)</label>
+          <input name="resend_key" value="{cfg.get('resend_key', '')}" placeholder="re_...">
           <label>Alert From Address</label>
           <input name="alert_from" value="{cfg.get('alert_from', '')}" placeholder="alerts@yourdomain.com">
           <label>Your Email (alert recipient)</label>
@@ -938,7 +944,8 @@ class WizardHandler(BaseHTTPRequestHandler):
             _state["config"].update({
                 "monitor_url":        data.get("monitor_url", "").strip(),
                 "monitor_token":      data.get("monitor_token", "changeme").strip(),
-                "sendgrid_key":       data.get("sendgrid_key", "").strip(),
+                "company_url":        data.get("company_url", "").strip(),
+                "resend_key":         data.get("resend_key", "").strip(),
                 "alert_from":         data.get("alert_from", "").strip(),
                 "user_email":         data.get("user_email", "").strip(),
                 "gmail_user":         data.get("gmail_user", "").strip(),
@@ -1061,7 +1068,6 @@ def repair_mode() -> int:
         "ALPACA_SECRET_KEY":    "alpaca_secret",
         "ALPACA_BASE_URL":      "alpaca_base_url",
         "TRADING_MODE":         "trading_mode",
-        "CONGRESS_API_KEY":     "congress_key",
         "OPERATING_MODE":       "operating_mode",
         "AUTONOMOUS_UNLOCK_KEY":"autonomous_unlock_key",
         "LICENSE_KEY":          "license_key",
@@ -1077,7 +1083,8 @@ def repair_mode() -> int:
         "PORTAL_SECRET_KEY":    "_portal_secret_key",
         "MONITOR_URL":          "monitor_url",
         "MONITOR_TOKEN":        "monitor_token",
-        "SENDGRID_API_KEY":     "sendgrid_key",
+        "COMPANY_URL":          "company_url",
+        "RESEND_API_KEY":       "resend_key",
         "ALERT_FROM":           "alert_from",
         "USER_EMAIL":           "user_email",
         "GMAIL_USER":           "gmail_user",

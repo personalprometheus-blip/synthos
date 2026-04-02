@@ -2,10 +2,10 @@
 Synthos Monitor Server
 =====================
 Runs on a dedicated Pi. Receives heartbeats from all Synthos instances,
-serves a command console dashboard, and sends SendGrid alerts when a Pi goes silent.
+serves a command console dashboard, and sends Resend alerts when a Pi goes silent.
 
 .env required:
-    SENDGRID_API_KEY=your_key_here
+    RESEND_API_KEY=re_...
     ALERT_FROM=alerts@yourdomain.com
     ALERT_TO=you@youremail.com
     SECRET_TOKEN=some_random_string
@@ -34,19 +34,12 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, request, jsonify, render_template_string
 from dotenv import load_dotenv
-try:
-    import sendgrid
-    from sendgrid.helpers.mail import Mail
-    _SENDGRID_AVAILABLE = True
-except ImportError:
-    _SENDGRID_AVAILABLE = False
-
 load_dotenv()
 
 app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SENDGRID_API_KEY     = os.getenv("SENDGRID_API_KEY")
+RESEND_API_KEY       = os.getenv("RESEND_API_KEY")
 ALERT_FROM           = os.getenv("ALERT_FROM", "alerts@example.com")
 ALERT_TO             = os.getenv("ALERT_TO", "you@example.com")
 # SECRET_TOKEN is the server-side env var name.
@@ -54,15 +47,21 @@ ALERT_TO             = os.getenv("ALERT_TO", "you@example.com")
 # operators who set only one side don't get silent 401s.
 SECRET_TOKEN         = os.getenv("SECRET_TOKEN") or os.getenv("MONITOR_TOKEN", "changeme")
 PORT                 = int(os.getenv("PORT", 5000))
+COMPANY_URL          = os.getenv("COMPANY_URL", "").rstrip("/")
 SILENCE_WINDOW_HOURS = 4
 ALERT_START_HOUR     = 8
 ALERT_END_HOUR       = 20
 ET                   = ZoneInfo("America/New_York")
 
+# ── Paths ─────────────────────────────────────────────────────────────────────
+_HERE         = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR      = os.path.join(_HERE, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+REGISTRY_FILE = os.path.join(DATA_DIR, ".monitor_registry.json")
+
 # ── State ─────────────────────────────────────────────────────────────────────
 pi_registry   = {}
 registry_lock = threading.Lock()
-REGISTRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.monitor_registry.json')
 
 
 def save_registry():
@@ -114,31 +113,38 @@ def in_alert_window():
     return ALERT_START_HOUR <= now_et.hour < ALERT_END_HOUR
 
 def send_alert(pi_id, last_seen):
-    if not SENDGRID_API_KEY:
-        print(f"[ALERT] No SendGrid key — would have alerted for {pi_id}")
-        return
-    if not _SENDGRID_AVAILABLE:
-        print(f"[ALERT] sendgrid package not installed — would have alerted for {pi_id}. "
-              f"Run: pip install sendgrid")
+    if not RESEND_API_KEY:
+        print(f"[ALERT] No Resend key — would have alerted for {pi_id}")
         return
     elapsed = round((now_utc() - last_seen).total_seconds() / 3600, 1)
-    message = Mail(
-        from_email=ALERT_FROM,
-        to_emails=ALERT_TO,
-        subject=f"⚠️ Synthos Alert — {pi_id} is silent",
-        html_content=f"""
-        <h2>Synthos Monitor Alert</h2>
-        <p><strong>{pi_id}</strong> has not sent a heartbeat in <strong>{elapsed} hours</strong>.</p>
-        <p>Last seen: {last_seen.strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-        <p>Check your Pi.</p>
-        """
-    )
     try:
-        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
-        sg.client.mail.send.post(request_body=message.get())
-        print(f"[ALERT] Sent alert for {pi_id}")
+        import requests as _req
+        r = _req.post(
+            'https://api.resend.com/emails',
+            headers={
+                'Authorization': f'Bearer {RESEND_API_KEY}',
+                'Content-Type':  'application/json',
+            },
+            json={
+                'from':    ALERT_FROM,
+                'to':      [ALERT_TO],
+                'subject': f"⚠️ Synthos Alert — {pi_id} is silent",
+                'html': (
+                    f"<h2>Synthos Monitor Alert</h2>"
+                    f"<p><strong>{pi_id}</strong> has not sent a heartbeat in "
+                    f"<strong>{elapsed} hours</strong>.</p>"
+                    f"<p>Last seen: {last_seen.strftime('%Y-%m-%d %H:%M:%S UTC')}</p>"
+                    f"<p>Check your Pi.</p>"
+                ),
+            },
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            print(f"[ALERT] Sent alert for {pi_id}")
+        else:
+            print(f"[ALERT] Resend error {r.status_code}: {r.text[:100]}")
     except Exception as e:
-        print(f"[ALERT] SendGrid error: {e}")
+        print(f"[ALERT] Resend error: {e}")
 
 def pi_status(data):
     """Returns 'active', 'fault', or 'offline'"""
@@ -342,80 +348,43 @@ def api_reports():
 def api_enqueue():
     """
     Receive a Scoop queue event from a retail Pi agent.
-    Inserts into company Pi scoop_queue for Scoop to dispatch.
+    If COMPANY_URL is configured, forwards the event to the Company Node.
+    Otherwise logs receipt and returns 200 (graceful no-op — events are not
+    persisted on the Monitor Node).
 
-    Auth: X-Token header must match SECRET_TOKEN / MONITOR_TOKEN.
-
-    Required fields: event_type, priority, subject, body, source_agent
-    Optional fields: payload, correlation_id, related_ticker,
-                     related_signal_id, pi_id, audience
+    Set COMPANY_URL=http://<company-pi-ip>:5010 on retail Pis to route events.
     """
     token = request.headers.get("X-Token", "")
     if token != SECRET_TOKEN:
         return jsonify({"error": "unauthorized"}), 401
 
+    # Forward to Company Node if configured
+    if COMPANY_URL:
+        try:
+            import requests as _req
+            r = _req.post(
+                f"{COMPANY_URL}/api/enqueue",
+                headers={"X-Token": SECRET_TOKEN, "Content-Type": "application/json"},
+                json=request.get_json(silent=True) or {},
+                timeout=5,
+            )
+            return jsonify(r.json()), r.status_code
+        except Exception as e:
+            print(f"[ENQUEUE] Forward to company node failed: {e}")
+            return jsonify({"ok": False, "error": f"Company node unreachable: {e}"}), 502
+
+    # No COMPANY_URL — log and acknowledge (not persisted on monitor node)
     data = request.get_json(silent=True) or {}
-
-    # Validate required fields
-    required = ["event_type", "priority", "subject", "body", "source_agent"]
-    missing  = [f for f in required if not data.get(f)]
-    if missing:
-        return jsonify({
-            "error": f"Missing required fields: {', '.join(missing)}"
-        }), 400
-
-    event_type      = str(data["event_type"])
-    priority        = int(data["priority"])
-    subject         = str(data["subject"])
-    body            = str(data["body"])
-    source_agent    = str(data["source_agent"])
-    payload         = data.get("payload", {})
-    pi_id           = data.get("pi_id")
-    audience        = data.get("audience", "customer")
-    correlation_id  = data.get("correlation_id")
-    related_ticker  = data.get("related_ticker")
-    related_signal_id = data.get("related_signal_id")
-
-    if priority not in (0, 1, 2, 3):
-        return jsonify({"error": "priority must be 0, 1, 2, or 3"}), 400
-
-    # Write to company DB via db_helpers if available,
-    # otherwise direct SQLite insert as fallback.
-    try:
-        import sys as _sys
-        import os as _os
-        _company_dir = _os.path.dirname(_os.path.abspath(__file__))
-        _utils_path  = _os.path.join(_company_dir, "utils")
-        if _utils_path not in _sys.path:
-            _sys.path.insert(0, _utils_path)
-        from db_helpers import DB as _DB
-        _db = _DB()
-        eid = _db.post_scoop_event(
-            event_type      = event_type,
-            payload         = payload if isinstance(payload, dict) else {},
-            audience        = audience,
-            pi_id           = pi_id,
-            subject         = subject,
-            body            = body,
-            source_agent    = source_agent,
-            priority        = priority,
-            correlation_id  = correlation_id,
-            related_ticker  = related_ticker,
-            related_signal_id = related_signal_id,
-        )
-        print(
-            f"[ENQUEUE] {event_type} P{priority} from {source_agent} "
-            f"pi={pi_id} id={eid[:8]}"
-        )
-        return jsonify({"ok": True, "id": eid, "priority": priority}), 200
-
-    except Exception as e:
-        # db_helpers not available on this node — log and reject cleanly
-        print(f"[ENQUEUE] DB write failed: {e}")
-        return jsonify({
-            "ok":    False,
-            "error": f"DB unavailable: {str(e)[:120]}"
-        }), 503
+    print(
+        f"[ENQUEUE] Received (no COMPANY_URL set — not persisted): "
+        f"{data.get('event_type', '?')} P{data.get('priority', '?')} "
+        f"from {data.get('source_agent', '?')}"
+    )
+    return jsonify({
+        "ok": True,
+        "queued": False,
+        "note": "COMPANY_URL not set — event logged but not persisted",
+    }), 200
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -1832,5 +1801,9 @@ if __name__ == "__main__":
     t.start()
     print(f"[Synthos Monitor] Running on port {PORT}")
     print(f"[Synthos Monitor] Console at http://0.0.0.0:{PORT}/console")
+    if COMPANY_URL:
+        print(f"[Synthos Monitor] Scoop events → Company Node at {COMPANY_URL}")
+    else:
+        print(f"[Synthos Monitor] COMPANY_URL not set — enqueue events will not be persisted")
     print(f"[Synthos Monitor] Tracking {len(pi_registry)} Pi(s) from persistent state")
     app.run(host="0.0.0.0", port=PORT)

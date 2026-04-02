@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
 validate_env.py — .env Integration Audit
-Synthos
+Synthos v3.0
 
 Run from the synthos project directory on the Pi:
-    python3 validate_env.py
+    python3 tests/validate_env.py
 
 Checks every .env key used by the system:
   1. Key presence and non-empty value
   2. Format validation (URL shape, key prefix patterns, enum values)
-  3. Live connectivity tests (Alpaca, Anthropic, Congress.gov, SendGrid)
+  3. Live connectivity tests (Alpaca, Anthropic, Congress.gov, Resend)
   4. Cross-key consistency (TRADING_MODE vs ALPACA_BASE_URL, etc.)
-  5. Redacted summary — shows what's set without exposing secrets
+  5. v3.0 keys: ENCRYPTION_KEY, ADMIN_EMAIL/PASSWORD, CONSTRUCTION_MODE, Stripe
+  6. Redacted summary — shows what's set without exposing secrets
 
 Keys are never printed in full. Only first/last few chars shown.
 """
@@ -98,24 +99,31 @@ print(f"{INFO} {len(lines)} key(s) defined in .env")
 section("1. KEY PRESENCE")
 
 # Critical — system won't start without these
-anthropic_key  = key_present('ANTHROPIC_API_KEY', required=True)
-alpaca_key     = key_present('ALPACA_API_KEY',     required=True)
-alpaca_secret  = key_present('ALPACA_SECRET_KEY',  required=True)
-alpaca_url     = key_present('ALPACA_BASE_URL',    required=True)
-trading_mode   = key_present('TRADING_MODE',       required=True)
-operating_mode = key_present('OPERATING_MODE',     required=True)
+anthropic_key  = key_present('ANTHROPIC_API_KEY',  required=True)
+alpaca_key     = key_present('ALPACA_API_KEY',      required=True)
+alpaca_secret  = key_present('ALPACA_SECRET_KEY',   required=True)
+alpaca_url     = key_present('ALPACA_BASE_URL',     required=True)
+trading_mode   = key_present('TRADING_MODE',        required=True)
+operating_mode = key_present('OPERATING_MODE',      required=True)
+encryption_key = key_present('ENCRYPTION_KEY',      required=True)
+admin_email    = key_present('ADMIN_EMAIL',         required=True)
+admin_password = key_present('ADMIN_PASSWORD',      required=True)
 
 print()
 # Important — degraded without these
-congress_key   = key_present('CONGRESS_API_KEY',   required=False)
-sendgrid_key   = key_present('SENDGRID_API_KEY',   required=False)
-alert_from     = key_present('ALERT_FROM',         required=False)
-alert_to       = key_present('ALERT_TO',           required=False)
-user_email     = key_present('USER_EMAIL',         required=False)
-monitor_url    = key_present('MONITOR_URL',        required=False)
-monitor_token  = key_present('MONITOR_TOKEN',      required=False)
-pi_id          = key_present('PI_ID',              required=False)
-portal_pass    = key_present('PORTAL_PASSWORD',    required=False)
+resend_key        = key_present('RESEND_API_KEY',           required=False)
+alert_from        = key_present('ALERT_FROM',              required=False)
+alert_to          = key_present('ALERT_TO',                required=False)
+user_email        = key_present('USER_EMAIL',              required=False)
+monitor_url       = key_present('MONITOR_URL',             required=False)
+monitor_token     = key_present('MONITOR_TOKEN',           required=False)
+company_url       = key_present('COMPANY_URL',             required=False)
+pi_id             = key_present('PI_ID',                   required=False)
+construction_mode = key_present('CONSTRUCTION_MODE',       required=False)
+portal_base_url   = key_present('PORTAL_BASE_URL',         required=False)
+stripe_pub        = key_present('STRIPE_PUBLISHABLE_KEY',  required=False)
+stripe_secret     = key_present('STRIPE_SECRET_KEY',       required=False)
+stripe_webhook    = key_present('STRIPE_WEBHOOK_SECRET',   required=False)
 
 
 # ══════════════════════════════════════════════════════════
@@ -196,14 +204,101 @@ if alpaca_key and alpaca_url:
       f"url={'paper' if url_is_paper else 'live'} — "
       f"{'consistent ✓' if consistent else 'MISMATCH ✗ — paper key against live URL or vice versa'}")
 
-# OPERATING_MODE enum
+# OPERATING_MODE enum — v3.0 accepts MANAGED/AUTOMATIC as aliases
 if operating_mode:
-    ok = operating_mode.upper() in ('SUPERVISED', 'AUTONOMOUS')
+    valid_modes = ('SUPERVISED', 'AUTONOMOUS', 'MANAGED', 'AUTOMATIC')
+    ok = operating_mode.upper() in valid_modes
     p("OPERATING_MODE value",
       ok,
-      f"'{operating_mode}' — {'valid' if ok else 'must be SUPERVISED or AUTONOMOUS'}")
+      f"'{operating_mode}' — {'valid' if ok else 'must be SUPERVISED | MANAGED | AUTONOMOUS | AUTOMATIC'}")
 
-# SendGrid from-address format
+# ENCRYPTION_KEY — must be a valid Fernet key (32 url-safe base64 bytes = 44 chars)
+if encryption_key:
+    import base64 as _b64
+    try:
+        decoded = _b64.urlsafe_b64decode(encryption_key + '==')
+        ok = len(decoded) == 32
+        p("ENCRYPTION_KEY format",
+          ok,
+          f"{'Valid 32-byte Fernet key' if ok else f'Wrong length: {len(decoded)} bytes (need 32)'}")
+    except Exception:
+        p("ENCRYPTION_KEY format", False,
+          "Not valid URL-safe base64 — generate with: python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
+
+# ADMIN_EMAIL format
+if admin_email:
+    ok = '@' in admin_email and '.' in admin_email.split('@')[-1]
+    p("ADMIN_EMAIL format", ok,
+      f"'{admin_email}' — {'valid' if ok else 'not a valid email address'}")
+
+# ADMIN_PASSWORD strength (min 12 chars)
+if admin_password:
+    ok = len(admin_password) >= 12
+    p("ADMIN_PASSWORD length",
+      ok,
+      f"{'OK' if ok else 'Too short — use at least 12 characters'} ({len(admin_password)} chars)")
+
+# CONSTRUCTION_MODE enum
+if construction_mode:
+    ok = construction_mode.lower() in ('true', 'false', '1', '0', 'yes', 'no')
+    p("CONSTRUCTION_MODE value",
+      ok,
+      f"'{construction_mode}' — {'valid' if ok else 'expected true/false or 1/0'}")
+
+# PORTAL_BASE_URL — used to build /setup-account links in Stripe webhook emails
+if portal_base_url:
+    ok = portal_base_url.startswith('http://') or portal_base_url.startswith('https://')
+    p("PORTAL_BASE_URL format", ok,
+      f"'{portal_base_url}' — {'valid' if ok else 'must start with http:// or https://'}")
+    if ok and portal_base_url.endswith('/'):
+        w("PORTAL_BASE_URL has trailing slash", "stripped in code but tidy to remove")
+else:
+    w("PORTAL_BASE_URL not set",
+      "Stripe webhook setup emails will fall back to http://localhost:<PORT> — "
+      "set to https://portal.synth-cloud.com before enabling Stripe integration")
+
+# Stripe key formats
+if stripe_pub:
+    ok = stripe_pub.startswith('pk_')
+    p("STRIPE_PUBLISHABLE_KEY format",
+      ok,
+      f"{'OK — starts with pk_' if ok else 'Expected prefix pk_test_ or pk_live_'}")
+
+if stripe_secret:
+    ok = stripe_secret.startswith('sk_')
+    p("STRIPE_SECRET_KEY format",
+      ok,
+      f"{'OK — starts with sk_' if ok else 'Expected prefix sk_test_ or sk_live_'}")
+
+if stripe_webhook:
+    ok = stripe_webhook.startswith('whsec_')
+    p("STRIPE_WEBHOOK_SECRET format",
+      ok,
+      f"{'OK — starts with whsec_' if ok else 'Expected prefix whsec_'}")
+
+# Cross-check Stripe test vs live consistency
+if stripe_pub and stripe_secret:
+    pub_is_test    = stripe_pub.startswith('pk_test_')
+    secret_is_test = stripe_secret.startswith('sk_test_')
+    consistent     = pub_is_test == secret_is_test
+    p("Stripe key environment consistent",
+      consistent,
+      f"{'Both test or both live ✓' if consistent else 'MISMATCH — one test key, one live key'}")
+
+# Cross-check: Stripe webhook requires PORTAL_BASE_URL to build setup-account links
+if stripe_webhook and not portal_base_url:
+    w("STRIPE_WEBHOOK_SECRET set but PORTAL_BASE_URL missing",
+      "Webhook will fire but setup emails will contain localhost links — "
+      "set PORTAL_BASE_URL=https://portal.synth-cloud.com")
+
+# Resend key format — keys start with re_
+if resend_key:
+    ok = resend_key.startswith('re_')
+    p("RESEND_API_KEY format",
+      ok,
+      f"{'prefix re_ OK' if ok else 'Expected prefix re_ — check key from resend.com/api-keys'}")
+
+# Resend from-address format
 if alert_from:
     ok = '@' in alert_from and '.' in alert_from.split('@')[-1]
     p("ALERT_FROM email format", ok,
@@ -224,6 +319,19 @@ if monitor_url:
     ok = monitor_url.startswith('http://') or monitor_url.startswith('https://')
     p("MONITOR_URL format", ok,
       f"'{monitor_url}' — {'valid' if ok else 'must start with http:// or https://'}")
+
+# Company URL format
+if company_url:
+    ok = company_url.startswith('http://') or company_url.startswith('https://')
+    p("COMPANY_URL format", ok,
+      f"'{company_url}' — {'valid' if ok else 'must start with http:// or https://'}")
+    if ok and company_url.endswith('/'):
+        w("COMPANY_URL has trailing slash",
+          "code strips it with rstrip('/') — harmless but tidy to remove")
+else:
+    w("COMPANY_URL not set",
+      "Scoop events will route via MONITOR_URL proxy (or be dropped if MONITOR_URL "
+      "also unset). Set COMPANY_URL=http://<company-pi-ip>:5010 for direct routing.")
 
 
 # ══════════════════════════════════════════════════════════
@@ -319,64 +427,69 @@ if _req and anthropic_key:
 else:
     w("Anthropic test skipped", "ANTHROPIC_API_KEY not set")
 
-# ── Congress.gov ───────────────────────────────────────────────────────────
-if _req and congress_key:
-    print(f"\n  Congress.gov:")
+# ── Alpaca News API ────────────────────────────────────────────────────────
+_alpaca_key    = os.getenv('ALPACA_API_KEY', '')
+_alpaca_secret = os.getenv('ALPACA_SECRET_KEY', '')
+if _req and _alpaca_key and _alpaca_secret:
+    print(f"\n  Alpaca News API:")
     try:
         r = _req.get(
-            'https://api.congress.gov/v3/bill',
-            params={'api_key': congress_key, 'limit': 1, 'format': 'json'},
+            'https://data.alpaca.markets/v1beta1/news',
+            params={'limit': 1, 'exclude_contentless': 'true'},
+            headers={
+                'APCA-API-KEY-ID':     _alpaca_key,
+                'APCA-API-SECRET-KEY': _alpaca_secret,
+            },
             timeout=10,
         )
         if r.status_code == 200:
-            p("Congress.gov API key", True, "Valid — API responding")
+            count = len(r.json().get('news', []))
+            p("Alpaca News API", True, f"Responding — {count} article(s) returned")
         elif r.status_code == 403:
-            p("Congress.gov API key", False,
-              "403 — key invalid or not yet activated (can take 24h after signup)")
+            p("Alpaca News API", False, "403 — credentials rejected")
         elif r.status_code == 429:
-            p("Congress.gov API key", True,
-              "Rate limited — key is valid")
+            p("Alpaca News API", True, "Rate limited — credentials valid")
         else:
-            p("Congress.gov API key", False,
-              f"HTTP {r.status_code}: {r.text[:80]}")
+            p("Alpaca News API", False, f"HTTP {r.status_code}: {r.text[:80]}")
     except Exception as e:
-        p("Congress.gov API key", False, f"Connection failed: {e}")
+        p("Alpaca News API", False, f"Connection failed: {e}")
 else:
-    w("Congress.gov test skipped", "CONGRESS_API_KEY not set")
+    w("Alpaca News API test skipped", "ALPACA_API_KEY or ALPACA_SECRET_KEY not set")
 
-# ── SendGrid ───────────────────────────────────────────────────────────────
-if _req and sendgrid_key and alert_from and alert_to:
-    print(f"\n  SendGrid:")
+# ── Resend ─────────────────────────────────────────────────────────────────
+if _req and resend_key:
+    print(f"\n  Resend:")
     try:
-        # Just validate the key via /v3/user/profile — no email sent
+        # Validate key via /domains — no email sent
         r = _req.get(
-            'https://api.sendgrid.com/v3/user/profile',
-            headers={'Authorization': f'Bearer {sendgrid_key}'},
+            'https://api.resend.com/domains',
+            headers={'Authorization': f'Bearer {resend_key}'},
             timeout=10,
         )
         if r.status_code == 200:
-            data     = r.json()
-            username = data.get('username', '?')
-            p("SendGrid API key", True,
-              f"Valid — account: {username}")
+            data    = r.json()
+            domains = [d.get('name', '?') for d in data.get('data', [])]
+            p("RESEND_API_KEY", True,
+              f"Valid — verified domains: {', '.join(domains) if domains else 'none yet'}")
+            if not domains:
+                w("No verified domains in Resend",
+                  "Add and verify a sending domain at resend.com/domains before emails will deliver")
         elif r.status_code == 401:
-            p("SendGrid API key", False,
+            p("RESEND_API_KEY", False,
               "401 Unauthorized — key invalid or revoked")
-        elif r.status_code == 403:
-            p("SendGrid API key", False,
-              "403 Forbidden — key may have restricted scopes (needs mail.send)")
         else:
-            p("SendGrid API key", False,
+            p("RESEND_API_KEY", False,
               f"HTTP {r.status_code}: {r.text[:80]}")
     except Exception as e:
-        p("SendGrid API key", False, f"Connection failed: {e}")
-elif sendgrid_key and not (alert_from and alert_to):
-    w("SendGrid alert config incomplete",
-      "SENDGRID_API_KEY set but ALERT_FROM and/or ALERT_TO missing — "
-      "protective exit emails will not send")
+        p("RESEND_API_KEY", False, f"Connection failed: {e}")
+
+    if not (alert_from and admin_email):
+        w("Resend alert config incomplete",
+          "RESEND_API_KEY set but ALERT_FROM and/or ADMIN_EMAIL missing — "
+          "protective exit emails and construction OTP will not send")
 else:
-    w("SendGrid test skipped",
-      "SENDGRID_API_KEY not set — protective exit emails disabled")
+    w("Resend test skipped",
+      "RESEND_API_KEY not set — email alerts and account setup emails disabled")
 
 # ── Monitor ────────────────────────────────────────────────────────────────
 if _req and monitor_url:
@@ -396,6 +509,39 @@ if _req and monitor_url:
     except Exception as e:
         w("Monitor server unreachable",
           f"{monitor_url} — {e} (non-blocking, heartbeats will fail silently)")
+
+# ── Company Node ────────────────────────────────────────────────────────────
+if _req and company_url:
+    print(f"\n  Company Node:")
+    try:
+        # /health is unauthenticated — returns queue counts
+        r = _req.get(
+            f"{company_url.rstrip('/')}/health",
+            timeout=5,
+        )
+        if r.status_code == 200:
+            data   = r.json()
+            counts = data.get('queue', {})
+            detail = (
+                f"pending={counts.get('pending',0)} "
+                f"sent={counts.get('sent',0)} "
+                f"failed={counts.get('failed',0)}"
+            )
+            p("Company Node reachable (/health)", True,
+              f"{company_url} — {detail}")
+        elif r.status_code == 401:
+            p("Company Node reachable (/health)", False,
+              f"401 — /health should be unauthenticated; check company_server.py version")
+        else:
+            p("Company Node reachable (/health)", False,
+              f"HTTP {r.status_code}: {r.text[:80]}")
+    except Exception as e:
+        w("Company Node unreachable",
+          f"{company_url} — {e} (non-blocking — Scoop events will queue locally "
+          f"or proxy via monitor if MONITOR_URL is set)")
+else:
+    w("Company Node test skipped",
+      "COMPANY_URL not set — set to http://<company-pi-ip>:5010 to enable direct routing")
 
 
 # ══════════════════════════════════════════════════════════

@@ -1,20 +1,20 @@
 """
-news_agent.py — News Agent (Scout / Research Agent)
-Synthos · Agent 2
+retail_news_agent.py — News Agent
+Synthos · v3.0
 
 Runs:
-  - Every hour during market hours (9am-4pm ET weekdays)
+  - Every hour during market hours (9am-4pm ET weekdays) — via systemd synthos-news.timer
   - Every 4 hours overnight
 
 Responsibilities:
-  - Fetch congressional disclosures and legislative news from free APIs
+  - Fetch financial news via Alpaca News API (REST historical + streaming)
   - Score signals through 22-gate deterministic classification spine
   - Apply per-member reliability weight → adjusted score
   - Pull 1yr price history for ticker + industry/sector ETF
   - Write all signals to news_feed table for portal display
   - Announce for peer interrogation (UDP broadcast, 30s wait)
   - Post metadata to company Pi if COMPANY_SUBSCRIPTION=true
-  - Queue validated signals for Bolt
+  - Queue validated signals for Trade Logic
 
 No AI inference in any decision path — all decisions are rule-based and traceable.
 Every article produces a structured NewsDecisionLog recording each gate's inputs
@@ -34,7 +34,6 @@ import socket
 import logging
 import argparse
 import requests
-import feedparser
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
@@ -47,12 +46,21 @@ load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 from database import get_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
-# ANTHROPIC_API_KEY removed — Scout uses no LLM in classification decisions.
+# ANTHROPIC_API_KEY removed — News agent uses no LLM in classification decisions.
 # All decisions are rule-based and traceable. See gate1-gate22 functions.
-CONGRESS_API_KEY     = os.environ.get('CONGRESS_API_KEY', '')
 ALPACA_API_KEY       = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET_KEY    = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_DATA_URL      = "https://data.alpaca.markets"
+
+# ── MULTI-TENANT ROUTING ──────────────────────────────────────────────────────
+_CUSTOMER_ID: 'str | None' = None
+
+def _db():
+    """Return per-customer signals.db if --customer-id was given, else the shared system DB."""
+    if _CUSTOMER_ID:
+        from retail_database import get_customer_db
+        return get_customer_db(_CUSTOMER_ID)
+    return get_db()
 ET                   = ZoneInfo("America/New_York")
 MAX_RETRIES          = 3
 REQUEST_TIMEOUT      = 10
@@ -213,8 +221,7 @@ _REGULATORY_TERMS = (
 _PRIMARY_SOURCE_SIGNALS = frozenset({
     'filing', 'press release', 'official statement', 'transcript',
     'form 4', 'sec filing', '8-k', '10-k', '10-q', 'annual report',
-    'confirmed by', 'announced by', 'congress.gov', 'sec.gov',
-    'federal register', 'capitol trades',
+    'confirmed by', 'announced by', 'sec.gov', 'alpaca news',
 })
 
 _OPINION_SIGNALS = frozenset({
@@ -406,14 +413,14 @@ class NewsDecisionLog:
     def commit(self, db):
         log.info(f"[NEWS_DECISION]\n{self.to_human()}")
         try:
-            db.log_event("NEWS_CLASSIFIED", agent="Scout",
+            db.log_event("NEWS_CLASSIFIED", agent="News",
                          details=json.dumps(self.to_machine()))
         except Exception as e:
             log.debug(f"NewsDecisionLog.commit failed (non-fatal): {e}")
 
 
 # ── TEMP PATCH: PER-SOURCE DAILY FETCH GUARD ──────────────────────────────
-# Prevents Scout from hitting any external source more than once per day.
+# Prevents the News agent from hitting any external source more than once per day.
 # Remove this block once a proper rate-limiting layer is in place.
 
 _FETCH_GUARD_EVENT      = "SCOUT_SOURCE_FETCH"
@@ -449,7 +456,7 @@ def _source_fetched_recently(source_name: str, db) -> bool:
 def _record_source_fetch(source_name: str, db) -> None:
     """Record a successful fetch so the guard fires until the next 08:00 ET reset."""
     try:
-        db.log_event(_FETCH_GUARD_EVENT, agent="Scout", details=f"source={source_name}")
+        db.log_event(_FETCH_GUARD_EVENT, agent="News", details=f"source={source_name}")
     except Exception:
         pass
 
@@ -630,212 +637,176 @@ def extract_ticker_from_headline(headline, existing_ticker=None):
     return None
 
 
-# ── SOURCE FETCHERS ───────────────────────────────────────────────────────
+# ── ALPACA NEWS FETCHERS ───────────────────────────────────────────────────
 
-def fetch_capitol_trades():
-    """Fetch recent congressional trades from Capitol Trades free tier."""
-    url = "https://capitoltrades.com/api/trades"
-    params = {"pageSize": 50, "page": 1}
-    r = fetch_with_retry(url, params=params)
-    if not r:
-        return []
-    try:
-        data = r.json()
-        results = []
-        for t in data.get("data", []):
-            results.append({
-                "ticker":      t.get("issuer", {}).get("tickerSymbol", ""),
-                "company":     t.get("issuer", {}).get("name", ""),
-                "politician":  f"{t.get('politician', {}).get('name', '')} "
-                               f"({t.get('politician', {}).get('party', '')}·"
-                               f"{t.get('politician', {}).get('chamber', '')})",
-                "tx_date":     t.get("txDate", ""),
-                "disc_date":   t.get("pubDate", ""),
-                "tx_type":     t.get("txType", ""),
-                "amount":      t.get("value", ""),
-                "source":      "Capitol Trades API",
-                "source_tier": 1,
-                "source_url":  "https://capitoltrades.com",
-                "headline":    (f"{t.get('politician', {}).get('name', 'Unknown')} "
-                               f"{t.get('txType', 'traded')} "
-                               f"{t.get('issuer', {}).get('tickerSymbol', '')}"),
-            })
-        log.info(f"Capitol Trades: fetched {len(results)} disclosures")
-        return results
-    except Exception as e:
-        log.error(f"Capitol Trades parse error: {e}")
-        return []
+_ALPACA_NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
+_ALPACA_HEADERS  = lambda: {
+    "APCA-API-KEY-ID":     ALPACA_API_KEY,
+    "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+}
+
+# Alpaca news source → tier mapping.
+# Benzinga is the primary content provider via Alpaca's news feed.
+_ALPACA_SOURCE_TIERS = {
+    "benzinga":  2,   # wire-level financial news
+    "reuters":   2,
+    "ap":        2,
+    "dow jones": 2,
+    "wsj":       2,
+    "ft":        2,
+    "bloomberg": 2,
+}
 
 
-def fetch_congress_gov_activity():
-    """Fetch recent bill activity from Congress.gov API."""
-    if not CONGRESS_API_KEY:
-        log.warning("No CONGRESS_API_KEY set — skipping Congress.gov fetch")
+def _alpaca_news_tier(source_name: str) -> int:
+    """Map Alpaca article source string to internal source tier (1–4)."""
+    s = (source_name or "").lower()
+    for key, tier in _ALPACA_SOURCE_TIERS.items():
+        if key in s:
+            return tier
+    return 3   # default: press-release tier
+
+
+def _alpaca_article_to_item(article: dict) -> dict:
+    """
+    Normalise an Alpaca news article dict to the pipeline's standard item format.
+
+    Alpaca article fields:
+      id, headline, summary, author, created_at, updated_at,
+      content, url, symbols (list), source (e.g. 'Benzinga')
+    """
+    symbols   = article.get("symbols") or []
+    ticker    = symbols[0].upper() if symbols else None
+    pub_date  = (article.get("created_at") or "")[:10]   # "YYYY-MM-DD"
+    source    = article.get("source", "Alpaca News")
+    tier      = _alpaca_news_tier(source)
+    return {
+        "headline":    (article.get("headline") or "").strip(),
+        "subhead":     (article.get("summary")  or "")[:120].strip(),
+        "source":      f"Alpaca News ({source})",
+        "source_tier": tier,
+        "source_url":  article.get("url", _ALPACA_NEWS_URL),
+        "politician":  "",
+        "disc_date":   pub_date,
+        "tx_date":     pub_date,
+        "ticker":      ticker,
+        "all_symbols": symbols,
+    }
+
+
+def fetch_alpaca_news_historical(
+    symbols: list | None = None,
+    start:   str  | None = None,
+    end:     str  | None = None,
+    limit:   int  = 50,
+    sort:    str  = "desc",
+) -> list[dict]:
+    """
+    Fetch news articles from Alpaca's historical news REST API.
+
+    Endpoint: GET https://data.alpaca.markets/v1beta1/news
+    Auth:     APCA-API-KEY-ID + APCA-API-SECRET-KEY headers
+    Rate:     ~130 articles/day available; max 50 per call.
+    Coverage: 2015–present via Benzinga content feed.
+
+    Args:
+        symbols:  Optional list of tickers to filter by (e.g. ['AAPL','MSFT']).
+                  If None, fetches market-wide news.
+        start:    ISO-8601 start datetime (e.g. '2026-04-01T00:00:00Z').
+                  Defaults to 24 h ago.
+        end:      ISO-8601 end datetime. Defaults to now.
+        limit:    Max articles per call (1–50).
+        sort:     'desc' (newest first) or 'asc'.
+
+    Returns:
+        List of normalised item dicts ready for the 22-gate classification spine.
+    """
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        log.warning("ALPACA_API_KEY / ALPACA_SECRET_KEY not set — skipping news fetch")
         return []
-    results = []
-    url = "https://api.congress.gov/v3/bill"
-    params = {"api_key": CONGRESS_API_KEY, "format": "json",
-               "limit": 20, "sort": "updateDate+desc"}
-    r = fetch_with_retry(url, params=params)
-    if r:
+
+    if not start:
+        start = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    if not end:
+        end = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    params: dict = {
+        "start":               start,
+        "end":                 end,
+        "limit":               min(limit, 50),
+        "sort":                sort,
+        "include_content":     "false",
+        "exclude_contentless": "true",
+    }
+    if symbols:
+        params["symbols"] = ",".join(s.upper() for s in symbols)
+
+    results   = []
+    page_token = None
+    pages_fetched = 0
+    max_pages = 10   # safety ceiling — at 50/page this is 500 articles max per run
+
+    while pages_fetched < max_pages:
+        if page_token:
+            params["page_token"] = page_token
         try:
-            for bill in r.json().get("bills", []):
-                title = bill.get("title", "")
-                if not title:
-                    continue
-                sponsors = bill.get("sponsors", [{}])
-                results.append({
-                    "headline":    title,
-                    "source":      "Congress.gov API",
-                    "source_tier": 1,
-                    "source_url":  "https://api.congress.gov",
-                    "politician":  sponsors[0].get("fullName", "Multiple sponsors")
-                                   if sponsors else "Multiple sponsors",
-                    "tx_date":     bill.get("introducedDate", ""),
-                    "disc_date":   (bill.get("updateDate", "")[:10]
-                                   if bill.get("updateDate") else ""),
-                    "raw":         bill,
-                })
-        except Exception as e:
-            log.error(f"Congress.gov parse error: {e}")
-    log.info(f"Congress.gov: fetched {len(results)} bill actions")
+            r = requests.get(
+                _ALPACA_NEWS_URL,
+                params=params,
+                headers=_ALPACA_HEADERS(),
+                timeout=REQUEST_TIMEOUT,
+            )
+            r.raise_for_status()
+        except Exception as exc:
+            log.error(f"Alpaca news fetch error (page {pages_fetched + 1}): {exc}")
+            break
+
+        data       = r.json()
+        articles   = data.get("news", [])
+        page_token = data.get("next_page_token")
+        pages_fetched += 1
+
+        for article in articles:
+            item = _alpaca_article_to_item(article)
+            if item["headline"]:
+                results.append(item)
+
+        log.debug(f"Alpaca news page {pages_fetched}: {len(articles)} articles "
+                  f"(total so far: {len(results)})")
+
+        if not page_token or len(articles) == 0:
+            break
+
+    log.info(f"Alpaca news: fetched {len(results)} articles "
+             f"({pages_fetched} page{'s' if pages_fetched != 1 else ''})")
     return results
 
 
-def fetch_federal_register():
-    """Fetch recent procurement and regulatory notices from Federal Register."""
-    url = "https://www.federalregister.gov/api/v1/documents.json"
-    params = {
-        "per_page": 20, "order": "newest",
-        "fields[]": ["title", "abstract", "agencies", "publication_date", "html_url"],
-        "conditions[type][]": ["Notice", "Proposed Rule"],
-    }
-    r = fetch_with_retry(url, params=params)
-    if not r:
-        return []
-    try:
-        results = []
-        for doc in r.json().get("results", []):
-            results.append({
-                "headline":    doc.get("title", ""),
-                "subhead":     (doc.get("abstract", "") or "")[:120],
-                "source":      "Federal Register API",
-                "source_tier": 1,
-                "source_url":  doc.get("html_url", "https://www.federalregister.gov/api/v1"),
-                "politician":  ", ".join(a.get("name", "") for a in doc.get("agencies", [])[:2]),
-                "disc_date":   doc.get("publication_date", ""),
-                "tx_date":     doc.get("publication_date", ""),
-            })
-        log.info(f"Federal Register: fetched {len(results)} notices")
-        return results
-    except Exception as e:
-        log.error(f"Federal Register parse error: {e}")
-        return []
-
-
-def get_rss_feeds():
-    """Return RSS feed list. Reads RSS_FEEDS_JSON env var if set.
-
-    Feeds that require custom HTTP headers are 4-element tuples:
-      [name, url, tier, headers_dict]
-    Standard feeds are 3-element tuples: [name, url, tier]
+def fetch_alpaca_news_for_ticker(ticker: str, limit: int = 10) -> list[dict]:
     """
-    # EDGAR requires: User-Agent: <company/name> <contact-email>
-    _contact = os.environ.get('USER_EMAIL', os.environ.get('OWNER_EMAIL', 'synthos@synth-cloud.com'))
-    _edgar_ua = {"User-Agent": f"Synthos {_contact}"}
-    _gov_ua   = {"User-Agent": f"Synthos/1.0 ({_contact})"}
-
-    rss_json = os.environ.get('RSS_FEEDS_JSON', '')
-    if rss_json:
-        try:
-            custom = json.loads(rss_json)
-            if isinstance(custom, list) and custom:
-                log.info(f"Using {len(custom)} custom RSS feeds from RSS_FEEDS_JSON")
-                return custom
-        except Exception as e:
-            log.warning(f"RSS_FEEDS_JSON parse error — using defaults: {e}")
-    return [
-        # ── POLITICS / REGULATORY NEWS ────────────────────────────────────
-        # Reuters/AP/Politico removed — DNS fail / 404 / 403 as of 2026-03-31
-        ["Bloomberg Politics",      "https://feeds.bloomberg.com/politics/news.rss",                                              3],
-        ["The Hill",                "https://thehill.com/feed",                                                                   3],
-        ["Roll Call",               "https://rollcall.com/feed",                                                                  3],
-
-        # ── REGULATORY: Enforcement / Approvals ──────────────────────────
-        ["SEC Press Releases",      "https://www.sec.gov/rss/news/pressreleases.rss",                                             1],
-        ["SEC Enforcement",         "https://www.sec.gov/rss/litigation/admin.xml",                                               1],
-        ["CFTC Press Releases",     "https://www.cftc.gov/RSS/RSSGP/rssgp.xml",                                                   1],
-        ["CFTC Enforcement",        "https://www.cftc.gov/RSS/RSSENF/rssenf.xml",                                                 1],
-        ["CFTC Speeches",           "https://www.cftc.gov/RSS/RSSST/rssst.xml",                                                   2],
-
-        # ── CONTRACTS ────────────────────────────────────────────────────
-        ["DoD Contract Awards",     "https://www.war.gov/DesktopModules/ArticleCS/RSS.ashx?max=10&ContentType=400&Site=945",      1],
-
-        # ── MACRO / RATES ─────────────────────────────────────────────────
-        ["Federal Reserve",         "https://www.federalreserve.gov/feeds/press_all.xml",                                         1],
-        ["Fed FOMC",                "https://www.federalreserve.gov/feeds/press_monetary.xml",                                    1],
-        ["Fed Powell Speeches",     "https://www.federalreserve.gov/feeds/s_t_powell.xml",                                       1],
-        ["Fed Speeches",            "https://www.federalreserve.gov/feeds/speeches.xml",                                         2],
-        ["Fed H.15 Rates",          "https://www.federalreserve.gov/feeds/h15.xml",                                              2],
-        ["Fed Enforcement",         "https://www.federalreserve.gov/feeds/press_enforcement.xml",                                 2],
-        ["Fed Bank Orders",         "https://www.federalreserve.gov/feeds/press_orders.xml",                                     2],
-        ["BEA Economic Releases",   "https://apps.bea.gov/rss/rss.xml",                                                          1],
-        ["Treasury Auctions",       "https://www.treasurydirect.gov/TA_WS/securities/announced/rss",                             2],
-        ["OCC Banking Bulletins",   "https://www.occ.treas.gov/rss/occ_bulletins.xml",                                          2],
-        ["OCC News Releases",       "https://www.occ.treas.gov/rss/occ_news.xml",                                               2],
-
-        # ── LEGISLATION / RULES ───────────────────────────────────────────
-        ["Federal Register Daily",  "https://www.govinfo.gov/rss/fr.xml",                                                        2],
-        ["Congressional Bills",     "https://www.govinfo.gov/rss/bills.xml",                                                     2],
-        ["Enrolled Bills",          "https://www.govinfo.gov/rss/bills-enr.xml",                                                 1],
-        ["House Floor Today",       "https://www.congress.gov/rss/house-floor-today.xml",                                       2],
-        ["Senate Floor Today",      "https://www.congress.gov/rss/senate-floor-today.xml",                                      2],
-        ["FERC Energy Filings",     "https://ecollection.ferc.gov/api/rssfeed",                                                  2],
-
-        # ── EDGAR FILINGS (SEC — requires User-Agent per EDGAR policy) ─────
-        # Form 4: insider buy/sell transactions (most relevant for trading signals)
-        ["EDGAR Form 4",            "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&dateb=&owner=include&count=40&search_text=&output=atom",      1, _edgar_ua],
-        # 8-K: material corporate events (earnings surprises, M&A, FDA rulings, etc.)
-        ["EDGAR 8-K",               "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=40&search_text=&output=atom",    1, _edgar_ua],
-        # 13F-HR: institutional portfolio holdings (quarterly, lags 45 days)
-        ["EDGAR 13F-HR",            "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=13F-HR&dateb=&owner=include&count=40&search_text=&output=atom", 2, _edgar_ua],
-    ]
-
-
-# ── NEWS HEADLINE FEEDS (display-only, not in signal pipeline) ───────────────
-
-NEWS_FEEDS = [
-    # MarketWatch — confirmed live 2026-03-31
-    ("MW Market Pulse",        "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",       "Markets"),
-    ("MW Bulletins",           "https://feeds.content.dowjones.io/public/rss/mw_bulletins",          "Breaking"),
-    ("MW Realtime Headlines",  "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",  "Markets"),
-]
-
-def _headline_key(headline: str) -> str:
-    """Normalised key for dedup — lowercase, letters/numbers only."""
-    import re
-    return re.sub(r'[^a-z0-9 ]', '', headline.lower()).strip()
-
-def _jaccard(a: str, b: str) -> float:
-    """Word-level Jaccard similarity between two strings."""
-    sa = set(a.split())
-    sb = set(b.split())
-    if not sa or not sb:
-        return 0.0
-    return len(sa & sb) / len(sa | sb)
-
-def fetch_and_store_news_headlines(db) -> int:
-    """Fetch MarketWatch and other display-only news feeds.
-
-    Articles are written directly to the news_feed table with source='NEWS'
-    and routing='NEWS' — they bypass the 22-gate signal pipeline entirely
-    and never affect trade decisions.
-
-    Returns number of new (non-duplicate) articles stored.
+    Fetch recent Alpaca news articles for a specific ticker.
+    Used by the screening request handler and per-ticker lookups.
+    Returns a list of normalised item dicts.
     """
-    import requests as _req
+    start = (datetime.now() - timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    return fetch_alpaca_news_historical(
+        symbols=[ticker], start=start, limit=limit, sort="desc"
+    )
 
-    # Pull last 24h headlines already stored for dedup
+
+def fetch_and_store_alpaca_display_news(db) -> int:
+    """
+    Fetch recent broad-market Alpaca news and store to news_feed table for
+    portal display (Intel page).  Articles bypass the 22-gate signal pipeline
+    entirely — routing='NEWS'.
+
+    Deduplication: Jaccard similarity against headlines stored in the last 24 h.
+    Returns number of new articles stored.
+    """
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        return 0
+
+    # Pull last-24h stored headlines for dedup
     stored_keys: list[str] = []
     try:
         with db.conn() as c:
@@ -844,103 +815,50 @@ def fetch_and_store_news_headlines(db) -> int:
                 WHERE source='NEWS'
                   AND created_at >= datetime('now','-24 hours')
             """).fetchall()
-        stored_keys = [_headline_key(r[0]) for r in rows if r[0]]
+        stored_keys = [re.sub(r'[^a-z0-9 ]', '', (r[0] or "").lower()).strip()
+                       for r in rows if r[0]]
     except Exception:
         pass
 
-    ua = {"User-Agent": f"Synthos/1.0 ({os.environ.get('USER_EMAIL','synthos@synth-cloud.com')})"}
+    start    = (datetime.now() - timedelta(hours=6)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    articles = fetch_alpaca_news_historical(start=start, limit=50, sort="desc")
+
     stored = 0
-
-    for feed_name, url, category in NEWS_FEEDS:
+    for item in articles:
+        title = item["headline"]
+        if not title:
+            continue
+        key = re.sub(r'[^a-z0-9 ]', '', title.lower()).strip()
+        if not key:
+            continue
+        # Skip if >70% similar to anything already stored
+        if any(_jaccard(key, sk) > 0.70 for sk in stored_keys):
+            continue
+        stored_keys.append(key)
         try:
-            resp = _req.get(url, headers=ua, timeout=10)
-            resp.raise_for_status()
-            feed = feedparser.parse(resp.content)
-            if feed.bozo and not feed.entries:
-                log.warning(f"News feed parse issue: {feed_name}")
-                continue
-            count = 0
-            for entry in feed.entries[:20]:
-                title = (entry.get("title") or "").strip()
-                if not title:
-                    continue
-                key = _headline_key(title)
-                if not key:
-                    continue
-                # Duplicate check — skip if >70% similar to any stored headline
-                is_dup = any(_jaccard(key, sk) > 0.70 for sk in stored_keys)
-                if is_dup:
-                    continue
-                stored_keys.append(key)   # add to in-memory dedup set
-                pub = entry.get("published") or entry.get("updated") or ""
-                try:
-                    db.write_news_feed_entry(
-                        congress_member = "",
-                        ticker          = "",
-                        signal_score    = "NEWS",
-                        sentiment_score = None,
-                        raw_headline    = title,
-                        metadata        = {
-                            "source":   feed_name,
-                            "category": category,
-                            "link":     entry.get("link", url),
-                            "pub_date": pub[:25],
-                            "routing":  "NEWS",
-                            "staleness": "fresh",
-                        },
-                        source = "NEWS",
-                    )
-                    stored += 1
-                    count += 1
-                except Exception as e:
-                    log.warning(f"news_feed write failed ({feed_name}): {e}")
-            log.info(f"{feed_name}: stored {count} new headlines")
+            db.write_news_feed_entry(
+                congress_member = "",
+                ticker          = item.get("ticker") or "",
+                signal_score    = "NEWS",
+                sentiment_score = None,
+                raw_headline    = title,
+                metadata        = {
+                    "source":     item["source"],
+                    "category":   "Markets",
+                    "link":       item["source_url"],
+                    "pub_date":   item["disc_date"],
+                    "routing":    "NEWS",
+                    "staleness":  "fresh",
+                    "symbols":    item.get("all_symbols", []),
+                },
+                source = "NEWS",
+            )
+            stored += 1
         except Exception as e:
-            log.error(f"News feed fetch failed ({feed_name}): {e}")
+            log.warning(f"news_feed write failed (Alpaca display news): {e}")
 
+    log.info(f"Alpaca display news: {stored} new headlines stored")
     return stored
-
-
-def fetch_rss_feeds():
-    """Fetch and parse all RSS feeds. Returns list of signal dicts.
-
-    Feed tuples may be [name, url, tier] or [name, url, tier, headers].
-    When headers are present, the feed is pre-fetched via requests so
-    custom headers (e.g. SEC EDGAR User-Agent requirement) are sent.
-    """
-    import requests as _req
-    results = []
-    for entry in get_rss_feeds():
-        source_name, url, tier = entry[0], entry[1], entry[2]
-        extra_headers = entry[3] if len(entry) > 3 else None
-        try:
-            if extra_headers:
-                resp = _req.get(url, headers=extra_headers, timeout=10)
-                resp.raise_for_status()
-                feed = feedparser.parse(resp.content)
-            else:
-                feed = feedparser.parse(url)
-            if feed.bozo and not feed.entries:
-                log.warning(f"RSS parse issue: {source_name}")
-                continue
-            for entry in feed.entries[:5]:
-                title = entry.get("title", "").strip()
-                if not title:
-                    continue
-                results.append({
-                    "headline":    title,
-                    "subhead":     entry.get("summary", "")[:120].strip(),
-                    "source":      source_name,
-                    "source_tier": tier,
-                    "source_url":  entry.get("link", url),
-                    "politician":  "",
-                    "disc_date":   datetime.now().strftime('%Y-%m-%d'),
-                    "tx_date":     datetime.now().strftime('%Y-%m-%d'),
-                })
-            log.info(f"{source_name}: fetched {min(5, len(feed.entries))} articles")
-        except Exception as e:
-            log.error(f"RSS fetch failed ({source_name}): {e}")
-    return results
 
 
 # ── INTERROGATION BROADCAST ───────────────────────────────────────────────
@@ -2513,21 +2431,23 @@ def _state_to_confidence(state):
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
 
-def _fetch_yahoo_headlines(ticker, max_items=5):
-    """Fetch recent Yahoo Finance RSS headlines for a ticker. Returns list of strings."""
-    import feedparser as _fp
-    url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
+def _fetch_alpaca_headlines_for_ticker(ticker: str, max_items: int = 10) -> list[str]:
+    """
+    Fetch recent Alpaca news headlines for a ticker.
+    Returns a list of headline strings (newest first).
+    Used by the screening request handler as a fast per-ticker headline source.
+    """
     try:
-        feed = _fp.parse(url)
-        return [e.get('title', '').strip() for e in feed.entries[:max_items] if e.get('title')]
+        items = fetch_alpaca_news_for_ticker(ticker, limit=max_items)
+        return [i["headline"] for i in items if i.get("headline")]
     except Exception as e:
-        log.warning(f"Yahoo RSS {ticker}: {e}")
+        log.warning(f"Alpaca headlines {ticker}: {e}")
         return []
 
 
 def _score_headlines_for_screening(headlines):
     """
-    Score a list of headlines using Scout's existing keyword logic.
+    Score a list of headlines using the News agent's existing keyword logic.
     Returns (signal_str, score_float, top_headline).
       signal_str: 'bullish' | 'bearish' | 'neutral'
       score_float: 0.0 – 1.0
@@ -2558,7 +2478,7 @@ def _score_headlines_for_screening(headlines):
 def _handle_screening_requests(db):
     """
     Fulfill pending 'news' screening requests from the sector screener.
-    Fetches Yahoo Finance headlines for each ticker, scores them, writes
+    Fetches recent Alpaca news headlines for each ticker, scores them, writes
     results back to sector_screening, and appends to the logic audit log.
     """
     import os as _os
@@ -2586,7 +2506,7 @@ def _handle_screening_requests(db):
     for req in pending:
         ticker = req['ticker']
         run_id = req['run_id']
-        headlines = _fetch_yahoo_headlines(ticker)
+        headlines = _fetch_alpaca_headlines_for_ticker(ticker)
         signal, score, top_headline = _score_headlines_for_screening(headlines)
 
         db.fulfill_screening_request(
@@ -2615,12 +2535,12 @@ def _handle_screening_requests(db):
 
 
 def run(session="market"):
-    db   = get_db()
+    db   = _db()
     ctrl = ResearchControls()
     now  = datetime.now(ET)
-    log.info(f"Scout starting — session={session} time={now.strftime('%H:%M ET')}")
+    log.info(f"News agent starting — session={session} time={now.strftime('%H:%M ET')}")
 
-    db.log_event("AGENT_START", agent="Scout", details=f"session={session}")
+    db.log_event("AGENT_START", agent="News", details=f"session={session}")
     db.log_heartbeat("news_agent", "RUNNING")
 
     # ── Gate 2: Benchmark regime (session-level, once per run) ────────────
@@ -2632,53 +2552,28 @@ def run(session="market"):
     # ── Fetch all sources (guarded — max 1 fetch per source per 24 h) ────────
     all_raw = []
 
-    if _source_fetched_recently("Capitol Trades API", db):
-        log.info("GUARD: Capitol Trades API skipped — fetched within last 24 h")
+    # ── Fetch all news from Alpaca (guarded — max once per hour per session) ─
+    # Market session: last 2 h of news, broad market + tracked tickers.
+    # Overnight session: last 8 h of news to catch afterhours moves.
+    _source_key = "Alpaca News API"
+    if _source_fetched_recently(_source_key, db):
+        log.info("GUARD: Alpaca News API skipped — fetched within last reset window")
     else:
-        results = fetch_capitol_trades()
+        if session == "market":
+            news_start = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        else:
+            news_start = (datetime.now() - timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        results = fetch_alpaca_news_historical(start=news_start, limit=50, sort="desc")
         all_raw.extend(results)
         if results is not None:
-            _record_source_fetch("Capitol Trades API", db)
+            _record_source_fetch(_source_key, db)
 
     if session == "market":
-        if _source_fetched_recently("Congress.gov API", db):
-            log.info("GUARD: Congress.gov API skipped — fetched within last 24 h")
-        else:
-            results = fetch_congress_gov_activity()
-            all_raw.extend(results)
-            if results is not None:
-                _record_source_fetch("Congress.gov API", db)
-
-        if _source_fetched_recently("Federal Register API", db):
-            log.info("GUARD: Federal Register API skipped — fetched within last 24 h")
-        else:
-            results = fetch_federal_register()
-            all_raw.extend(results)
-            if results is not None:
-                _record_source_fetch("Federal Register API", db)
-
-        if _source_fetched_recently("RSS feeds", db):
-            log.info("GUARD: RSS feeds skipped — fetched within last 24 h")
-        else:
-            results = fetch_rss_feeds()
-            all_raw.extend(results)
-            if results is not None:
-                _record_source_fetch("RSS feeds", db)
-
-        # ── News headline feeds (display-only, bypass signal pipeline) ────
-        # No daily guard — dedup inside fetch_and_store_news_headlines handles
-        # repeat fetches; MW feeds update throughout the day.
-        news_stored = fetch_and_store_news_headlines(db)
-        log.info(f"News headline feeds: {news_stored} new headlines stored")
-    else:
-        # Overnight: disclosures + congress only
-        if _source_fetched_recently("Congress.gov API", db):
-            log.info("GUARD: Congress.gov API skipped — fetched within last 24 h")
-        else:
-            results = fetch_congress_gov_activity()
-            all_raw.extend(results)
-            if results is not None:
-                _record_source_fetch("Congress.gov API", db)
+        # ── Display-only news for portal Intel page ────────────────────────
+        # No daily guard — dedup inside handles repeat fetches; updates hourly.
+        news_stored = fetch_and_store_alpaca_display_news(db)
+        log.info(f"Alpaca display news: {news_stored} new headlines stored")
 
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
@@ -2750,7 +2645,7 @@ def run(session="market"):
                         "is_amended":  False,
                         "is_spousal":  False,
                     },
-                    source = "CONGRESS" if source_tier == 1 else "RSS",
+                    source = "ALPACA",
                 )
             except Exception:
                 pass
@@ -2821,7 +2716,7 @@ def run(session="market"):
                         "ind_etf":         item.get("ind_etf", ""),
                         "sec_etf":         item.get("sector", ""),
                     },
-                    source = "CONGRESS" if source_tier == 1 else "RSS",
+                    source = "ALPACA",
                 )
             except Exception:
                 pass
@@ -2979,11 +2874,11 @@ def run(session="market"):
             interrogation_status = interrogation_status,
         )
 
-        # ── Route to Bolt ─────────────────────────────────────────────────
+        # ── Route to Trade Logic ──────────────────────────────────────────
         if routing in ("QUEUE", "WATCH"):
             db.queue_signal_for_trader(sig_id)
             queued += 1
-            log.info(f"Routed to Bolt: {ticker} routing={routing} adj={adj_text} "
+            log.info(f"Routed to Trade Logic: {ticker} routing={routing} adj={adj_text} "
                      f"{interrogation_status}")
         else:
             db.discard_signal(sig_id, reason=output.get("explanation", "gate22 discard"))
@@ -3081,14 +2976,14 @@ def run(session="market"):
 
     db.log_heartbeat("news_agent", "OK", portfolio_value=portfolio['cash'])
     db.log_event(
-        "AGENT_COMPLETE", agent="Scout",
+        "AGENT_COMPLETE", agent="News",
         details=f"new={new_signals} queued={queued} discarded={discarded} skipped={skipped}",
         portfolio_value=portfolio['cash'],
     )
 
     # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
     # Check for pending news screening requests from the sector screener.
-    # For each ticker, fetch Yahoo Finance RSS headlines and score sentiment.
+    # For each ticker, fetch recent Alpaca news headlines and score sentiment.
     _handle_screening_requests(db)
 
     try:
@@ -3101,13 +2996,28 @@ def run(session="market"):
 # ── ENTRY POINT ───────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Synthos — Scout (Research Agent)')
+    parser = argparse.ArgumentParser(description='Synthos — News Agent')
     parser.add_argument('--session', choices=['market', 'overnight', 'seed'], default='market',
                         help='market=full scan, overnight=disclosures+congress only, seed=45-day historical seed (maps to market)')
+    parser.add_argument('--customer-id', default=None,
+                        help='Customer UUID — routes DB and Alpaca credentials to per-customer sources')
     args = parser.parse_args()
     if args.session == 'seed': args.session = 'market'
 
-    acquire_agent_lock("news_agent.py")
+    # ── Multi-tenant: load per-customer credentials if --customer-id is given ──
+    if args.customer_id:
+        _CUSTOMER_ID = args.customer_id
+        try:
+            import auth as _auth
+            _ak, _sk = _auth.get_alpaca_credentials(args.customer_id)
+            if _ak:
+                ALPACA_API_KEY    = _ak
+                ALPACA_SECRET_KEY = _sk
+            log.info(f"Multi-tenant mode: customer={args.customer_id}")
+        except Exception as _e:
+            log.warning(f"Could not load customer credentials from auth.db: {_e}")
+
+    acquire_agent_lock(f"news_agent.py:{_CUSTOMER_ID or 'default'}")
     try:
         run(session=args.session)
     except KeyboardInterrupt:
