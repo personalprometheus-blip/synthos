@@ -62,6 +62,20 @@ if str(_COMMON_DIR.parent.parent) not in sys.path:
 
 from installers.common.env_writer import write_env, build_company_env
 
+# Sentinel display bridge — imported lazily during install step
+_sentinel_bridge = None
+def _get_bridge():
+    global _sentinel_bridge
+    if _sentinel_bridge is None:
+        try:
+            if str(CORE_DIR) not in sys.path:
+                sys.path.insert(0, str(CORE_DIR))
+            import sentinel_bridge
+            _sentinel_bridge = sentinel_bridge
+        except ImportError:
+            pass
+    return _sentinel_bridge
+
 # ── CONSTANTS ─────────────────────────────────────────────────────────────────
 SYNTHOS_VERSION = "3.0"
 INSTALLER_PORT  = 8081
@@ -70,6 +84,13 @@ REQUIRED_PACKAGES = [
     "flask",
     "requests",
     "python-dotenv",
+]
+
+# Sentinel display dependencies — installed only when a screen is detected
+SENTINEL_PACKAGES = [
+    "pygame",
+    "astral",
+    "RPi.GPIO",
 ]
 
 REQUIRED_CORE_FILES = [
@@ -305,18 +326,67 @@ def verify_install(config: dict) -> tuple[bool, list[str]]:
 
 
 # ── INSTALL ORCHESTRATOR ──────────────────────────────────────────────────────
+def _detect_and_install_display(config: dict) -> None:
+    """
+    Detect if a display is attached and install Sentinel if so.
+    Non-fatal — installer continues regardless of display status.
+    """
+    bridge = _get_bridge()
+    if bridge is None:
+        _log_ui("  ⚠ sentinel_bridge.py not found — skipping display detection", "warning")
+        return
+
+    _log_ui("  Probing for attached display hardware…")
+    detection = bridge.detect_display()
+
+    if not detection["present"]:
+        _log_ui(f"  ⊘ No display detected — skipping Sentinel install")
+        config["display_detected"] = False
+        return
+
+    _log_ui(f"  ✓ Display found: {detection['details']} (method={detection['method']})")
+    config["display_detected"] = True
+    config["display_method"] = detection["method"]
+    config["display_fb_device"] = detection.get("fb_device", "")
+
+    # Install Sentinel display system
+    _log_ui("  Installing Sentinel display system…")
+    result = bridge.install_sentinel()
+    if result["ok"]:
+        _log_ui(f"  ✓ {result['message']}")
+    else:
+        _log_ui(f"  ⚠ Sentinel install issue: {result['message']}", "warning")
+
+    # Install Sentinel-specific Python packages
+    _log_ui("  Installing display dependencies (pygame, astral, RPi.GPIO)…")
+    for pkg in SENTINEL_PACKAGES:
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", pkg],
+                capture_output=True, text=True, timeout=120
+            )
+        except Exception as e:
+            _log_ui(f"    ⚠ {pkg}: {e}", "warning")
+    _log_ui("  ✓ Display dependencies installed")
+
+    # Create drop folder for display asset uploads
+    drop_dir = SYNTHOS_HOME / "data" / "display_uploads"
+    drop_dir.mkdir(parents=True, exist_ok=True)
+    _log_ui(f"  ✓ Display asset drop folder: {drop_dir}")
+
+
 def run_install(config: dict) -> bool:
     _log_ui("=== Company Node Install Starting ===")
     _save_progress("INSTALLING", config)
 
-    _log_ui("Step 1/5 — Creating directories…")
+    _log_ui("Step 1/6 — Creating directories…")
     create_directories()
 
-    _log_ui("Step 2/5 — Installing Python packages…")
+    _log_ui("Step 2/6 — Installing Python packages…")
     if not install_packages():
         _log_ui("Package install had errors — continuing (some may already be installed)", "warning")
 
-    _log_ui("Step 3/5 — Writing .env…")
+    _log_ui("Step 3/6 — Writing .env…")
     try:
         db_path = config.get("company_db_path") or str(DB_PATH)
         config["company_db_path"] = db_path
@@ -328,11 +398,17 @@ def run_install(config: dict) -> bool:
         _save_progress("DEGRADED")
         return False
 
-    _log_ui("Step 4/5 — Initializing company.db…")
+    _log_ui("Step 4/6 — Initializing company.db…")
     if not bootstrap_database(Path(db_path)):
         _log_ui("  ⚠ DB init failed — server will retry on first start", "warning")
 
-    _log_ui("Step 5/5 — Registering cron…")
+    _log_ui("Step 5/6 — Detecting & configuring display…")
+    try:
+        _detect_and_install_display(config)
+    except Exception as exc:
+        _log_ui(f"  ⚠ Display setup failed (non-fatal): {exc}", "warning")
+
+    _log_ui("Step 6/6 — Registering cron…")
     register_cron(config)
 
     _log_ui("Verifying installation…")

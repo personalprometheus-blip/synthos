@@ -39,10 +39,12 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, redirect, render_template_string, request, url_for
 from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
 
 load_dotenv()
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB upload limit
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SECRET_TOKEN = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
@@ -55,6 +57,17 @@ DATA_DIR = os.path.join(_HERE, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH  = os.getenv("COMPANY_DB_PATH", os.path.join(DATA_DIR, "company.db"))
 LOG_DIR  = os.path.join(os.path.dirname(_HERE), "logs")   # synthos_build/logs/
+
+# ── Sentinel Display Bridge ──────────────────────────────────────────────────
+_display_bridge = None
+try:
+    import sentinel_bridge as _display_bridge
+    _display_bridge.start_watcher()  # Start drop folder monitor
+except ImportError:
+    pass  # sentinel_bridge.py not present — display features disabled
+
+DISPLAY_DROP_DIR = os.path.join(os.path.dirname(_HERE), "data", "display_uploads")
+os.makedirs(DISPLAY_DROP_DIR, exist_ok=True)
 
 # ── Database ──────────────────────────────────────────────────────────────────
 @contextmanager
@@ -463,6 +476,7 @@ td.mono{font-family:var(--mono);font-size:11px}
   <span class="wordmark">SYNTHOS</span>
   <span class="header-badge">Company Node</span>
   <div class="header-right">
+    <a href="/display" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="Display control">Display</a>
     <a href="/project-status" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="Project status">Status</a>
     <a href="/logs" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="View logs">Logs</a>
     <span class="clock" id="clock">--:--:-- ET</span>
@@ -1360,6 +1374,479 @@ def api_project_status_refresh():
     }), 200
 
 
+# ── Sentinel Display ──────────────────────────────────────────────────────────
+
+DISPLAY_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinel Display — Synthos Company</title>
+<style>
+:root{--bg:#0e0f11;--card:#16181d;--border:#23262e;--text:#c9cdd5;--dim:#556;
+--accent:#4fc3f7;--accent2:#81c784;--warn:#ffb74d;--err:#ef5350;--radius:10px;
+--font:'SF Mono',ui-monospace,'Cascadia Code','Fira Code',monospace}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:0.82rem;line-height:1.6;padding:1.5rem}
+a{color:var(--accent);text-decoration:none}
+h1{font-size:1.1rem;font-weight:600;margin-bottom:1rem;letter-spacing:0.03em}
+h2{font-size:0.88rem;font-weight:600;margin:1.5rem 0 0.5rem;letter-spacing:0.05em;text-transform:uppercase;color:var(--dim)}
+
+.topbar{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.topbar a{font-size:0.72rem;letter-spacing:0.08em;color:var(--dim)}
+.topbar a:hover{color:var(--accent)}
+.topbar a.active{color:var(--accent);border-bottom:1px solid var(--accent)}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
+.status-row{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.status-pill{display:inline-flex;align-items:center;gap:0.4rem;padding:0.3rem 0.7rem;border-radius:20px;font-size:0.75rem;background:var(--bg);border:1px solid var(--border)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.green{background:#4caf50}.dot.red{background:#ef5350}.dot.yellow{background:#ffb74d}.dot.blue{background:var(--accent)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem}
+.scene-grid{display:flex;gap:0.5rem;flex-wrap:wrap}
+.scene-btn{padding:0.4rem 0.9rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-family:var(--font);font-size:0.78rem;transition:all 0.2s}
+.scene-btn:hover{border-color:var(--accent);color:var(--accent)}
+.scene-btn.active{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600}
+
+.theme-dots{display:flex;gap:0.6rem;align-items:center;margin-top:0.5rem}
+.theme-dot{width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid var(--border);transition:all 0.2s}
+.theme-dot:hover{transform:scale(1.15)}.theme-dot.active{border-color:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+.slider-row{display:flex;align-items:center;gap:0.8rem;margin:0.5rem 0}
+.slider-row label{min-width:60px;font-size:0.75rem;color:var(--dim)}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent)}
+.slider-row .val{min-width:30px;text-align:right;font-size:0.78rem}
+
+.chip{display:inline-block;padding:0.25rem 0.6rem;border-radius:4px;border:1px solid var(--border);background:var(--bg);font-size:0.75rem;cursor:pointer;margin:0.2rem}
+.chip:hover{border-color:var(--accent)}.chip.active{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+
+.dropzone{border:2px dashed var(--border);border-radius:var(--radius);padding:2rem;text-align:center;color:var(--dim);transition:all 0.3s;cursor:pointer;margin:0.5rem 0}
+.dropzone.dragover{border-color:var(--accent);background:rgba(79,195,247,0.05);color:var(--accent)}
+.dropzone input{display:none}
+
+.asset-table{width:100%;border-collapse:collapse;margin-top:0.5rem}
+.asset-table th,.asset-table td{text-align:left;padding:0.4rem 0.6rem;border-bottom:1px solid var(--border);font-size:0.78rem}
+.asset-table th{color:var(--dim);font-weight:500}
+
+.btn{padding:0.35rem 0.8rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-family:var(--font);font-size:0.75rem;transition:all 0.2s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.danger{color:var(--err)}.btn.danger:hover{border-color:var(--err)}
+
+.log-box{background:#0a0b0d;border:1px solid var(--border);border-radius:6px;padding:0.8rem;max-height:200px;overflow-y:auto;font-size:0.72rem;line-height:1.5;white-space:pre-wrap;color:#8a8}
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;padding:0.6rem 1.2rem;border-radius:8px;background:#1e1e1e;border:1px solid var(--border);color:var(--text);font-size:0.78rem;opacity:0;transition:opacity 0.3s;z-index:999;pointer-events:none}
+.toast.show{opacity:1}
+select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.3rem 0.5rem;font-family:var(--font);font-size:0.78rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <strong style="font-size:0.9rem;letter-spacing:0.06em">SYNTHOS</strong>
+  <a href="/console">Console</a>
+  <a href="/project-status">Project Status</a>
+  <a href="/display" class="active">Display</a>
+</div>
+
+<h1>Sentinel Display Control</h1>
+
+<div class="status-row" id="statusRow">
+  <span class="status-pill"><span class="dot" id="connDot"></span><span id="connLabel">Checking…</span></span>
+  <span class="status-pill"><span class="dot" id="svcDot"></span><span id="svcLabel">Service: —</span></span>
+  <span class="status-pill"><span class="dot blue"></span><span id="sceneLabel">Scene: —</span></span>
+  <span class="status-pill"><span class="dot blue"></span><span id="themeLabel">Theme: —</span></span>
+</div>
+
+<div class="grid">
+  <!-- Scene Selector -->
+  <div class="card">
+    <h2>Active Scene</h2>
+    <div class="scene-grid" id="sceneGrid"></div>
+  </div>
+
+  <!-- Theme Selector -->
+  <div class="card">
+    <h2>Theme</h2>
+    <div class="theme-dots" id="themeDots"></div>
+  </div>
+
+  <!-- Brightness -->
+  <div class="card">
+    <h2>Brightness</h2>
+    <div class="slider-row">
+      <label>Day</label>
+      <input type="range" min="0" max="100" id="dayBri" oninput="deBri('day',this.value)">
+      <span class="val" id="dayBriVal">—</span>
+    </div>
+    <div class="slider-row">
+      <label>Night</label>
+      <input type="range" min="0" max="100" id="nightBri" oninput="deBri('night',this.value)">
+      <span class="val" id="nightBriVal">—</span>
+    </div>
+  </div>
+
+  <!-- Day/Night Mode -->
+  <div class="card">
+    <h2>Day / Night Mode</h2>
+    <div id="dnChips" style="margin-top:0.4rem"></div>
+  </div>
+
+  <!-- Animations -->
+  <div class="card">
+    <h2>Boot Animation</h2>
+    <div id="bootChips" style="margin-top:0.3rem"></div>
+    <h2>Idle Animation</h2>
+    <div id="idleChips" style="margin-top:0.3rem"></div>
+  </div>
+</div>
+
+<!-- Upload -->
+<div class="card" style="margin-top:0.5rem">
+  <h2>Upload Display Assets</h2>
+  <div style="display:flex;align-items:center;gap:0.8rem;margin-bottom:0.5rem">
+    <label style="font-size:0.75rem;color:var(--dim)">Category:</label>
+    <select id="uploadCat">
+      <option value="auto">Auto-detect</option>
+      <option value="boot">Boot</option>
+      <option value="idle">Idle</option>
+      <option value="informational">Informational</option>
+      <option value="theme">Theme</option>
+    </select>
+  </div>
+  <div class="dropzone" id="dropzone">
+    <div>Drop files here or <strong>click to browse</strong></div>
+    <div style="font-size:0.7rem;color:var(--dim);margin-top:0.3rem">PNG, JPG, BMP, GIF, JSON, PY — max 8 MB</div>
+    <input type="file" id="fileInput" multiple accept=".png,.jpg,.jpeg,.bmp,.gif,.json,.py">
+  </div>
+</div>
+
+<!-- Assets Table -->
+<div class="card">
+  <h2>Installed Assets</h2>
+  <table class="asset-table">
+    <thead><tr><th>File</th><th>Category</th><th>Size</th><th></th></tr></thead>
+    <tbody id="assetBody"><tr><td colspan="4" style="color:var(--dim)">Loading…</td></tr></tbody>
+  </table>
+</div>
+
+<!-- Service & Logs -->
+<div class="card">
+  <h2>Service</h2>
+  <div style="display:flex;gap:0.5rem;margin-bottom:0.8rem">
+    <button class="btn" onclick="svcAction('restart')">Restart Display</button>
+    <button class="btn" onclick="loadLogs()">Refresh Logs</button>
+  </div>
+  <div class="log-box" id="logBox">No logs loaded.</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const T='"""+"""{{TOKEN}}"""+"""';
+const H={headers:{'X-Token':T,'Content-Type':'application/json'}};
+let _briTimer=null;
+
+function toast(msg,err){const t=document.getElementById('toast');t.textContent=msg;t.style.borderColor=err?'var(--err)':'var(--accent)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+
+async function api(path,opts){try{const r=await fetch(path,{...opts,headers:{...opts?.headers,'X-Token':T}});const j=await r.json();if(!r.ok)throw new Error(j.error||r.statusText);return j}catch(e){toast(e.message,true);throw e}}
+
+async function loadStatus(){
+  try{
+    const s=await api('/api/display/status');
+    document.getElementById('connDot').className='dot '+(s.display_detected?'green':'red');
+    document.getElementById('connLabel').textContent=s.display_detected?'Connected':'No Display';
+    document.getElementById('svcDot').className='dot '+(s.service_active?'green':'yellow');
+    document.getElementById('svcLabel').textContent='Service: '+(s.service_active?'Running':'Stopped');
+    document.getElementById('sceneLabel').textContent='Scene: '+(s.current_scene||'—');
+    document.getElementById('themeLabel').textContent='Theme: '+(s.config?.theme?.active||'—');
+
+    // Scenes
+    const scenes=['idle','boot','trade','news','weather','alert','settings'];
+    const sg=document.getElementById('sceneGrid');
+    sg.innerHTML=scenes.map(sc=>`<button class="scene-btn ${sc===s.current_scene?'active':''}" onclick="setScene('${sc}')">${sc}</button>`).join('');
+
+    // Themes
+    const colors={retro:'#00ff41',amber:'#ffb300',arctic:'#4fc3f7',ghost:'#e0e0e0'};
+    const td=document.getElementById('themeDots');
+    const active=s.config?.theme?.active||'retro';
+    td.innerHTML=Object.entries(colors).map(([n,c])=>`<div class="theme-dot ${n===active?'active':''}" style="background:${c}" title="${n}" onclick="setTheme('${n}')"></div>`).join('');
+
+    // Brightness
+    const dayB=s.config?.day_brightness??90, nightB=s.config?.night_brightness??40;
+    document.getElementById('dayBri').value=dayB;document.getElementById('dayBriVal').textContent=dayB;
+    document.getElementById('nightBri').value=nightB;document.getElementById('nightBriVal').textContent=nightB;
+
+    // Day/Night
+    const dnMode=s.config?.daynight_mode||'auto';
+    const dnEl=document.getElementById('dnChips');
+    dnEl.innerHTML=['auto','force_day','force_night'].map(m=>`<span class="chip ${m===dnMode?'active':''}" onclick="setDN('${m}')">${m.replace('_',' ')}</span>`).join('');
+
+    // Animations
+    const bootAnims=s.config?.animations?.available_boot||['retro_terminal'];
+    const idleAnims=s.config?.animations?.available_idle||['retro_matrix'];
+    const curBoot=s.config?.animations?.boot||'';
+    const curIdle=s.config?.animations?.idle||'';
+    document.getElementById('bootChips').innerHTML=bootAnims.map(a=>`<span class="chip ${a===curBoot?'active':''}" onclick="setAnim('boot','${a}')">${a}</span>`).join('');
+    document.getElementById('idleChips').innerHTML=idleAnims.map(a=>`<span class="chip ${a===curIdle?'active':''}" onclick="setAnim('idle','${a}')">${a}</span>`).join('');
+
+    // Assets
+    loadAssets();
+  }catch(e){
+    document.getElementById('connDot').className='dot red';
+    document.getElementById('connLabel').textContent='Error';
+  }
+}
+
+async function loadAssets(){
+  try{
+    const a=await api('/api/display/assets');
+    const tb=document.getElementById('assetBody');
+    if(!a.assets||!a.assets.length){tb.innerHTML='<tr><td colspan="4" style="color:var(--dim)">No assets installed</td></tr>';return}
+    tb.innerHTML=a.assets.map(f=>`<tr><td>${f.name}</td><td>${f.category}</td><td>${f.size_kb} KB</td><td><button class="btn danger" onclick="removeAsset('${f.name}')">Remove</button></td></tr>`).join('');
+  }catch(e){}
+}
+
+async function setScene(sc){await api('/api/display/scene',{method:'POST',body:JSON.stringify({scene:sc}),...H});toast('Scene → '+sc);loadStatus()}
+async function setTheme(th){await api('/api/display/theme',{method:'POST',body:JSON.stringify({theme:th}),...H});toast('Theme → '+th);loadStatus()}
+async function setDN(mode){await api('/api/display/daynight',{method:'POST',body:JSON.stringify({mode}),...H});toast('Day/Night → '+mode);loadStatus()}
+async function setAnim(kind,name){await api('/api/display/animation',{method:'POST',body:JSON.stringify({kind,name}),...H});toast(kind+' → '+name);loadStatus()}
+
+function deBri(which,val){
+  document.getElementById(which+'BriVal').textContent=val;
+  clearTimeout(_briTimer);
+  _briTimer=setTimeout(()=>{
+    api('/api/display/brightness',{method:'POST',body:JSON.stringify({[which+'_brightness']:parseInt(val)}),...H});
+    toast('Brightness updated');
+  },400);
+}
+
+async function removeAsset(name){if(!confirm('Remove '+name+'?'))return;await api('/api/display/assets/'+encodeURIComponent(name),{method:'DELETE'});toast('Removed '+name);loadStatus()}
+async function svcAction(act){await api('/api/display/restart',{method:'POST',...H});toast('Service restarting…');setTimeout(loadStatus,3000)}
+
+async function loadLogs(){
+  try{const d=await api('/api/display/logs');document.getElementById('logBox').textContent=d.logs||'No logs available.'}catch(e){document.getElementById('logBox').textContent='Failed to load logs.'}
+}
+
+// Drag-and-drop upload
+const dz=document.getElementById('dropzone'), fi=document.getElementById('fileInput');
+dz.addEventListener('click',()=>fi.click());
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover')});
+dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('dragover');uploadFiles(e.dataTransfer.files)});
+fi.addEventListener('change',()=>{uploadFiles(fi.files);fi.value=''});
+
+async function uploadFiles(files){
+  const cat=document.getElementById('uploadCat').value;
+  for(const f of files){
+    const fd=new FormData();fd.append('file',f);fd.append('category',cat);
+    try{
+      const r=await fetch('/api/display/upload',{method:'POST',headers:{'X-Token':T},body:fd});
+      const j=await r.json();if(!r.ok)throw new Error(j.error||'Upload failed');
+      toast('Uploaded: '+f.name);
+    }catch(e){toast('Upload failed: '+e.message,true)}
+  }
+  loadStatus();
+}
+
+// Auto-refresh
+loadStatus();
+setInterval(loadStatus,10000);
+</script>
+</body>
+</html>
+"""
+
+# Inject the token into DISPLAY_HTML at render time
+def _render_display_html():
+    token = request.args.get("token", "") or request.cookies.get("company_token", "")
+    return DISPLAY_HTML.replace("{{TOKEN}}", token)
+
+
+@app.route("/display")
+def display_page():
+    """Render the Sentinel display control panel."""
+    return _render_display_html()
+
+
+@app.route("/api/display/status")
+def api_display_status():
+    """Full display status JSON."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        status = _display_bridge.get_display_status()
+        return jsonify(status), 200
+    except Exception as e:
+        return jsonify({"error": str(e), "display_detected": False}), 200
+
+
+@app.route("/api/display/scene", methods=["POST"])
+def api_display_scene():
+    """Change the active scene."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    scene = data.get("scene")
+    if not scene:
+        return jsonify({"error": "missing 'scene'"}), 400
+    try:
+        _display_bridge.set_scene(scene)
+        return jsonify({"ok": True, "scene": scene}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/brightness", methods=["POST"])
+def api_display_brightness():
+    """Adjust day/night brightness."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        cfg = _display_bridge.read_config()
+        changed = False
+        if "day_brightness" in data:
+            cfg["day_brightness"] = int(data["day_brightness"])
+            changed = True
+        if "night_brightness" in data:
+            cfg["night_brightness"] = int(data["night_brightness"])
+            changed = True
+        if changed:
+            _display_bridge.write_config(cfg)
+            _display_bridge.set_brightness(cfg.get("day_brightness", 90))
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/theme", methods=["POST"])
+def api_display_theme():
+    """Change the display theme."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    theme = data.get("theme")
+    if not theme:
+        return jsonify({"error": "missing 'theme'"}), 400
+    try:
+        _display_bridge.set_theme(theme)
+        return jsonify({"ok": True, "theme": theme}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/daynight", methods=["POST"])
+def api_display_daynight():
+    """Set day/night mode: auto, force_day, force_night."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode")
+    if mode not in ("auto", "force_day", "force_night"):
+        return jsonify({"error": "invalid mode — use auto, force_day, or force_night"}), 400
+    try:
+        _display_bridge.set_daynight_mode(mode)
+        return jsonify({"ok": True, "mode": mode}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/animation", methods=["POST"])
+def api_display_animation():
+    """Set boot or idle animation."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    kind = data.get("kind")
+    name = data.get("name")
+    if kind not in ("boot", "idle") or not name:
+        return jsonify({"error": "need 'kind' (boot|idle) and 'name'"}), 400
+    try:
+        if kind == "boot":
+            _display_bridge.set_boot_animation(name)
+        else:
+            _display_bridge.set_idle_animation(name)
+        return jsonify({"ok": True, "kind": kind, "name": name}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/assets")
+def api_display_assets():
+    """List installed display assets."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        assets = _display_bridge.list_assets()
+        return jsonify({"assets": assets}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+DISPLAY_ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".json", ".py"}
+
+@app.route("/api/display/upload", methods=["POST"])
+def api_display_upload():
+    """Upload a display asset (drag-and-drop or form)."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    if "file" not in request.files:
+        return jsonify({"error": "no file provided"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "empty filename"}), 400
+    safe = secure_filename(f.filename)
+    ext = os.path.splitext(safe)[1].lower()
+    if ext not in DISPLAY_ALLOWED_EXT:
+        return jsonify({"error": f"file type {ext} not allowed"}), 400
+    category = request.form.get("category", "auto")
+    # Save to drop dir — watcher will pick it up, or install directly
+    dest = os.path.join(DISPLAY_DROP_DIR, safe)
+    f.save(dest)
+    try:
+        result = _display_bridge.install_asset(dest, category=category if category != "auto" else None)
+        return jsonify({"ok": True, "installed": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/assets/<filename>", methods=["DELETE"])
+def api_display_remove_asset(filename):
+    """Remove an installed display asset."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    safe = secure_filename(filename)
+    try:
+        _display_bridge.remove_asset(safe)
+        return jsonify({"ok": True, "removed": safe}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/restart", methods=["POST"])
+def api_display_restart():
+    """Restart the Sentinel display service."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        _display_bridge.restart_display_service()
+        return jsonify({"ok": True, "message": "restart requested"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/display/logs")
+def api_display_logs():
+    """Get recent display log output."""
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    lines = int(request.args.get("lines", 50))
+    try:
+        logs = _display_bridge.get_display_logs(lines=lines)
+        return jsonify({"logs": logs}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Retention ─────────────────────────────────────────────────────────────────
 _PI_EVENTS_RETAIN_DAYS = int(os.getenv("PI_EVENTS_RETAIN_DAYS", "30"))
 
@@ -1392,5 +1879,6 @@ if __name__ == "__main__":
     print(f"[Company] Running on port {PORT}")
     print(f"[Company] Console at http://0.0.0.0:{PORT}/console?token=<SECRET_TOKEN>")
     print(f"[Company] Project status at http://0.0.0.0:{PORT}/project-status?token=<SECRET_TOKEN>")
+    print(f"[Company] Display panel at http://0.0.0.0:{PORT}/display?token=<SECRET_TOKEN>")
     print(f"[Company] DB at {DB_PATH}")
     app.run(host="0.0.0.0", port=PORT)
