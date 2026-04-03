@@ -517,7 +517,7 @@ def restore_backup(pi_id: str, date_str: str | None = None) -> None:
             "Next steps (project lead):\n"
             "  1. Flash fresh Pi OS Lite\n"
             "  2. Run install_retail.py\n"
-            "  3. Extract: tar -xzf %s -C /home/pi/synthos/\n"
+            "  3. Extract: tar -xzf %s -C <SYNTHOS_HOME>/\n"
             "  4. Reboot — agents resume from last known state",
             output_path,
         )

@@ -67,9 +67,40 @@ PORTAL_BASE_URL          = os.environ.get('PORTAL_BASE_URL', '').rstrip('/')
 # Set CONSTRUCTION_MODE=false in .env to open the gates when ready to launch.
 CONSTRUCTION_MODE    = os.environ.get('CONSTRUCTION_MODE', 'true').lower() == 'true'
 
+# ── TERMS OF SERVICE ──────────────────────────────────────────────────────
+# Bump this version string when ToS content changes to force re-acceptance.
+TOS_CURRENT_VERSION  = "1.0"
+# Per-customer agreement files go here: data/customers/<id>/agreements/
+_CUSTOMERS_DIR       = os.path.join(_ROOT_DIR, 'data', 'customers')
+
 # In-memory OTP store — one slot, TTL enforced on use
 # {'otp': str, 'expires_at': datetime, 'session_key': str}
 _construction_otp: dict = {}
+
+# ── RATE LIMITING ─────────────────────────────────────────────────────────
+# Simple in-memory sliding window. Keyed by IP address.
+# _login_attempts: {ip: [(timestamp, ...), ...]}
+# _otp_attempts:   {ip: [(timestamp, ...), ...]}
+import collections as _collections
+_login_attempts: dict = _collections.defaultdict(list)
+_otp_attempts:   dict = _collections.defaultdict(list)
+
+_LOGIN_MAX     = 10   # max attempts per window
+_LOGIN_WINDOW  = 300  # seconds (5 minutes)
+_OTP_MAX       = 5    # max attempts per window
+_OTP_WINDOW    = 300  # seconds (5 minutes)
+
+
+def _rate_limited(store: dict, ip: str, max_attempts: int, window_s: int) -> bool:
+    """Return True if IP has exceeded max_attempts in the last window_s seconds."""
+    import time as _time
+    now = _time.monotonic()
+    # Prune old entries
+    store[ip] = [t for t in store[ip] if now - t < window_s]
+    if len(store[ip]) >= max_attempts:
+        return True
+    store[ip].append(now)
+    return False
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -217,6 +248,23 @@ def timestamp_to_date(ts):
 
 
 def login_required(f):
+    """Full access gate: requires valid session AND accepted current ToS.
+    PORTAL_PASSWORD admin sessions ('admin' literal id) bypass ToS — no customer record exists."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_authenticated():
+            return redirect('/login')
+        # Legacy PORTAL_PASSWORD admin has no customer record — skip ToS gate
+        if session.get('customer_id') != 'admin':
+            if session.get('tos_version') != TOS_CURRENT_VERSION:
+                return redirect('/terms')
+        return f(*args, **kwargs)
+    return decorated
+
+
+def authenticated_only(f):
+    """Session gate only — does NOT check ToS. Used for /terms itself to avoid redirect loop."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -324,6 +372,12 @@ def login():
         return redirect('/admin' if is_admin() else '/')
 
     if request.method == 'POST':
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
+        if _rate_limited(_login_attempts, ip, _LOGIN_MAX, _LOGIN_WINDOW):
+            log.warning("Login rate limit hit for IP %s", ip)
+            return render_template_string(LOGIN_HTML,
+                error="Too many login attempts — please wait a few minutes.")
+
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
 
@@ -349,6 +403,7 @@ def login():
                     session['role']         = customer['role']
                     session['display_name'] = auth.get_display_name(customer)
                     session['access_reason']= reason   # 'active'|'trialing'|'grace_period'|'admin'
+                    session['tos_version']  = customer['tos_version']
                     session.permanent       = True
                     auth.record_login(customer['id'])
                     log.info(f"Login: {customer['id']} (role={customer['role']} access={reason})")
@@ -375,6 +430,159 @@ def login():
 def logout():
     session.clear()
     return redirect('/login')
+
+
+# ── TERMS OF SERVICE ──────────────────────────────────────────────────────
+
+_TERMS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos — Terms of Service</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f5f0e8;color:#1a1612;font-family:'IBM Plex Sans',sans-serif;
+     min-height:100vh;display:flex;flex-direction:column;align-items:center;
+     justify-content:flex-start;padding:40px 20px}
+.wordmark{font-family:'IBM Plex Mono',monospace;font-size:0.9rem;font-weight:600;
+          letter-spacing:0.12em;color:#1a1612;margin-bottom:32px;opacity:0.5}
+.card{background:#ede8df;border:1px solid #c8bfaa;border-radius:4px;
+      padding:2rem;width:100%;max-width:620px}
+h1{font-family:'IBM Plex Mono',monospace;font-size:1rem;font-weight:600;
+   letter-spacing:0.06em;margin-bottom:6px}
+.version{font-size:0.72rem;color:#7a7060;margin-bottom:24px;
+         font-family:'IBM Plex Mono',monospace;letter-spacing:0.04em}
+.tos-body{background:#f5f0e8;border:1px solid #c8bfaa;border-radius:2px;
+          padding:1.25rem 1.5rem;max-height:340px;overflow-y:auto;
+          font-size:0.82rem;line-height:1.8;color:#2a2420;margin-bottom:24px}
+.tos-body p{margin-bottom:1rem}
+.tos-body p:last-child{margin-bottom:0}
+.tos-body strong{font-weight:600;color:#1a1612}
+.accept-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:20px}
+.accept-row input[type=checkbox]{margin-top:3px;accent-color:#1a1612;
+                                  width:15px;height:15px;flex-shrink:0;cursor:pointer}
+.accept-row label{font-size:0.82rem;color:#2a2420;line-height:1.5;cursor:pointer}
+button[type=submit]{width:100%;background:#1a1612;color:#f5f0e8;border:none;
+                    border-radius:2px;padding:11px 20px;
+                    font-family:'IBM Plex Mono',monospace;font-size:0.82rem;
+                    font-weight:600;letter-spacing:0.1em;cursor:pointer;
+                    text-transform:uppercase;transition:opacity 0.15s}
+button[type=submit]:hover{opacity:0.85}
+button[type=submit]:disabled{opacity:0.35;cursor:not-allowed}
+.meta{font-size:0.7rem;color:#7a7060;margin-top:16px;text-align:center;
+      font-family:'IBM Plex Mono',monospace;letter-spacing:0.04em}
+</style>
+</head>
+<body>
+<div class="wordmark">SYNTHOS</div>
+<div class="card">
+  <h1>Terms of Service</h1>
+  <div class="version">Version {{ version }} &nbsp;·&nbsp; Review before continuing</div>
+
+  <div class="tos-body">
+    <p><strong>PLACEHOLDER — Terms of Service content will be added here.</strong></p>
+    <p>This document will contain the full Synthos Terms of Service, including
+    provisions covering acceptable use, risk disclosure, limitations of liability,
+    and operator responsibilities.</p>
+    <p>By accepting, you confirm you have read and agree to the terms as they will
+    appear in the final document. This placeholder acceptance is recorded with a
+    timestamp and version number.</p>
+    <p>The document content is intentionally left blank during this development phase.
+    Do not distribute to end customers until final terms are drafted and reviewed.</p>
+  </div>
+
+  {% if error %}
+  <div style="color:#8b2200;font-size:0.78rem;margin-bottom:14px;padding:8px 12px;
+              background:#fdf0ed;border:1px solid #c8bfaa;border-radius:2px">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <form method="POST" action="/terms">
+    <div class="accept-row">
+      <input type="checkbox" id="accepted" name="accepted" value="yes" required>
+      <label for="accepted">
+        I have read and agree to the Synthos Terms of Service (v{{ version }}).
+        I understand that trading involves risk of financial loss and that Synthos
+        is not a licensed financial advisor.
+      </label>
+    </div>
+    <button type="submit">Accept &amp; Continue →</button>
+  </form>
+
+  <div class="meta">Acceptance is recorded with timestamp and version number.</div>
+</div>
+</body>
+</html>"""
+
+
+def _write_tos_acceptance_file(customer_id: str, version: str, ip: str, ua: str) -> None:
+    """
+    Write a JSON acceptance record to data/customers/<id>/agreements/tos_v<version>.json.
+    Directory is created if it does not exist.
+    File is chmod 600.
+    """
+    import json as _json
+    agreements_dir = os.path.join(_CUSTOMERS_DIR, customer_id, 'agreements')
+    os.makedirs(agreements_dir, exist_ok=True)
+    filename = f"tos_v{version}.json"
+    filepath = os.path.join(agreements_dir, filename)
+    record = {
+        "document":    "synthos_terms_of_service",
+        "version":     version,
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+        "customer_id": customer_id,
+        "ip_address":  ip or "unknown",
+        "user_agent":  (ua or "unknown")[:200],
+    }
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            _json.dump(record, f, indent=2)
+        os.chmod(filepath, 0o600)
+        log.info("ToS acceptance filed: %s", filepath)
+    except OSError as exc:
+        log.error("Failed to write ToS acceptance file: %s", exc)
+
+
+@app.route('/terms', methods=['GET'])
+@authenticated_only
+def terms_get():
+    """Show Terms of Service page. Accessible to authenticated users regardless of ToS status."""
+    # If already accepted current version, skip straight through
+    if session.get('tos_version') == TOS_CURRENT_VERSION:
+        return redirect('/')
+    from flask import render_template_string
+    return render_template_string(_TERMS_HTML, version=TOS_CURRENT_VERSION, error=None)
+
+
+@app.route('/terms', methods=['POST'])
+@authenticated_only
+def terms_post():
+    """Record ToS acceptance, write agreement file, update session."""
+    from flask import render_template_string
+    if request.form.get('accepted') != 'yes':
+        return render_template_string(
+            _TERMS_HTML, version=TOS_CURRENT_VERSION,
+            error="You must check the box to continue."
+        )
+
+    customer_id = session['customer_id']
+    ip  = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+    ua  = request.headers.get('User-Agent', '')
+
+    # 1. Write to auth.db
+    auth.mark_tos_accepted(customer_id, TOS_CURRENT_VERSION)
+
+    # 2. Write agreement file to customer folder
+    _write_tos_acceptance_file(customer_id, TOS_CURRENT_VERSION, ip, ua)
+
+    # 3. Update session so login_required passes on next request
+    session['tos_version'] = TOS_CURRENT_VERSION
+
+    log.info("ToS v%s accepted by customer %s", TOS_CURRENT_VERSION, customer_id)
+    return redirect('/')
 
 
 # ── CUSTOMER ACQUISITION PIPELINE ROUTES ─────────────────────────────────
@@ -920,14 +1128,19 @@ def construction_verify():
             sent = True  # Already sent this session
 
     elif request.method == 'POST':
-        otp_entered = request.form.get('otp', '')
-        if _verify_construction_otp(otp_entered):
-            session['construction_unlocked'] = True
-            redirect_to = session.pop('construction_redirect', '/subscribe')
-            log.info(f"Construction access granted to admin {session.get('customer_id')}")
-            return redirect(redirect_to)
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
+        if _rate_limited(_otp_attempts, ip, _OTP_MAX, _OTP_WINDOW):
+            log.warning("OTP rate limit hit for IP %s", ip)
+            error = "Too many attempts — please wait a few minutes before trying again."
         else:
-            error = "Incorrect or expired code. Request a new one below."
+            otp_entered = request.form.get('otp', '')
+            if _verify_construction_otp(otp_entered):
+                session['construction_unlocked'] = True
+                redirect_to = session.pop('construction_redirect', '/subscribe')
+                log.info(f"Construction access granted to admin {session.get('customer_id')}")
+                return redirect(redirect_to)
+            else:
+                error = "Incorrect or expired code. Request a new one below."
 
     return render_template_string(_CONSTRUCTION_VERIFY_HTML, error=error, sent=sent)
 
@@ -992,6 +1205,7 @@ def sso_login():
     session['role']         = customer['role']
     session['display_name'] = auth.get_display_name(customer)
     session['access_reason']= reason
+    session['tos_version']  = customer['tos_version']
     session.permanent       = True
     auth.record_login(customer['id'])
     log.info(f'SSO login: {customer["id"]} ({email}) access={reason}')
@@ -1399,7 +1613,18 @@ def load_pending_approvals():
         return []
 
 def update_env(key, value):
-    """Update a single key in .env file."""
+    """Update a single key in .env file.
+
+    Security: newlines are stripped from value to prevent .env injection.
+    Keys must be alphanumeric+underscore only.
+    """
+    # Sanitize key — must be a valid env var name
+    import re as _re
+    if not _re.fullmatch(r'[A-Z][A-Z0-9_]*', key):
+        raise ValueError(f"Invalid env key: {key!r}")
+    # Strip newlines from value to prevent injection of additional keys
+    value = str(value).replace('\n', '').replace('\r', '')
+
     lines = []
     found = False
     if os.path.exists(ENV_PATH):
@@ -1416,6 +1641,7 @@ def update_env(key, value):
         new_lines.append(f"{key}={value}\n")
     with open(ENV_PATH, 'w') as f:
         f.writelines(new_lines)
+    os.chmod(ENV_PATH, 0o600)
 
 
 # ── PORTAL HTML ───────────────────────────────────────────────────────────
@@ -2228,6 +2454,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         &#9888; Keys are written directly to <code style="font-size:10px">.env</code> on this Pi. Leave a field blank to keep the existing value.
       </div>
       <div class="setting-row">
+        <div><div class="setting-label">Anthropic API Key</div><div class="setting-desc">Required for AI-assisted trade analysis</div></div>
+        <input class="glass-input" type="password" id="k-anthropic" placeholder="sk-ant-..." style="width:180px">
+      </div>
+      <div class="setting-row">
         <div><div class="setting-label">Alpaca API Key</div><div class="setting-desc">Paper or live trading account</div></div>
         <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK..." style="width:160px">
       </div>
@@ -2244,19 +2474,31 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <input class="glass-input" type="password" id="k-resend" placeholder="re_..." style="width:160px">
       </div>
       <div class="setting-row">
-        <div><div class="setting-label">Monitor URL</div><div class="setting-desc">Heartbeat destination</div></div>
-        <input class="glass-input" type="text" id="k-monitor-url" placeholder="http://localhost:5000" style="width:220px">
+        <div><div class="setting-label">Monitor URL</div><div class="setting-desc">Heartbeat destination (Monitor Pi)</div></div>
+        <input class="glass-input" type="text" id="k-monitor-url" placeholder="http://monitor-pi.local:5000" style="width:240px">
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Monitor Token</div><div class="setting-desc">Shared secret with monitor server</div></div>
         <input class="glass-input" type="password" id="k-monitor-token" placeholder="Token..." style="width:160px">
       </div>
       <div class="setting-row">
+        <div><div class="setting-label">Company URL</div><div class="setting-desc">Company Pi endpoint for alerts &amp; backups</div></div>
+        <input class="glass-input" type="text" id="k-company-url" placeholder="http://company-pi.local:5010" style="width:240px">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">License Key</div><div class="setting-desc">Synthos license (restore from backup)</div></div>
+        <input class="glass-input" type="password" id="k-license" placeholder="SYN-..." style="width:180px">
+      </div>
+      <div class="setting-row">
         <div><div class="setting-label">Portal Password</div><div class="setting-desc">Login password for this portal</div></div>
         <input class="glass-input" type="password" id="k-portal-pw" placeholder="New password..." style="width:160px">
       </div>
       <div class="setting-row">
-        <div><div class="setting-label">Alert Email</div><div class="setting-desc">Where to send error alerts</div></div>
+        <div><div class="setting-label">Alert Email (From)</div><div class="setting-desc">Verified Resend sender address</div></div>
+        <input class="glass-input" type="email" id="k-alert-from" placeholder="alerts@yourdomain.com" style="width:220px">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">Alert Email (To)</div><div class="setting-desc">Where error alerts are delivered</div></div>
         <input class="glass-input" type="email" id="k-alert-to" placeholder="you@email.com" style="width:200px">
       </div>
     </div>
@@ -2428,13 +2670,17 @@ async function submitUnlockKey() {
 // ── SETTINGS ──
 async function saveKeys() {
   const fields = {
+    'ANTHROPIC_API_KEY': document.getElementById('k-anthropic').value,
     'ALPACA_API_KEY':    document.getElementById('k-alpaca-key').value,
     'ALPACA_SECRET_KEY': document.getElementById('k-alpaca-secret').value,
     'ALPACA_BASE_URL':   document.getElementById('k-alpaca-url').value,
     'RESEND_API_KEY':    document.getElementById('k-resend').value,
     'MONITOR_URL':       document.getElementById('k-monitor-url').value,
     'MONITOR_TOKEN':     document.getElementById('k-monitor-token').value,
+    'COMPANY_URL':       document.getElementById('k-company-url').value,
+    'LICENSE_KEY':       document.getElementById('k-license').value,
     'PORTAL_PASSWORD':   document.getElementById('k-portal-pw').value,
+    'ALERT_FROM':        document.getElementById('k-alert-from').value,
     'ALERT_TO':          document.getElementById('k-alert-to').value,
   };
   // Only send fields that have values
@@ -3633,15 +3879,23 @@ def api_keys():
 
     # Whitelist of keys that write to .env
     ALLOWED_KEYS = {
+        'ANTHROPIC_API_KEY',
         'ALPACA_BASE_URL',
         'RESEND_API_KEY',
         'MONITOR_TOKEN',
         'MONITOR_URL',
+        'COMPANY_URL',
+        'LICENSE_KEY',
         'PORTAL_PASSWORD',
         'PI_LABEL',
         'PI_EMAIL',
         'OPERATOR_EMAIL',
+        'ALERT_FROM',
         'ALERT_TO',
+        'ALERT_PHONE',
+        'CARRIER_GATEWAY',
+        'GMAIL_USER',
+        'GMAIL_APP_PASSWORD',
         'TRADING_MODE',
         'OPERATING_MODE',
     }
@@ -4577,8 +4831,17 @@ def api_files_upload():
     """
     Upload files directly to the Pi, then sync to GitHub.
     Replaces the Mac -> GitHub -> Pi workflow entirely.
+    Admin only — regular customers cannot upload code to the Pi.
     """
+    if not is_admin():
+        return jsonify({"ok": False, "error": "Admin access required"}), 403
+
     import threading
+
+    # Uploads are written to a staging directory, not directly to PROJECT_DIR.
+    # This prevents a compromised customer session from overwriting live agent code.
+    STAGING_DIR = os.path.join(os.path.dirname(PROJECT_DIR), 'upload_staging')
+    os.makedirs(STAGING_DIR, exist_ok=True)
 
     uploaded      = []
     errors        = []
@@ -4591,11 +4854,12 @@ def api_files_upload():
 
         fname = os.path.basename(fname)
         ext   = os.path.splitext(fname)[1].lower()
-        if ext not in ('.py', '.sh', '.md', '.html', '.txt', '.json', '.env'):
+        if ext not in ('.py', '.sh', '.md', '.html', '.txt', '.json'):
             errors.append(f"{fname}: file type not allowed")
             continue
 
-        dest = os.path.join(PROJECT_DIR, fname)
+        # Write to staging, not live PROJECT_DIR
+        dest = os.path.join(STAGING_DIR, fname)
         try:
             file.save(dest)
             if ext == '.sh':

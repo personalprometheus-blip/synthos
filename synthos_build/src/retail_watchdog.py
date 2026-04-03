@@ -1,7 +1,7 @@
 """
-watchdog.py — Crash Monitor & Auto-Restart System
-Synthos Retail Pi | synthos_build/src/watchdog.py
-Version: 2.0
+retail_watchdog.py — Crash Monitor & Auto-Restart System
+Synthos Retail Pi | synthos_build/src/retail_watchdog.py
+Version: 3.0
 
 Runs continuously in the background via cron @reboot.
 Monitors all retail Pi agents for crashes, auto-restarts up to 3 times,
@@ -22,15 +22,16 @@ Known-good snapshot:
   Also used as the Sunday morning rollback source if Friday push breaks things.
 
 CRON SETUP:
-  @reboot sleep 90 && python3 /home/pi/synthos/synthos_build/src/watchdog.py &
+  Registered automatically by install_retail.py — do not edit manually.
+  (@reboot sleep 90 && python3 <SYNTHOS_HOME>/src/retail_watchdog.py &)
 
 USAGE:
-  python3 watchdog.py              # start watching
-  python3 watchdog.py --status     # show current agent status
-  python3 watchdog.py --history    # show crash history
-  python3 watchdog.py --snapshot   # take known-good snapshot now
-  python3 watchdog.py --restore    # restore from known-good snapshot
-  python3 watchdog.py --test-crash # simulate crash (testing only)
+  python3 retail_watchdog.py              # start watching
+  python3 retail_watchdog.py --status     # show current agent status
+  python3 retail_watchdog.py --history    # show crash history
+  python3 retail_watchdog.py --snapshot   # take known-good snapshot now
+  python3 retail_watchdog.py --restore    # restore from known-good snapshot
+  python3 retail_watchdog.py --test-crash # simulate crash (testing only)
 """
 
 import os

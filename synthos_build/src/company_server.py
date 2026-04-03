@@ -45,7 +45,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SECRET_TOKEN = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "changeme")
+SECRET_TOKEN = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
 PORT         = int(os.getenv("PORT", 5010))
 ET           = ZoneInfo("America/New_York")
 
@@ -130,13 +130,16 @@ def init_db():
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
 def _authorized():
-    """Check X-Token header or ?token= query param."""
+    """Check X-Token header or ?token= query param. Uses timing-safe comparison."""
+    import hmac as _hmac_mod
     token = (
         request.headers.get("X-Token", "")
         or request.args.get("token", "")
         or request.cookies.get("company_token", "")
     )
-    return token == SECRET_TOKEN
+    if not SECRET_TOKEN or not token:
+        return False
+    return _hmac_mod.compare_digest(token, SECRET_TOKEN)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -460,6 +463,7 @@ td.mono{font-family:var(--mono);font-size:11px}
   <span class="wordmark">SYNTHOS</span>
   <span class="header-badge">Company Node</span>
   <div class="header-right">
+    <a href="/project-status" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="Project status">Status</a>
     <a href="/logs" style="font-size:0.72rem;letter-spacing:0.08em;color:#556;text-decoration:none;margin-right:1rem" title="View logs">Logs</a>
     <span class="clock" id="clock">--:--:-- ET</span>
     <div class="live-pill"><div class="live-dot"></div>LIVE</div>
@@ -841,6 +845,521 @@ def console():
     return render_template_string(DASHBOARD_HTML)
 
 
+# ── Project Status ────────────────────────────────────────────────────────────
+_STATUS_JSON        = os.path.join(os.path.dirname(_HERE), "data", "project_status.json")
+_GITHUB_TOKEN       = os.getenv("GITHUB_TOKEN", "")
+_GITHUB_OWNER       = os.getenv("GITHUB_REPO_OWNER", "personalprometheus-blip")
+_GITHUB_STATUS_REPO = os.getenv("GITHUB_STATUS_REPO", "synthos-company")
+_GITHUB_STATUS_PATH = os.getenv("GITHUB_STATUS_PATH", "data/project_status.json")
+_STATUS_CACHE_TTL   = int(os.getenv("PROJECT_STATUS_TTL", "300"))   # seconds (default 5 min)
+
+_status_cache: dict = {"data": None, "fetched_at": None, "source": "none"}
+
+
+def _fetch_status_from_github():
+    """
+    Fetch project_status.json from the GitHub API.
+    Returns the parsed dict on success, None on failure.
+    Requires GITHUB_TOKEN in .env (read:contents scope is sufficient).
+    Works for both public and private repos.
+    """
+    import urllib.request as _urllib_req
+    import base64 as _b64
+    import time as _time
+
+    if not _GITHUB_TOKEN:
+        return None
+
+    url = (
+        f"https://api.github.com/repos/{_GITHUB_OWNER}"
+        f"/{_GITHUB_STATUS_REPO}/contents/{_GITHUB_STATUS_PATH}"
+    )
+    req = _urllib_req.Request(url, headers={
+        "Authorization": f"token {_GITHUB_TOKEN}",
+        "Accept":        "application/vnd.github.v3+json",
+        "User-Agent":    "synthos-company-server/1.0",
+    })
+    try:
+        with _urllib_req.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read())
+        content = _b64.b64decode(payload["content"]).decode("utf-8")
+        data = json.loads(content)
+        _status_cache["data"]       = data
+        _status_cache["fetched_at"] = _time.time()
+        _status_cache["source"]     = "github"
+        print(f"[Company] project_status.json refreshed from GitHub")
+        return data
+    except Exception as exc:
+        print(f"[Company] GitHub status fetch failed: {exc}")
+        return None
+
+
+def _get_status_data():
+    """
+    Return (data, source, cache_age_seconds).
+    Priority: warm cache → GitHub API → local file → None.
+    """
+    import time as _time
+
+    # Serve warm cache if within TTL
+    if _status_cache["data"] and _status_cache["fetched_at"]:
+        age = _time.time() - _status_cache["fetched_at"]
+        if age < _STATUS_CACHE_TTL:
+            return _status_cache["data"], _status_cache["source"], age
+
+    # Try GitHub
+    data = _fetch_status_from_github()
+    if data:
+        return data, "github", 0
+
+    # Fall back to local file
+    try:
+        with open(_STATUS_JSON, "r") as fh:
+            data = json.load(fh)
+        _status_cache["data"]       = data
+        _status_cache["fetched_at"] = _time.time()
+        _status_cache["source"]     = "local"
+        print("[Company] project_status.json loaded from local file (GitHub unavailable)")
+        return data, "local", 0
+    except Exception as exc:
+        print(f"[Company] project_status.json load failed: {exc}")
+        return None, "error", 0
+
+_STATUS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos — Project Status</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b12;--surface:#0d1120;--surface2:#111827;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:rgba(255,255,255,0.88);--muted:rgba(255,255,255,0.35);--dim:rgba(255,255,255,0.15);
+  --teal:#00f5d4;--teal2:rgba(0,245,212,0.1);
+  --pink:#ff4b6e;--pink2:rgba(255,75,110,0.1);
+  --purple:#7b61ff;--purple2:rgba(123,97,255,0.1);
+  --amber:#ffb347;--amber2:rgba(255,179,71,0.1);
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:99px}
+
+.header{position:sticky;top:0;z-index:200;background:rgba(8,11,18,0.92);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;gap:12px}
+.wordmark{font-family:var(--mono);font-size:1rem;font-weight:600;letter-spacing:0.15em;color:var(--teal);text-shadow:0 0 20px rgba(0,245,212,0.4)}
+.header-badge{font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;
+  padding:3px 8px;border-radius:99px;border:1px solid rgba(123,97,255,0.3);background:rgba(123,97,255,0.1);color:#a78bfa}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+.nav-link{font-size:11px;letter-spacing:0.06em;color:var(--muted);text-decoration:none;transition:color 0.15s}
+.nav-link:hover{color:var(--text)}
+.clock{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.live-pill{display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:99px;
+  background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.2);font-size:10px;font-weight:600;color:var(--teal)}
+.live-dot{width:5px;height:5px;border-radius:50%;background:var(--teal);box-shadow:0 0 6px var(--teal);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+.page{max-width:1300px;margin:0 auto;padding:24px}
+
+/* HERO PROGRESS */
+.hero{padding:28px;border-radius:16px;border:1px solid var(--border);background:var(--surface);margin-bottom:24px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.hero-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.hero-title{font-size:1.4rem;font-weight:700;letter-spacing:-0.3px}
+.hero-meta{font-size:11px;color:var(--muted);margin-top:4px}
+.phase-badge{font-family:var(--mono);font-size:11px;font-weight:600;padding:6px 14px;border-radius:8px;
+  background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.2);color:var(--teal)}
+.milestone-chip{font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  padding:4px 10px;border-radius:99px;background:rgba(255,179,71,0.1);border:1px solid rgba(255,179,71,0.25);color:var(--amber)}
+.progress-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.progress-label span{font-size:11px;color:var(--muted)}
+.progress-label strong{font-family:var(--mono);font-size:13px;color:var(--teal)}
+.progress-track{height:6px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden}
+.progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--teal),rgba(0,245,212,0.6));transition:width 0.6s ease}
+
+/* STAT GRID */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:24px}
+.stat-card{padding:16px;border-radius:14px;border:1px solid var(--border);background:var(--surface);position:relative;overflow:hidden}
+.stat-card::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:14px 14px 0 0}
+.sc-teal::after{background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.sc-amber::after{background:linear-gradient(90deg,transparent,var(--amber),transparent)}
+.sc-pink::after{background:linear-gradient(90deg,transparent,var(--pink),transparent)}
+.sc-purple::after{background:linear-gradient(90deg,transparent,var(--purple),transparent)}
+.sc-muted::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent)}
+.stat-label{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.stat-val{font-size:28px;font-weight:700;letter-spacing:-0.5px}
+.sc-teal .stat-val{color:var(--teal);text-shadow:0 0 20px rgba(0,245,212,0.3)}
+.sc-amber .stat-val{color:var(--amber);text-shadow:0 0 20px rgba(255,179,71,0.3)}
+.sc-pink .stat-val{color:var(--pink);text-shadow:0 0 20px rgba(255,75,110,0.3)}
+.sc-purple .stat-val{color:var(--purple);text-shadow:0 0 20px rgba(123,97,255,0.3)}
+.sc-muted .stat-val{color:var(--muted)}
+.stat-sub{font-size:10px;color:var(--dim);margin-top:4px}
+
+/* SECTION */
+.sec-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);
+  display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* PHASE GRID */
+.phase-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-bottom:24px}
+.phase-card{padding:18px;border-radius:14px;border:1px solid var(--border);background:var(--surface);position:relative;overflow:hidden}
+.phase-card.active{border-color:rgba(0,245,212,0.2);background:rgba(0,245,212,0.03)}
+.phase-card.active::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.phase-card.not_started{opacity:0.5}
+.phase-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.phase-num{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px;
+  background:rgba(255,255,255,0.05);color:var(--muted)}
+.phase-name{font-size:13px;font-weight:600;flex:1}
+.phase-status{font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  padding:2px 8px;border-radius:99px;border:1px solid}
+.ps-complete{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.25);color:var(--teal)}
+.ps-in_progress{background:rgba(255,179,71,0.08);border-color:rgba(255,179,71,0.25);color:var(--amber)}
+.ps-not_started{background:rgba(255,255,255,0.03);border-color:var(--border);color:var(--dim)}
+.task-list{list-style:none;display:flex;flex-direction:column;gap:5px}
+.task-item{display:flex;align-items:flex-start;gap:8px;font-size:11px;line-height:1.4}
+.task-check{flex-shrink:0;width:14px;height:14px;margin-top:1px;border-radius:3px;border:1px solid;
+  display:flex;align-items:center;justify-content:center;font-size:8px}
+.task-check.done{background:rgba(0,245,212,0.15);border-color:rgba(0,245,212,0.4);color:var(--teal)}
+.task-check.pending{background:rgba(255,255,255,0.03);border-color:var(--dim);color:transparent}
+.task-text.done{color:var(--muted)}
+.task-text.pending{color:var(--text)}
+.phase-prog{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+.phase-prog-track{height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;margin-top:4px}
+.phase-prog-fill{height:100%;border-radius:99px}
+.ppf-complete{background:var(--teal)}
+.ppf-in_progress{background:linear-gradient(90deg,var(--teal),var(--amber))}
+.ppf-not_started{background:rgba(255,255,255,0.1)}
+.phase-prog-label{font-size:10px;color:var(--dim)}
+
+/* AGENT TABLE */
+.table-wrap{border-radius:14px;border:1px solid var(--border);background:var(--surface);overflow:hidden;margin-bottom:24px}
+table{width:100%;border-collapse:collapse}
+thead th{padding:10px 14px;text-align:left;font-size:9px;font-weight:700;letter-spacing:0.1em;
+  text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border);transition:background 0.1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(255,255,255,0.02)}
+td{padding:9px 14px;font-size:12px;color:var(--text);vertical-align:middle}
+td.mono{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;font-size:9px;font-weight:700;
+  padding:2px 7px;border-radius:99px;letter-spacing:0.05em;border:1px solid}
+.b-built{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.25);color:var(--teal)}
+.b-planned{background:rgba(255,255,255,0.03);border-color:var(--border);color:var(--dim)}
+.b-done{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.25);color:var(--teal)}
+.b-pending{background:rgba(255,179,71,0.1);border-color:rgba(255,179,71,0.25);color:var(--amber)}
+.b-hold{background:rgba(255,255,255,0.04);border-color:var(--border);color:var(--dim)}
+
+/* SECURITY GRID */
+.sec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;margin-bottom:24px}
+.sec-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;
+  border:1px solid var(--border);background:var(--surface)}
+.sec-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sec-dot.done{background:var(--teal);box-shadow:0 0 6px rgba(0,245,212,0.5)}
+.sec-dot.pending{background:var(--amber);box-shadow:0 0 6px rgba(255,179,71,0.4)}
+.sec-dot.hold{background:var(--dim)}
+.sec-info{flex:1;min-width:0}
+.sec-label{font-size:11px;font-weight:500}
+.sec-meta{font-size:10px;color:var(--muted);margin-top:1px}
+
+/* BLOCKERS */
+.blocker-empty{padding:24px;text-align:center;color:var(--muted);font-size:12px;font-style:italic}
+
+/* FOOTER */
+.footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.footer-left{display:flex;flex-direction:column;gap:3px}
+.footer-note{font-size:10px;color:var(--dim)}
+.source-bar{display:flex;align-items:center;gap:8px}
+.source-chip{font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:99px;border:1px solid}
+.source-github{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.25);color:var(--teal)}
+.source-local{background:rgba(255,179,71,0.1);border-color:rgba(255,179,71,0.25);color:var(--amber)}
+.source-error{background:rgba(255,75,110,0.1);border-color:rgba(255,75,110,0.3);color:var(--pink)}
+.source-age{font-size:10px;color:var(--dim)}
+.footer-right{display:flex;align-items:center;gap:10px}
+.refresh-gh-btn{font-size:10px;font-weight:600;padding:5px 12px;border-radius:7px;cursor:pointer;
+  border:1px solid rgba(0,245,212,0.25);background:rgba(0,245,212,0.05);color:var(--teal);
+  font-family:var(--sans);transition:all 0.15s}
+.refresh-gh-btn:hover{background:rgba(0,245,212,0.1);border-color:rgba(0,245,212,0.4)}
+.refresh-gh-btn:disabled{opacity:0.4;cursor:not-allowed}
+.footer-link{font-size:10px;color:var(--muted);text-decoration:none}
+.footer-link:hover{color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="wordmark">SYNTHOS</span>
+  <span class="header-badge">Project Status</span>
+  <div class="header-right">
+    <a href="/console" class="nav-link">Console</a>
+    <a href="/logs" class="nav-link">Logs</a>
+    <span class="clock" id="clock">--:--:-- ET</span>
+    <div class="live-pill"><div class="live-dot"></div>LIVE</div>
+  </div>
+</div>
+
+<div class="page" id="root">
+  <p style="color:var(--muted);font-size:12px;padding:40px;text-align:center">Loading…</p>
+</div>
+
+<script>
+const ET_ZONE = 'America/New_York';
+
+function fmtClock(){
+  const s=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:ET_ZONE,hour12:false});
+  document.getElementById('clock').textContent=s+' ET';
+}
+setInterval(fmtClock,1000); fmtClock();
+
+function statusCls(s){return{complete:'ps-complete',in_progress:'ps-in_progress',not_started:'ps-not_started'}[s]||'ps-not_started'}
+function statusLabel(s){return{complete:'Complete',in_progress:'In Progress',not_started:'Not Started'}[s]||s}
+
+function phaseCard(p){
+  const done=p.tasks.filter(t=>t.done).length, total=p.tasks.length;
+  const pct=total?Math.round(done/total*100):0;
+  const active=p.status==='in_progress';
+  const tasks=p.tasks.map(t=>`
+    <li class="task-item">
+      <span class="task-check ${t.done?'done':'pending'}">${t.done?'✓':''}</span>
+      <span class="task-text ${t.done?'done':'pending'}">${t.label}</span>
+    </li>`).join('');
+  return `
+    <div class="phase-card ${p.status}${active?' active':''}">
+      <div class="phase-header">
+        <span class="phase-num">P${p.id}</span>
+        <span class="phase-name">${p.name}</span>
+        <span class="phase-status ${statusCls(p.status)}">${statusLabel(p.status)}</span>
+      </div>
+      <ul class="task-list">${tasks}</ul>
+      <div class="phase-prog">
+        <div class="phase-prog-label">${done} / ${total} tasks · ${pct}%</div>
+        <div class="phase-prog-track">
+          <div class="phase-prog-fill ppf-${p.status}" style="width:${pct}%"></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function agentRows(agents, label){
+  return agents.map(a=>`
+    <tr>
+      <td><span class="badge ${a.status==='built'?'b-built':'b-planned'}">${a.status}</span></td>
+      <td class="mono">${a.alias}</td>
+      <td class="mono">${a.file}</td>
+      <td style="color:var(--muted);font-size:11px">${a.job}</td>
+    </tr>`).join('');
+}
+
+function secItems(items){
+  return items.map(s=>`
+    <div class="sec-item">
+      <div class="sec-dot ${s.status}"></div>
+      <div class="sec-info">
+        <div class="sec-label">${s.item}</div>
+        <div class="sec-meta">${s.repo} &middot; <span class="badge b-${s.status}" style="font-size:8px">${s.status}</span></div>
+      </div>
+    </div>`).join('');
+}
+
+function fmtAge(s){
+  if(s<60) return `${Math.round(s)}s ago`;
+  if(s<3600) return `${Math.round(s/60)}m ago`;
+  return `${Math.round(s/3600)}h ago`;
+}
+
+async function refreshFromGitHub(){
+  const btn=document.getElementById('gh-refresh-btn');
+  if(btn){btn.disabled=true;btn.textContent='Refreshing…'}
+  try{
+    const r=await fetch('/api/project-status/refresh',{method:'POST',headers:{'X-Token':window._token||''}});
+    const d=await r.json();
+    if(d.ok) await render();
+    else console.warn('Refresh failed:',d.error);
+  }catch(e){console.error(e)}
+  finally{if(btn){btn.disabled=false;btn.textContent='↻ Refresh from GitHub'}}
+}
+
+// Pull token from cookie for XHR auth
+window._token=(document.cookie.split(';').find(c=>c.trim().startsWith('company_token='))||'').split('=')[1]||'';
+
+async function render(){
+  const d=await fetch('/api/project-status',{headers:{'X-Token':window._token}}).then(r=>r.json());
+  const m=d.meta;
+  const phases=d.phases;
+  const phasesComplete=phases.filter(p=>p.status==='complete').length;
+  const phasePct=Math.round(phasesComplete/m.total_phases*100);
+  const currentPhase=phases.find(p=>p.status==='in_progress')||phases[m.current_phase-1];
+  const allTasks=phases.flatMap(p=>p.tasks);
+  const tasksDone=allTasks.filter(t=>t.done).length;
+  const agentBuilt=[...d.agents.retail_pi,...d.agents.company_pi].filter(a=>a.status==='built').length;
+  const agentTotal=[...d.agents.retail_pi,...d.agents.company_pi].length;
+  const secDone=d.security.filter(s=>s.status==='done').length;
+  const secTotal=d.security.length;
+  const blockers=d.blockers||[];
+
+  document.getElementById('root').innerHTML = `
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="hero-title">Synthos Build Progress</div>
+          <div class="hero-meta">Last updated ${m.last_updated} &middot; v${m.version}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${m.next_milestone?`<span class="milestone-chip">Next: ${m.next_milestone}</span>`:''}
+          <span class="phase-badge">Phase ${m.current_phase} of ${m.total_phases}</span>
+        </div>
+      </div>
+      <div class="progress-label">
+        <span>Phase progress</span>
+        <strong>${phasesComplete} / ${m.total_phases} phases complete</strong>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" style="width:${phasePct}%"></div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stat-grid">
+      <div class="stat-card sc-teal">
+        <div class="stat-label">Phases Done</div>
+        <div class="stat-val">${phasesComplete}</div>
+        <div class="stat-sub">of ${m.total_phases} total</div>
+      </div>
+      <div class="stat-card sc-purple">
+        <div class="stat-label">Tasks Done</div>
+        <div class="stat-val">${tasksDone}</div>
+        <div class="stat-sub">of ${allTasks.length} total</div>
+      </div>
+      <div class="stat-card sc-amber">
+        <div class="stat-label">Agents Built</div>
+        <div class="stat-val">${agentBuilt}</div>
+        <div class="stat-sub">of ${agentTotal} total</div>
+      </div>
+      <div class="stat-card ${secDone===secTotal?'sc-teal':'sc-pink'}">
+        <div class="stat-label">Security</div>
+        <div class="stat-val">${secDone}</div>
+        <div class="stat-sub">of ${secTotal} items done</div>
+      </div>
+      <div class="stat-card ${blockers.length?'sc-pink':'sc-muted'}">
+        <div class="stat-label">Blockers</div>
+        <div class="stat-val">${blockers.length}</div>
+        <div class="stat-sub">${blockers.length?'active':'all clear'}</div>
+      </div>
+    </div>
+
+    <!-- PHASES -->
+    <div class="sec-title">Build Phases</div>
+    <div class="phase-grid">${phases.map(phaseCard).join('')}</div>
+
+    <!-- SECURITY -->
+    <div class="sec-title">Security Checklist</div>
+    <div class="sec-grid">${secItems(d.security)}</div>
+
+    <!-- AGENTS -->
+    <div class="sec-title">Agent Registry — Retail Pi</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Alias</th><th>File</th><th>Job</th></tr></thead>
+        <tbody>${agentRows(d.agents.retail_pi)}</tbody>
+      </table>
+    </div>
+
+    <div class="sec-title">Agent Registry — Company Pi</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Alias</th><th>File</th><th>Job</th></tr></thead>
+        <tbody>${agentRows(d.agents.company_pi)}</tbody>
+      </table>
+    </div>
+
+    <!-- BLOCKERS -->
+    <div class="sec-title">Active Blockers</div>
+    <div class="table-wrap">
+      ${blockers.length?`<table><thead><tr><th>ID</th><th>Severity</th><th>Description</th></tr></thead><tbody>
+        ${blockers.map(b=>`<tr><td class="mono">${b.id}</td><td><span class="badge b-pending">${b.severity}</span></td><td>${b.description}</td></tr>`).join('')}
+      </tbody></table>`:`<div class="blocker-empty">No active blockers</div>`}
+    </div>
+
+    <div class="footer">
+      <div class="footer-left">
+        <div class="source-bar">
+          <span class="source-chip source-${d._source||'error'}">${d._source==='github'?'GitHub live':d._source==='local'?'Local file':'Error'}</span>
+          <span class="source-age">${d._cache_age_s>0?'cached '+fmtAge(d._cache_age_s):'just fetched'}</span>
+        </div>
+        <span class="footer-note">Auto-refreshes every 60s &middot; Push <code>data/project_status.json</code> to GitHub to update</span>
+      </div>
+      <div class="footer-right">
+        <a href="/api/project-status" class="footer-link">Raw JSON</a>
+        <button class="refresh-gh-btn" id="gh-refresh-btn" onclick="refreshFromGitHub()">↻ Refresh from GitHub</button>
+      </div>
+    </div>
+  `;
+}
+
+render();
+setInterval(render, 60000);
+</script>
+</body>
+</html>"""
+
+
+@app.route("/project-status")
+def project_status_dashboard():
+    """Project build progress dashboard — requires token auth."""
+    if request.args.get("token"):
+        resp = redirect(url_for("project_status_dashboard"))
+        resp.set_cookie("company_token", request.args["token"], httponly=True, samesite="Lax")
+        return resp
+    if not _authorized():
+        return (
+            "<html><body style='font-family:monospace;background:#080b12;color:#fff;padding:40px'>"
+            "<h2>Synthos — Project Status</h2>"
+            "<p style='color:rgba(255,255,255,0.5)'>Pass <code>?token=SECRET_TOKEN</code> to access.</p>"
+            "</body></html>"
+        ), 401
+    return render_template_string(_STATUS_HTML)
+
+
+@app.route("/api/project-status")
+def api_project_status():
+    """
+    Return project_status.json merged with cache metadata.
+    Source priority: warm cache → GitHub API → local file.
+    Requires token auth.
+    """
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    data, source, age = _get_status_data()
+    if data is None:
+        return jsonify({"error": "status data unavailable — check GITHUB_TOKEN or local file"}), 503
+    return jsonify({**data, "_source": source, "_cache_age_s": round(age)}), 200
+
+
+@app.route("/api/project-status/refresh", methods=["POST"])
+def api_project_status_refresh():
+    """
+    Force an immediate re-fetch from GitHub, bypassing the cache.
+    Returns the source used and last_updated from the freshly fetched data.
+    Requires token auth.
+    """
+    if not _authorized():
+        return jsonify({"error": "unauthorized"}), 401
+    # Bust the cache so _get_status_data() goes straight to GitHub
+    _status_cache["fetched_at"] = None
+    data, source, _ = _get_status_data()
+    if data is None:
+        return jsonify({"ok": False, "error": "fetch failed — check GITHUB_TOKEN or local file"}), 503
+    return jsonify({
+        "ok":          True,
+        "source":      source,
+        "last_updated": data.get("meta", {}).get("last_updated"),
+    }), 200
+
+
 # ── Retention ─────────────────────────────────────────────────────────────────
 _PI_EVENTS_RETAIN_DAYS = int(os.getenv("PI_EVENTS_RETAIN_DAYS", "30"))
 
@@ -866,10 +1385,12 @@ def trim_pi_events():
 if __name__ == "__main__":
     init_db()
     trim_pi_events()
-    if SECRET_TOKEN in ("changeme", ""):
-        print(f"[Company] ⚠  WARNING: SECRET_TOKEN is not set or is the default 'changeme'.")
-        print(f"[Company] ⚠  Set SECRET_TOKEN in .env before exposing this server.")
+    if not SECRET_TOKEN:
+        print("[Company] ✗ FATAL: SECRET_TOKEN is not set in .env — refusing to start.")
+        print("[Company]   Generate one with: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+        raise SystemExit(1)
     print(f"[Company] Running on port {PORT}")
     print(f"[Company] Console at http://0.0.0.0:{PORT}/console?token=<SECRET_TOKEN>")
+    print(f"[Company] Project status at http://0.0.0.0:{PORT}/project-status?token=<SECRET_TOKEN>")
     print(f"[Company] DB at {DB_PATH}")
     app.run(host="0.0.0.0", port=PORT)

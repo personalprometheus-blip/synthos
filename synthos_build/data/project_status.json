@@ -1,0 +1,144 @@
+{
+  "meta": {
+    "project": "Synthos",
+    "last_updated": "2026-04-03",
+    "current_phase": 5,
+    "total_phases": 6,
+    "version": "1.0",
+    "next_milestone": "Pi 5 live test"
+  },
+  "phases": [
+    {
+      "id": 1,
+      "name": "Core Trading System",
+      "status": "complete",
+      "tasks": [
+        {"label": "retail_trade_logic_agent.py operational (14-gate spine)", "done": true},
+        {"label": "retail_news_agent.py operational (22-gate signal scoring)", "done": true},
+        {"label": "retail_market_sentiment_agent.py operational (27-gate cascade)", "done": true},
+        {"label": "signals.db schema stable (v1.2, 17+ tables)", "done": true},
+        {"label": "Portal live (port 5001), validate_02 passing 22/22", "done": true},
+        {"label": "Option B decision logic (MIRROR/WATCH/WATCH_ONLY)", "done": true},
+        {"label": "Member weights, news_feed, 5yr price history", "done": true},
+        {"label": "Interrogation listener (UDP peer corroboration)", "done": true},
+        {"label": "Pending approvals queue (DB-backed)", "done": true},
+        {"label": "validate_03b passing 44/44", "done": true}
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Company Node + Validation Infrastructure",
+      "status": "complete",
+      "tasks": [
+        {"label": "scoop.py — email queue drain daemon", "done": true},
+        {"label": "strongbox.py — nightly encrypt + R2 upload", "done": true},
+        {"label": "company_server.py — event queue API + ops dashboard", "done": true},
+        {"label": "company_auditor.py — bug fixes (dry-run, timezone, continuous mode)", "done": true},
+        {"label": "Heartbeat architecture resolved", "done": true},
+        {"label": "Full architectural reconciliation (26 conflicts logged)", "done": true},
+        {"label": "Static and system validation reports written", "done": true},
+        {"label": "synthos-company initialized as separate git repo", "done": true}
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Normalization Sprint",
+      "status": "complete",
+      "tasks": [
+        {"label": "Suggestions pipeline migrated to db_helpers.post_suggestion()", "done": true},
+        {"label": "watchdog post_deploy_watch migrated to db_helpers", "done": true},
+        {"label": "COMPANY_DATA_DIR hardcode fixed to env var", "done": true},
+        {"label": "strongbox.py moved to synthos-company/src/", "done": true},
+        {"label": "company.db schema canonicalized (CL-012 RESOLVED)", "done": true},
+        {"label": "license_validator.py formally deferred", "done": true},
+        {"label": "All secondary doc tasks complete", "done": true}
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Ground Truth Declaration",
+      "status": "complete",
+      "tasks": [
+        {"label": "DATABASE_SCHEMA_CANONICAL.md written", "done": true},
+        {"label": "GROUND_TRUTH.md synthesized and declared", "done": true},
+        {"label": "All critical blockers resolved or formally deferred", "done": true}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Deployment Pipeline",
+      "status": "in_progress",
+      "tasks": [
+        {"label": "Installer simplification (5-step wizard, no API keys at install)", "done": true},
+        {"label": "ENCRYPTION_KEY generated at install, preserved on repair", "done": true},
+        {"label": "Boot sequence gate — structural keys only (API keys non-blocking)", "done": true},
+        {"label": "Terms of Service gate (first-login, filed to customer folder)", "done": true},
+        {"label": "Portal security hardening (rate limiting, timing-safe token, env injection fix)", "done": true},
+        {"label": "File upload restricted to admin + staged outside live dirs", "done": true},
+        {"label": "Dependabot + CodeQL enabled on both repos", "done": true},
+        {"label": "SECURITY.md written", "done": true},
+        {"label": "GitHub repos made private", "done": false},
+        {"label": "GitHub branch protection on main (both repos)", "done": false},
+        {"label": "Cloudflare SSL/TLS + HSTS + always-HTTPS configured", "done": false},
+        {"label": "Pi 5 live hardware test in paper mode", "done": false},
+        {"label": "Post-deploy rollback trigger verified", "done": false},
+        {"label": "Watchdog known-good snapshot and restore verified", "done": false}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Live Trading Gate",
+      "status": "not_started",
+      "tasks": [
+        {"label": "Paper trading review complete (min. 2 weeks)", "done": false},
+        {"label": "Project lead approval obtained", "done": false},
+        {"label": "TRADING_MODE flip to LIVE (explicit human action only)", "done": false}
+      ]
+    }
+  ],
+  "agents": {
+    "retail_pi": [
+      {"alias": "trader",    "file": "retail_trade_logic_agent.py",    "job": "Trade execution, 14-gate spine, open/midday/close sessions", "status": "built"},
+      {"alias": "research",  "file": "retail_news_agent.py",           "job": "Alpaca news fetch, 22-gate signal scoring", "status": "built"},
+      {"alias": "sentiment", "file": "retail_market_sentiment_agent.py","job": "27-gate market deterioration / cascade detection", "status": "built"},
+      {"alias": "screener",  "file": "retail_sector_screener.py",      "job": "Sector momentum scoring, enrichment requests", "status": "built"},
+      {"alias": "portal",    "file": "retail_portal.py",               "job": "Flask web portal, customer auth, Stripe", "status": "built"},
+      {"alias": "watchdog",  "file": "retail_watchdog.py",             "job": "Crash monitor, auto-restart x3, rollback", "status": "built"},
+      {"alias": "scheduler", "file": "retail_scheduler.py",            "job": "Session orchestrator — runs all agent sessions in order", "status": "built"},
+      {"alias": "heartbeat", "file": "retail_heartbeat.py",            "job": "POSTs agent status to Monitor after each session", "status": "built"},
+      {"alias": "boot",      "file": "retail_boot_sequence.py",        "job": "Boot coordinator — network wait, integrity check", "status": "built"},
+      {"alias": "shutdown",  "file": "retail_shutdown.py",             "job": "Graceful pre-maintenance shutdown (Sat 3:55am)", "status": "built"},
+      {"alias": "health",    "file": "retail_health_check.py",         "job": "Post-reboot verifier — DB integrity, Alpaca reconcile", "status": "built"},
+      {"alias": "listener",  "file": "retail_interrogation_listener.py","job": "UDP cross-validation responder, port 5557", "status": "built"},
+      {"alias": "patcher",   "file": "retail_patch.py",                "job": "Safe file updater — backup, syntax check, rollback", "status": "built"},
+      {"alias": "backup",    "file": "retail_backup.py",               "job": "Creates encrypted archive, POSTs to Company Pi", "status": "built"}
+    ],
+    "company_pi": [
+      {"alias": "scoop",     "file": "scoop.py",            "job": "Email queue drain daemon, Resend dispatch, priority hold", "status": "built"},
+      {"alias": "strongbox", "file": "strongbox.py",        "job": "Nightly encrypt + R2 upload, retention, verify", "status": "built"},
+      {"alias": "server",    "file": "company_server.py",   "job": "Event queue API, ops dashboard, /receive_backup", "status": "built"},
+      {"alias": "vault",     "file": "company_vault.py",    "job": "License key / secrets manager", "status": "planned"},
+      {"alias": "librarian", "file": "company_archivist.py","job": "Data archivist / historical record keeper", "status": "planned"},
+      {"alias": "sentinel",  "file": "company_sentinel.py", "job": "Company-side health watchdog", "status": "planned"},
+      {"alias": "fidget",    "file": "company_keepalive.py","job": "Keep-alive / activity daemon", "status": "planned"},
+      {"alias": "patches",   "file": "company_auditor.py",  "job": "Company-side bug/issue detector (continuous mode)", "status": "planned"}
+    ]
+  },
+  "security": [
+    {"item": "Dependabot alerts + security updates", "repo": "synthos",         "status": "done"},
+    {"item": "Dependabot alerts + security updates", "repo": "synthos-company", "status": "done"},
+    {"item": "CodeQL static analysis",               "repo": "synthos",         "status": "done"},
+    {"item": "CodeQL static analysis",               "repo": "synthos-company", "status": "done"},
+    {"item": "Secret scanning + push protection",    "repo": "both",            "status": "done"},
+    {"item": "Make repos private",                   "repo": "both",            "status": "pending"},
+    {"item": "Branch protection on main",            "repo": "both",            "status": "pending"},
+    {"item": "Enable 2FA on GitHub account",         "repo": "account",         "status": "pending"},
+    {"item": "Cloudflare SSL Full (strict)",         "repo": "infra",           "status": "pending"},
+    {"item": "Cloudflare HSTS + Always HTTPS",       "repo": "infra",           "status": "pending"},
+    {"item": "Cloudflare Bot Fight Mode",            "repo": "infra",           "status": "hold"},
+    {"item": "Portal session cookie flags (Secure/HttpOnly/SameSite)", "repo": "portal", "status": "pending"},
+    {"item": "CSRF tokens on portal forms",          "repo": "portal",          "status": "pending"},
+    {"item": "Security headers (CSP, X-Frame-Options)", "repo": "portal",       "status": "pending"}
+  ],
+  "blockers": []
+}

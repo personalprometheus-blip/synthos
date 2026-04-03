@@ -1,9 +1,10 @@
 """
-shutdown.py — Graceful Pre-Maintenance Shutdown
-Synthos
+retail_shutdown.py — Graceful Pre-Maintenance Shutdown
+Synthos v3.0
 
 Runs: Saturday 3:55 AM ET via cron (before 4:00 AM maintenance reboot)
-  55 3 * * 6  python3 /home/pi/synthos/shutdown.py
+  Cron registered automatically by install_retail.py — do not edit manually.
+  (55 3 * * 6  python3 <SYNTHOS_HOME>/src/retail_shutdown.py)
 
 Tasks:
   - Log planned shutdown event

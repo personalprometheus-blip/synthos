@@ -286,9 +286,10 @@ def verify_install(config: dict) -> tuple[bool, list[str]]:
         issues.append(".env file not found")
     else:
         content = ENV_PATH.read_text()
-        for key in ("SECRET_TOKEN", "RESEND_API_KEY", "PORT"):
+        for key in ("SECRET_TOKEN", "PORT"):
             if key not in content:
                 issues.append(f".env missing {key}")
+        # RESEND_API_KEY intentionally blank on fresh install — restored from backup
 
     # company.db exists
     db_path = Path(config.get("company_db_path", str(DB_PATH)))
@@ -570,36 +571,18 @@ h1{font-size:22px;font-weight:700;letter-spacing:-0.3px;margin-bottom:6px}
       </div>
     </div>
 
-    <!-- SECTION 2: Resend -->
+    <!-- SECTION 2: Ops Contact -->
     <div class="section">
       <div class="section-head">
         <div class="section-num">2</div>
-        <div class="section-title">Resend — Email Dispatch</div>
-        <div class="section-sub">used by scoop.py to send alerts</div>
+        <div class="section-title">Ops Contact</div>
+        <div class="section-sub">where critical alerts are routed</div>
       </div>
       <div class="section-body">
         <div class="field">
-          <label>Resend API Key</label>
-          <input type="password" id="resend_key" name="resend_key" placeholder="re_…">
-          <div class="hint">From resend.com → API Keys. Must start with re_</div>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label>From Address</label>
-            <input type="email" id="alert_from" name="alert_from"
-                   placeholder="alerts@yourdomain.com">
-            <div class="hint">Must be a verified Resend sender domain</div>
-          </div>
-          <div class="field">
-            <label>Alert To (ops fallback)</label>
-            <input type="email" id="alert_to" name="alert_to" placeholder="ops@yourco.com">
-            <div class="hint">Used when payload has no to_email</div>
-          </div>
-        </div>
-        <div class="field">
-          <label>Ops Email (optional override)</label>
+          <label>Ops Email</label>
           <input type="email" id="ops_email" name="ops_email" placeholder="ops@yourco.com">
-          <div class="hint">If set, takes priority over Alert To for ops-audience items</div>
+          <div class="hint">Used for operational alerts. Resend API key and alert addresses are restored from backup after install.</div>
         </div>
       </div>
     </div>
@@ -707,9 +690,6 @@ function collect() {
     secret_token:        f('secret_token'),
     port:                f('port') || '5010',
     company_db_path:     f('company_db_path'),
-    resend_key:          f('resend_key'),
-    alert_from:          f('alert_from'),
-    alert_to:            f('alert_to'),
     ops_email:           f('ops_email'),
     scoop_poll_s:        f('scoop_poll_s') || '5',
     scoop_max_attempts:  f('scoop_max_attempts') || '3',
@@ -720,10 +700,6 @@ function collect() {
 
 function validate(config) {
   if (!config.secret_token) return 'Secret Token is required';
-  if (!config.resend_key)   return 'Resend API Key is required';
-  if (!config.resend_key.startsWith('re_')) return 'Resend API Key must start with re_';
-  if (!config.alert_from)   return 'From Address is required';
-  if (!config.alert_to)     return 'Alert To address is required';
   return null;
 }
 

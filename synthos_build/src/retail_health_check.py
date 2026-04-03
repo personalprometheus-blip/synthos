@@ -1,9 +1,9 @@
 """
-health_check.py — Post-Reboot Health Verification
-Synthos
+retail_health_check.py — Post-Reboot Health Verification
+Synthos v3.0
 
-Runs: 60 seconds after every Pi reboot via cron @reboot
-  @reboot sleep 60 && python3 /home/pi/synthos/health_check.py
+Runs: called by retail_boot_sequence.py during boot sequence.
+  Cron is registered automatically by install_retail.py — do not edit manually.
 
 Checks:
   1. Database integrity

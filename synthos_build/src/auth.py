@@ -99,7 +99,12 @@ def verify_password(password: str, stored_hash: str) -> bool:
 # HMAC-SHA256 keyed hash (for DB lookup without storing plaintext).
 
 def _email_lookup_hash(email: str) -> str:
-    key = os.environ.get('ENCRYPTION_KEY', 'synthos-dev-fallback').encode()
+    key = os.environ.get('ENCRYPTION_KEY', '').encode()
+    if not key:
+        raise RuntimeError(
+            "ENCRYPTION_KEY not set in .env — cannot hash email for lookup. "
+            "Generate with: python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+        )
     return _hmac.new(key, email.lower().strip().encode(), hashlib.sha256).hexdigest()
 
 
@@ -146,6 +151,8 @@ def init_auth_db():
     with _auth_conn() as c:
         c.executescript(_AUTH_SCHEMA)
     _migrate_auth_db()
+    # Restrict permissions — auth.db contains encrypted PII and password hashes
+    os.chmod(AUTH_DB_PATH, 0o600)
     log.info("Auth DB initialized")
 
 
@@ -165,6 +172,10 @@ def _migrate_auth_db():
       grace_period_ends_at  — past_due grace cutoff (7 days from payment failure)
       pricing_tier          — early_adopter | standard
       pricing_locked_at     — timestamp when tier was locked in
+
+    v3.1 additions (terms of service gate):
+      tos_accepted_at       — UTC ISO timestamp when customer accepted ToS
+      tos_version           — version string of accepted ToS (e.g. '1.0')
     """
     new_columns = [
         ("email_verified",       "INTEGER NOT NULL DEFAULT 0"),
@@ -177,6 +188,8 @@ def _migrate_auth_db():
         ("grace_period_ends_at", "TEXT"),
         ("pricing_tier",         "TEXT NOT NULL DEFAULT 'standard'"),
         ("pricing_locked_at",    "TEXT"),
+        ("tos_accepted_at",      "TEXT"),
+        ("tos_version",          "TEXT"),
     ]
     with _auth_conn() as c:
         for col_name, col_def in new_columns:
@@ -274,6 +287,19 @@ def record_login(customer_id: str):
         c.execute(
             "UPDATE customers SET last_login = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), customer_id)
+        )
+
+
+def mark_tos_accepted(customer_id: str, version: str) -> None:
+    """
+    Record ToS acceptance in auth.db.
+    Sets tos_accepted_at (UTC ISO timestamp) and tos_version for the customer.
+    Idempotent — safe to call again if version changes in the future.
+    """
+    with _auth_conn() as c:
+        c.execute(
+            "UPDATE customers SET tos_accepted_at = ?, tos_version = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), version, customer_id)
         )
 
 

@@ -426,12 +426,10 @@ def verify_installation() -> tuple[bool, list[str]]:
         failures.append(".env not found")
     else:
         required_keys = [
-            "ANTHROPIC_API_KEY", "ALPACA_API_KEY", "ALPACA_SECRET_KEY",
-            "OPERATING_MODE", "OWNER_NAME",
-            "PORTAL_SECRET_KEY",
-            # LICENSE_KEY — DEFERRED_FROM_CURRENT_BASELINE
-            # Key is still collected during setup and written to .env for future use.
-            # Not required for verification until license_validator.py is implemented.
+            "OPERATING_MODE", "ADMIN_EMAIL",
+            "PORTAL_SECRET_KEY", "ENCRYPTION_KEY",
+            # API keys (ANTHROPIC_API_KEY, ALPACA_API_KEY, etc.) are intentionally
+            # blank after fresh install — they arrive via backup restore.
         ]
         try:
             env_text = ENV_PATH.read_text(encoding="utf-8")
@@ -574,6 +572,8 @@ def run_full_install(config: dict) -> bool:
         write_sentinel(config.get("pi_id", "synthos-pi-1"))
         _log_ui("✓ Installation complete. Reboot to start Synthos.")
         _log_ui(f"  Sentinel: {SENTINEL_PATH}")
+        _log_ui("  After reboot: open the portal and go to Settings → API Keys")
+        _log_ui("  Add Anthropic, Alpaca, and Resend keys before trading sessions run.")
         return True
     else:
         _log_ui("── DEGRADED ────────────────────────────────────────")
@@ -703,95 +703,35 @@ class WizardHandler(BaseHTTPRequestHandler):
     def page_welcome(self) -> bytes:
         body = """
         <div class="card-sub">Welcome. This wizard will configure your Synthos trading node.
-        It takes about 5 minutes.</div>
-        <div class="note">Make sure you have your API keys ready:<br>
-        Anthropic, Alpaca, and Congress.gov</div>
+        It takes about 2 minutes.</div>
+        <div class="note">You only need your admin credentials to install.<br>
+        API keys and alerts are configured after install via backup restore.</div>
         <form method="POST" action="/personal">
           <button class="btn" type="submit">Begin Setup →</button>
         </form>"""
-        return _render_page("Welcome", body, "Step 0 of 7 — Welcome")
+        return _render_page("Welcome", body, "Step 0 of 5 — Welcome")
 
-    def page_personal(self) -> bytes:
+    def page_personal(self, errors: list = None) -> bytes:
         cfg = _state["config"]
+        error_html = ""
+        if errors:
+            items = "".join(f"<li>{e}</li>" for e in errors)
+            error_html = f'<div class="note error"><ul style="margin:0;padding-left:16px">{items}</ul></div>'
         body = f"""
-        <div class="card-sub">Tell us about yourself. This creates your trading account — separate from the admin account.</div>
+        <div class="card-sub">Create your admin account. API keys and alerts are configured after install via backup restore.</div>
+        {error_html}
         <form method="POST" action="/personal">
           <label>Your full name</label>
-          <input name="owner_name" value="{cfg.get('owner_name', '')}" required>
-          <label>Your email address</label>
-          <input name="owner_email" type="email" value="{cfg.get('owner_email', '')}" required>
-          <label>Portal password <span style="font-size:0.8em;opacity:0.6">(used to log in as yourself)</span></label>
-          <input name="owner_password" type="password" value="{cfg.get('owner_password', '')}" required minlength="10" autocomplete="new-password">
-          <label>Pi node ID (e.g. synthos-pi-1)</label>
+          <input name="admin_name" value="{cfg.get('admin_name', '')}" required>
+          <label>Admin email address</label>
+          <input name="admin_email" type="email" value="{cfg.get('admin_email', '')}" required>
+          <label>Admin password <span style="font-size:0.8em;opacity:0.6">(min 10 characters)</span></label>
+          <input name="admin_password" type="password" required minlength="10" autocomplete="new-password">
+          <label>Pi node ID <span style="font-size:0.8em;opacity:0.6">(e.g. synthos-pi-1)</span></label>
           <input name="pi_id" value="{cfg.get('pi_id', 'synthos-pi-1')}">
           <button class="btn" type="submit">Next →</button>
         </form>"""
-        return _render_page("About You", body, "Step 1 of 7 — Identity")
-
-    def page_api_keys(self) -> bytes:
-        cfg = _state["config"]
-        tr = _state["test_results"]
-
-        def status(key: str) -> str:
-            if key not in tr:
-                return ""
-            return ' <span class="check">✓</span>' if tr[key] else ' <span class="fail">✗</span>'
-
-        body = f"""
-        <div class="card-sub">Enter your API keys. They will be tested before saving.</div>
-        <form method="POST" action="/api-keys">
-          <label>Anthropic API Key{status('anthropic')}</label>
-          <input name="anthropic_key" value="{cfg.get('anthropic_key', '')}" placeholder="sk-ant-..." required>
-          <label>Alpaca API Key{status('alpaca')}</label>
-          <input name="alpaca_key" value="{cfg.get('alpaca_key', '')}" placeholder="PK..." required>
-          <label>Alpaca Secret Key</label>
-          <input name="alpaca_secret" value="{cfg.get('alpaca_secret', '')}" type="password" required>
-          <label>Alpaca Base URL</label>
-          <input name="alpaca_base_url" value="{cfg.get('alpaca_base_url', 'https://paper-api.alpaca.markets')}">
-          <label>Trading Mode</label>
-          <select name="trading_mode">
-            <option value="PAPER" {"selected" if cfg.get("trading_mode","PAPER")=="PAPER" else ""}>PAPER (recommended)</option>
-            <option value="LIVE" {"selected" if cfg.get("trading_mode")=="LIVE" else ""}>LIVE</option>
-          </select>
-          <label>Congress.gov API Key{status('congress')}</label>
-          <input name="congress_key" value="{cfg.get('congress_key', '')}" required>
-          <label>License Key</label>
-          <input name="license_key" value="{cfg.get('license_key', '')}" placeholder="synthos-pi-01-..." required>
-          <div class="note">Keys will be tested live. You will see results before proceeding.</div>
-          <button class="btn" type="submit">Test Keys →</button>
-        </form>"""
-        return _render_page("API Keys", body, "Step 2 of 7 — Keys")
-
-    def page_alerts(self) -> bytes:
-        cfg = _state["config"]
-        body = f"""
-        <div class="card-sub">Optional: configure alerts and the monitor/company servers.</div>
-        <form method="POST" action="/alerts">
-          <label>Monitor Server URL (optional)</label>
-          <input name="monitor_url" value="{cfg.get('monitor_url', '')}" placeholder="http://your-monitor-pi:5000">
-          <label>Monitor Token</label>
-          <input name="monitor_token" value="{cfg.get('monitor_token', 'changeme')}">
-          <label>Company Node URL (optional — routes Scoop events direct to Pi 4B)</label>
-          <input name="company_url" value="{cfg.get('company_url', '')}" placeholder="http://your-company-pi:5010">
-          <small style="color:#888;display:block;margin:-8px 0 10px">
-            If set, alert events go directly to the Company Node (bypasses monitor proxy).
-            Leave blank if the Monitor Node has COMPANY_URL set, or if not yet installed.
-          </small>
-          <label>Resend API Key (optional — protective exit emails)</label>
-          <input name="resend_key" value="{cfg.get('resend_key', '')}" placeholder="re_...">
-          <label>Alert From Address</label>
-          <input name="alert_from" value="{cfg.get('alert_from', '')}" placeholder="alerts@yourdomain.com">
-          <label>Your Email (alert recipient)</label>
-          <input name="user_email" value="{cfg.get('user_email', '')}" placeholder="you@example.com">
-          <label>Gmail User (crash SMS alerts, optional)</label>
-          <input name="gmail_user" value="{cfg.get('gmail_user', '')}" placeholder="youraddress@gmail.com">
-          <label>Gmail App Password</label>
-          <input name="gmail_app_password" value="{cfg.get('gmail_app_password', '')}" type="password">
-          <label>Alert Phone (10-digit)</label>
-          <input name="alert_phone" value="{cfg.get('alert_phone', '')}" placeholder="8005551234">
-          <button class="btn" type="submit">Next →</button>
-        </form>"""
-        return _render_page("Alerts", body, "Step 3 of 7 — Alerts")
+        return _render_page("Admin Setup", body, "Step 1 of 5 — Identity")
 
     def page_portal(self) -> bytes:
         cfg = _state["config"]
@@ -805,7 +745,7 @@ class WizardHandler(BaseHTTPRequestHandler):
           <div class="note">Portal runs at http://&lt;your-pi&gt;.local:{cfg.get("portal_port","5001")}</div>
           <button class="btn" type="submit">Next →</button>
         </form>"""
-        return _render_page("Portal", body, "Step 4 of 7 — Portal")
+        return _render_page("Portal", body, "Step 2 of 5 — Portal")
 
     def page_capital(self) -> bytes:
         cfg = _state["config"]
@@ -826,7 +766,7 @@ class WizardHandler(BaseHTTPRequestHandler):
           AUTONOMOUS mode requires a separate unlock key from Synthos.</div>
           <button class="btn" type="submit">Next →</button>
         </form>"""
-        return _render_page("Capital", body, "Step 5 of 7 — Capital")
+        return _render_page("Capital", body, "Step 3 of 5 — Capital")
 
     def page_disclaimer(self) -> bytes:
         body = """
@@ -849,51 +789,34 @@ class WizardHandler(BaseHTTPRequestHandler):
         <form method="POST" action="/">
           <button class="btn btn-secondary" type="submit" style="margin-top:8px">← Back</button>
         </form>"""
-        return _render_page("Disclaimer", body, "Step 6 of 7 — Agreement")
+        return _render_page("Disclaimer", body, "Step 4 of 5 — Agreement")
 
     def page_review(self) -> bytes:
         cfg = _state["config"]
-        tr = _state["test_results"]
-
-        def check(key: str) -> str:
-            if key not in tr:
-                return ""
-            return '<span class="check">✓</span>' if tr[key] else '<span class="fail">✗ NOT SET</span>'
-
-        def mask(val: str) -> str:
-            if not val:
-                return "— not set"
-            return val[:4] + "••••" if len(val) > 4 else "••••"
 
         body = f"""
         <div class="card-sub">Confirm your configuration before installing.</div>
         <table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:16px">
-          <tr><td style="padding:5px 0;color:#555;width:160px">Owner name</td>
-              <td>{cfg.get('owner_name','—')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Email</td>
-              <td>{cfg.get('owner_email','—')}</td></tr>
+          <tr><td style="padding:5px 0;color:#555;width:160px">Admin name</td>
+              <td>{cfg.get('admin_name','—')}</td></tr>
+          <tr><td style="padding:5px 0;color:#555">Admin email</td>
+              <td>{cfg.get('admin_email','—')}</td></tr>
           <tr><td style="padding:5px 0;color:#555">Pi ID</td>
               <td>{cfg.get('pi_id','—')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Anthropic key</td>
-              <td>{mask(cfg.get('anthropic_key',''))} {check('anthropic')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Alpaca key</td>
-              <td>{mask(cfg.get('alpaca_key',''))} {check('alpaca')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Congress.gov key</td>
-              <td>{mask(cfg.get('congress_key',''))} {check('congress')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">License key</td>
-              <td>{mask(cfg.get('license_key',''))}</td></tr>
+          <tr><td style="padding:5px 0;color:#555">Portal port</td>
+              <td>{cfg.get('portal_port','5001')}</td></tr>
           <tr><td style="padding:5px 0;color:#555">Mode</td>
               <td>{cfg.get('operating_mode','SUPERVISED')}</td></tr>
           <tr><td style="padding:5px 0;color:#555">Capital</td>
               <td>${cfg.get('starting_capital','—')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Monitor URL</td>
-              <td>{cfg.get('monitor_url','—') or '— (set later)'}</td></tr>
+          <tr><td style="padding:5px 0;color:#555">API keys</td>
+              <td style="color:#999">Restore from backup after install</td></tr>
         </table>
         <div class="note warn">Do not close this tab during installation. Takes 2–5 minutes.</div>
         <form method="POST" action="/run-install">
           <button class="btn" type="submit">Install Now →</button>
         </form>"""
-        return _render_page("Review", body, "Step 7 of 7 — Install")
+        return _render_page("Review", body, "Step 5 of 5 — Install")
 
     def page_installing(self) -> bytes:
         lines = _state.get("log_lines", [])[-40:]
@@ -907,7 +830,21 @@ class WizardHandler(BaseHTTPRequestHandler):
                 status = f'<div class="note error">✗ Installation failed: {_state["install_error"]}<br>Check logs/install.log</div>'
                 action = '<a href="/"><button class="btn btn-secondary">← Start Over</button></a>'
             else:
-                status = '<div class="note">✓ Installation complete. Reboot your Pi to start Synthos.</div>'
+                port = _state["config"].get("portal_port", "5001")
+                status = f"""<div class="note">✓ Installation complete.</div>
+                <div class="note warn" style="margin-top:12px;line-height:1.8;font-size:12px">
+                  <strong>Next steps after reboot:</strong><br>
+                  1. Reboot the Pi — Synthos starts automatically<br>
+                  2. Open the portal at <strong>http://&lt;your-pi&gt;.local:{port}</strong><br>
+                  3. Log in with your admin email and password<br>
+                  4. Accept the Terms of Service<br>
+                  5. Go to <strong>Settings → API Keys</strong> and add:<br>
+                  &nbsp;&nbsp;&nbsp;• Anthropic API key<br>
+                  &nbsp;&nbsp;&nbsp;• Alpaca API key + secret<br>
+                  &nbsp;&nbsp;&nbsp;• Resend API key (for alerts)<br>
+                  &nbsp;&nbsp;&nbsp;• Company URL + Monitor URL (if nodes are running)<br>
+                  6. Agents run automatically at scheduled market sessions
+                </div>"""
                 action = ''
         else:
             status = '<div class="note">Installation in progress — do not close this tab.</div>'
@@ -926,8 +863,6 @@ class WizardHandler(BaseHTTPRequestHandler):
         routes = {
             "/":           self.page_welcome,
             "/personal":   self.page_personal,
-            "/api-keys":   self.page_api_keys,
-            "/alerts":     self.page_alerts,
             "/portal":     self.page_portal,
             "/capital":    self.page_capital,
             "/disclaimer": self.page_disclaimer,
@@ -942,48 +877,28 @@ class WizardHandler(BaseHTTPRequestHandler):
         data = self._read_post()
 
         if path == "/personal":
-            _state["config"].update({
-                "owner_name":     data.get("owner_name", "").strip(),
-                "owner_email":    data.get("owner_email", "").strip(),
-                "owner_password": data.get("owner_password", "").strip(),
-                "pi_id":          data.get("pi_id", "synthos-pi-1").strip(),
-            })
-            self._redirect("/api-keys")
+            admin_name     = data.get("admin_name", "").strip()
+            admin_email    = data.get("admin_email", "").strip()
+            admin_password = data.get("admin_password", "").strip()
+            pi_id          = data.get("pi_id", "synthos-pi-1").strip()
 
-        elif path == "/api-keys":
-            _state["config"].update({
-                "anthropic_key":  data.get("anthropic_key", "").strip(),
-                "alpaca_key":     data.get("alpaca_key", "").strip(),
-                "alpaca_secret":  data.get("alpaca_secret", "").strip(),
-                "alpaca_base_url": data.get("alpaca_base_url",
-                                            "https://paper-api.alpaca.markets").strip(),
-                "trading_mode":   data.get("trading_mode", "PAPER"),
-                "congress_key":   data.get("congress_key", "").strip(),
-                "license_key":    data.get("license_key", "").strip(),
-            })
-            # Run live tests
-            cfg = _state["config"]
-            ok_a, _ = test_anthropic(cfg["anthropic_key"])
-            ok_b, _ = test_alpaca(cfg["alpaca_key"], cfg["alpaca_secret"], cfg["alpaca_base_url"])
-            ok_c, _ = test_congress(cfg["congress_key"])
-            _state["test_results"] = {
-                "anthropic": ok_a,
-                "alpaca":    ok_b,
-                "congress":  ok_c,
-            }
-            self._redirect("/api-keys")
+            # Server-side validation (HTML minlength is client-side only)
+            errors = []
+            if len(admin_password) < 10:
+                errors.append("Password must be at least 10 characters.")
+            if "@" not in admin_email or "." not in admin_email:
+                errors.append("Enter a valid email address.")
+            if not admin_name:
+                errors.append("Name is required.")
+            if errors:
+                self._send(self.page_personal(errors=errors))
+                return
 
-        elif path == "/alerts":
             _state["config"].update({
-                "monitor_url":        data.get("monitor_url", "").strip(),
-                "monitor_token":      data.get("monitor_token", "changeme").strip(),
-                "company_url":        data.get("company_url", "").strip(),
-                "resend_key":         data.get("resend_key", "").strip(),
-                "alert_from":         data.get("alert_from", "").strip(),
-                "user_email":         data.get("user_email", "").strip(),
-                "gmail_user":         data.get("gmail_user", "").strip(),
-                "gmail_app_password": data.get("gmail_app_password", "").strip(),
-                "alert_phone":        data.get("alert_phone", "").strip(),
+                "admin_name":     admin_name,
+                "admin_email":    admin_email,
+                "admin_password": admin_password,
+                "pi_id":          pi_id,
             })
             self._redirect("/portal")
 
@@ -1096,30 +1011,42 @@ def repair_mode() -> int:
     # Load existing config from .env for package/cron steps.
     # Map raw env var names → wizard key names so build_retail_env preserves all values.
     _env_to_wizard = {
-        "ANTHROPIC_API_KEY":    "anthropic_key",
-        "ALPACA_API_KEY":       "alpaca_key",
-        "ALPACA_SECRET_KEY":    "alpaca_secret",
-        "ALPACA_BASE_URL":      "alpaca_base_url",
-        "TRADING_MODE":         "trading_mode",
-        "OPERATING_MODE":       "operating_mode",
-        "AUTONOMOUS_UNLOCK_KEY":"autonomous_unlock_key",
-        "LICENSE_KEY":          "license_key",
-        "PI_ID":                "pi_id",
-        "PI_LABEL":             "pi_label",
-        "PI_EMAIL":             "pi_email",
+        # Encryption key — generated once at install, MUST be preserved on repair
+        "ENCRYPTION_KEY":       "encryption_key",
+        # Admin credentials (v3.0 — set during install)
+        "ADMIN_NAME":           "admin_name",
+        "ADMIN_EMAIL":          "admin_email",
+        "ADMIN_PASSWORD":       "admin_password",
+        # Owner/customer mirrors (single-operator — mirrors admin)
         "OWNER_NAME":           "owner_name",
         "OWNER_EMAIL":          "owner_email",
         "OWNER_PASSWORD":       "owner_password",
         "OWNER_PRICING_TIER":   "owner_pricing_tier",
         "OWNER_CUSTOMER_ID":    "owner_customer_id",
+        # System identity
+        "PI_ID":                "pi_id",
+        "PI_LABEL":             "pi_label",
+        "PI_EMAIL":             "pi_email",
+        # Trading
+        "OPERATING_MODE":       "operating_mode",
+        "AUTONOMOUS_UNLOCK_KEY":"autonomous_unlock_key",
         "STARTING_CAPITAL":     "starting_capital",
-        "SUPPORT_EMAIL":        "support_email",
+        # Portal
         "PORTAL_PORT":          "portal_port",
         "PORTAL_PASSWORD":      "portal_password",
         "PORTAL_SECRET_KEY":    "_portal_secret_key",
+        "SUPPORT_EMAIL":        "support_email",
+        # API keys — blank on fresh install; preserved on repair
+        "ANTHROPIC_API_KEY":    "anthropic_key",
+        "ALPACA_API_KEY":       "alpaca_key",
+        "ALPACA_SECRET_KEY":    "alpaca_secret",
+        "ALPACA_BASE_URL":      "alpaca_base_url",
+        "LICENSE_KEY":          "license_key",
+        # Network nodes — blank on fresh install; preserved on repair
         "MONITOR_URL":          "monitor_url",
         "MONITOR_TOKEN":        "monitor_token",
         "COMPANY_URL":          "company_url",
+        # Alerts — blank on fresh install; preserved on repair
         "RESEND_API_KEY":       "resend_key",
         "ALERT_FROM":           "alert_from",
         "USER_EMAIL":           "user_email",

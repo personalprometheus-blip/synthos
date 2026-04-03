@@ -1,6 +1,6 @@
 """
-boot_sequence_v1.0.py — Synthos Boot Sequence Coordinator
-Synthos · v1.0
+retail_boot_sequence.py — Synthos Boot Sequence Coordinator
+Synthos · v3.0
 
 Runs once after every Pi reboot via cron @reboot.
 Starts all Synthos systems in the correct order, verifies each
@@ -15,12 +15,13 @@ Boot order:
   5. Write boot heartbeat
   6. Log boot complete — cron takes over
 
-CRON ENTRY (replaces individual @reboot lines):
-  @reboot sleep 60 && python3 /home/pi/synthos/synthos_build/src/boot_sequence.py >> /home/pi/synthos/synthos_build/logs/boot.log 2>&1
+CRON ENTRY:
+  Registered automatically by install_retail.py. Do not edit manually.
+  (@reboot sleep 60 && python3 <SYNTHOS_HOME>/src/retail_boot_sequence.py >> <SYNTHOS_HOME>/logs/boot.log 2>&1)
 
 Developer:  Patrick McGuire
 Support:    synthos.signal@gmail.com
-Version:    1.0
+Version:    3.0
 """
 
 import os
@@ -115,7 +116,7 @@ def send_sms_alert(message):
     """Send SMS alert via Gmail gateway.
 
     ARCHITECTURAL EXCEPTION: This function uses smtplib directly rather than
-    routing through scoop.py. This is intentional — boot_sequence.py runs before
+    routing through scoop.py. This is intentional — retail_boot_sequence.py runs before
     any agents are started, so scoop.py is not yet available. Direct SMTP is the
     only viable path for a boot-time alert. This is the sole permitted exception
     to the scoop-only outbound email rule.
@@ -157,19 +158,32 @@ def step1_network():
 
 
 def step2_env():
-    """Step 2 — Verify .env exists and has required keys."""
+    """Step 2 — Verify .env exists and has required structural keys.
+
+    API keys (ANTHROPIC_API_KEY, ALPACA_API_KEY, etc.) are intentionally blank
+    on a fresh install — they arrive via backup restore after install.
+    Only keys that must be present for the system to boot are checked here.
+    """
     log.info("Step 2/9 — Environment")
     if not os.path.exists(ENV_PATH):
         return step(".env file", False, "not found — run installer")
 
     load_dotenv(ENV_PATH, override=True)
-    required_keys = ['ANTHROPIC_API_KEY', 'ALPACA_API_KEY', 'TRADING_MODE']
-    missing = [k for k in required_keys if not os.environ.get(k)]
 
+    # Keys required for the system to boot at all
+    required_keys = ['TRADING_MODE', 'OPERATING_MODE', 'ENCRYPTION_KEY', 'PORTAL_SECRET_KEY']
+    missing = [k for k in required_keys if not os.environ.get(k)]
     if missing:
         return step(".env keys", False, f"missing: {', '.join(missing)}")
 
-    return step(".env file", True, "all required keys present")
+    # Warn if API keys are blank — expected on fresh install, must be restored before trading
+    blank_api_keys = [k for k in ['ANTHROPIC_API_KEY', 'ALPACA_API_KEY'] if not os.environ.get(k)]
+    if blank_api_keys:
+        log.warning("API keys not yet set (%s) — restore from backup before trading sessions run",
+                    ', '.join(blank_api_keys))
+
+    return step(".env file", True, "structural keys present"
+                + (" — API keys pending restore" if blank_api_keys else ""))
 
 
 def step3_files():
