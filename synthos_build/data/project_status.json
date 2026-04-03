@@ -125,8 +125,8 @@
       {"alias": "server",    "file": "company_server.py",    "job": "Event queue API, ops dashboard, /receive_backup", "status": "built"},
       {"alias": "sentinel",  "file": "company_sentinel.py",  "job": "Company-side health watchdog — checks server/scoop/strongbox/disk", "status": "built"},
       {"alias": "fidget",    "file": "company_keepalive.py", "job": "Keep-alive / activity daemon — pings /health, prevents idle", "status": "built"},
-      {"alias": "vault",     "file": "company_vault.py",     "job": "License key / secrets manager", "status": "planned"},
-      {"alias": "librarian", "file": "company_archivist.py", "job": "Data archivist / historical record keeper", "status": "planned"},
+      {"alias": "vault",     "file": "company_vault.py",     "job": "License key / secrets manager", "status": "built"},
+      {"alias": "librarian", "file": "company_archivist.py", "job": "Data archivist / historical record keeper", "status": "built"},
       {"alias": "patches",   "file": "company_auditor.py",   "job": "Company-side bug/issue detector (continuous mode)", "status": "planned"}
     ]
   },
