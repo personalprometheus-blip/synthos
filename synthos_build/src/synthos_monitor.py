@@ -45,7 +45,7 @@ ALERT_TO             = os.getenv("ALERT_TO", "you@example.com")
 # SECRET_TOKEN is the server-side env var name.
 # MONITOR_TOKEN is the client-side env var name — accept both so
 # operators who set only one side don't get silent 401s.
-SECRET_TOKEN         = os.getenv("SECRET_TOKEN") or os.getenv("MONITOR_TOKEN", "changeme")
+SECRET_TOKEN         = os.getenv("SECRET_TOKEN") or os.getenv("MONITOR_TOKEN", "")
 PORT                 = int(os.getenv("PORT", 5000))
 COMPANY_URL          = os.getenv("COMPANY_URL", "").rstrip("/")
 SILENCE_WINDOW_HOURS = 4
@@ -1813,6 +1813,11 @@ def audit_page():
 
 # ── Boot ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    if not SECRET_TOKEN:
+        print("[Synthos Monitor] ✗ FATAL: SECRET_TOKEN is not set in .env — refusing to start.")
+        print("[Synthos Monitor]   Run install_monitor.py to generate one.")
+        raise SystemExit(1)
+
     load_registry()  # restore Pi state from last run
 
     # Register digest agent blueprint
