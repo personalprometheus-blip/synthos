@@ -74,9 +74,15 @@
         {"label": "Boot sequence gate — structural keys only (API keys non-blocking)", "done": true},
         {"label": "Terms of Service gate (first-login, filed to customer folder)", "done": true},
         {"label": "Portal security hardening (rate limiting, timing-safe token, env injection fix)", "done": true},
+        {"label": "Portal session cookie flags (Secure/HttpOnly/SameSite=Strict)", "done": true},
+        {"label": "Portal security headers (CSP, X-Frame-Options, HSTS, Referrer-Policy)", "done": true},
         {"label": "File upload restricted to admin + staged outside live dirs", "done": true},
+        {"label": "Monitor Node installer (install_monitor.py)", "done": true},
+        {"label": "company_sentinel.py — company-side health watchdog", "done": true},
+        {"label": "company_keepalive.py — keep-alive / activity daemon", "done": true},
         {"label": "Dependabot + CodeQL enabled on both repos", "done": true},
         {"label": "SECURITY.md written", "done": true},
+        {"label": "Live project status dashboard (/project-status on company server)", "done": true},
         {"label": "GitHub repos made private", "done": false},
         {"label": "GitHub branch protection on main (both repos)", "done": false},
         {"label": "Cloudflare SSL/TLS + HSTS + always-HTTPS configured", "done": false},
@@ -114,14 +120,14 @@
       {"alias": "backup",    "file": "retail_backup.py",               "job": "Creates encrypted archive, POSTs to Company Pi", "status": "built"}
     ],
     "company_pi": [
-      {"alias": "scoop",     "file": "scoop.py",            "job": "Email queue drain daemon, Resend dispatch, priority hold", "status": "built"},
-      {"alias": "strongbox", "file": "strongbox.py",        "job": "Nightly encrypt + R2 upload, retention, verify", "status": "built"},
-      {"alias": "server",    "file": "company_server.py",   "job": "Event queue API, ops dashboard, /receive_backup", "status": "built"},
-      {"alias": "vault",     "file": "company_vault.py",    "job": "License key / secrets manager", "status": "planned"},
-      {"alias": "librarian", "file": "company_archivist.py","job": "Data archivist / historical record keeper", "status": "planned"},
-      {"alias": "sentinel",  "file": "company_sentinel.py", "job": "Company-side health watchdog", "status": "planned"},
-      {"alias": "fidget",    "file": "company_keepalive.py","job": "Keep-alive / activity daemon", "status": "planned"},
-      {"alias": "patches",   "file": "company_auditor.py",  "job": "Company-side bug/issue detector (continuous mode)", "status": "planned"}
+      {"alias": "scoop",     "file": "scoop.py",             "job": "Email queue drain daemon, Resend dispatch, priority hold", "status": "built"},
+      {"alias": "strongbox", "file": "strongbox.py",         "job": "Nightly encrypt + R2 upload, retention, verify", "status": "built"},
+      {"alias": "server",    "file": "company_server.py",    "job": "Event queue API, ops dashboard, /receive_backup", "status": "built"},
+      {"alias": "sentinel",  "file": "company_sentinel.py",  "job": "Company-side health watchdog — checks server/scoop/strongbox/disk", "status": "built"},
+      {"alias": "fidget",    "file": "company_keepalive.py", "job": "Keep-alive / activity daemon — pings /health, prevents idle", "status": "built"},
+      {"alias": "vault",     "file": "company_vault.py",     "job": "License key / secrets manager", "status": "planned"},
+      {"alias": "librarian", "file": "company_archivist.py", "job": "Data archivist / historical record keeper", "status": "planned"},
+      {"alias": "patches",   "file": "company_auditor.py",   "job": "Company-side bug/issue detector (continuous mode)", "status": "planned"}
     ]
   },
   "security": [
@@ -130,15 +136,15 @@
     {"item": "CodeQL static analysis",               "repo": "synthos",         "status": "done"},
     {"item": "CodeQL static analysis",               "repo": "synthos-company", "status": "done"},
     {"item": "Secret scanning + push protection",    "repo": "both",            "status": "done"},
+    {"item": "Portal session cookie flags (Secure/HttpOnly/SameSite=Strict)", "repo": "portal", "status": "done"},
+    {"item": "Security headers (CSP, X-Frame-Options, HSTS, Referrer-Policy)", "repo": "portal", "status": "done"},
     {"item": "Make repos private",                   "repo": "both",            "status": "pending"},
     {"item": "Branch protection on main",            "repo": "both",            "status": "pending"},
     {"item": "Enable 2FA on GitHub account",         "repo": "account",         "status": "pending"},
     {"item": "Cloudflare SSL Full (strict)",         "repo": "infra",           "status": "pending"},
     {"item": "Cloudflare HSTS + Always HTTPS",       "repo": "infra",           "status": "pending"},
-    {"item": "Cloudflare Bot Fight Mode",            "repo": "infra",           "status": "hold"},
-    {"item": "Portal session cookie flags (Secure/HttpOnly/SameSite)", "repo": "portal", "status": "pending"},
-    {"item": "CSRF tokens on portal forms",          "repo": "portal",          "status": "pending"},
-    {"item": "Security headers (CSP, X-Frame-Options)", "repo": "portal",       "status": "pending"}
+    {"item": "CSRF token-based protection on portal forms", "repo": "portal",   "status": "pending"},
+    {"item": "Cloudflare Bot Fight Mode",            "repo": "infra",           "status": "hold"}
   ],
   "blockers": []
 }

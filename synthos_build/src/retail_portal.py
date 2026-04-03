@@ -112,6 +112,47 @@ log = logging.getLogger('portal')
 app = Flask(__name__)
 app.secret_key = os.environ.get('PORTAL_SECRET_KEY', secrets.token_hex(32))
 
+# ── SESSION COOKIE SECURITY ────────────────────────────────────────────────
+# Secure=True: browser only sends cookie over HTTPS (Cloudflare Tunnel handles TLS).
+# Set HTTPS_ONLY=false in .env only for local HTTP testing.
+app.config['SESSION_COOKIE_SECURE']      = os.environ.get('HTTPS_ONLY', 'true').lower() != 'false'
+app.config['SESSION_COOKIE_HTTPONLY']    = True          # JS cannot read session cookie
+app.config['SESSION_COOKIE_SAMESITE']   = 'Strict'      # blocks cross-site request forgery
+app.config['SESSION_COOKIE_NAME']        = 'synthos_s'  # non-default name
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
+
+
+# ── SECURITY HEADERS ───────────────────────────────────────────────────────
+@app.after_request
+def _security_headers(response):
+    """
+    Apply security headers to every response.
+
+    CSP uses 'unsafe-inline' for scripts/styles because the portal renders
+    all HTML via render_template_string with inline JS/CSS. Refactor to
+    nonce-based CSP when the frontend is componentised.
+    SameSite=Strict on the session cookie is the primary CSRF mitigation.
+    """
+    h = response.headers
+    h['X-Frame-Options']         = 'DENY'
+    h['X-Content-Type-Options']  = 'nosniff'
+    h['X-XSS-Protection']        = '1; mode=block'
+    h['Referrer-Policy']         = 'strict-origin-when-cross-origin'
+    h['Permissions-Policy']      = 'geolocation=(), microphone=(), camera=()'
+    h['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    # HSTS: only emit if running in HTTPS mode (default true in production).
+    if app.config.get('SESSION_COOKIE_SECURE'):
+        h.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    return response
+
 
 # ── CONSTRUCTION LOCK HELPERS ─────────────────────────────────────────────
 
