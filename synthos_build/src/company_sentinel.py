@@ -68,10 +68,9 @@ _HERE    = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_HERE, "data")
 DB_PATH  = os.getenv("COMPANY_DB_PATH", os.path.join(DATA_DIR, "company.db"))
 
-# Strongbox writes to logs/strongbox.log (relative to synthos_build root).
-_BUILD_DIR    = os.path.dirname(_HERE)
-LOG_DIR       = os.path.join(_BUILD_DIR, "logs")
-STRONGBOX_LOG = os.path.join(LOG_DIR, "strongbox.log")
+# Strongbox (v2 agent) logs to synthos-company/logs/strongbox.log.
+_SYNTHOS_COMPANY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(_HERE))), "synthos-company")
+STRONGBOX_LOG    = os.path.join(_SYNTHOS_COMPANY, "logs", "strongbox.log")
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
@@ -128,11 +127,11 @@ def _enqueue_alert(service: str, detail: str) -> None:
     )
 
     payload = json.dumps({
-        "event_type": "sentinel_alert",
-        "priority":   0,
-        "subject":    subject,
-        "body":       body,
-        "service":    service,
+        "event_type":   "sentinel_alert",
+        "priority":     0,
+        "subject":      subject,
+        "body":         body,
+        "source_agent": service,
     }).encode("utf-8")
 
     url = f"http://localhost:{COMPANY_PORT}/api/enqueue"
