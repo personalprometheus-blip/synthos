@@ -487,19 +487,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .pi-avatar{
   width:42px;height:42px;border-radius:12px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  font-size:14px;font-weight:800;letter-spacing:-0.3px;
   position:relative;overflow:hidden;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.09);
 }
-.pi-avatar::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(145deg,rgba(255,255,255,0.18) 0%,transparent 55%)}
-.av-teal{background:linear-gradient(135deg,rgba(0,245,212,0.3),rgba(0,245,212,0.1));
-         border:1px solid rgba(0,245,212,0.25);color:var(--teal)}
-.av-purple{background:linear-gradient(135deg,rgba(123,97,255,0.3),rgba(123,97,255,0.1));
-           border:1px solid rgba(123,97,255,0.25);color:#a78bfa}
-.av-amber{background:linear-gradient(135deg,rgba(255,179,71,0.3),rgba(255,179,71,0.1));
-          border:1px solid rgba(255,179,71,0.25);color:var(--amber)}
-.av-pink{background:linear-gradient(135deg,rgba(255,75,110,0.3),rgba(255,75,110,0.1));
-         border:1px solid rgba(255,75,110,0.25);color:var(--pink)}
+.pi-avatar::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(145deg,rgba(255,255,255,0.13) 0%,transparent 50%)}
+/* glass cloud fleet decorations */
+.fleet-cloud{position:absolute;bottom:-4px;right:4px;opacity:0.14;pointer-events:none}
 
 .pi-info{flex:1;min-width:0}
 .pi-name{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -585,10 +580,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 .modal-header{padding:18px 22px 0;display:flex;align-items:flex-start;gap:14px;flex-shrink:0}
 .modal-avatar{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;
-              justify-content:center;font-size:16px;font-weight:800;flex-shrink:0;
-              position:relative;overflow:hidden}
-.modal-avatar::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(145deg,rgba(255,255,255,0.2) 0%,transparent 55%)}
+              justify-content:center;flex-shrink:0;
+              position:relative;overflow:hidden;
+              background:rgba(255,255,255,0.03);
+              border:1px solid rgba(255,255,255,0.09)}
+.modal-avatar::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(145deg,rgba(255,255,255,0.16) 0%,transparent 50%)}
 .modal-title-wrap{flex:1}
 .modal-name{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--text)}
 .modal-email{font-size:12px;color:var(--muted);margin-top:2px}
@@ -740,31 +737,64 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="fleet-label">Pis Online</div>
       <div class="fleet-val" id="fl-online">0</div>
       <div class="fleet-sub" id="fl-total">of 0 registered</div>
+      <svg class="fleet-cloud" viewBox="0 0 54 38" xmlns="http://www.w3.org/2000/svg" width="54" height="38">
+        <circle cx="38" cy="12" r="9" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.2"/>
+        <g stroke="rgba(255,255,255,1)" stroke-width="1.1" stroke-linecap="round">
+          <line x1="38" y1="1" x2="38" y2="0"/><line x1="44.5" y1="5.5" x2="45.5" y2="4.5"/>
+          <line x1="48" y1="12" x2="50" y2="12"/><line x1="31.5" y1="5.5" x2="30.5" y2="4.5"/>
+          <line x1="28" y1="12" x2="26" y2="12"/>
+        </g>
+        <path d="M3,29 Q3,22 10,22 Q9,15 18,15 Q24,15 26,19 Q33,18 33,24 Q37,24 37,29 Q37,33 33,33 L7,33 Q3,33 3,29 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
     </div>
     <div class="fleet-card fc-purple">
       <div class="fleet-label">Fleet Portfolio</div>
       <div class="fleet-val" id="fl-portfolio">$0</div>
       <div class="fleet-sub">Combined value</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.9" stroke-linecap="round"/>
+      </svg>
     </div>
     <div class="fleet-card fc-amber">
       <div class="fleet-label">Pending Approvals</div>
       <div class="fleet-val" id="fl-pending">0</div>
       <div class="fleet-sub">Across all Pis</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 40" xmlns="http://www.w3.org/2000/svg" width="44" height="40">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M21,28 L18,35 L21,34.5 L19.5,40 L25.5,32 L22,32.5 Z" fill="rgba(255,255,255,1)" stroke="none"/>
+      </svg>
     </div>
     <div class="fleet-card fc-pink">
       <div class="fleet-label">Open Issues</div>
       <div class="fleet-val" id="fl-issues">0</div>
       <div class="fleet-sub">Needs attention</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 38" xmlns="http://www.w3.org/2000/svg" width="44" height="38">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,1)" stroke-width="1.4" stroke-linecap="round">
+          <line x1="13" y1="30" x2="11.5" y2="37"/><line x1="20" y1="30" x2="18.5" y2="37"/><line x1="27" y1="30" x2="25.5" y2="37"/>
+        </g>
+      </svg>
     </div>
     <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
       <div class="fleet-label">Open Positions</div>
       <div class="fleet-val" id="fl-positions" style="color:var(--text)">0</div>
       <div class="fleet-sub">Fleet-wide</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,0.6)" stroke-width="1.1" stroke-linecap="round">
+          <line x1="8" y1="22" x2="5" y2="22"/><line x1="8.8" y1="18.5" x2="6.5" y2="17"/>
+        </g>
+      </svg>
     </div>
     <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
       <div class="fleet-label">Trades Today</div>
       <div class="fleet-val" id="fl-trades" style="color:var(--text)">0</div>
       <div class="fleet-sub">All Pis</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.9" stroke-linecap="round"/>
+      </svg>
     </div>
   </div>
 
@@ -842,6 +872,49 @@ function avatarColor(piId) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
+// ── GLASS CLOUD WEATHER ICONS ──
+function weatherIcon(status) {
+  const cp = 'M3,21 Q3,14 10,14 Q9,7 18,7 Q24,7 26,11 Q33,10 33,16 Q37,16 37,21 Q37,25 33,25 L7,25 Q3,25 3,21 Z';
+  const hl = 'M7,14 Q7,9 13,9 Q12,4 19,4';
+  if (status === 'online' || status === 'active') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 7px rgba(0,245,212,0.4))">
+      <circle cx="27" cy="10" r="8" fill="rgba(0,245,212,0.07)"/>
+      <circle cx="27" cy="10" r="5.5" fill="rgba(0,245,212,0.15)" stroke="rgba(0,245,212,0.72)" stroke-width="1.3"/>
+      <g stroke="rgba(0,245,212,0.62)" stroke-width="1.2" stroke-linecap="round">
+        <line x1="27" y1="2.5" x2="27" y2="0.5"/>
+        <line x1="32.5" y1="4.5" x2="34" y2="3"/>
+        <line x1="36" y1="10" x2="38" y2="10"/>
+        <line x1="21.5" y1="4.5" x2="20" y2="3"/>
+        <line x1="18" y1="10" x2="16" y2="10"/>
+      </g>
+      <path d="${cp}" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1" stroke-linecap="round"/>
+    </svg>`;
+  }
+  if (status === 'fault' || status === 'warning') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 7px rgba(255,179,71,0.4))">
+      <path d="${cp}" fill="rgba(255,179,71,0.05)" stroke="rgba(255,255,255,0.68)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" stroke-linecap="round"/>
+      <path d="M21,27 L18,34 L21,33.5 L19.5,39 L25.5,31 L22,31.5 Z" fill="rgba(255,179,71,0.95)" stroke="rgba(255,179,71,0.4)" stroke-width="0.5" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  if (status === 'offline') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(255,75,110,0.25))">
+      <path d="${cp}" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.52)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-linecap="round"/>
+      <g stroke="rgba(140,200,255,0.65)" stroke-width="1.6" stroke-linecap="round">
+        <line x1="13" y1="28" x2="11.5" y2="37"/>
+        <line x1="20" y1="28" x2="18.5" y2="37"/>
+        <line x1="27" y1="28" x2="25.5" y2="37"/>
+      </g>
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 4px rgba(255,255,255,0.1))">
+    <path d="${cp}" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.38)" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1" stroke-linecap="round"/>
+  </svg>`;
+}
+
 // ── FETCH STATUS ──
 async function fetchStatus() {
   try {
@@ -893,8 +966,6 @@ function renderPiGrid() {
   grid.innerHTML = pis.map(pi => {
     const sc   = statusClass(pi.status);
     const dc   = dotClass(pi.status);
-    const av   = avatarColor(pi.pi_id);
-    const ini  = initials(pi.label);
     const pnl  = pi.realized_gains || 0;
     const pnlCls = pnl >= 0 ? 'teal' : 'pink';
     const pnlStr = (pnl>=0?'+$':'-$') + Math.abs(pnl).toFixed(2);
@@ -908,7 +979,7 @@ function renderPiGrid() {
 
     return '<div class="pi-card ' + sc + '" onclick="openModal('' + pi.pi_id + '')">'
       + '<div class="pi-card-top">'
-        + '<div class="pi-avatar ' + av + '">' + ini + '</div>'
+        + '<div class="pi-avatar">' + weatherIcon(pi.status) + '</div>'
         + '<div class="pi-info">'
           + '<div class="pi-name">' + (pi.label||pi.pi_id) + '</div>'
           + '<div class="pi-email">' + (pi.email||'No email') + '</div>'
@@ -941,9 +1012,8 @@ async function openModal(piId) {
 
   // Set header from cached data immediately
   const pi = piData[piId] || {};
-  const av = avatarColor(piId);
-  document.getElementById('modal-avatar').className = 'modal-avatar ' + av;
-  document.getElementById('modal-avatar').textContent = initials(pi.label||piId);
+  document.getElementById('modal-avatar').className = 'modal-avatar';
+  document.getElementById('modal-avatar').innerHTML = weatherIcon(pi.status || 'unknown');
   document.getElementById('modal-name').textContent = pi.label || piId;
   document.getElementById('modal-email').textContent = pi.email || 'No email';
   document.getElementById('modal-id').textContent = piId;
