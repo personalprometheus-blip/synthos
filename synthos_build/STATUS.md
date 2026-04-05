@@ -1,14 +1,15 @@
 # PROJECT STATUS
 
 > **REPO IDENTITY:** `personalprometheus-blip/synthos` — local: `/home/pi/synthos/synthos_build/`
-> **This repo owns:** retail_node (Pi 2W) — trading agents, portal, signals.db
+> **This repo owns:** retail_node (Pi 5, incoming) — trading agents, portal, signals.db, ingestion pipeline
 > **Also owns:** master project tracker (PROJECT_STATUS.md) for all phases/cross-repo blockers
 > **Companion:** `synthos-company` owns company_node (Pi 4B) agents — do NOT put company code here
-> **Separate:** `pi-display` repo (formerly `Sentinel`) is a display project for the Pi 4B — unrelated to Synthos operation. Hooks in later as a vanity feature. Not the same as company_sentinel.py (planned Company Pi health watchdog).
+> **Separate:** `Sentinel` repo is a display side project — unrelated to Synthos operation
+> **Pi 2W retired:** removed from v3 architecture 2026-04-05
 
-**Last Updated:** 2026-03-30
-**Current Phase:** Phase 5 — Deployment Pipeline
-**Overall Progress:** 4 of 6 phases complete
+**Last Updated:** 2026-04-05
+**Current Phase:** Phase 5 complete — retail Pi 5 build is next
+**Overall Progress:** 5 of 6 phases complete
 
 ---
 
@@ -68,9 +69,9 @@
 
 ---
 
-## Current Milestone: Deployment Pipeline (Phase 5)
-**Goal:** Build and validate the end-to-end deploy pipeline in paper mode
-**Status:** Not started — stragglers from Phase 3/4 cleared; ready to begin
+## Current Milestone: Pi 5 Retail Build
+**Goal:** Deploy retail portal and all trading agents on the incoming Pi 5
+**Status:** Blocked on hardware — Pi 5 on order
 
 ## Blockers
 | ID | Severity | Description |
@@ -114,7 +115,6 @@ Full blocker detail: docs/validation/SYSTEM_VALIDATION_REPORT.md
 
 ## Notes for AI Agents
 - This is a paper-trading-only system. TRADING_MODE must remain PAPER.
-- company_auditor.py was killed for this work session — restart at end: `nohup python3 /home/pi/synthos-company/agents/company_auditor.py --mode continuous >> logs/bug_finder.log 2>&1 &`
+- Pi 2W (10.0.0.121) is retired — do not SSH to it or reference it in planning
 - company_node repo is at `/home/pi/synthos-company/` — separate from this retail repo
-- Do NOT rename files or refactor architecture during the normalization sprint
 - See CLAUDE.md for full session context
