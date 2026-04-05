@@ -1,7 +1,7 @@
 # PROJECT STATUS — Synthos
 
-**Last Updated:** 2026-03-30
-**Current Phase:** Phase 5 — Deployment Pipeline complete; process_node repo initialized
+**Last Updated:** 2026-04-04
+**Current Phase:** Phase 5 — Deployment Pipeline complete; Phase 6 not started
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
 ---
@@ -10,9 +10,9 @@
 
 | Repo | Node | Role | Status |
 |------|------|------|--------|
-| [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 2W) | Trading agents, portal, signals.db | Active |
+| [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 2W → Pi 5) | Trading agents, portal, signals.db | Active |
 | [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B / cloud) | Ops agents, licensing, backups, monitoring | Active |
-| [personalprometheus-blip/synthos-process](https://github.com/personalprometheus-blip/synthos-process) | process_node (Pi 3) | News/signal ingestion pipeline, article enrichment, Redis-based cross-node distribution | Repo initialized; hardware pending (SD card arriving ~2026-03-31) |
+| ~~personalprometheus-blip/synthos-process~~ | ~~process_node (Pi 3)~~ | ~~News/signal ingestion pipeline~~ | CANCELLED — process_node merged into retail_node |
 
 ---
 
@@ -24,7 +24,7 @@
 | 2 | Company Node + Validation Infrastructure | ✅ Complete |
 | 3 | Normalization Sprint | ✅ Complete |
 | 4 | Ground Truth Declaration | ✅ Complete |
-| 5 | Deployment Pipeline | 🔴 Not Started |
+| 5 | Deployment Pipeline | ✅ Complete |
 | 6 | Live Trading Gate | 🔴 Not Started |
 
 ---
@@ -57,7 +57,7 @@
 
 ---
 
-## Phase 3 — Normalization Sprint 🟡 IN PROGRESS
+## Phase 3 — Normalization Sprint ✅ COMPLETE
 
 **Goal:** Resolve all critical blockers identified in SYSTEM_VALIDATION_REPORT.md.
 
