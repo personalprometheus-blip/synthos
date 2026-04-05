@@ -1,11 +1,17 @@
 {
   "meta": {
     "project": "Synthos",
-    "last_updated": "2026-04-03",
-    "current_phase": 5,
-    "total_phases": 6,
-    "version": "1.0",
-    "next_milestone": "Pi 5 live test"
+    "last_updated": "2026-04-05",
+    "current_phase": 6,
+    "total_phases": 9,
+    "version": "1.1",
+    "next_milestone": "Pi 5 retail node deployment",
+    "domain_map": {
+      "app.synth-cloud.com":    "Pi 5 port 5001 — retail portal (customer + admin)",
+      "portal.synth-cloud.com": "redirect → app.synth-cloud.com",
+      "ssh.synth-cloud.com":    "Pi 4B port 22 — Cloudflare Access",
+      "ssh2.synth-cloud.com":   "Pi 5 port 22 — Cloudflare Access"
+    }
   },
   "phases": [
     {
@@ -67,7 +73,7 @@
     {
       "id": 5,
       "name": "Deployment Pipeline",
-      "status": "in_progress",
+      "status": "complete",
       "tasks": [
         {"label": "Installer simplification (5-step wizard, no API keys at install)", "done": true},
         {"label": "ENCRYPTION_KEY generated at install, preserved on repair", "done": true},
@@ -83,51 +89,112 @@
         {"label": "Dependabot + CodeQL enabled on both repos", "done": true},
         {"label": "SECURITY.md written", "done": true},
         {"label": "Live project status dashboard (/project-status on company server)", "done": true},
+        {"label": "login_server retired — v3 single portal model locked", "done": true},
+        {"label": "company_server.py demoted to internal API only (port 5010)", "done": true}
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Pi 5 Retail Node Deployment",
+      "status": "in_progress",
+      "tasks": [
         {"label": "GitHub repos made private", "done": false},
         {"label": "GitHub branch protection on main (both repos)", "done": false},
-        {"label": "Cloudflare SSL/TLS + HSTS + always-HTTPS configured", "done": false},
+        {"label": "Cloudflare SSL Full (strict) + HSTS + always-HTTPS configured", "done": false},
+        {"label": "ssh2.synth-cloud.com tunnel pointing to Pi 5 port 22", "done": false},
+        {"label": "app.synth-cloud.com tunnel pointing to Pi 5 port 5001", "done": false},
+        {"label": "portal.synth-cloud.com redirect → app.synth-cloud.com", "done": false},
+        {"label": "MacBook SSH to Pi 5 via Cloudflare tunnel (no manual auth)", "done": false},
+        {"label": "retail_portal.py live on Pi 5 at app.synth-cloud.com", "done": false},
+        {"label": "Pi 5 retail agents installed and running (install_retail.py)", "done": false},
+        {"label": "Pi 4B ↔ Pi 5 internal API communication verified", "done": false},
         {"label": "Pi 5 live hardware test in paper mode", "done": false},
         {"label": "Post-deploy rollback trigger verified", "done": false},
         {"label": "Watchdog known-good snapshot and restore verified", "done": false}
       ]
     },
     {
-      "id": 6,
+      "id": 7,
+      "name": "Pre-Release Security Hardening",
+      "status": "not_started",
+      "tasks": [
+        {"label": "Enable 2FA on GitHub account", "done": false},
+        {"label": "CSRF token-based protection on portal forms", "done": false},
+        {"label": "Cloudflare Bot Fight Mode enabled", "done": false},
+        {"label": "Boot-time integrity gate on company node (pre-flight check)", "done": false},
+        {"label": "Penetration test / threat model review", "done": false},
+        {"label": "Secrets rotation procedure documented", "done": false},
+        {"label": "Incident response runbook written", "done": false},
+        {"label": "company_auditor.py (patches) continuous mode live on company node", "done": false}
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Paper Trading Review",
+      "status": "not_started",
+      "tasks": [
+        {"label": "Paper trading live on Pi 5 (minimum 2 weeks)", "done": false},
+        {"label": "Trade log audit — signal accuracy review", "done": false},
+        {"label": "Sentiment cascade false-positive analysis", "done": false},
+        {"label": "Watchdog recovery drill (simulated crash + auto-restart)", "done": false},
+        {"label": "Backup + restore drill (strongbox → R2 → restore)", "done": false},
+        {"label": "Heartbeat / monitor silence alert tested", "done": false},
+        {"label": "Full session cycle reviewed (open/midday/close)", "done": false},
+        {"label": "Performance baseline logged (latency, DB size, CPU)", "done": false},
+        {"label": "Project lead sign-off on paper results", "done": false}
+      ]
+    },
+    {
+      "id": 9,
       "name": "Live Trading Gate",
       "status": "not_started",
       "tasks": [
-        {"label": "Paper trading review complete (min. 2 weeks)", "done": false},
-        {"label": "Project lead approval obtained", "done": false},
-        {"label": "TRADING_MODE flip to LIVE (explicit human action only)", "done": false}
+        {"label": "All Phase 7 security items complete", "done": false},
+        {"label": "All Phase 8 paper trading sign-offs complete", "done": false},
+        {"label": "Customer onboarding flow tested end-to-end (Stripe + portal)", "done": false},
+        {"label": "Admin dashboard verified (Patrick login → company API)", "done": false},
+        {"label": "TRADING_MODE flip to LIVE (explicit human action only)", "done": false},
+        {"label": "First live trade logged and confirmed", "done": false},
+        {"label": "Post-live monitoring plan active (sentinel + heartbeat + alerts)", "done": false}
       ]
     }
   ],
   "agents": {
     "retail_pi": [
-      {"alias": "trader",    "file": "retail_trade_logic_agent.py",    "job": "Trade execution, 14-gate spine, open/midday/close sessions", "status": "built"},
-      {"alias": "research",  "file": "retail_news_agent.py",           "job": "Alpaca news fetch, 22-gate signal scoring", "status": "built"},
+      {"alias": "trader",    "file": "retail_trade_logic_agent.py",     "job": "Trade execution, 14-gate spine, open/midday/close sessions", "status": "built"},
+      {"alias": "research",  "file": "retail_news_agent.py",            "job": "Alpaca news fetch, 22-gate signal scoring", "status": "built"},
       {"alias": "sentiment", "file": "retail_market_sentiment_agent.py","job": "27-gate market deterioration / cascade detection", "status": "built"},
-      {"alias": "screener",  "file": "retail_sector_screener.py",      "job": "Sector momentum scoring, enrichment requests", "status": "built"},
-      {"alias": "portal",    "file": "retail_portal.py",               "job": "Flask web portal, customer auth, Stripe", "status": "built"},
-      {"alias": "watchdog",  "file": "retail_watchdog.py",             "job": "Crash monitor, auto-restart x3, rollback", "status": "built"},
-      {"alias": "scheduler", "file": "retail_scheduler.py",            "job": "Session orchestrator — runs all agent sessions in order", "status": "built"},
-      {"alias": "heartbeat", "file": "retail_heartbeat.py",            "job": "POSTs agent status to Monitor after each session", "status": "built"},
-      {"alias": "boot",      "file": "retail_boot_sequence.py",        "job": "Boot coordinator — network wait, integrity check", "status": "built"},
-      {"alias": "shutdown",  "file": "retail_shutdown.py",             "job": "Graceful pre-maintenance shutdown (Sat 3:55am)", "status": "built"},
-      {"alias": "health",    "file": "retail_health_check.py",         "job": "Post-reboot verifier — DB integrity, Alpaca reconcile", "status": "built"},
+      {"alias": "screener",  "file": "retail_sector_screener.py",       "job": "Sector momentum scoring, enrichment requests", "status": "built"},
+      {"alias": "portal",    "file": "retail_portal.py",                "job": "Flask web portal, customer auth, Stripe — app.synth-cloud.com", "status": "built"},
+      {"alias": "watchdog",  "file": "retail_watchdog.py",              "job": "Crash monitor, auto-restart x3, rollback", "status": "built"},
+      {"alias": "scheduler", "file": "retail_scheduler.py",             "job": "Session orchestrator — runs all agent sessions in order", "status": "built"},
+      {"alias": "heartbeat", "file": "retail_heartbeat.py",             "job": "POSTs agent status to Monitor after each session", "status": "built"},
+      {"alias": "boot",      "file": "retail_boot_sequence.py",         "job": "Boot coordinator — network wait, integrity check", "status": "built"},
+      {"alias": "shutdown",  "file": "retail_shutdown.py",              "job": "Graceful pre-maintenance shutdown (Sat 3:55am)", "status": "built"},
+      {"alias": "health",    "file": "retail_health_check.py",          "job": "Post-reboot verifier — DB integrity, Alpaca reconcile", "status": "built"},
       {"alias": "listener",  "file": "retail_interrogation_listener.py","job": "UDP cross-validation responder, port 5557", "status": "built"},
-      {"alias": "patcher",   "file": "retail_patch.py",                "job": "Safe file updater — backup, syntax check, rollback", "status": "built"},
-      {"alias": "backup",    "file": "retail_backup.py",               "job": "Creates encrypted archive, POSTs to Company Pi", "status": "built"}
+      {"alias": "patcher",   "file": "retail_patch.py",                 "job": "Safe file updater — backup, syntax check, rollback", "status": "built"},
+      {"alias": "backup",    "file": "retail_backup.py",                "job": "Creates encrypted archive, POSTs to Company Pi", "status": "built"}
     ],
     "company_pi": [
-      {"alias": "scoop",     "file": "scoop.py",             "job": "Email queue drain daemon, Resend dispatch, priority hold", "status": "built"},
-      {"alias": "strongbox", "file": "strongbox.py",         "job": "Nightly encrypt + R2 upload, retention, verify", "status": "built"},
-      {"alias": "server",    "file": "company_server.py",    "job": "Event queue API, ops dashboard, /receive_backup", "status": "built"},
-      {"alias": "sentinel",  "file": "company_sentinel.py",  "job": "Company-side health watchdog — checks server/scoop/strongbox/disk", "status": "built"},
-      {"alias": "fidget",    "file": "company_keepalive.py", "job": "Keep-alive / activity daemon — pings /health, prevents idle", "status": "built"},
-      {"alias": "vault",     "file": "company_vault.py",     "job": "License key / secrets manager", "status": "built"},
-      {"alias": "librarian", "file": "company_archivist.py", "job": "Data archivist / historical record keeper", "status": "built"},
-      {"alias": "patches",   "file": "company_auditor.py",   "job": "Company-side bug/issue detector (continuous mode)", "status": "planned"}
+      {"alias": "scoop",      "file": "company_scoop.py",                    "job": "Email queue drain daemon, Resend dispatch, priority hold", "status": "built"},
+      {"alias": "strongbox",  "file": "company_strongbox.py",                "job": "Nightly encrypt + R2 upload, retention, verify", "status": "built"},
+      {"alias": "server",     "file": "company_server.py",                   "job": "Internal event queue API — called by Pi 5 portal (port 5010)", "status": "built"},
+      {"alias": "sentinel",   "file": "company_sentinel.py",                 "job": "Company-side health watchdog", "status": "built"},
+      {"alias": "fidget",     "file": "company_fidget.py",                   "job": "Keep-alive / activity daemon — pings /health, prevents idle", "status": "built"},
+      {"alias": "vault",      "file": "company_vault.py",                    "job": "License key / secrets manager", "status": "built"},
+      {"alias": "librarian",  "file": "company_librarian.py",                "job": "Data archivist / historical record keeper", "status": "built"},
+      {"alias": "patches",    "file": "company_patches.py",                  "job": "Company-side bug/issue detector (continuous mode)", "status": "built"},
+      {"alias": "timekeeper", "file": "company_timekeeper.py",               "job": "Market hours / session timing coordinator", "status": "built"},
+      {"alias": "dispatcher", "file": "company_dispatcher_agent.py",         "job": "Routes signals and tasks between agents", "status": "built"},
+      {"alias": "orchestrator","file": "company_master_orchestration_layer.py","job": "Master orchestration layer — coordinates all company agents", "status": "built"},
+      {"alias": "macro",      "file": "company_macro_regime_agent.py",       "job": "Macro regime detection and classification", "status": "built"},
+      {"alias": "flow",       "file": "company_flow_positioning_agent.py",   "job": "Flow and positioning analysis", "status": "built"},
+      {"alias": "aggregator", "file": "company_market_state_aggregator.py",  "job": "Aggregates market state across all inputs", "status": "built"},
+      {"alias": "result-audit","file": "company_result_audit_agent.py",      "job": "Audits trade results and outcome accuracy", "status": "built"},
+      {"alias": "bias-audit", "file": "company_bias_audit_agent.py",         "job": "Detects signal bias and systematic errors", "status": "built"},
+      {"alias": "audit-stack","file": "company_audit_stack_agent.py",        "job": "Full audit stack coordinator", "status": "built"},
+      {"alias": "social",     "file": "company_social_rumor_agent.py",       "job": "Social signal and rumor detection", "status": "built"}
     ]
   },
   "security": [
@@ -144,6 +211,7 @@
     {"item": "Cloudflare SSL Full (strict)",         "repo": "infra",           "status": "pending"},
     {"item": "Cloudflare HSTS + Always HTTPS",       "repo": "infra",           "status": "pending"},
     {"item": "CSRF token-based protection on portal forms", "repo": "portal",   "status": "pending"},
+    {"item": "Boot-time integrity gate on company node",    "repo": "company",  "status": "pending"},
     {"item": "Cloudflare Bot Fight Mode",            "repo": "infra",           "status": "hold"}
   ],
   "blockers": []
