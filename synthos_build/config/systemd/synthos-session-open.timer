@@ -1,0 +1,15 @@
+[Unit]
+Description=Synthos — Market Open session (9:30am ET weekdays)
+Requires=synthos-scheduler@open.service
+
+[Timer]
+# 9:30am Eastern — weekdays only
+OnCalendar=Mon..Fri *-*-* 09:30:00 America/New_York
+# Catch up any run missed due to reboot or downtime
+Persistent=true
+# Small random delay avoids exact-second thundering herd
+RandomizedDelaySec=10
+Unit=synthos-scheduler@open.service
+
+[Install]
+WantedBy=timers.target

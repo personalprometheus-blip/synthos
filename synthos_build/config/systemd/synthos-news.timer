@@ -1,0 +1,13 @@
+[Unit]
+Description=Synthos — News agent (hourly)
+Requires=synthos-scheduler@news.service
+
+[Timer]
+# Every hour, all days — scheduler decides market vs overnight mode at runtime
+OnCalendar=*-*-* *:00:00
+Persistent=true
+RandomizedDelaySec=30
+Unit=synthos-scheduler@news.service
+
+[Install]
+WantedBy=timers.target

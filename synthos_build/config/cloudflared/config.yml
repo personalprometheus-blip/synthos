@@ -1,0 +1,24 @@
+# Synthos — Cloudflare Tunnel Configuration
+# Portal: portal.synth-cloud.com → localhost:5001
+#
+# Fill in TUNNEL_ID after running setup_tunnel.sh
+# This file is copied to ~/.cloudflared/config.yml by the setup script.
+#
+# To find your tunnel ID:
+#   cloudflared tunnel list
+# Or in the Cloudflare Zero Trust dashboard:
+#   https://one.dash.cloudflare.com → Access → Tunnels
+
+tunnel: TUNNEL_ID_HERE
+credentials-file: /home/pi/.cloudflared/TUNNEL_ID_HERE.json
+
+ingress:
+  # Main portal — customer and admin access
+  - hostname: portal.synth-cloud.com
+    service: http://localhost:5001
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: false
+
+  # Catch-all — required by cloudflared (returns 404 for unmatched)
+  - service: http_status:404

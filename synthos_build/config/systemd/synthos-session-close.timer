@@ -1,0 +1,12 @@
+[Unit]
+Description=Synthos — Market Close session (3:30pm ET weekdays)
+Requires=synthos-scheduler@close.service
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 15:30:00 America/New_York
+Persistent=true
+RandomizedDelaySec=10
+Unit=synthos-scheduler@close.service
+
+[Install]
+WantedBy=timers.target

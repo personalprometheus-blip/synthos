@@ -1,0 +1,13 @@
+[Unit]
+Description=Synthos — Market Sentiment agent (every 30 minutes)
+Requires=synthos-scheduler@sentiment.service
+
+[Timer]
+# Every 30 minutes, all day — scheduler itself checks kill switch and market hours
+OnCalendar=*-*-* *:00,30:00
+Persistent=true
+RandomizedDelaySec=15
+Unit=synthos-scheduler@sentiment.service
+
+[Install]
+WantedBy=timers.target

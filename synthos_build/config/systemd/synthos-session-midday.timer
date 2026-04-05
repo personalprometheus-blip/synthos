@@ -1,0 +1,12 @@
+[Unit]
+Description=Synthos — Midday session (12:30pm ET weekdays)
+Requires=synthos-scheduler@midday.service
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 12:30:00 America/New_York
+Persistent=true
+RandomizedDelaySec=10
+Unit=synthos-scheduler@midday.service
+
+[Install]
+WantedBy=timers.target

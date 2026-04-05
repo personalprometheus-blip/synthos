@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos Project Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d0d0d;
+      color: #e0e0e0;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 32px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #222;
+    }
+    .header h1 { font-size: 28px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+    .header h1 span { color: #4ade80; }
+    .meta-block { text-align: right; font-size: 13px; color: #666; line-height: 1.8; }
+    .meta-block strong { color: #aaa; }
+    .milestone-badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 10px;
+      background: #1a2e1a;
+      border: 1px solid #4ade8044;
+      border-radius: 20px;
+      color: #4ade80;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* ── Summary bar ── */
+    .summary-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .summary-card {
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .summary-card .num { font-size: 32px; font-weight: 700; color: #fff; }
+    .summary-card .lbl { font-size: 12px; color: #555; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .summary-card.green .num { color: #4ade80; }
+    .summary-card.yellow .num { color: #facc15; }
+    .summary-card.blue .num { color: #60a5fa; }
+
+    /* ── Section titles ── */
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #555;
+      margin-bottom: 14px;
+    }
+
+    /* ── Phase cards ── */
+    .phases { display: flex; flex-direction: column; gap: 12px; margin-bottom: 36px; }
+
+    .phase-card {
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .phase-card.complete  { border-left: 3px solid #4ade80; }
+    .phase-card.in_progress { border-left: 3px solid #facc15; }
+    .phase-card.not_started { border-left: 3px solid #333; }
+
+    .phase-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .phase-header:hover { background: #1a1a1a; }
+
+    .phase-left { display: flex; align-items: center; gap: 12px; }
+    .phase-num {
+      font-size: 11px;
+      font-weight: 600;
+      color: #444;
+      background: #1e1e1e;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      padding: 2px 7px;
+      min-width: 32px;
+      text-align: center;
+    }
+    .phase-name { font-size: 15px; font-weight: 600; color: #ddd; }
+
+    .phase-right { display: flex; align-items: center; gap: 14px; }
+    .phase-progress-text { font-size: 12px; color: #555; }
+
+    .status-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .pill-complete    { background: #14271a; color: #4ade80; border: 1px solid #4ade8033; }
+    .pill-in_progress { background: #27230a; color: #facc15; border: 1px solid #facc1533; }
+    .pill-not_started { background: #1a1a1a; color: #555;    border: 1px solid #2a2a2a; }
+
+    .progress-bar-wrap {
+      height: 3px;
+      background: #1e1e1e;
+      margin: 0 18px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .fill-complete    { background: #4ade80; }
+    .fill-in_progress { background: #facc15; }
+    .fill-not_started { background: #333; }
+
+    .phase-tasks {
+      padding: 12px 18px 16px;
+      display: none;
+      border-top: 1px solid #1c1c1c;
+    }
+    .phase-tasks.open { display: block; }
+
+    .task-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 6px 0;
+      font-size: 13px;
+      color: #888;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .task-item:last-child { border-bottom: none; }
+    .task-item.done { color: #555; }
+    .task-item.done .task-label { text-decoration: line-through; }
+
+    .task-check {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1.5px solid #333;
+      flex-shrink: 0;
+      margin-top: 1px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .task-check.checked {
+      background: #4ade80;
+      border-color: #4ade80;
+    }
+    .task-check.checked::after {
+      content: '';
+      width: 9px;
+      height: 6px;
+      border-left: 2px solid #000;
+      border-bottom: 2px solid #000;
+      transform: rotate(-45deg) translateY(-1px);
+      display: block;
+    }
+    .phase-chevron { color: #444; font-size: 12px; transition: transform 0.2s; }
+    .phase-chevron.open { transform: rotate(90deg); }
+
+    /* ── Agents ── */
+    .agents-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .agent-group {
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .agent-group-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #555;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e1e1e;
+    }
+    .agent-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #1a1a1a;
+      gap: 8px;
+    }
+    .agent-row:last-child { border-bottom: none; }
+    .agent-alias {
+      font-size: 12px;
+      font-weight: 600;
+      color: #60a5fa;
+      min-width: 70px;
+      flex-shrink: 0;
+    }
+    .agent-file {
+      font-size: 11px;
+      color: #444;
+      font-family: monospace;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .agent-status {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+    .status-built   { background: #14271a; color: #4ade80; }
+    .status-planned { background: #1a1a1a; color: #555; }
+
+    /* ── Security ── */
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      margin-bottom: 36px;
+    }
+    .security-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+    .sec-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sec-done    { background: #4ade80; }
+    .sec-pending { background: #facc15; }
+    .sec-hold    { background: #555; }
+    .sec-label { flex: 1; color: #888; }
+    .sec-repo { font-size: 11px; color: #444; }
+
+    /* ── Footer ── */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 20px;
+      border-top: 1px solid #1e1e1e;
+      font-size: 12px;
+      color: #444;
+    }
+    .refresh-btn {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #888;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .refresh-btn:hover { background: #222; color: #ccc; }
+
+    /* ── Error ── */
+    .error-msg {
+      background: #1a0a0a;
+      border: 1px solid #ff444433;
+      color: #ff6b6b;
+      padding: 16px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="app"><p style="color:#555;padding:40px">Loading dashboard...</p></div>
+
+<script>
+async function load() {
+  let data;
+  try {
+    const r = await fetch('project_status.json?t=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    data = await r.json();
+  } catch(e) {
+    document.getElementById('app').innerHTML =
+      `<div class="error-msg">
+        Could not load project_status.json.<br>
+        Make sure you opened this via the launch script (not directly from Finder).<br><br>
+        Run: <code>~/.synthos/open_dashboard.sh</code>
+       </div>`;
+    return;
+  }
+  render(data);
+}
+
+function render(d) {
+  const meta = d.meta;
+  const phases = d.phases;
+  const allTasks = phases.flatMap(p => p.tasks);
+  const done = allTasks.filter(t => t.done).length;
+  const total = allTasks.length;
+  const complete = phases.filter(p => p.status === 'complete').length;
+  const inProg   = phases.filter(p => p.status === 'in_progress').length;
+
+  // Summary
+  const summaryHTML = `
+    <div class="summary-bar">
+      <div class="summary-card green">
+        <div class="num">${complete}</div>
+        <div class="lbl">Phases Complete</div>
+      </div>
+      <div class="summary-card yellow">
+        <div class="num">${inProg}</div>
+        <div class="lbl">In Progress</div>
+      </div>
+      <div class="summary-card blue">
+        <div class="num">${done}/${total}</div>
+        <div class="lbl">Tasks Done</div>
+      </div>
+      <div class="summary-card">
+        <div class="num" style="font-size:20px;color:#aaa">${Math.round(done/total*100)}%</div>
+        <div class="lbl">Overall Progress</div>
+      </div>
+    </div>`;
+
+  // Phases
+  const phasesHTML = phases.map((p, i) => {
+    const pdone  = p.tasks.filter(t => t.done).length;
+    const ptotal = p.tasks.length;
+    const pct    = ptotal ? Math.round(pdone/ptotal*100) : 0;
+    const pillClass = `pill-${p.status}`;
+    const fillClass = `fill-${p.status}`;
+    const cardClass = p.status;
+    const statusLabel = p.status === 'in_progress' ? 'In Progress'
+                      : p.status === 'complete'    ? 'Complete'
+                      : 'Not Started';
+    const tasksHTML = p.tasks.map(t => `
+      <div class="task-item ${t.done ? 'done' : ''}">
+        <div class="task-check ${t.done ? 'checked' : ''}"></div>
+        <span class="task-label">${t.label}</span>
+      </div>`).join('');
+
+    return `
+      <div class="phase-card ${cardClass}">
+        <div class="phase-header" onclick="togglePhase(${i})">
+          <div class="phase-left">
+            <div class="phase-num">P${p.id}</div>
+            <div class="phase-name">${p.name}</div>
+          </div>
+          <div class="phase-right">
+            <div class="phase-progress-text">${pdone}/${ptotal}</div>
+            <div class="status-pill ${pillClass}">${statusLabel}</div>
+            <div class="phase-chevron" id="chev-${i}">▶</div>
+          </div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-fill ${fillClass}" style="width:${pct}%"></div>
+        </div>
+        <div class="phase-tasks ${p.status === 'in_progress' ? 'open' : ''}" id="tasks-${i}">
+          ${tasksHTML}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Agents
+  const agentGroupHTML = (agents, title) => `
+    <div class="agent-group">
+      <div class="agent-group-title">${title}</div>
+      ${agents.map(a => `
+        <div class="agent-row">
+          <div class="agent-alias">${a.alias}</div>
+          <div class="agent-file">${a.file}</div>
+          <div class="agent-status status-${a.status}">${a.status}</div>
+        </div>`).join('')}
+    </div>`;
+
+  const agentsHTML = `
+    <div class="agents-grid">
+      ${agentGroupHTML(d.agents.retail_pi,  'Retail Pi Agents')}
+      ${agentGroupHTML(d.agents.company_pi, 'Company Pi Agents')}
+    </div>`;
+
+  // Security
+  const secHTML = d.security.map(s => `
+    <div class="security-item">
+      <div class="sec-dot sec-${s.status}"></div>
+      <div class="sec-label">${s.item}</div>
+      <div class="sec-repo">${s.repo}</div>
+    </div>`).join('');
+
+  // Full render
+  document.getElementById('app').innerHTML = `
+    <div class="header">
+      <div>
+        <h1>Synthos <span>Dashboard</span></h1>
+      </div>
+      <div class="meta-block">
+        <div><strong>Phase</strong> ${meta.current_phase} of ${meta.total_phases}</div>
+        <div><strong>Updated</strong> ${meta.last_updated}</div>
+        <div><strong>Version</strong> ${meta.version}</div>
+        <div class="milestone-badge">▶ ${meta.next_milestone}</div>
+      </div>
+    </div>
+
+    ${summaryHTML}
+
+    <div class="section-title">Project Phases</div>
+    <div class="phases">${phasesHTML}</div>
+
+    <div class="section-title">Agents</div>
+    ${agentsHTML}
+
+    <div class="section-title">Security Checklist</div>
+    <div class="security-grid">${secHTML}</div>
+
+    <div class="footer">
+      <div>Synthos v${meta.version} · ${done}/${total} tasks complete · auto-refresh off</div>
+      <button class="refresh-btn" onclick="load()">↻ Refresh</button>
+    </div>`;
+
+  // Open in_progress phases by default (already set above, but update chevrons)
+  phases.forEach((p, i) => {
+    if (p.status === 'in_progress') {
+      const chev = document.getElementById('chev-' + i);
+      if (chev) chev.classList.add('open');
+    }
+  });
+}
+
+function togglePhase(i) {
+  const tasks = document.getElementById('tasks-' + i);
+  const chev  = document.getElementById('chev-' + i);
+  tasks.classList.toggle('open');
+  chev.classList.toggle('open');
+}
+
+load();
+</script>
+</body>
+</html>
