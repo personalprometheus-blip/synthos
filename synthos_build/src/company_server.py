@@ -47,9 +47,10 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB upload limit
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SECRET_TOKEN = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
-PORT         = int(os.getenv("PORT", 5010))
-ET           = ZoneInfo("America/New_York")
+SECRET_TOKEN  = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
+CF_ADMIN_EMAIL = os.getenv("OPERATOR_EMAIL", "").lower().strip()
+PORT          = int(os.getenv("PORT", 5010))
+ET            = ZoneInfo("America/New_York")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 _HERE    = os.path.dirname(os.path.abspath(__file__))
@@ -141,9 +142,17 @@ def init_db():
     print(f"[Company] DB initialized: {DB_PATH}")
 
 
-# ── Auth helper ───────────────────────────────────────────────────────────────
-def _authorized():
-    """Check X-Token header or ?token= query param. Uses timing-safe comparison."""
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+def _cf_authorized():
+    """Trust Cloudflare Access — checks Cf-Access-Authenticated-User-Email header."""
+    if not CF_ADMIN_EMAIL:
+        return False
+    cf_email = request.headers.get("Cf-Access-Authenticated-User-Email", "").lower().strip()
+    return cf_email == CF_ADMIN_EMAIL
+
+
+def _token_authorized():
+    """Check X-Token header, ?token= query param, or cookie. Timing-safe."""
     import hmac as _hmac_mod
     token = (
         request.headers.get("X-Token", "")
@@ -153,6 +162,11 @@ def _authorized():
     if not SECRET_TOKEN or not token:
         return False
     return _hmac_mod.compare_digest(token, SECRET_TOKEN)
+
+
+def _authorized():
+    """Browser routes: accept either Cloudflare Access or SECRET_TOKEN."""
+    return _cf_authorized() or _token_authorized()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
