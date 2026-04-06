@@ -30,28 +30,63 @@ from dotenv import load_dotenv
 
 def _system_metrics() -> dict:
     """
-    Collect CPU, RAM, load average, CPU temperature, and disk usage.
-    Returns a dict with float values or None for each metric.
-    Requires psutil (install: pip install psutil). Fails silently if unavailable.
+    Collect detailed CPU, RAM, disk, and temperature metrics.
+    Returns a dict with float/list/None values for each metric.
+    Requires psutil (pip install psutil). Fails silently if unavailable.
     """
     metrics = {
-        'cpu_percent':  None,
-        'ram_percent':  None,
-        'load_avg':     None,
-        'cpu_temp':     None,
-        'disk_percent': None,
+        # CPU
+        'cpu_percent':   None,
+        'cpu_count':     None,
+        'load_avg':      None,
+        # RAM — all in GB, plus percent
+        'ram_percent':   None,
+        'ram_total_gb':  None,
+        'ram_used_gb':   None,
+        'ram_avail_gb':  None,
+        'ram_cached_gb': None,   # buffers + cached (Linux)
+        # Disk
+        'disk_percent':  None,
+        'disk_total_gb': None,
+        'disk_used_gb':  None,
+        'disk_free_gb':  None,
+        # Network (cumulative bytes since boot — monitor diffs for speed)
+        'net_bytes_sent': None,
+        'net_bytes_recv': None,
+        # Temperature
+        'cpu_temp':      None,
     }
     try:
         import psutil
-        metrics['cpu_percent']  = round(psutil.cpu_percent(interval=0.5), 1)
-        metrics['ram_percent']  = round(psutil.virtual_memory().percent, 1)
-        metrics['disk_percent'] = round(psutil.disk_usage('/').percent, 1)
+        # CPU
+        metrics['cpu_percent'] = round(psutil.cpu_percent(interval=0.5), 1)
+        metrics['cpu_count']   = psutil.cpu_count(logical=True)
         load = os.getloadavg()
         metrics['load_avg'] = [round(load[0], 2), round(load[1], 2), round(load[2], 2)]
+        # RAM
+        vm = psutil.virtual_memory()
+        gb = 1024 ** 3
+        metrics['ram_percent']   = round(vm.percent, 1)
+        metrics['ram_total_gb']  = round(vm.total   / gb, 2)
+        metrics['ram_used_gb']   = round(vm.used    / gb, 2)
+        metrics['ram_avail_gb']  = round(vm.available / gb, 2)
+        # buffers + cached on Linux; falls back gracefully
+        cached = getattr(vm, 'cached', 0) + getattr(vm, 'buffers', 0)
+        metrics['ram_cached_gb'] = round(cached / gb, 2)
+        # Disk
+        du = psutil.disk_usage('/')
+        metrics['disk_percent']  = round(du.percent, 1)
+        metrics['disk_total_gb'] = round(du.total / gb, 1)
+        metrics['disk_used_gb']  = round(du.used  / gb, 1)
+        metrics['disk_free_gb']  = round(du.free  / gb, 1)
+        # Network counters (cumulative)
+        net = psutil.net_io_counters()
+        metrics['net_bytes_sent'] = net.bytes_sent
+        metrics['net_bytes_recv'] = net.bytes_recv
     except Exception:
         pass
     try:
-        # Raspberry Pi thermal zone — /sys/class/thermal/thermal_zone0/temp (millidegrees C)
+        # Raspberry Pi thermal zone (millidegrees C → °C)
         with open('/sys/class/thermal/thermal_zone0/temp') as f:
             metrics['cpu_temp'] = round(int(f.read().strip()) / 1000, 1)
     except Exception:
@@ -102,11 +137,21 @@ def _build_payload(agent_name: str, status: str) -> dict:
         'urgent_flags':      0,
         'positions':         [],
         # System health metrics
-        'cpu_percent':       sys_metrics['cpu_percent'],
-        'ram_percent':       sys_metrics['ram_percent'],
-        'load_avg':          sys_metrics['load_avg'],
-        'cpu_temp':          sys_metrics['cpu_temp'],
-        'disk_percent':      sys_metrics['disk_percent'],
+        'cpu_percent':    sys_metrics['cpu_percent'],
+        'cpu_count':      sys_metrics['cpu_count'],
+        'load_avg':       sys_metrics['load_avg'],
+        'ram_percent':    sys_metrics['ram_percent'],
+        'ram_total_gb':   sys_metrics['ram_total_gb'],
+        'ram_used_gb':    sys_metrics['ram_used_gb'],
+        'ram_avail_gb':   sys_metrics['ram_avail_gb'],
+        'ram_cached_gb':  sys_metrics['ram_cached_gb'],
+        'disk_percent':   sys_metrics['disk_percent'],
+        'disk_total_gb':  sys_metrics['disk_total_gb'],
+        'disk_used_gb':   sys_metrics['disk_used_gb'],
+        'disk_free_gb':   sys_metrics['disk_free_gb'],
+        'net_bytes_sent': sys_metrics['net_bytes_sent'],
+        'net_bytes_recv': sys_metrics['net_bytes_recv'],
+        'cpu_temp':       sys_metrics['cpu_temp'],
     }
 
     try:

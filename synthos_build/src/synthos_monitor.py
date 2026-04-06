@@ -212,11 +212,21 @@ def heartbeat():
             "kill_switch":       data.get("kill_switch",    existing.get("kill_switch", False)),
             "last_errors":       data.get("last_errors",    existing.get("last_errors", [])),
             # Hardware metrics
-            "cpu_percent":       data.get("cpu_percent",    existing.get("cpu_percent")),
-            "ram_percent":       data.get("ram_percent",    existing.get("ram_percent")),
-            "load_avg":          data.get("load_avg",       existing.get("load_avg")),
-            "cpu_temp":          data.get("cpu_temp",       existing.get("cpu_temp")),
-            "disk_percent":      data.get("disk_percent",   existing.get("disk_percent")),
+            "cpu_percent":    data.get("cpu_percent",    existing.get("cpu_percent")),
+            "cpu_count":      data.get("cpu_count",      existing.get("cpu_count")),
+            "load_avg":       data.get("load_avg",        existing.get("load_avg")),
+            "ram_percent":    data.get("ram_percent",    existing.get("ram_percent")),
+            "ram_total_gb":   data.get("ram_total_gb",   existing.get("ram_total_gb")),
+            "ram_used_gb":    data.get("ram_used_gb",    existing.get("ram_used_gb")),
+            "ram_avail_gb":   data.get("ram_avail_gb",   existing.get("ram_avail_gb")),
+            "ram_cached_gb":  data.get("ram_cached_gb",  existing.get("ram_cached_gb")),
+            "disk_percent":   data.get("disk_percent",   existing.get("disk_percent")),
+            "disk_total_gb":  data.get("disk_total_gb",  existing.get("disk_total_gb")),
+            "disk_used_gb":   data.get("disk_used_gb",   existing.get("disk_used_gb")),
+            "disk_free_gb":   data.get("disk_free_gb",   existing.get("disk_free_gb")),
+            "net_bytes_sent": data.get("net_bytes_sent", existing.get("net_bytes_sent")),
+            "net_bytes_recv": data.get("net_bytes_recv", existing.get("net_bytes_recv")),
+            "cpu_temp":       data.get("cpu_temp",       existing.get("cpu_temp")),
             # History — keep last 48 heartbeat samples for time-series graphs
             "history":           (existing.get("history", []) + [{
                 "t":   now_utc().isoformat(),
@@ -272,12 +282,22 @@ def api_status():
                 "operating_mode":    data.get("operating_mode", "SUPERVISED"),
                 "trading_mode":      data.get("trading_mode", "PAPER"),
                 "kill_switch":       data.get("kill_switch", False),
-                "cpu_percent":       data.get("cpu_percent"),
-                "ram_percent":       data.get("ram_percent"),
-                "load_avg":          data.get("load_avg"),
-                "cpu_temp":          data.get("cpu_temp"),
-                "disk_percent":      data.get("disk_percent"),
-                "history":           data.get("history", []),
+                "cpu_percent":    data.get("cpu_percent"),
+                "cpu_count":      data.get("cpu_count"),
+                "load_avg":       data.get("load_avg"),
+                "ram_percent":    data.get("ram_percent"),
+                "ram_total_gb":   data.get("ram_total_gb"),
+                "ram_used_gb":    data.get("ram_used_gb"),
+                "ram_avail_gb":   data.get("ram_avail_gb"),
+                "ram_cached_gb":  data.get("ram_cached_gb"),
+                "disk_percent":   data.get("disk_percent"),
+                "disk_total_gb":  data.get("disk_total_gb"),
+                "disk_used_gb":   data.get("disk_used_gb"),
+                "disk_free_gb":   data.get("disk_free_gb"),
+                "net_bytes_sent": data.get("net_bytes_sent"),
+                "net_bytes_recv": data.get("net_bytes_recv"),
+                "cpu_temp":       data.get("cpu_temp"),
+                "history":        data.get("history", []),
             }
     return jsonify(out), 200
 
@@ -1160,40 +1180,178 @@ async function switchTab(tab, btn) {
 function renderModalTab(tab, pi) {
   const body = document.getElementById('modal-body');
 
-  // helpers
-  const mc  = (v, w, c) => v == null ? 'mc-na' : v >= c ? 'mc-crit' : v >= w ? 'mc-warn' : 'mc-ok';
-  const fmt = (v, u, d=0) => v != null ? v.toFixed(d) + u : '\u2014';
+  const mc  = (v,w,c) => v==null?'mc-na':v>=c?'mc-crit':v>=w?'mc-warn':'mc-ok';
+  const fmt = (v,u,d=0) => v!=null ? v.toFixed(d)+u : '\u2014';
+  const gb  = (v) => v!=null ? v.toFixed(2)+' GB' : '\u2014';
 
   if (tab === 'overview') {
-    const load   = pi.load_avg || [];
-    const cpuCls = mc(pi.cpu_percent,  70, 90);
-    const ramCls = mc(pi.ram_percent,  75, 90);
-    const tmpCls = mc(pi.cpu_temp,     65, 80);
-    const dskCls = mc(pi.disk_percent, 75, 90);
+    // ── Processor panel data ──
+    const cpuCls  = mc(pi.cpu_percent, 70, 90);
+    const load    = pi.load_avg || [];
+    const cores   = pi.cpu_count || '\u2014';
+    // ── Memory panel data ──
+    const ramTot  = pi.ram_total_gb  || 0;
+    const ramUsed = pi.ram_used_gb   || 0;
+    const ramCach = pi.ram_cached_gb || 0;
+    const ramFree = pi.ram_avail_gb  || 0;
+    const ramUsedPct  = ramTot ? Math.round(ramUsed / ramTot * 100) : 0;
+    const ramCachPct  = ramTot ? Math.round(ramCach / ramTot * 100) : 0;
+    const ramFreePct  = Math.max(0, 100 - ramUsedPct - ramCachPct);
+    // ── Disk panel data ──
+    const dskCls  = mc(pi.disk_percent, 75, 90);
+    const dskUsed = pi.disk_used_gb  || 0;
+    const dskTot  = pi.disk_total_gb || 0;
+    const dskFree = pi.disk_free_gb  || 0;
+    const dskPct  = pi.disk_percent  || 0;
+    // ── Temp panel data ──
+    const tmpCls  = mc(pi.cpu_temp, 65, 80);
+
     body.innerHTML =
-      '<div class="modal-stats">'
-        + '<div class="mstat"><div class="mstat-label">CPU</div><div class="mstat-val ' + cpuCls + '">' + fmt(pi.cpu_percent,'%') + '</div><div class="mstat-sub">Utilization</div></div>'
-        + '<div class="mstat"><div class="mstat-label">RAM</div><div class="mstat-val ' + ramCls + '">' + fmt(pi.ram_percent,'%') + '</div><div class="mstat-sub">Memory used</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Temp</div><div class="mstat-val ' + tmpCls + '">' + fmt(pi.cpu_temp,'\u00b0C',1) + '</div><div class="mstat-sub">CPU temperature</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Disk</div><div class="mstat-val ' + dskCls + '">' + fmt(pi.disk_percent,'%') + '</div><div class="mstat-sub">Storage used</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Load Avg</div><div class="mstat-val" style="font-size:14px">'
-            + (load[0]!=null?load[0].toFixed(2):'\u2014')
-            + '</div><div class="mstat-sub">'
-            + (load[1]!=null?load[1].toFixed(2):'\u2014') + ' / ' + (load[2]!=null?load[2].toFixed(2):'\u2014') + ' (5/15m)'
-        + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Uptime</div><div class="mstat-val" style="font-size:15px">' + (pi.uptime||'N/A') + '</div><div class="mstat-sub">Since last reboot</div></div>'
+      // ── 2x2 Panel Grid ──────────────────────────────────────────────────
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+
+        // PROCESSOR panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Processor</div>'
+            + '<div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:8px">'
+                + '<div class="' + cpuCls + '" style="font-size:32px;font-weight:700;line-height:1;font-family:var(--mono)">' + fmt(pi.cpu_percent,'%') + '</div>'
+                + '<div style="padding-bottom:4px">'
+                    + '<div style="font-size:10px;color:var(--muted)">' + cores + ' cores</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">load ' + (load[0]!=null?load[0].toFixed(2):'\u2014') + '</div>'
+                + '</div>'
+            + '</div>'
+            + '<div style="height:40px;position:relative"><canvas id="mc-cpu-spark"></canvas></div>'
+            + '<div style="display:flex;gap:16px;margin-top:6px">'
+                + '<div><div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em">5m avg</div>'
+                    + '<div style="font-size:11px;font-family:var(--mono);color:var(--muted)">' + (load[1]!=null?load[1].toFixed(2):'\u2014') + '</div></div>'
+                + '<div><div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em">15m avg</div>'
+                    + '<div style="font-size:11px;font-family:var(--mono);color:var(--muted)">' + (load[2]!=null?load[2].toFixed(2):'\u2014') + '</div></div>'
+            + '</div>'
+        + '</div>'
+
+        // MEMORY panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Memory</div>'
+            + '<div style="display:flex;align-items:center;gap:12px">'
+                // Donut chart
+                + '<div style="position:relative;width:72px;height:72px;flex-shrink:0">'
+                    + '<canvas id="mc-ram-donut" width="72" height="72"></canvas>'
+                    + '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">'
+                        + '<div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--teal)">' + ramUsedPct + '%</div>'
+                    + '</div>'
+                + '</div>'
+                // Breakdown table
+                + '<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:var(--teal);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Used</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--teal)">' + gb(pi.ram_used_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:var(--purple);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Cached</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--purple)">' + gb(pi.ram_cached_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:rgba(255,255,255,0.1);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Free</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--dim)">' + gb(pi.ram_avail_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="margin-top:2px;padding-top:4px;border-top:1px solid var(--border);display:flex;justify-content:space-between">'
+                        + '<div style="font-size:9px;color:var(--dim)">Total</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--muted)">' + gb(pi.ram_total_gb) + '</div>'
+                    + '</div>'
+                + '</div>'
+            + '</div>'
+        + '</div>'
+
+        // STORAGE panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Storage</div>'
+            + '<div style="display:flex;justify-content:space-between;margin-bottom:8px">'
+                + '<div class="' + dskCls + '" style="font-size:28px;font-weight:700;font-family:var(--mono);line-height:1">' + fmt(pi.disk_percent,'%') + '</div>'
+                + '<div style="text-align:right">'
+                    + '<div style="font-size:10px;color:var(--muted)">Used: ' + gb(pi.disk_used_gb) + '</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">Free: ' + gb(pi.disk_free_gb) + '</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">Total: ' + gb(pi.disk_total_gb) + '</div>'
+                + '</div>'
+            + '</div>'
+            // Fill bar
+            + '<div style="height:6px;border-radius:99px;background:rgba(255,255,255,0.07);overflow:hidden;margin-bottom:4px">'
+                + '<div style="height:100%;width:' + dskPct + '%;border-radius:99px;background:' + (dskPct>=90?'var(--pink)':dskPct>=75?'var(--amber)':'var(--teal)') + ';transition:width 0.4s"></div>'
+            + '</div>'
+            + '<div style="font-size:9px;color:var(--dim)">/ (root filesystem)</div>'
+        + '</div>'
+
+        // THERMAL & UPTIME panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Thermal &amp; Uptime</div>'
+            + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+                + '<div style="width:36px;height:36px;border-radius:9px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center">'
+                    + '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">'
+                        + '<rect x="8.5" y="2" width="3" height="11" rx="1.5" fill="rgba(255,255,255,0.15)"/>'
+                        + '<rect x="9" y="2.5" width="2" height="' + (pi.cpu_temp!=null?Math.min(10,pi.cpu_temp/10).toFixed(1):'5') + '" rx="1" fill="' + (tmpCls==='mc-crit'?'#ff4b6e':tmpCls==='mc-warn'?'#ffb347':'#00f5d4') + '"/>'
+                        + '<circle cx="10" cy="14.5" r="2.5" fill="' + (tmpCls==='mc-crit'?'#ff4b6e':tmpCls==='mc-warn'?'#ffb347':'#00f5d4') + '"/>'
+                    + '</svg>'
+                + '</div>'
+                + '<div>'
+                    + '<div class="' + tmpCls + '" style="font-size:22px;font-weight:700;font-family:var(--mono);line-height:1">' + fmt(pi.cpu_temp,'\u00b0C',1) + '</div>'
+                    + '<div style="font-size:9px;color:var(--dim);margin-top:2px">CPU Temperature</div>'
+                + '</div>'
+            + '</div>'
+            + '<div style="border-top:1px solid var(--border);padding-top:10px">'
+                + '<div style="font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px">Uptime</div>'
+                + '<div style="font-size:16px;font-weight:600;color:var(--text);font-family:var(--mono)">' + (pi.uptime||'N/A') + '</div>'
+                + '<div style="font-size:9px;color:var(--dim);margin-top:6px">Mode: ' + (pi.operating_mode||'SUPERVISED') + ' &nbsp;&middot;&nbsp; ' + (pi.trading_mode||'PAPER') + '</div>'
+            + '</div>'
+        + '</div>'
+
       + '</div>'
-      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:4px 0 8px">Agent Status</div>'
+
+      // ── Agents / Process List ──────────────────────────────────────────────
+      + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Agents</div>'
       + renderAgents(pi.agents||{});
+
+    // Draw micro charts after DOM ready
+    setTimeout(() => {
+      // CPU sparkline
+      const cpuCtx = document.getElementById('mc-cpu-spark');
+      if (cpuCtx) {
+        const hist = (pi.history||[]).filter(h=>h.cpu!=null);
+        const vals = hist.map(h=>h.cpu);
+        if (vals.length > 1) {
+          const g = cpuCtx.getContext('2d').createLinearGradient(0,0,0,40);
+          g.addColorStop(0,'rgba(0,245,212,0.25)'); g.addColorStop(1,'rgba(0,245,212,0)');
+          new Chart(cpuCtx, { type:'line', data:{ labels:vals.map((_,i)=>i),
+            datasets:[{data:vals,borderColor:'#00f5d4',borderWidth:1.5,fill:true,
+              backgroundColor:g,tension:0.4,pointRadius:0}]},
+            options:{animation:false,responsive:true,maintainAspectRatio:false,
+              plugins:{legend:{display:false},tooltip:{enabled:false}},
+              scales:{x:{display:false},y:{display:false,min:0,max:100}}}});
+        }
+      }
+      // RAM donut
+      const ramCtx = document.getElementById('mc-ram-donut');
+      if (ramCtx) {
+        new Chart(ramCtx, { type:'doughnut',
+          data:{ datasets:[{
+            data:[ramUsedPct, ramCachPct, ramFreePct],
+            backgroundColor:['rgba(0,245,212,0.85)','rgba(123,97,255,0.75)','rgba(255,255,255,0.07)'],
+            borderWidth:0, hoverOffset:0,
+          }]},
+          options:{cutout:'68%',animation:false,
+            plugins:{legend:{display:false},tooltip:{enabled:false}}}});
+      }
+    }, 30);
 
   } else if (tab === 'performance') {
     body.innerHTML =
       '<div class="modal-graph-wrap">'
-        + '<div class="modal-graph-title">CPU Usage History</div>'
+        + '<div class="modal-graph-title">CPU Usage %</div>'
         + '<div class="modal-graph-canvas"><canvas id="modal-chart-cpu"></canvas></div>'
       + '</div>'
       + '<div class="modal-graph-wrap" style="margin-top:12px">'
-        + '<div class="modal-graph-title">Memory Usage History</div>'
+        + '<div class="modal-graph-title">Memory Usage %</div>'
         + '<div class="modal-graph-canvas"><canvas id="modal-chart-ram"></canvas></div>'
       + '</div>';
 
@@ -1255,7 +1413,6 @@ function renderModalTab(tab, pi) {
         + '<div class="mstat"><div class="mstat-label">Pi ID</div><div class="mstat-val" style="font-size:11px;font-family:var(--mono)">' + (pi.pi_id||'\u2014') + '</div></div>'
         + '<div class="mstat"><div class="mstat-label">First Seen</div><div class="mstat-val" style="font-size:12px">' + (pi.first_seen||'\u2014').slice(0,10) + '</div></div>'
       + '</div>'
-
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Update Keys on Pi</div>'
       + '<div style="font-size:11px;color:var(--amber);background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.15);border-radius:8px;padding:8px 10px;margin-bottom:12px">'
         + '&#9888; Keys are sent directly to the Pi portal at ' + (pi.pi_id||'?') + ':5001 and written to .env'
@@ -1300,17 +1457,25 @@ function renderAgents(agents) {
   };
   // Render whatever agents are reported (fall back to raw key if name unknown)
   const keys = Object.keys(agents);
-  if (!keys.length) return '<div style="color:var(--muted);font-size:11px;padding:8px 0">No agent data received</div>';
-  return '<div>' + keys.map(k => {
-    const status    = agents[k];
-    const label     = knownNames[k] || k;
-    const isOk      = status && status !== 'fault' && status !== 'error';
-    return '<div class="agent-row">'
-      + '<div class="agent-dot" style="background:' + (isOk?'var(--teal)':'var(--muted)') + ';box-shadow:' + (isOk?'0 0 5px var(--teal)':'none') + '"></div>'
-      + '<span class="agent-name">' + label + '</span>'
-      + '<span class="agent-status">' + (status||'No data') + '</span>'
+  if (!keys.length) return '<div style="color:var(--muted);font-size:11px;padding:12px 0;text-align:center">No agent data received yet</div>';
+  return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+    + keys.map((k,i) => {
+      const status = agents[k];
+      const label  = knownNames[k] || k;
+      const isOk   = status && status !== 'fault' && status !== 'error';
+      const isFault= status === 'fault' || status === 'error';
+      const dotClr = isFault ? 'var(--pink)' : isOk ? 'var(--teal)' : 'var(--muted)';
+      const dotGlw = isFault ? '0 0 5px var(--pink)' : isOk ? '0 0 5px var(--teal)' : 'none';
+      const stClr  = isFault ? 'var(--pink)' : isOk ? 'rgba(255,255,255,0.45)' : 'var(--dim)';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;'
+          + (i > 0 ? 'border-top:1px solid var(--border);' : '')
+          + '">'
+        + '<div style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:' + dotClr + ';box-shadow:' + dotGlw + '"></div>'
+        + '<span style="font-size:11px;font-weight:600;font-family:var(--mono);color:var(--text);flex:1">' + label + '</span>'
+        + '<span style="font-size:10px;font-family:var(--mono);color:' + stClr + '">' + (status||'—') + '</span>'
+      + '</div>';
+    }).join('')
     + '</div>';
-  }).join('') + '</div>';
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
