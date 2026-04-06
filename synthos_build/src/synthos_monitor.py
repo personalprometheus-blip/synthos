@@ -2240,6 +2240,79 @@ if __name__ == "__main__":
 
     t = threading.Thread(target=silence_detector, daemon=True)
     t.start()
+
+    # ── Self-heartbeat: monitor node reports its own metrics to itself ─────────
+    def _self_heartbeat_loop():
+        """
+        Post this monitor node's own system metrics to /heartbeat every 5 minutes.
+        Allows the node roster to show pi2w_monitor_node's CPU/RAM/temp inline
+        with all other nodes — no external agent needed.
+        """
+        self_pi_id    = os.getenv("PI_ID",    "pi2w-monitor")
+        self_pi_label = os.getenv("PI_LABEL", "Monitor Node")
+        self_url      = f"http://127.0.0.1:{PORT}/heartbeat"
+        interval      = int(os.getenv("SELF_HB_INTERVAL", "300"))  # default 5 min
+
+        time.sleep(10)  # let Flask finish starting
+        while True:
+            try:
+                import psutil as _ps
+                vm   = _ps.virtual_memory()
+                du   = _ps.disk_usage('/')
+                net  = _ps.net_io_counters()
+                load = os.getloadavg()
+                gb   = 1024 ** 3
+
+                cpu_t = None
+                try:
+                    with open('/sys/class/thermal/thermal_zone0/temp') as _f:
+                        cpu_t = round(int(_f.read().strip()) / 1000, 1)
+                except Exception:
+                    pass
+
+                cached_bytes = getattr(vm, 'cached', 0) + getattr(vm, 'buffers', 0)
+
+                payload = {
+                    "pi_id":          self_pi_id,
+                    "label":          self_pi_label,
+                    "agents":         {"synthos_monitor": "active"},
+                    "operating_mode": "SUPERVISED",
+                    "trading_mode":   "PAPER",
+                    "kill_switch":    False,
+                    # CPU
+                    "cpu_percent":    round(_ps.cpu_percent(interval=0.5), 1),
+                    "cpu_count":      _ps.cpu_count(logical=True),
+                    "load_avg":       [round(load[0],2), round(load[1],2), round(load[2],2)],
+                    # RAM
+                    "ram_percent":    round(vm.percent, 1),
+                    "ram_total_gb":   round(vm.total     / gb, 2),
+                    "ram_used_gb":    round(vm.used      / gb, 2),
+                    "ram_avail_gb":   round(vm.available / gb, 2),
+                    "ram_cached_gb":  round(cached_bytes / gb, 2),
+                    # Disk
+                    "disk_percent":   round(du.percent, 1),
+                    "disk_total_gb":  round(du.total / gb, 1),
+                    "disk_used_gb":   round(du.used  / gb, 1),
+                    "disk_free_gb":   round(du.free  / gb, 1),
+                    # Network
+                    "net_bytes_sent": net.bytes_sent,
+                    "net_bytes_recv": net.bytes_recv,
+                    # Temp
+                    "cpu_temp":       cpu_t,
+                }
+                import requests as _req
+                _req.post(self_url, json=payload,
+                          headers={"X-Token": SECRET_TOKEN}, timeout=5)
+                print(f"[SelfHB] Posted — CPU {payload['cpu_percent']}%  "
+                      f"RAM {payload['ram_percent']}%  Temp {cpu_t}°C")
+            except Exception as _e:
+                print(f"[SelfHB] Failed: {_e}")
+            time.sleep(interval)
+
+    sh = threading.Thread(target=_self_heartbeat_loop, daemon=True)
+    sh.start()
+    # ──────────────────────────────────────────────────────────────────────────
+
     print(f"[Synthos Monitor] Running on port {PORT}")
     print(f"[Synthos Monitor] Console at http://0.0.0.0:{PORT}/console")
     if COMPANY_URL:
