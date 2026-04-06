@@ -934,8 +934,8 @@ function toast(msg, type='ok') {
 }
 
 // ── STATUS HELPERS ──
-function statusClass(s) { return s === 'online' ? 'online' : s === 'offline' ? 'offline' : 'warning'; }
-function dotClass(s) { return s === 'online' ? 'online' : s === 'offline' ? 'offline' : s === 'warning' ? 'warning' : 'unknown'; }
+function statusClass(s) { return (s === 'online' || s === 'active') ? 'online' : s === 'offline' ? 'offline' : (s === 'fault' || s === 'warning') ? 'warning' : 'warning'; }
+function dotClass(s) { return (s === 'online' || s === 'active') ? 'online' : s === 'offline' ? 'offline' : (s === 'fault' || s === 'warning') ? 'warning' : 'unknown'; }
 function ageSince(isoStr) {
   const secs = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
   if (secs < 60) return secs + 's ago';
@@ -1029,8 +1029,8 @@ function colorWithAlpha(hex, alpha) {
 function updateFleetStats() {
   const pis   = Object.values(piData);
   const total  = pis.length;
-  const online = pis.filter(p => p.status === 'online').length;
-  const notOk  = pis.filter(p => p.status !== 'online').length;
+  const online = pis.filter(p => p.status === 'online' || p.status === 'active').length;
+  const notOk  = pis.filter(p => p.status !== 'online' && p.status !== 'active').length;
 
   const cpuNodes  = pis.filter(p => p.cpu_percent != null);
   const ramNodes  = pis.filter(p => p.ram_percent != null);
@@ -1075,7 +1075,7 @@ function renderNodeRoster() {
     const sc   = statusClass(pi.status);
     const dc   = dotClass(pi.status);
     const load1 = pi.load_avg && pi.load_avg[0] != null ? pi.load_avg[0] : null;
-    return '<div class="node-row" onclick="openModal(\'' + pi.pi_id + '\')">'
+    return '<div class="node-row" data-piid="' + pi.pi_id + '" onclick="openModal(this.dataset.piid)">'
       + '<div class="node-name-cell">'
           + '<div class="node-micro-av">' + weatherIcon(pi.status) + '</div>'
           + '<div><div class="node-lbl">' + escHtml(pi.label || pi.pi_id) + '</div>'
