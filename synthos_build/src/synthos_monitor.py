@@ -1428,12 +1428,12 @@ function renderModalTab(tab, pi) {
           + '<input id="adm-alert-to" type="email" placeholder="node@email.com" style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
       + '</div>'
       + '<div style="display:flex;gap:8px;margin-bottom:16px">'
-        + '<button onclick="pushKeysToPi(\'' + (pi.pi_id||'') + '\')" style="padding:9px 18px;border-radius:10px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push Keys to Pi</button>'
+        + '<button data-piid="' + (pi.pi_id||'') + '" onclick="pushKeysToPi(this.dataset.piid)" style="padding:9px 18px;border-radius:10px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push Keys to Pi</button>'
         + '<div id="adm-key-result-' + (pi.pi_id||'') + '" style="font-size:11px;color:var(--muted);align-self:center"></div>'
       + '</div>'
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Danger Zone</div>'
       + '<div style="display:flex;flex-direction:column;gap:8px">'
-        + '<button onclick="promptDelete(\'' + pi.pi_id + '\')" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Node from Registry</button>'
+        + '<button data-piid="' + pi.pi_id + '" onclick="promptDelete(this.dataset.piid)" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Node from Registry</button>'
       + '</div>';
   }
 }
@@ -1528,7 +1528,7 @@ function renderTodos() {
         + '<div class="todo-meta">' + (t.pi_id||'') + ' · ' + (t.date||'') + ' · ' + (t.category||'') + '</div>'
         + (t.action ? '<div class="todo-action">→ ' + escHtml(t.action) + '</div>' : '')
       + '</div>'
-      + '<button class="resolve-btn" onclick="resolveTodo('' + CSS.escape(t.id) + '',event)">Done</button>'
+      + '<button class="resolve-btn" data-todoid="' + CSS.escape(t.id) + '" onclick="resolveTodo(this.dataset.todoid,event)">Done</button>'
     + '</div>'
   ).join('');
 }
@@ -2021,7 +2021,7 @@ function renderPiTabs() {
     return;
   }
   wrap.innerHTML = pis.map(pi =>
-    '<button class="pi-tab" id="tab-' + pi.pi_id + '" onclick="loadPiData(\'' + pi.pi_id + '\')">'
+    '<button class="pi-tab" id="tab-' + pi.pi_id + '" data-piid="' + pi.pi_id + '" onclick="loadPiData(this.dataset.piid)">'
     + (pi.label || pi.pi_id)
     + '</button>'
   ).join('');
