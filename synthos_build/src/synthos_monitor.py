@@ -211,10 +211,18 @@ def heartbeat():
             "trading_mode":      data.get("trading_mode",   existing.get("trading_mode", "PAPER")),
             "kill_switch":       data.get("kill_switch",    existing.get("kill_switch", False)),
             "last_errors":       data.get("last_errors",    existing.get("last_errors", [])),
-            # History — keep last 48 heartbeat values for sparkline
+            # Hardware metrics
+            "cpu_percent":       data.get("cpu_percent",    existing.get("cpu_percent")),
+            "ram_percent":       data.get("ram_percent",    existing.get("ram_percent")),
+            "load_avg":          data.get("load_avg",       existing.get("load_avg")),
+            "cpu_temp":          data.get("cpu_temp",       existing.get("cpu_temp")),
+            "disk_percent":      data.get("disk_percent",   existing.get("disk_percent")),
+            # History — keep last 48 heartbeat samples for time-series graphs
             "history":           (existing.get("history", []) + [{
-                "t": now_utc().isoformat(),
-                "v": data.get("portfolio_value", data.get("portfolio", 0.0)),
+                "t":   now_utc().isoformat(),
+                "v":   data.get("portfolio_value", data.get("portfolio", 0.0)),
+                "cpu": data.get("cpu_percent"),
+                "ram": data.get("ram_percent"),
             }])[-48:],
         }
         save_registry()
@@ -264,6 +272,12 @@ def api_status():
                 "operating_mode":    data.get("operating_mode", "SUPERVISED"),
                 "trading_mode":      data.get("trading_mode", "PAPER"),
                 "kill_switch":       data.get("kill_switch", False),
+                "cpu_percent":       data.get("cpu_percent"),
+                "ram_percent":       data.get("ram_percent"),
+                "load_avg":          data.get("load_avg"),
+                "cpu_temp":          data.get("cpu_temp"),
+                "disk_percent":      data.get("disk_percent"),
+                "history":           data.get("history", []),
             }
     return jsonify(out), 200
 
@@ -487,19 +501,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .pi-avatar{
   width:42px;height:42px;border-radius:12px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  font-size:14px;font-weight:800;letter-spacing:-0.3px;
   position:relative;overflow:hidden;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.09);
 }
-.pi-avatar::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(145deg,rgba(255,255,255,0.18) 0%,transparent 55%)}
-.av-teal{background:linear-gradient(135deg,rgba(0,245,212,0.3),rgba(0,245,212,0.1));
-         border:1px solid rgba(0,245,212,0.25);color:var(--teal)}
-.av-purple{background:linear-gradient(135deg,rgba(123,97,255,0.3),rgba(123,97,255,0.1));
-           border:1px solid rgba(123,97,255,0.25);color:#a78bfa}
-.av-amber{background:linear-gradient(135deg,rgba(255,179,71,0.3),rgba(255,179,71,0.1));
-          border:1px solid rgba(255,179,71,0.25);color:var(--amber)}
-.av-pink{background:linear-gradient(135deg,rgba(255,75,110,0.3),rgba(255,75,110,0.1));
-         border:1px solid rgba(255,75,110,0.25);color:var(--pink)}
+.pi-avatar::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(145deg,rgba(255,255,255,0.13) 0%,transparent 50%)}
+/* glass cloud fleet decorations */
+.fleet-cloud{position:absolute;bottom:-4px;right:4px;opacity:0.14;pointer-events:none}
 
 .pi-info{flex:1;min-width:0}
 .pi-name{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -585,10 +594,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 .modal-header{padding:18px 22px 0;display:flex;align-items:flex-start;gap:14px;flex-shrink:0}
 .modal-avatar{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;
-              justify-content:center;font-size:16px;font-weight:800;flex-shrink:0;
-              position:relative;overflow:hidden}
-.modal-avatar::after{content:'';position:absolute;inset:0;
-  background:linear-gradient(145deg,rgba(255,255,255,0.2) 0%,transparent 55%)}
+              justify-content:center;flex-shrink:0;
+              position:relative;overflow:hidden;
+              background:rgba(255,255,255,0.03);
+              border:1px solid rgba(255,255,255,0.09)}
+.modal-avatar::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(145deg,rgba(255,255,255,0.16) 0%,transparent 50%)}
 .modal-title-wrap{flex:1}
 .modal-name{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--text)}
 .modal-email{font-size:12px;color:var(--muted);margin-top:2px}
@@ -651,6 +662,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
            border:1px solid rgba(255,75,110,0.15)}
 .error-log.empty{color:var(--teal);font-size:11px;text-align:center;padding:20px}
 
+/* NODE ROSTER TABLE */
+.node-table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);margin-bottom:20px}
+.node-thead{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
+            padding:8px 16px;background:rgba(255,255,255,0.025);min-width:740px;border-bottom:1px solid var(--border)}
+.node-th{font-size:9px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted)}
+.node-row{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
+          padding:10px 16px;border-top:1px solid var(--border);align-items:center;
+          cursor:pointer;transition:background 0.15s;min-width:740px}
+.node-row:hover{background:rgba(255,255,255,0.025)}
+.node-cell{font-size:12px;font-family:var(--mono)}
+.node-name-cell{display:flex;align-items:center;gap:8px}
+.node-micro-av{width:28px;height:28px;border-radius:8px;flex-shrink:0;
+               display:flex;align-items:center;justify-content:center;
+               background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.09)}
+.node-lbl{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:148px}
+.node-id-tag{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.mc-ok{color:var(--teal)}.mc-warn{color:var(--amber)}.mc-crit{color:var(--pink)}.mc-na{color:var(--dim)}
+/* GRAPH CARDS */
+.graph-card{border-radius:14px;border:1px solid var(--border);background:var(--surface);
+            padding:16px 16px 10px;margin-bottom:14px}
+.graph-card-title{font-size:10px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;
+                  color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.graph-canvas-wrap{height:110px;position:relative}
+
 /* Toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
        padding:10px 20px;border-radius:12px;font-size:12px;font-weight:600;
@@ -687,8 +722,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="clock" id="clock">--:--:-- ET</div>
     <a href="/audit" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
        background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.3);color:var(--purple);
-       text-decoration:none;letter-spacing:0.04em">Agent 4</a>
-    <div class="live-pill"><div class="live-dot"></div><span id="pi-count">0 Pis</span></div>
+       text-decoration:none;letter-spacing:0.04em">AI Audit</a>
+    <div class="live-pill"><div class="live-dot"></div><span id="pi-count">No Nodes</span></div>
   </div>
 </header>
 
@@ -736,50 +771,105 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   <!-- FLEET STATS -->
   <div class="fleet-grid">
+    <!-- Nodes Online -->
     <div class="fleet-card fc-teal">
-      <div class="fleet-label">Pis Online</div>
+      <div class="fleet-label">Nodes Online</div>
       <div class="fleet-val" id="fl-online">0</div>
       <div class="fleet-sub" id="fl-total">of 0 registered</div>
+      <svg class="fleet-cloud" viewBox="0 0 54 38" xmlns="http://www.w3.org/2000/svg" width="54" height="38">
+        <circle cx="38" cy="12" r="9" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.2"/>
+        <g stroke="rgba(255,255,255,1)" stroke-width="1.1" stroke-linecap="round">
+          <line x1="38" y1="1" x2="38" y2="0"/><line x1="44.5" y1="5.5" x2="45.5" y2="4.5"/>
+          <line x1="48" y1="12" x2="50" y2="12"/><line x1="31.5" y1="5.5" x2="30.5" y2="4.5"/>
+          <line x1="28" y1="12" x2="26" y2="12"/>
+        </g>
+        <path d="M3,29 Q3,22 10,22 Q9,15 18,15 Q24,15 26,19 Q33,18 33,24 Q37,24 37,29 Q37,33 33,33 L7,33 Q3,33 3,29 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+      </svg>
     </div>
-    <div class="fleet-card fc-purple">
-      <div class="fleet-label">Fleet Portfolio</div>
-      <div class="fleet-val" id="fl-portfolio">$0</div>
-      <div class="fleet-sub">Combined value</div>
-    </div>
-    <div class="fleet-card fc-amber">
-      <div class="fleet-label">Pending Approvals</div>
-      <div class="fleet-val" id="fl-pending">0</div>
-      <div class="fleet-sub">Across all Pis</div>
-    </div>
+    <!-- Active Alerts -->
     <div class="fleet-card fc-pink">
-      <div class="fleet-label">Open Issues</div>
+      <div class="fleet-label">Active Alerts</div>
       <div class="fleet-val" id="fl-issues">0</div>
-      <div class="fleet-sub">Needs attention</div>
+      <div class="fleet-sub">Open issues</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 40" xmlns="http://www.w3.org/2000/svg" width="44" height="40">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M21,28 L18,35 L21,34.5 L19.5,40 L25.5,32 L22,32.5 Z" fill="rgba(255,255,255,1)" stroke="none"/>
+      </svg>
     </div>
-    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Open Positions</div>
-      <div class="fleet-val" id="fl-positions" style="color:var(--text)">0</div>
-      <div class="fleet-sub">Fleet-wide</div>
+    <!-- Avg CPU -->
+    <div class="fleet-card fc-amber">
+      <div class="fleet-label">Avg CPU</div>
+      <div class="fleet-val" id="fl-cpu">—</div>
+      <div class="fleet-sub" id="fl-cpu-sub">Awaiting data</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,0.7)" stroke-width="1.1" stroke-linecap="round">
+          <line x1="11" y1="19" x2="11" y2="23"/><line x1="15" y1="16" x2="15" y2="23"/>
+          <line x1="19" y1="18" x2="19" y2="23"/><line x1="23" y1="14" x2="23" y2="23"/>
+        </g>
+      </svg>
     </div>
+    <!-- Avg RAM -->
+    <div class="fleet-card fc-purple">
+      <div class="fleet-label">Avg RAM</div>
+      <div class="fleet-val" id="fl-ram">—</div>
+      <div class="fleet-sub" id="fl-ram-sub">Awaiting data</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <rect x="9" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.7)" stroke="none"/>
+        <rect x="16" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.4)" stroke="none"/>
+        <rect x="23" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.7)" stroke="none"/>
+      </svg>
+    </div>
+    <!-- Avg Temp -->
     <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Trades Today</div>
-      <div class="fleet-val" id="fl-trades" style="color:var(--text)">0</div>
-      <div class="fleet-sub">All Pis</div>
+      <div class="fleet-label">Avg Temp</div>
+      <div class="fleet-val" id="fl-temp" style="color:var(--text)">—</div>
+      <div class="fleet-sub">°C · CPU temp</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 38" xmlns="http://www.w3.org/2000/svg" width="44" height="38">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,1)" stroke-width="1.4" stroke-linecap="round">
+          <line x1="13" y1="30" x2="11.5" y2="37"/><line x1="20" y1="30" x2="18.5" y2="37"/><line x1="27" y1="30" x2="25.5" y2="37"/>
+        </g>
+      </svg>
+    </div>
+    <!-- Customers (placeholder — Pi 5 portal pending) -->
+    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
+      <div class="fleet-label">Customers</div>
+      <div class="fleet-val" id="fl-customers" style="color:var(--dim)">—</div>
+      <div class="fleet-sub">Portal pending</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.9" stroke-linecap="round"/>
+      </svg>
     </div>
   </div>
 
-  <!-- TWO COLUMN: PI GRID + TODOS -->
+  <!-- NODE ROSTER — full width -->
+  <div class="sec-title">Node Roster <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
+  <div id="node-roster">
+    <div class="node-table-wrap">
+      <div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">Waiting for first heartbeat…</div>
+    </div>
+  </div>
+
+  <!-- TWO COLUMN: GRAPHS + ISSUES -->
   <div class="two-col">
 
-    <!-- PI GRID -->
+    <!-- SYSTEM HEALTH GRAPHS -->
     <div>
-      <div class="sec-title">Customer Pis <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
-      <div class="pi-grid" id="pi-grid">
-        <div style="color:var(--muted);font-size:12px;padding:20px;grid-column:1/-1">No Pis registered yet. Waiting for first heartbeat...</div>
+      <div class="sec-title">System Health Over Time</div>
+      <div class="graph-card">
+        <div class="graph-card-title">CPU Usage %</div>
+        <div class="graph-canvas-wrap"><canvas id="cpu-chart"></canvas></div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Memory Usage %</div>
+        <div class="graph-canvas-wrap"><canvas id="ram-chart"></canvas></div>
       </div>
     </div>
 
-    <!-- TODO LIST -->
+    <!-- ISSUES PANEL -->
     <div>
       <div class="sec-title">Open Issues</div>
       <div class="todo-panel">
@@ -842,95 +932,171 @@ function avatarColor(piId) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
+// ── GLASS CLOUD WEATHER ICONS ──
+function weatherIcon(status) {
+  const cp = 'M3,21 Q3,14 10,14 Q9,7 18,7 Q24,7 26,11 Q33,10 33,16 Q37,16 37,21 Q37,25 33,25 L7,25 Q3,25 3,21 Z';
+  const hl = 'M7,14 Q7,9 13,9 Q12,4 19,4';
+  if (status === 'online' || status === 'active') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 7px rgba(0,245,212,0.4))">
+      <circle cx="27" cy="10" r="8" fill="rgba(0,245,212,0.07)"/>
+      <circle cx="27" cy="10" r="5.5" fill="rgba(0,245,212,0.15)" stroke="rgba(0,245,212,0.72)" stroke-width="1.3"/>
+      <g stroke="rgba(0,245,212,0.62)" stroke-width="1.2" stroke-linecap="round">
+        <line x1="27" y1="2.5" x2="27" y2="0.5"/>
+        <line x1="32.5" y1="4.5" x2="34" y2="3"/>
+        <line x1="36" y1="10" x2="38" y2="10"/>
+        <line x1="21.5" y1="4.5" x2="20" y2="3"/>
+        <line x1="18" y1="10" x2="16" y2="10"/>
+      </g>
+      <path d="${cp}" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.75)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1" stroke-linecap="round"/>
+    </svg>`;
+  }
+  if (status === 'fault' || status === 'warning') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 7px rgba(255,179,71,0.4))">
+      <path d="${cp}" fill="rgba(255,179,71,0.05)" stroke="rgba(255,255,255,0.68)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" stroke-linecap="round"/>
+      <path d="M21,27 L18,34 L21,33.5 L19.5,39 L25.5,31 L22,31.5 Z" fill="rgba(255,179,71,0.95)" stroke="rgba(255,179,71,0.4)" stroke-width="0.5" stroke-linejoin="round"/>
+    </svg>`;
+  }
+  if (status === 'offline') {
+    return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 5px rgba(255,75,110,0.25))">
+      <path d="${cp}" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.52)" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="1" stroke-linecap="round"/>
+      <g stroke="rgba(140,200,255,0.65)" stroke-width="1.6" stroke-linecap="round">
+        <line x1="13" y1="28" x2="11.5" y2="37"/>
+        <line x1="20" y1="28" x2="18.5" y2="37"/>
+        <line x1="27" y1="28" x2="25.5" y2="37"/>
+      </g>
+    </svg>`;
+  }
+  return `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;filter:drop-shadow(0 0 4px rgba(255,255,255,0.1))">
+    <path d="${cp}" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.38)" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="${hl}" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="1" stroke-linecap="round"/>
+  </svg>`;
+}
+
 // ── FETCH STATUS ──
 async function fetchStatus() {
   try {
     const r = await fetch('/api/status');
     if (!r.ok) return;
     piData = await r.json();
-    renderPiGrid();
+    renderNodeRoster();
     updateFleetStats();
+    buildFleetCharts();
     document.getElementById('sync-label').textContent = 'synced ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
   } catch(e) {}
 }
 
+// ── METRIC COLOR HELPERS ──
+function metricClass(v, warn, crit) {
+  if (v == null) return 'mc-na';
+  if (v >= crit) return 'mc-crit';
+  if (v >= warn) return 'mc-warn';
+  return 'mc-ok';
+}
+function fmtMetric(v, unit, dec=0) {
+  return v != null ? v.toFixed(dec) + unit : '—';
+}
+function colorWithAlpha(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+}
+
 // ── FLEET STATS ──
 function updateFleetStats() {
-  const pis = Object.values(piData);
-  const total    = pis.length;
-  const online   = pis.filter(p => p.status === 'online').length;
-  const portfolio = pis.reduce((s,p) => s + (p.portfolio_value||0), 0);
-  const pending  = pis.reduce((s,p) => s + (p.pending_approvals||0), 0);
-  const positions = pis.reduce((s,p) => s + (p.open_positions||0), 0);
-  const trades   = pis.reduce((s,p) => s + (p.trades_today||0), 0);
+  const pis   = Object.values(piData);
+  const total  = pis.length;
+  const online = pis.filter(p => p.status === 'online').length;
+  const notOk  = pis.filter(p => p.status !== 'online').length;
+
+  const cpuNodes  = pis.filter(p => p.cpu_percent != null);
+  const ramNodes  = pis.filter(p => p.ram_percent != null);
+  const tempNodes = pis.filter(p => p.cpu_temp   != null);
+
+  const avg = (arr, key) => arr.length ? arr.reduce((s,p) => s + p[key], 0) / arr.length : null;
+  const avgCpu  = avg(cpuNodes,  'cpu_percent');
+  const avgRam  = avg(ramNodes,  'ram_percent');
+  const avgTemp = avg(tempNodes, 'cpu_temp');
 
   const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('fl-online', online);
-  sv('fl-total', 'of ' + total + ' registered');
-  sv('fl-portfolio', '$' + portfolio.toFixed(2));
-  sv('fl-pending', pending);
-  sv('fl-positions', positions);
-  sv('fl-trades', trades);
-  sv('pi-count', total + ' Pi' + (total===1?'':'s'));
 
-  // Issues count from todos
-  sv('fl-issues', allTodos.filter(t=>!t.resolved).length);
+  sv('fl-online',  online + (total ? ' / ' + total : ''));
+  sv('fl-total',   total === 0 ? 'No nodes registered' : notOk === 0 ? 'All reporting' : notOk + ' not reporting');
+  sv('fl-issues',  allTodos.filter(t=>!t.resolved).length);
+  sv('fl-cpu',     avgCpu  != null ? avgCpu.toFixed(1)  + '%'  : '—');
+  sv('fl-ram',     avgRam  != null ? avgRam.toFixed(1)  + '%'  : '—');
+  sv('fl-temp',    avgTemp != null ? avgTemp.toFixed(1) + '°C' : '—');
+
+  // Header pill
+  if (total === 0)       sv('pi-count', 'No Nodes');
+  else if (notOk === 0)  sv('pi-count', 'All Nodes Online');
+  else                   sv('pi-count', notOk + ' not reporting');
 }
 
-// ── PI GRID ──
-function renderPiGrid() {
-  const grid = document.getElementById('pi-grid');
+// ── NODE ROSTER TABLE ──
+function renderNodeRoster() {
+  const wrap = document.getElementById('node-roster');
   const pis  = Object.values(piData);
+
   if (!pis.length) {
-    grid.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;grid-column:1/-1">No Pis registered yet. Waiting for first heartbeat...</div>';
+    wrap.innerHTML = '<div class="node-table-wrap"><div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">No nodes registered yet. Waiting for first heartbeat\u2026</div></div>';
     return;
   }
-  // Sort: online first, then offline
+
   pis.sort((a,b) => {
-    const order = {online:0,warning:1,offline:2};
-    return (order[a.status]??3) - (order[b.status]??3);
+    const ord = {online:0,warning:1,fault:1,offline:2};
+    return (ord[a.status]??3) - (ord[b.status]??3);
   });
-  grid.innerHTML = pis.map(pi => {
+
+  const rows = pis.map(pi => {
     const sc   = statusClass(pi.status);
     const dc   = dotClass(pi.status);
-    const av   = avatarColor(pi.pi_id);
-    const ini  = initials(pi.label);
-    const pnl  = pi.realized_gains || 0;
-    const pnlCls = pnl >= 0 ? 'teal' : 'pink';
-    const pnlStr = (pnl>=0?'+$':'-$') + Math.abs(pnl).toFixed(2);
-    const modeBadge = pi.kill_switch ? '<span class="pi-badge pb-kill">HALTED</span>'
-      : pi.operating_mode === 'AUTONOMOUS' ? '<span class="pi-badge pb-auto">AUTO</span>'
-      : '<span class="pi-badge pb-supervised">SUPERVISED</span>';
-    const tradeBadge = (pi.trading_mode||'PAPER') === 'PAPER'
-      ? '<span class="pi-badge pb-paper">PAPER</span>' : '';
-    const pendBadge = (pi.pending_approvals||0) > 0
-      ? '<span class="pi-badge pb-pend">' + pi.pending_approvals + ' pending</span>' : '';
-
-    return '<div class="pi-card ' + sc + '" onclick="openModal('' + pi.pi_id + '')">'
-      + '<div class="pi-card-top">'
-        + '<div class="pi-avatar ' + av + '">' + ini + '</div>'
-        + '<div class="pi-info">'
-          + '<div class="pi-name">' + (pi.label||pi.pi_id) + '</div>'
-          + '<div class="pi-email">' + (pi.email||'No email') + '</div>'
-          + '<div class="pi-id-tag">' + pi.pi_id + '</div>'
-        + '</div>'
-        + '<div class="status-dot-wrap">'
+    const load1 = pi.load_avg && pi.load_avg[0] != null ? pi.load_avg[0] : null;
+    return '<div class="node-row" onclick="openModal(\'' + pi.pi_id + '\')">'
+      + '<div class="node-name-cell">'
+          + '<div class="node-micro-av">' + weatherIcon(pi.status) + '</div>'
+          + '<div><div class="node-lbl">' + escHtml(pi.label || pi.pi_id) + '</div>'
+              + '<div class="node-id-tag">' + pi.pi_id + '</div></div>'
+      + '</div>'
+      + '<div><div class="status-dot-wrap">'
           + '<div class="sdot ' + dc + '"></div>'
           + '<span class="status-text st-' + sc + '">' + pi.status + '</span>'
-        + '</div>'
-      + '</div>'
-      + '<div class="pi-stats">'
-        + '<div class="pi-stat"><div class="psl">Portfolio</div><div class="psv teal">$' + (pi.portfolio_value||0).toFixed(2) + '</div></div>'
-        + '<div class="pi-stat"><div class="psl">Positions</div><div class="psv ' + ((pi.open_positions||0)>0?'amber':'') + '">' + (pi.open_positions||0) + '</div></div>'
-        + '<div class="pi-stat"><div class="psl">P&L</div><div class="psv ' + pnlCls + '">' + pnlStr + '</div></div>'
-      + '</div>'
-      + '<div class="pi-footer">'
-        + modeBadge + tradeBadge + pendBadge
-        + '<span class="pi-uptime">' + (pi.uptime||'—') + ' up · ' + ageSince(pi.last_seen) + '</span>'
-      + '</div>'
+      + '</div></div>'
+      + '<div class="node-cell ' + metricClass(pi.cpu_percent, 70, 90) + '">'
+          + fmtMetric(pi.cpu_percent, '%') + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.ram_percent, 75, 90) + '">'
+          + fmtMetric(pi.ram_percent, '%') + '</div>'
+      + '<div class="node-cell ' + metricClass(load1, 1.5, 3.0) + '">'
+          + fmtMetric(load1, '', 2) + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.cpu_temp, 65, 80) + '">'
+          + fmtMetric(pi.cpu_temp, '\u00b0', 1) + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.disk_percent, 75, 90) + '">'
+          + fmtMetric(pi.disk_percent, '%') + '</div>'
+      + '<div class="node-cell mc-na">' + (pi.uptime || '\u2014') + '</div>'
+      + '<div class="node-cell mc-na">' + ageSince(pi.last_seen) + '</div>'
     + '</div>';
   }).join('');
+
+  wrap.innerHTML =
+    '<div class="node-table-wrap">'
+    + '<div class="node-thead">'
+        + '<div class="node-th">Node</div>'
+        + '<div class="node-th">Status</div>'
+        + '<div class="node-th">CPU</div>'
+        + '<div class="node-th">RAM</div>'
+        + '<div class="node-th">Load</div>'
+        + '<div class="node-th">Temp</div>'
+        + '<div class="node-th">Disk</div>'
+        + '<div class="node-th">Uptime</div>'
+        + '<div class="node-th">Last Seen</div>'
+    + '</div>'
+    + rows
+    + '</div>';
 }
+
 
 // ── MODAL ──
 async function openModal(piId) {
@@ -941,9 +1107,8 @@ async function openModal(piId) {
 
   // Set header from cached data immediately
   const pi = piData[piId] || {};
-  const av = avatarColor(piId);
-  document.getElementById('modal-avatar').className = 'modal-avatar ' + av;
-  document.getElementById('modal-avatar').textContent = initials(pi.label||piId);
+  document.getElementById('modal-avatar').className = 'modal-avatar';
+  document.getElementById('modal-avatar').innerHTML = weatherIcon(pi.status || 'unknown');
   document.getElementById('modal-name').textContent = pi.label || piId;
   document.getElementById('modal-email').textContent = pi.email || 'No email';
   document.getElementById('modal-id').textContent = piId;
@@ -994,75 +1159,81 @@ async function switchTab(tab, btn) {
 
 function renderModalTab(tab, pi) {
   const body = document.getElementById('modal-body');
+
+  // helpers
+  const mc  = (v, w, c) => v == null ? 'mc-na' : v >= c ? 'mc-crit' : v >= w ? 'mc-warn' : 'mc-ok';
+  const fmt = (v, u, d=0) => v != null ? v.toFixed(d) + u : '\u2014';
+
   if (tab === 'overview') {
-    const pnl = pi.realized_gains || 0;
-    const pos = pi.positions || [];
+    const load   = pi.load_avg || [];
+    const cpuCls = mc(pi.cpu_percent,  70, 90);
+    const ramCls = mc(pi.ram_percent,  75, 90);
+    const tmpCls = mc(pi.cpu_temp,     65, 80);
+    const dskCls = mc(pi.disk_percent, 75, 90);
     body.innerHTML =
       '<div class="modal-stats">'
-        + '<div class="mstat"><div class="mstat-label">Portfolio</div><div class="mstat-val mv-teal">$' + (pi.portfolio_value||0).toFixed(2) + '</div><div class="mstat-sub">$' + (pi.cash||0).toFixed(2) + ' cash</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Realized P&L</div><div class="mstat-val ' + (pnl>=0?'mv-teal':'mv-pink') + '">' + (pnl>=0?'+$':'-$') + Math.abs(pnl).toFixed(2) + '</div><div class="mstat-sub">This month</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Positions</div><div class="mstat-val ' + ((pi.open_positions||0)>0?'mv-amber':'') + '">' + (pi.open_positions||0) + '</div><div class="mstat-sub">' + (pi.trades_today||0) + ' trades today</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Pending</div><div class="mstat-val ' + ((pi.pending_approvals||0)>0?'mv-amber':'') + '">' + (pi.pending_approvals||0) + '</div><div class="mstat-sub">Approvals</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Flags</div><div class="mstat-val ' + ((pi.urgent_flags||0)>0?'mv-pink':'') + '">' + (pi.urgent_flags||0) + '</div><div class="mstat-sub">Urgent</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Uptime</div><div class="mstat-val" style="font-size:16px">' + (pi.uptime||'N/A') + '</div><div class="mstat-sub">Since last reboot</div></div>'
+        + '<div class="mstat"><div class="mstat-label">CPU</div><div class="mstat-val ' + cpuCls + '">' + fmt(pi.cpu_percent,'%') + '</div><div class="mstat-sub">Utilization</div></div>'
+        + '<div class="mstat"><div class="mstat-label">RAM</div><div class="mstat-val ' + ramCls + '">' + fmt(pi.ram_percent,'%') + '</div><div class="mstat-sub">Memory used</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Temp</div><div class="mstat-val ' + tmpCls + '">' + fmt(pi.cpu_temp,'\u00b0C',1) + '</div><div class="mstat-sub">CPU temperature</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Disk</div><div class="mstat-val ' + dskCls + '">' + fmt(pi.disk_percent,'%') + '</div><div class="mstat-sub">Storage used</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Load Avg</div><div class="mstat-val" style="font-size:14px">'
+            + (load[0]!=null?load[0].toFixed(2):'\u2014')
+            + '</div><div class="mstat-sub">'
+            + (load[1]!=null?load[1].toFixed(2):'\u2014') + ' / ' + (load[2]!=null?load[2].toFixed(2):'\u2014') + ' (5/15m)'
+        + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Uptime</div><div class="mstat-val" style="font-size:15px">' + (pi.uptime||'N/A') + '</div><div class="mstat-sub">Since last reboot</div></div>'
       + '</div>'
-      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Open Positions</div>'
-      + '<div style="margin-bottom:14px">'
-      + (pos.length ? pos.map(p => {
-          const pnl2 = p.pnl || 0;
-          return '<div class="pos-row">'
-            + '<div class="pos-chip">' + (p.ticker||'?').slice(0,4) + '</div>'
-            + '<div><div class="pos-ticker-t">' + p.ticker + '</div><div class="pos-shares-t">' + (p.shares||0).toFixed(2) + ' @ $' + (p.entry_price||0).toFixed(2) + '</div></div>'
-            + '<div class="pos-pnl-t ' + (pnl2>=0?'mv-teal':'mv-pink') + '">' + (pnl2>=0?'+$':'-$') + Math.abs(pnl2).toFixed(2) + '</div>'
-            + '</div>';
-        }).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px 0">No open positions</div>')
-      + '</div>'
-      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Agent Status</div>'
+      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:4px 0 8px">Agent Status</div>'
       + renderAgents(pi.agents||{});
 
   } else if (tab === 'performance') {
     body.innerHTML =
       '<div class="modal-graph-wrap">'
-        + '<div class="modal-graph-title">Portfolio History</div>'
-        + '<div class="modal-graph-canvas"><canvas id="modal-chart"></canvas></div>'
+        + '<div class="modal-graph-title">CPU Usage History</div>'
+        + '<div class="modal-graph-canvas"><canvas id="modal-chart-cpu"></canvas></div>'
       + '</div>'
-      + '<div class="modal-stats">'
-        + '<div class="mstat"><div class="mstat-label">Mode</div><div class="mstat-val" style="font-size:14px">' + (pi.operating_mode||'SUPERVISED') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Trading</div><div class="mstat-val" style="font-size:14px">' + (pi.trading_mode||'PAPER') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Kill Switch</div><div class="mstat-val ' + (pi.kill_switch?'mv-pink':'mv-teal') + '" style="font-size:14px">' + (pi.kill_switch?'ACTIVE':'CLEAR') + '</div></div>'
+      + '<div class="modal-graph-wrap" style="margin-top:12px">'
+        + '<div class="modal-graph-title">Memory Usage History</div>'
+        + '<div class="modal-graph-canvas"><canvas id="modal-chart-ram"></canvas></div>'
       + '</div>';
 
-    // Draw chart
     setTimeout(() => {
-      const hist = pi.history || [];
-      const ctx = document.getElementById('modal-chart');
-      if (!ctx || !hist.length) return;
-      const labels = hist.map(h => new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit'}));
-      const values = hist.map(h => h.v);
-      const grad = ctx.getContext('2d').createLinearGradient(0,0,0,100);
-      grad.addColorStop(0, 'rgba(0,245,212,0.2)');
-      grad.addColorStop(1, 'rgba(0,245,212,0)');
-      if (modalChartInst) modalChartInst.destroy();
-      modalChartInst = new Chart(ctx, {
-        type: 'line',
-        data: { labels, datasets: [{
-          data: values, borderColor: '#00f5d4', borderWidth: 2,
-          fill: true, backgroundColor: grad, tension: 0.4,
-          pointRadius: 0, pointHitRadius: 8,
-        }]},
-        options: {
-          responsive:true, maintainAspectRatio:false,
-          plugins:{legend:{display:false},tooltip:{
-            backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(0,245,212,0.3)',borderWidth:1,
-            titleColor:'rgba(255,255,255,0.5)',bodyColor:'#00f5d4',bodyFont:{weight:'bold'},
-            callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}
-          }},
-          scales:{
-            x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:6}},
-            y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>'$'+v.toFixed(0)},position:'right'}
+      const hist = (pi.history || []).filter(h => h.cpu != null || h.ram != null);
+      if (!hist.length) {
+        body.innerHTML += '<div style="color:var(--muted);font-size:11px;text-align:center;padding:12px">No metric history yet \u2014 awaiting next heartbeat</div>';
+        return;
+      }
+      const labels = hist.map(h => new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}));
+      const mkChart = (canvasId, data, color, unit) => {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return null;
+        const grad = ctx.getContext('2d').createLinearGradient(0,0,0,100);
+        grad.addColorStop(0, colorWithAlpha(color, 0.18));
+        grad.addColorStop(1, colorWithAlpha(color, 0.0));
+        return new Chart(ctx, {
+          type: 'line',
+          data: { labels, datasets: [{
+            data, borderColor: color, borderWidth: 2,
+            fill: true, backgroundColor: grad, tension: 0.4,
+            pointRadius: 0, pointHitRadius: 8, spanGaps: true,
+          }]},
+          options: {
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{
+              backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
+              titleColor:'rgba(255,255,255,0.5)',bodyColor:color,bodyFont:{weight:'bold'},
+              callbacks:{label:c=>c.parsed.y.toFixed(1)+unit}
+            }},
+            scales:{
+              x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:6}},
+              y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>v+unit},min:0,max:100,position:'right'}
+            }
           }
-        }
-      });
+        });
+      };
+      if (modalChartInst) { modalChartInst.destroy(); modalChartInst = null; }
+      modalChartInst = mkChart('modal-chart-cpu', hist.map(h=>h.cpu), '#00f5d4', '%');
+      mkChart('modal-chart-ram', hist.map(h=>h.ram), '#7b61ff', '%');
     }, 50);
 
   } else if (tab === 'logs') {
@@ -1071,21 +1242,20 @@ function renderModalTab(tab, pi) {
       '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Recent Errors</div>'
       + (errors.length
           ? '<div class="error-log">' + errors.map(e => escHtml(e)).join('\n') + '</div>'
-          : '<div class="error-log empty">✓ No recent errors</div>')
+          : '<div class="error-log empty">\u2713 No recent errors</div>')
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">Agent Status</div>'
       + renderAgents(pi.agents||{})
-      + '<div style="font-size:10px;color:var(--muted);margin-top:12px">Full logs available in customer portal at ' + (pi.pi_id||'') + ':5001/logs</div>';
+      + '<div style="font-size:10px;color:var(--muted);margin-top:12px">Full logs: ' + (pi.pi_id||'') + ':5001/logs</div>';
 
   } else if (tab === 'admin') {
     body.innerHTML =
       '<div class="modal-stats" style="grid-template-columns:1fr 1fr;margin-bottom:16px">'
-        + '<div class="mstat"><div class="mstat-label">Customer</div><div class="mstat-val" style="font-size:14px;word-break:break-all">' + (pi.label||'—') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Email</div><div class="mstat-val" style="font-size:12px;word-break:break-all"><a href="mailto:' + (pi.email||'') + '" style="color:var(--teal)">' + (pi.email||'—') + '</a></div></div>'
-        + '<div class="mstat"><div class="mstat-label">Pi ID</div><div class="mstat-val" style="font-size:11px;font-family:var(--mono)">' + (pi.pi_id||'—') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">First Seen</div><div class="mstat-val" style="font-size:12px">' + (pi.first_seen||'—').slice(0,10) + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Node</div><div class="mstat-val" style="font-size:14px;word-break:break-all">' + (pi.label||'\u2014') + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Contact</div><div class="mstat-val" style="font-size:12px;word-break:break-all"><a href="mailto:' + (pi.email||'') + '" style="color:var(--teal)">' + (pi.email||'\u2014') + '</a></div></div>'
+        + '<div class="mstat"><div class="mstat-label">Pi ID</div><div class="mstat-val" style="font-size:11px;font-family:var(--mono)">' + (pi.pi_id||'\u2014') + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">First Seen</div><div class="mstat-val" style="font-size:12px">' + (pi.first_seen||'\u2014').slice(0,10) + '</div></div>'
       + '</div>'
 
-      // Key update form — pushes to Pi portal which writes to .env
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Update Keys on Pi</div>'
       + '<div style="font-size:11px;color:var(--amber);background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.15);border-radius:8px;padding:8px 10px;margin-bottom:12px">'
         + '&#9888; Keys are sent directly to the Pi portal at ' + (pi.pi_id||'?') + ':5001 and written to .env'
@@ -1098,29 +1268,46 @@ function renderModalTab(tab, pi) {
         + '<div><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Alpaca Secret</div>'
           + '<input id="adm-alpaca-secret" type="password" placeholder="Secret..." style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
         + '<div><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Alert Email</div>'
-          + '<input id="adm-alert-to" type="email" placeholder="customer@email.com" style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
+          + '<input id="adm-alert-to" type="email" placeholder="node@email.com" style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
       + '</div>'
       + '<div style="display:flex;gap:8px;margin-bottom:16px">'
         + '<button onclick="pushKeysToPi(\'' + (pi.pi_id||'') + '\')" style="padding:9px 18px;border-radius:10px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push Keys to Pi</button>'
         + '<div id="adm-key-result-' + (pi.pi_id||'') + '" style="font-size:11px;color:var(--muted);align-self:center"></div>'
       + '</div>'
-
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Danger Zone</div>'
       + '<div style="display:flex;flex-direction:column;gap:8px">'
-        + '<button onclick="promptDelete(\'' + pi.pi_id + '\')" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Pi from Registry</button>'
+        + '<button onclick="promptDelete(\'' + pi.pi_id + '\')" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Node from Registry</button>'
       + '</div>';
   }
 }
 
+
 function renderAgents(agents) {
-  const names = {'trade_logic_agent':'Trade Logic','news_agent':'News','market_sentiment_agent':'Market Sentiment'};
-  const list = Object.keys(names);
-  return '<div>' + list.map(k => {
-    const status = agents[k];
-    const hasStatus = !!status;
+  // Known agent descriptive names — add entries as agents report in
+  const knownNames = {
+    'retail_trade_logic_agent':     'Trade Logic',
+    'retail_news_agent':            'News',
+    'retail_market_sentiment_agent':'Market Sentiment',
+    'retail_sector_screener':       'Screener',
+    'retail_scheduler':             'Scheduler',
+    'retail_heartbeat':             'Heartbeat',
+    'retail_watchdog':              'Watchdog',
+    'retail_health_check':          'Health Check',
+    // Legacy names (pre-rename)
+    'trade_logic_agent':            'Trade Logic',
+    'news_agent':                   'News',
+    'market_sentiment_agent':       'Market Sentiment',
+  };
+  // Render whatever agents are reported (fall back to raw key if name unknown)
+  const keys = Object.keys(agents);
+  if (!keys.length) return '<div style="color:var(--muted);font-size:11px;padding:8px 0">No agent data received</div>';
+  return '<div>' + keys.map(k => {
+    const status    = agents[k];
+    const label     = knownNames[k] || k;
+    const isOk      = status && status !== 'fault' && status !== 'error';
     return '<div class="agent-row">'
-      + '<div class="agent-dot" style="background:' + (hasStatus?'var(--teal)':'var(--muted)') + ';box-shadow:' + (hasStatus?'0 0 5px var(--teal)':'none') + '"></div>'
-      + '<span class="agent-name">' + names[k] + '</span>'
+      + '<div class="agent-dot" style="background:' + (isOk?'var(--teal)':'var(--muted)') + ';box-shadow:' + (isOk?'0 0 5px var(--teal)':'none') + '"></div>'
+      + '<span class="agent-name">' + label + '</span>'
       + '<span class="agent-status">' + (status||'No data') + '</span>'
     + '</div>';
   }).join('') + '</div>';
@@ -1236,6 +1423,64 @@ async function resolveTodo(id, e) {
   });
   await fetchTodos();
   toast('✓ Issue resolved', 'ok');
+}
+
+// ── FLEET CHARTS ──
+const CHART_COLORS = ['#00f5d4','#7b61ff','#ffb347','#ff4b6e','#a78bfa','#67e8f9'];
+let cpuChartInst = null;
+let ramChartInst = null;
+
+function buildFleetCharts() {
+  const pis  = Object.values(piData).filter(p => p.history && p.history.length > 1);
+  if (!pis.length) return;
+
+  const cpuCtx = document.getElementById('cpu-chart');
+  const ramCtx = document.getElementById('ram-chart');
+  if (!cpuCtx || !ramCtx) return;
+
+  // Use the longest history for labels
+  const refPi = pis.reduce((a,b) => a.history.length >= b.history.length ? a : b);
+  const labels = refPi.history.map(h =>
+    new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})
+  );
+
+  const mkDatasets = (histKey, alpha) => pis
+    .filter(p => p.history.some(h => h[histKey] != null))
+    .map((pi, i) => {
+      const color = CHART_COLORS[i % CHART_COLORS.length];
+      return {
+        label: pi.label || pi.pi_id,
+        data:  pi.history.map(h => h[histKey] != null ? h[histKey] : null),
+        borderColor: color, borderWidth: 2,
+        fill: true, backgroundColor: colorWithAlpha(color, alpha),
+        tension: 0.4, pointRadius: 0, pointHitRadius: 8, spanGaps: true,
+      };
+    });
+
+  const chartOpts = unit => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: pis.length > 1, position: 'bottom',
+                labels:{color:'rgba(255,255,255,0.4)',font:{size:9},boxWidth:8,padding:8}},
+      tooltip: {
+        backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
+        titleColor:'rgba(255,255,255,0.5)',bodyColor:'rgba(255,255,255,0.85)',
+        callbacks:{label:c=>(c.dataset.label||'')+': '+c.parsed.y.toFixed(1)+unit}
+      }
+    },
+    scales: {
+      x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:8}},
+      y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>v+unit},min:0,max:100,position:'right'}
+    }
+  });
+
+  if (cpuChartInst) cpuChartInst.destroy();
+  if (ramChartInst) ramChartInst.destroy();
+
+  const cpuDs = mkDatasets('cpu', 0.1);
+  const ramDs = mkDatasets('ram', 0.1);
+  if (cpuDs.length) cpuChartInst = new Chart(cpuCtx, {type:'line', data:{labels,datasets:cpuDs}, options:chartOpts('%')});
+  if (ramDs.length) ramChartInst = new Chart(ramCtx, {type:'line', data:{labels,datasets:ramDs}, options:chartOpts('%')});
 }
 
 // ── COUNTDOWN ──
