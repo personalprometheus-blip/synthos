@@ -115,6 +115,8 @@ These items must be completed before any live trading or adversarial deployment.
 - [ ] Align installer required-key check with canonical company integrity-gate secret set (`ANTHROPIC_API_KEY`, `MONITOR_TOKEN` currently missing from installer)
 - [ ] Add PRAGMA integrity_check to installer DB verification (currently checks existence only)
 - [ ] Enforce `MONITOR_URL` and `PI_ID` presence at installer time
+  - ✅ MONITOR_URL and MONITOR_TOKEN pre-populated in `env_writer.py` installer template (2026-04-06)
+  - Retail Pi setup pending — `MONITOR_URL=http://192.168.203.10:5000`, token pre-filled
 - [ ] Verify company startup trust path under normal and break-glass modes
 - [ ] Implement retail boot-time license gate — FUTURE_RETAIL_ENTITLEMENT_WORK (deferred from current baseline; see docs/milestones.md)
 
@@ -152,8 +154,9 @@ The node-picker SSO model was the wrong design. Customers do not have individual
 `synthos-login.service` is stopped and disabled. `login_server/` code remains in repo for
 reference but is not active. `portal.synth-cloud.com` redirects to `app.synth-cloud.com`.
 
-**4. Pi 2W fully retired.**
-Removed from all architecture. No further SSH or configuration work on 10.0.0.121.
+**4. Pi 2W role reassigned — now pi2w_monitor_node.**
+Previously retired (old IP 10.0.0.121, old role). Now recommissioned as the dedicated
+heartbeat monitor node. Reflashed 2026-04-06. See Addendum below for full setup details.
 
 ### Final domain map
 
@@ -245,3 +248,76 @@ node-picker portal model. They must be updated before Phase 6 or first customer 
 | login_server/ | synthos-company/ | Move to documentation/archive/ |
 | SYNTHOS_TODO_COMBINED.md | if present | Reconcile against current phase plan |
 | Any docs referencing `synthos-process` repo | both repos | Mark CANCELLED or remove |
+
+---
+
+## Addendum — pi2w_monitor_node Setup (2026-04-06)
+
+### Node commissioned
+
+| Property | Value |
+|---|---|
+| Designation | `pi2w_monitor_node` |
+| Hardware | Raspberry Pi Zero 2W |
+| Hostname | `pi0-2Wmonitor` |
+| OS | Debian GNU/Linux 13 (trixie), aarch64 |
+| SSH user | `pi-02w` |
+| SSH alias | `ssh pi2w_monitor_node` (Mac `~/.ssh/config`) |
+| WiFi IP | `192.168.203.10` (DHCP, Akamai network) |
+| Network scope | LAN only — no Cloudflare tunnel |
+| Service | `synthos_monitor.py` — port 5000 — **not yet installed as systemd service** |
+
+### What was completed 2026-04-06
+
+- Reflashed SD card with new credentials (hostname `pi0-2Wmonitor`, user `pi-02w`)
+- Connected via USB ethernet adapter → USB hub → Pi 2W OTG port, tunnelled through pi4b
+- Resolved SSH host key warning from reflash
+- Installed authorized SSH keys: pi4b (`pi@pi4b`) + Mac (`personal_prometheus@icloud.com`)
+- Configured WiFi profiles: `SantaMcGuire` and `Akamai` (both autoconnect)
+- Created `~/synthos/.env` with keys from pi4b vault (chmod 600)
+- Added `pi2w_monitor_node` SSH alias to Mac `~/.ssh/config`
+- Updated `user/.env` (retail template) with correct `MONITOR_URL` and `MONITOR_TOKEN`
+- Updated `env_writer.py` installer template with pre-filled monitor node values and comments
+- Updated `MEMORY.md` with node naming convention and network switch future planning note
+
+### .env on pi2w_monitor_node (`~/synthos/.env`)
+
+```
+PORT=5000
+SECRET_TOKEN=synthos-default-token        # must match MONITOR_TOKEN on retail Pis
+RESEND_API_KEY=re_NwsJo4Yh_...            # from pi4b vault
+ALERT_FROM=Synth_Alerts@synth-cloud.com
+ALERT_TO=personal_prometheus@icloud.com
+COMPANY_URL=http://192.168.206.172:5010   # pi4b company server
+```
+
+### Retail Pi integration — pending
+
+When retail Pi is set up, ensure its `.env` contains:
+
+```
+MONITOR_URL=http://192.168.203.10:5000   # pi2w_monitor_node WiFi IP (DHCP — update on switch install)
+MONITOR_TOKEN=synthos-default-token      # must match SECRET_TOKEN above
+```
+
+Both values are now pre-filled in `installers/common/env_writer.py` and `user/.env`.
+
+### Remaining tasks before monitor is fully operational
+
+- [ ] Deploy `synthos_monitor.py` to `~/synthos/` on pi2w_monitor_node
+- [ ] Install as systemd service (`synthos-monitor.service`)
+- [ ] Verify retail Pi heartbeat POSTs reach `http://192.168.203.10:5000/heartbeat`
+- [ ] **IP finalization** — when ethernet switch is installed, assign static IPs and update
+      `MONITOR_URL` on all retail Pis and `COMPANY_URL` on pi2w_monitor_node
+      (see MEMORY.md — Future Planning Notes for full checklist)
+
+### Node naming convention (established 2026-04-06)
+
+All physical Pi nodes are named `<model>_<role>`. When Patrick references a node by model
+shorthand ("the 2W", "the 4B", "the 5"), map to full designation.
+
+| Designation | Hardware | Status |
+|---|---|---|
+| `pi4b` | Raspberry Pi 4B | ✅ Live — company server |
+| `pi2w_monitor_node` | Raspberry Pi Zero 2W | ✅ Live — monitor node |
+| `pi5` (TBD) | Raspberry Pi 5 | 🔲 Pending delivery — retail node |
