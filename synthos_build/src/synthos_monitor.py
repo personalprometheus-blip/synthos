@@ -1005,7 +1005,7 @@ async function fetchStatus() {
     updateFleetStats();
     buildFleetCharts();
     document.getElementById('sync-label').textContent = 'synced ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
-  } catch(e) {}
+  } catch(e) { console.error('[fetchStatus]', e); }
 }
 
 // ── METRIC COLOR HELPERS ──
