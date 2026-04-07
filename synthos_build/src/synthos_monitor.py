@@ -734,6 +734,18 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </head>
 <body>
 
+<!-- DEBUG BANNER — remove after console is confirmed working -->
+<div id="dbg-banner" style="background:#1a0a2e;border:2px solid #7b61ff;color:#fff;padding:10px 16px;font-family:monospace;font-size:13px;position:fixed;bottom:0;left:0;right:0;z-index:99999">
+  <b>DEBUG</b> | Server rendered: {{ build_ts }} |
+  JS status: <span id="dbg-js" style="color:#ff4b6e">NOT RUNNING</span> |
+  Fetch status: <span id="dbg-fetch" style="color:#ff4b6e">NOT CALLED</span> |
+  piData keys: <span id="dbg-keys" style="color:#ff4b6e">—</span>
+</div>
+<script>
+document.getElementById('dbg-js').textContent = 'RUNNING';
+document.getElementById('dbg-js').style.color = '#00f5d4';
+</script>
+
 <!-- HEADER -->
 <header class="header">
   <div class="wordmark">SYNTHOS</div>
@@ -907,6 +919,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </div>
 
 <script>
+/* DBG */ try { document.getElementById('dbg-fetch').textContent = 'MAIN SCRIPT STARTED'; } catch(e){}
 const SECRET_TOKEN = '{{ secret_token }}';
 let piData = {};
 let allTodos = [];
@@ -997,15 +1010,23 @@ function weatherIcon(status) {
 
 // ── FETCH STATUS ──
 async function fetchStatus() {
+  const dbgFetch = document.getElementById('dbg-fetch');
+  const dbgKeys  = document.getElementById('dbg-keys');
   try {
+    if (dbgFetch) dbgFetch.textContent = 'FETCHING...';
     const r = await fetch('/api/status');
-    if (!r.ok) return;
+    if (!r.ok) { if (dbgFetch) dbgFetch.textContent = 'HTTP ' + r.status; return; }
     piData = await r.json();
+    if (dbgFetch) { dbgFetch.textContent = 'OK (' + Object.keys(piData).length + ' nodes)'; dbgFetch.style.color = '#00f5d4'; }
+    if (dbgKeys) dbgKeys.textContent = Object.keys(piData).join(', ') || 'empty';
     renderNodeRoster();
     updateFleetStats();
     buildFleetCharts();
     document.getElementById('sync-label').textContent = 'synced ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
-  } catch(e) { console.error('[fetchStatus]', e); }
+  } catch(e) {
+    console.error('[fetchStatus]', e);
+    if (dbgFetch) { dbgFetch.textContent = 'ERROR: ' + e.message; dbgFetch.style.color = '#ff4b6e'; }
+  }
 }
 
 // ── METRIC COLOR HELPERS ──
@@ -1399,7 +1420,7 @@ function renderModalTab(tab, pi) {
     body.innerHTML =
       '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Recent Errors</div>'
       + (errors.length
-          ? '<div class="error-log">' + errors.map(e => escHtml(e)).join('\n') + '</div>'
+          ? '<div class="error-log">' + errors.map(e => escHtml(e)).join('\\n') + '</div>'
           : '<div class="error-log empty">\u2713 No recent errors</div>')
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">Agent Status</div>'
       + renderAgents(pi.agents||{})
@@ -1656,6 +1677,7 @@ function tickCountdown() {
 }
 
 // ── INIT ──
+/* DBG */ try { document.getElementById('dbg-keys').textContent = 'INIT REACHED'; } catch(e){}
 fetchStatus();
 fetchTodos();
 setInterval(tickCountdown, 1000);
@@ -1666,7 +1688,13 @@ setInterval(fetchTodos, 120000);
 
 @app.route("/console")
 def console():
-    return render_template_string(DASHBOARD, secret_token=SECRET_TOKEN)
+    import datetime as _dt
+    from flask import make_response
+    resp = make_response(render_template_string(DASHBOARD, secret_token=SECRET_TOKEN, build_ts=_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 # keep old / route as JSON redirect
 @app.route("/health")
