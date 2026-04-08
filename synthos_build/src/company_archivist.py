@@ -188,7 +188,7 @@ def _register_in_index(index: dict, table: str, path: Path, count: int, date_str
 def _archive_scoop_queue(cutoff_iso: str) -> int:
     """
     Archive sent/skipped/failed scoop_queue rows older than cutoff_iso.
-    Rows are grouped by their created_at date and written to dated files.
+    Rows are grouped by their queued_at date and written to dated files.
     Returns total rows archived.
     """
     total = 0
@@ -196,8 +196,8 @@ def _archive_scoop_queue(cutoff_iso: str) -> int:
         rows = conn.execute(
             """SELECT * FROM scoop_queue
                WHERE status IN ('sent','skipped','failed')
-               AND created_at < ?
-               ORDER BY created_at""",
+               AND queued_at < ?
+               ORDER BY queued_at""",
             (cutoff_iso,),
         ).fetchall()
 
@@ -208,7 +208,7 @@ def _archive_scoop_queue(cutoff_iso: str) -> int:
         # Group by date
         by_date: dict[str, list] = {}
         for row in rows:
-            date_str = (row["created_at"] or "unknown")[:10]
+            date_str = (row["queued_at"] or "unknown")[:10]
             by_date.setdefault(date_str, []).append(dict(row))
 
         index = _load_index()
@@ -249,7 +249,7 @@ def _archive_pi_events(cutoff_iso: str) -> int:
     total = 0
     with _db_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM pi_events WHERE received_at < ? ORDER BY received_at",
+            "SELECT * FROM pi_events WHERE recorded_at < ? ORDER BY recorded_at",
             (cutoff_iso,),
         ).fetchall()
 
@@ -260,7 +260,7 @@ def _archive_pi_events(cutoff_iso: str) -> int:
         # Group by date
         by_date: dict[str, list] = {}
         for row in rows:
-            date_str = (row["received_at"] or "unknown")[:10]
+            date_str = (row["recorded_at"] or "unknown")[:10]
             by_date.setdefault(date_str, []).append(dict(row))
 
         index = _load_index()

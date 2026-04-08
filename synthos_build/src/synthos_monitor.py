@@ -63,6 +63,11 @@ REGISTRY_FILE = os.path.join(DATA_DIR, ".monitor_registry.json")
 pi_registry   = {}
 registry_lock = threading.Lock()
 
+# ── Global Commands ──────────────────────────────────────────────────────────
+# Pending commands are stored per-pi_id and popped on next heartbeat response.
+pending_commands = {}          # {pi_id: [{"type": "...", "value": "..."}]}
+commands_lock    = threading.Lock()
+
 
 def save_registry():
     """Persist registry to disk so Pi state survives monitor restarts."""
@@ -237,7 +242,11 @@ def heartbeat():
         }
         save_registry()
 
-    return jsonify({"status": "ok"}), 200
+    # Deliver any pending global commands to this Pi
+    with commands_lock:
+        cmds = pending_commands.pop(pi_id, [])
+
+    return jsonify({"status": "ok", "commands": cmds}), 200
 
 
 @app.route("/api/pi/<pi_id>", methods=["GET"])
@@ -422,6 +431,70 @@ def api_enqueue():
     }), 200
 
 
+# ── Global Command Routes ────────────────────────────────────────────────────
+def _queue_command(cmd_type, value, targets="all"):
+    """Queue a command for target Pis. Delivered on next heartbeat response."""
+    cmd = {"type": cmd_type, "value": value, "queued_at": now_utc().isoformat()}
+    with commands_lock:
+        if targets == "all":
+            with registry_lock:
+                target_ids = list(pi_registry.keys())
+        else:
+            target_ids = targets if isinstance(targets, list) else [targets]
+        for pid in target_ids:
+            pending_commands.setdefault(pid, []).append(cmd)
+    return target_ids
+
+
+@app.route("/api/command/trading-mode", methods=["POST"])
+def cmd_trading_mode():
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "").upper()
+    if mode not in ("PAPER", "LIVE"):
+        return jsonify({"error": "mode must be PAPER or LIVE"}), 400
+    targets = _queue_command("set_trading_mode", mode, data.get("targets", "all"))
+    return jsonify({"ok": True, "command": "set_trading_mode", "value": mode,
+                    "queued_for": targets}), 200
+
+
+@app.route("/api/command/kill-switch", methods=["POST"])
+def cmd_kill_switch():
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    active = bool(data.get("active", True))
+    targets = _queue_command("set_kill_switch", active, data.get("targets", "all"))
+    return jsonify({"ok": True, "command": "set_kill_switch", "value": active,
+                    "queued_for": targets}), 200
+
+
+@app.route("/api/command/operating-mode", methods=["POST"])
+def cmd_operating_mode():
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "").upper()
+    if mode not in ("SUPERVISED", "AUTONOMOUS"):
+        return jsonify({"error": "mode must be SUPERVISED or AUTONOMOUS"}), 400
+    targets = _queue_command("set_operating_mode", mode, data.get("targets", "all"))
+    return jsonify({"ok": True, "command": "set_operating_mode", "value": mode,
+                    "queued_for": targets}), 200
+
+
+@app.route("/api/commands/pending", methods=["GET"])
+def cmd_pending():
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN:
+        return jsonify({"error": "unauthorized"}), 401
+    with commands_lock:
+        return jsonify(dict(pending_commands)), 200
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 DASHBOARD = """<!DOCTYPE html>
 <html lang="en">
@@ -492,8 +565,50 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .fleet-sub{font-size:10px;color:var(--muted);margin-top:3px}
 
 /* TWO COLUMN */
-.two-col{display:grid;grid-template-columns:1fr 340px;gap:16px;margin-bottom:20px}
+.two-col{display:grid;grid-template-columns:1fr 380px;gap:16px;margin-bottom:20px}
 @media(max-width:900px){.two-col{grid-template-columns:1fr}}
+
+/* GLOBAL COMMANDS */
+.cmd-panel{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden;margin-top:14px}
+.cmd-panel-hdr{padding:14px 16px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.cmd-panel-title{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);flex:1}
+.cmd-section{padding:10px 14px;border-bottom:1px solid var(--border)}
+.cmd-section:last-child{border-bottom:none}
+.cmd-label{font-size:10px;font-weight:600;color:var(--muted);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:6px}
+.cmd-row{display:flex;gap:6px}
+.cmd-btn{flex:1;padding:6px 10px;font-size:10px;font-weight:700;font-family:var(--mono);
+         border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--muted);
+         cursor:pointer;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.05em}
+.cmd-btn:hover{border-color:var(--teal);color:var(--teal);background:rgba(0,245,212,0.06)}
+.cmd-btn.active-teal{border-color:var(--teal);color:var(--teal);background:rgba(0,245,212,0.1);box-shadow:0 0 8px rgba(0,245,212,0.15)}
+.cmd-btn.active-amber{border-color:var(--amber);color:var(--amber);background:rgba(255,179,71,0.1);box-shadow:0 0 8px rgba(255,179,71,0.15)}
+.cmd-btn.active-pink{border-color:var(--pink);color:var(--pink);background:rgba(255,75,110,0.1);box-shadow:0 0 8px rgba(255,75,110,0.15)}
+.cmd-btn.danger{border-color:rgba(255,75,110,0.3);color:var(--pink)}
+.cmd-btn.danger:hover{background:rgba(255,75,110,0.12);border-color:var(--pink)}
+.cmd-btn.danger.active-pink{background:rgba(255,75,110,0.18);animation:pulse-pink 2s infinite}
+@keyframes pulse-pink{0%,100%{box-shadow:0 0 8px rgba(255,75,110,0.15)}50%{box-shadow:0 0 16px rgba(255,75,110,0.35)}}
+
+/* AGENT FLEET TABLE */
+.aft-panel{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden;margin-top:14px}
+.aft-hdr{padding:14px 16px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)}
+.aft-title{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);flex:1}
+.aft-count{font-size:9px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--teal2);border:1px solid rgba(0,245,212,0.2);color:var(--teal)}
+.aft-scroll{max-height:320px;overflow-y:auto}
+.aft-row{display:grid;grid-template-columns:1fr 100px 70px 70px;gap:4px;padding:7px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:11px}
+.aft-row:last-child{border-bottom:none}
+.aft-row.aft-thead{position:sticky;top:0;background:var(--surface);z-index:1;font-size:9px;font-weight:700;
+                   letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);padding:8px 14px}
+.aft-agent{font-weight:600;font-family:var(--mono);color:var(--text)}
+.aft-node{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.aft-status{display:flex;align-items:center;gap:5px}
+.aft-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.aft-dot.s-active{background:var(--teal);box-shadow:0 0 5px var(--teal)}
+.aft-dot.s-idle{background:var(--amber);box-shadow:0 0 4px var(--amber)}
+.aft-dot.s-fault{background:var(--pink);box-shadow:0 0 5px var(--pink)}
+.aft-dot.s-inactive{background:var(--dim)}
+.aft-st{font-size:10px;font-family:var(--mono)}
+.aft-st.s-active{color:var(--teal)}.aft-st.s-idle{color:var(--amber)}.aft-st.s-fault{color:var(--pink)}.aft-st.s-inactive{color:var(--dim)}
+.aft-time{font-size:10px;color:var(--dim);font-family:var(--mono)}
 
 /* PI GRID */
 .pi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
@@ -683,20 +798,27 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .error-log.empty{color:var(--teal);font-size:11px;text-align:center;padding:20px}
 
 /* NODE ROSTER TABLE */
-.node-table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);margin-bottom:20px}
-.node-thead{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
-            padding:8px 16px;background:rgba(255,255,255,0.025);min-width:740px;border-bottom:1px solid var(--border)}
+/* ROSTER + COMMANDS SIDE-BY-SIDE */
+.roster-cmd-row{display:grid;grid-template-columns:1fr 256px;gap:16px;margin-bottom:20px;align-items:start}
+@media(max-width:960px){.roster-cmd-row{grid-template-columns:1fr}}
+.roster-col{min-width:0}
+.cmd-col{min-width:0}
+.cmd-panel{margin-top:14px}
+
+.node-table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);margin-bottom:0}
+.node-thead{display:grid;grid-template-columns:180px 88px 58px 58px 62px 58px 58px 80px 72px;
+            padding:8px 14px;background:rgba(255,255,255,0.025);min-width:680px;border-bottom:1px solid var(--border)}
 .node-th{font-size:9px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted)}
-.node-row{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
-          padding:10px 16px;border-top:1px solid var(--border);align-items:center;
-          cursor:pointer;transition:background 0.15s;min-width:740px}
+.node-row{display:grid;grid-template-columns:180px 88px 58px 58px 62px 58px 58px 80px 72px;
+          padding:10px 14px;border-top:1px solid var(--border);align-items:center;
+          cursor:pointer;transition:background 0.15s;min-width:680px}
 .node-row:hover{background:rgba(255,255,255,0.025)}
 .node-cell{font-size:12px;font-family:var(--mono)}
 .node-name-cell{display:flex;align-items:center;gap:8px}
 .node-micro-av{width:28px;height:28px;border-radius:8px;flex-shrink:0;
                display:flex;align-items:center;justify-content:center;
                background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.09)}
-.node-lbl{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:148px}
+.node-lbl{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:116px}
 .node-id-tag{font-size:9px;color:var(--dim);font-family:var(--mono)}
 .mc-ok{color:var(--teal)}.mc-warn{color:var(--amber)}.mc-crit{color:var(--pink)}.mc-na{color:var(--dim)}
 /* GRAPH CARDS */
@@ -704,7 +826,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             padding:16px 16px 10px;margin-bottom:14px}
 .graph-card-title{font-size:10px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;
                   color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
-.graph-canvas-wrap{height:110px;position:relative}
+.graph-canvas-wrap{height:85px;position:relative}
 
 /* Toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
@@ -754,7 +876,7 @@ document.getElementById('dbg-js').style.color = '#00f5d4';
     <div class="clock" id="clock">--:--:-- ET</div>
     <a href="/audit" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
        background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.3);color:var(--purple);
-       text-decoration:none;letter-spacing:0.04em">AI Audit</a>
+       text-decoration:none;letter-spacing:0.04em">Auditor</a>
     <div class="live-pill"><div class="live-dot"></div><span id="pi-count">No Nodes</span></div>
   </div>
 </header>
@@ -853,36 +975,77 @@ document.getElementById('dbg-js').style.color = '#00f5d4';
         <rect x="23" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.7)" stroke="none"/>
       </svg>
     </div>
-    <!-- Avg Temp -->
-    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Avg Temp</div>
-      <div class="fleet-val" id="fl-temp" style="color:var(--text)">—</div>
-      <div class="fleet-sub">°C · CPU temp</div>
-      <svg class="fleet-cloud" viewBox="0 0 44 38" xmlns="http://www.w3.org/2000/svg" width="44" height="38">
+    <!-- Fleet Agents -->
+    <div class="fleet-card fc-teal">
+      <div class="fleet-label">Fleet Agents</div>
+      <div class="fleet-val" id="fl-agents">—</div>
+      <div class="fleet-sub" id="fl-agents-sub">Awaiting data</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
         <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
-        <g stroke="rgba(255,255,255,1)" stroke-width="1.4" stroke-linecap="round">
-          <line x1="13" y1="30" x2="11.5" y2="37"/><line x1="20" y1="30" x2="18.5" y2="37"/><line x1="27" y1="30" x2="25.5" y2="37"/>
+        <g fill="rgba(255,255,255,0.85)" stroke="none">
+          <circle cx="14" cy="18" r="2.5"/><circle cx="22" cy="18" r="2.5"/><circle cx="30" cy="18" r="2.5"/>
         </g>
       </svg>
     </div>
-    <!-- Customers (placeholder — Pi 5 portal pending) -->
-    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Customers</div>
-      <div class="fleet-val" id="fl-customers" style="color:var(--dim)">—</div>
-      <div class="fleet-sub">Portal pending</div>
+    <!-- Trading Mode -->
+    <div class="fleet-card fc-amber">
+      <div class="fleet-label">Trading Mode</div>
+      <div class="fleet-val" id="fl-trading" style="font-size:20px">—</div>
+      <div class="fleet-sub" id="fl-trading-sub">Awaiting data</div>
       <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
-        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.3" stroke-linejoin="round"/>
-        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.9" stroke-linecap="round"/>
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,0.9)" stroke-width="1.2" fill="none" stroke-linecap="round">
+          <polyline points="11,24 16,17 21,21 29,13"/><circle cx="29" cy="13" r="1.5" fill="rgba(255,255,255,0.9)"/>
+        </g>
       </svg>
     </div>
   </div>
 
-  <!-- NODE ROSTER — full width -->
-  <div class="sec-title">Node Roster <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
-  <div id="node-roster">
-    <div class="node-table-wrap">
-      <div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">Waiting for first heartbeat…</div>
+  <!-- ROSTER + COMMANDS ROW -->
+  <div class="roster-cmd-row">
+
+    <!-- NODE ROSTER -->
+    <div class="roster-col">
+      <div class="sec-title">Node Roster <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
+      <div id="node-roster">
+        <div class="node-table-wrap">
+          <div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">Waiting for first heartbeat…</div>
+        </div>
+      </div>
     </div>
+
+    <!-- GLOBAL COMMANDS -->
+    <div class="cmd-col">
+      <div class="sec-title">Commands</div>
+      <div class="cmd-panel" style="margin-top:0">
+        <div class="cmd-panel-hdr">
+          <span class="cmd-panel-title">Global Commands</span>
+          <span style="font-size:9px;color:var(--dim);font-family:var(--mono)" id="cmd-status"></span>
+        </div>
+        <div class="cmd-section">
+          <div class="cmd-label">Trading Mode Gate</div>
+          <div class="cmd-row">
+            <button class="cmd-btn" id="cmd-paper" onclick="sendGlobalCmd('trading-mode','PAPER')">Paper</button>
+            <button class="cmd-btn" id="cmd-live" onclick="confirmCmd('trading-mode','LIVE','Switch ALL nodes to LIVE trading?')">Live</button>
+          </div>
+        </div>
+        <div class="cmd-section">
+          <div class="cmd-label">Operating Mode</div>
+          <div class="cmd-row">
+            <button class="cmd-btn" id="cmd-supervised" onclick="sendGlobalCmd('operating-mode','SUPERVISED')">Supervised</button>
+            <button class="cmd-btn" id="cmd-autonomous" onclick="confirmCmd('operating-mode','AUTONOMOUS','Grant AUTONOMOUS mode to ALL nodes?')">Autonomous</button>
+          </div>
+        </div>
+        <div class="cmd-section">
+          <div class="cmd-label">Emergency</div>
+          <div class="cmd-row">
+            <button class="cmd-btn danger" id="cmd-kill-on" onclick="confirmCmd('kill-switch',true,'ACTIVATE kill switch on ALL nodes?')">Kill Switch ON</button>
+            <button class="cmd-btn" id="cmd-kill-off" onclick="sendGlobalCmd('kill-switch',false)">Kill Switch OFF</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- TWO COLUMN: GRAPHS + ISSUES -->
@@ -901,7 +1064,7 @@ document.getElementById('dbg-js').style.color = '#00f5d4';
       </div>
     </div>
 
-    <!-- ISSUES PANEL -->
+    <!-- RIGHT COLUMN: ISSUES + AGENT FLEET -->
     <div>
       <div class="sec-title">Open Issues</div>
       <div class="todo-panel">
@@ -911,6 +1074,17 @@ document.getElementById('dbg-js').style.color = '#00f5d4';
         </div>
         <div class="todo-scroll" id="todo-list">
           <div class="todo-empty">Loading issues...</div>
+        </div>
+      </div>
+
+      <!-- AGENT FLEET OVERVIEW -->
+      <div class="aft-panel">
+        <div class="aft-hdr">
+          <span class="aft-title">Agent Fleet</span>
+          <span class="aft-count" id="aft-badge">0</span>
+        </div>
+        <div class="aft-scroll" id="aft-body">
+          <div style="color:var(--muted);font-size:11px;padding:16px;text-align:center">Waiting for heartbeat data...</div>
         </div>
       </div>
     </div>
@@ -1022,6 +1196,7 @@ async function fetchStatus() {
     renderNodeRoster();
     updateFleetStats();
     buildFleetCharts();
+    renderAgentFleet();
     document.getElementById('sync-label').textContent = 'synced ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
   } catch(e) {
     console.error('[fetchStatus]', e);
@@ -1055,12 +1230,35 @@ function updateFleetStats() {
 
   const cpuNodes  = pis.filter(p => p.cpu_percent != null);
   const ramNodes  = pis.filter(p => p.ram_percent != null);
-  const tempNodes = pis.filter(p => p.cpu_temp   != null);
 
   const avg = (arr, key) => arr.length ? arr.reduce((s,p) => s + p[key], 0) / arr.length : null;
   const avgCpu  = avg(cpuNodes,  'cpu_percent');
   const avgRam  = avg(ramNodes,  'ram_percent');
-  const avgTemp = avg(tempNodes, 'cpu_temp');
+
+  // Agent counts across all nodes (including expected but unreported)
+  let agActive = 0, agIdle = 0, agFault = 0, agInactive = 0, agTotal = 0;
+  pis.forEach(p => {
+    const reported = p.agents || {};
+    const ageSecs = p.age_secs || 0;
+    const role = detectNodeRole(p);
+    const merged = {};
+    if (role && EXPECTED_AGENTS[role]) {
+      EXPECTED_AGENTS[role].forEach(k => { merged[k] = null; });
+    }
+    Object.entries(reported).forEach(([k, v]) => { merged[k] = v; });
+    Object.values(merged).forEach(s => {
+      agTotal++;
+      const cls = agentStatusClass(s, ageSecs);
+      if (cls === 'fault') agFault++;
+      else if (cls === 'idle') agIdle++;
+      else if (cls === 'inactive') agInactive++;
+      else agActive++;
+    });
+  });
+
+  // Trading mode counts
+  const paperCount = pis.filter(p => (p.trading_mode||'PAPER') === 'PAPER').length;
+  const liveCount  = pis.filter(p => (p.trading_mode||'PAPER') === 'LIVE').length;
 
   const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
 
@@ -1069,12 +1267,18 @@ function updateFleetStats() {
   sv('fl-issues',  allTodos.filter(t=>!t.resolved).length);
   sv('fl-cpu',     avgCpu  != null ? avgCpu.toFixed(1)  + '%'  : '—');
   sv('fl-ram',     avgRam  != null ? avgRam.toFixed(1)  + '%'  : '—');
-  sv('fl-temp',    avgTemp != null ? avgTemp.toFixed(1) + '°C' : '—');
+  sv('fl-agents',  agTotal > 0 ? agActive + ' / ' + agTotal : '—');
+  sv('fl-agents-sub', agTotal > 0 ? agActive + ' active' + (agIdle ? ', ' + agIdle + ' idle' : '') + (agFault ? ', ' + agFault + ' fault' : '') + (agInactive ? ', ' + agInactive + ' off' : '') : 'Awaiting data');
+  sv('fl-trading',    total > 0 ? paperCount + 'P / ' + liveCount + 'L' : '—');
+  sv('fl-trading-sub', total > 0 ? paperCount + ' paper, ' + liveCount + ' live' : 'Awaiting data');
 
   // Header pill
   if (total === 0)       sv('pi-count', 'No Nodes');
   else if (notOk === 0)  sv('pi-count', 'All Nodes Online');
   else                   sv('pi-count', notOk + ' not reporting');
+
+  // Update command button highlights
+  updateCommandState(pis);
 }
 
 // ── NODE ROSTER TABLE ──
@@ -1501,20 +1705,206 @@ function renderAgents(agents) {
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+// ── AGENT FLEET OVERVIEW ──
+const AGENT_NAMES = {
+  'retail_trade_logic_agent':'Trade Logic','retail_news_agent':'News',
+  'retail_market_sentiment_agent':'Market Sentiment','retail_sector_screener':'Screener',
+  'retail_scheduler':'Scheduler','retail_heartbeat':'Heartbeat',
+  'retail_watchdog':'Watchdog','retail_health_check':'Health Check',
+  'retail_boot_sequence':'Boot Sequence','retail_shutdown':'Shutdown',
+  'retail_interrogation_listener':'Listener','retail_patch':'Patcher',
+  'retail_backup':'Backup',
+  'trade_logic_agent':'Trade Logic','news_agent':'News','market_sentiment_agent':'Market Sentiment',
+  'synthos_monitor':'Monitor','scoop':'Scoop','strongbox':'Strongbox',
+  'company_server':'Server','company_vault':'Vault','company_archivist':'Librarian',
+  'company_sentinel':'Sentinel','company_keepalive':'Keepalive','company_auditor':'Auditor'
+};
+
+// Expected agents per node role — used to show inactive agents that haven't reported
+const EXPECTED_AGENTS = {
+  retail: [
+    'retail_trade_logic_agent','retail_news_agent','retail_market_sentiment_agent',
+    'retail_sector_screener','retail_scheduler','retail_heartbeat',
+    'retail_watchdog','retail_health_check','retail_boot_sequence',
+    'retail_shutdown','retail_interrogation_listener','retail_patch','retail_backup'
+  ],
+  company: [
+    'company_server','scoop','strongbox','company_vault',
+    'company_archivist','company_sentinel','company_keepalive','company_auditor'
+  ],
+  monitor: ['synthos_monitor']
+};
+
+function detectNodeRole(pi) {
+  const agents = Object.keys(pi.agents || {});
+  const id = (pi.pi_id || '').toLowerCase();
+  const label = (pi.label || '').toLowerCase();
+  if (agents.some(a => a.startsWith('retail_')) || id.includes('retail') || label.includes('retail'))
+    return 'retail';
+  if (agents.some(a => a.startsWith('company_') || a === 'scoop' || a === 'strongbox')
+      || id.includes('company') || id.includes('pi4b') || label.includes('company'))
+    return 'company';
+  if (agents.includes('synthos_monitor') || id.includes('monitor') || label.includes('monitor'))
+    return 'monitor';
+  // Fallback: check for legacy agent names
+  if (agents.some(a => a.includes('trade') || a.includes('news') || a.includes('sentiment')))
+    return 'retail';
+  return null;  // unknown role — only show reported agents
+}
+
+function agentStatusClass(s, ageSecs) {
+  if (s === 'fault' || s === 'error') return 'fault';
+  if (!s) return 'inactive';
+  if (ageSecs > 900) return 'idle';  // >15 min since last heartbeat
+  return 'active';
+}
+
+function renderAgentFleet() {
+  const body  = document.getElementById('aft-body');
+  const badge = document.getElementById('aft-badge');
+  if (!body) return;
+
+  const pis = Object.values(piData);
+  const rows = [];
+  pis.forEach(pi => {
+    const reported = pi.agents || {};
+    const ageSecs = pi.age_secs || 0;
+    const lastSeen = pi.last_seen || '';
+    const role = detectNodeRole(pi);
+
+    // Start with all expected agents for this node role (marked inactive)
+    const merged = {};
+    if (role && EXPECTED_AGENTS[role]) {
+      EXPECTED_AGENTS[role].forEach(k => { merged[k] = null; });
+    }
+    // Overlay reported agents on top
+    Object.entries(reported).forEach(([k, v]) => { merged[k] = v; });
+
+    Object.entries(merged).forEach(([key, status]) => {
+      rows.push({
+        agent: AGENT_NAMES[key] || key,
+        agentKey: key,
+        node: pi.label || pi.pi_id,
+        status: agentStatusClass(status, ageSecs),
+        rawStatus: status,
+        lastSeen: status ? lastSeen : ''
+      });
+    });
+  });
+
+  if (!rows.length) {
+    body.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:16px;text-align:center">No nodes registered yet</div>';
+    badge.textContent = '0';
+    return;
+  }
+
+  // Sort: fault first, then active, idle, inactive
+  const sord = {fault:0, active:1, idle:2, inactive:3};
+  rows.sort((a,b) => (sord[a.status]||9) - (sord[b.status]||9) || a.node.localeCompare(b.node));
+
+  const activeCount = rows.filter(r => r.status === 'active').length;
+  badge.textContent = activeCount + ' / ' + rows.length;
+  body.innerHTML =
+    '<div class="aft-row aft-thead"><div>Agent</div><div>Node</div><div>Status</div><div>Last</div></div>'
+    + rows.map(r =>
+      '<div class="aft-row">'
+        + '<div class="aft-agent">' + escHtml(r.agent) + '</div>'
+        + '<div class="aft-node">' + escHtml(r.node) + '</div>'
+        + '<div class="aft-status"><div class="aft-dot s-' + r.status + '"></div><span class="aft-st s-' + r.status + '">' + r.status + '</span></div>'
+        + '<div class="aft-time">' + (r.lastSeen ? ageSince(r.lastSeen) : '\u2014') + '</div>'
+      + '</div>'
+    ).join('');
+}
+
+// ── GLOBAL COMMANDS ──
+let cmdConfirmType = null;
+let cmdConfirmValue = null;
+
+function confirmCmd(type, value, msg) {
+  cmdConfirmType = type;
+  cmdConfirmValue = value;
+  document.getElementById('confirm-msg').textContent = msg;
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+async function sendGlobalCmd(type, value) {
+  const statusEl = document.getElementById('cmd-status');
+  try {
+    statusEl.textContent = 'sending...';
+    statusEl.style.color = 'var(--amber)';
+    const body = type === 'kill-switch' ? {active: value} : {mode: value};
+    const r = await fetch('/api/command/' + type, {
+      method: 'POST',
+      headers: {'X-Token': SECRET_TOKEN, 'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (r.ok) {
+      const d = await r.json();
+      toast('\u2713 ' + type + ' \u2192 ' + value + ' queued for ' + (d.queued_for||[]).length + ' nodes', 'ok');
+      statusEl.textContent = 'queued';
+      statusEl.style.color = 'var(--teal)';
+    } else {
+      toast('Command failed: HTTP ' + r.status, 'err');
+      statusEl.textContent = 'failed';
+      statusEl.style.color = 'var(--pink)';
+    }
+  } catch(e) {
+    toast('Command error: ' + e.message, 'err');
+    statusEl.textContent = 'error';
+    statusEl.style.color = 'var(--pink)';
+  }
+  setTimeout(() => { statusEl.textContent = ''; }, 5000);
+}
+
+function updateCommandState(pis) {
+  // Highlight buttons based on current fleet majority state
+  const tm = pis.map(p => (p.trading_mode||'PAPER'));
+  const allPaper = tm.every(m => m === 'PAPER');
+  const allLive  = tm.every(m => m === 'LIVE');
+  const om = pis.map(p => (p.operating_mode||'SUPERVISED'));
+  const allSup   = om.every(m => m === 'SUPERVISED');
+  const allAuto  = om.every(m => m === 'AUTONOMOUS');
+  const ks = pis.map(p => !!p.kill_switch);
+  const anyKill  = ks.some(k => k);
+  const noKill   = ks.every(k => !k);
+
+  const cls = (id, c, on) => { const el=document.getElementById(id); if(el){el.classList.remove('active-teal','active-amber','active-pink'); if(on) el.classList.add(c);} };
+  cls('cmd-paper',      'active-teal',  allPaper && pis.length > 0);
+  cls('cmd-live',       'active-amber', allLive  && pis.length > 0);
+  cls('cmd-supervised', 'active-teal',  allSup   && pis.length > 0);
+  cls('cmd-autonomous', 'active-amber', allAuto  && pis.length > 0);
+  cls('cmd-kill-on',    'active-pink',  anyKill);
+  cls('cmd-kill-off',   'active-teal',  noKill && pis.length > 0);
+}
+
 // ── DELETE ──
 function promptDelete(piId) {
   pendingDelete = piId;
   document.getElementById('confirm-msg').textContent = 'Remove "' + piId + '" from the registry?';
   document.getElementById('confirm-overlay').classList.add('show');
 }
-function cancelDelete() { pendingDelete=null; document.getElementById('confirm-overlay').classList.remove('show'); }
+function cancelDelete() {
+  pendingDelete=null;
+  cmdConfirmType=null;
+  cmdConfirmValue=null;
+  document.getElementById('confirm-overlay').classList.remove('show');
+}
 async function confirmDelete() {
+  // Handle global command confirmation
+  if (cmdConfirmType) {
+    const t = cmdConfirmType, v = cmdConfirmValue;
+    cmdConfirmType = null; cmdConfirmValue = null;
+    document.getElementById('confirm-overlay').classList.remove('show');
+    await sendGlobalCmd(t, v);
+    return;
+  }
+  // Handle Pi delete confirmation
   if (!pendingDelete) return;
   try {
     await fetch('/api/delete/' + encodeURIComponent(pendingDelete), {
       method:'DELETE', headers:{'X-Token':SECRET_TOKEN}
     });
-    toast('✓ Pi removed', 'ok');
+    toast('\u2713 Pi removed', 'ok');
   } catch(e) {}
   cancelDelete();
   closeModalBtn();
@@ -1730,21 +2120,38 @@ def index():
 @app.route("/api/todos", methods=["GET"])
 def api_todos_fallback():
     """
-    Fallback todos endpoint — used when digest_agent blueprint is not loaded.
-    Returns empty list so console JS doesn't break.
+    Proxy TODO.md items from the Company Pi's company_server.
+    Falls back to empty list if company server is unreachable.
     """
-    # If digest_agent blueprint is registered it will handle this route first.
-    # This only fires if the blueprint isn't loaded.
-    TODO_STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.triage_todos.json')
-    import json as _json
-    if os.path.exists(TODO_STORE):
+    if COMPANY_URL:
         try:
-            todos = _json.load(open(TODO_STORE))
-            unresolved = [t for t in todos if not t.get('resolved')]
-            return jsonify(unresolved), 200
+            import requests as _req
+            r = _req.get(f"{COMPANY_URL}/api/todos", timeout=5)
+            if r.status_code == 200:
+                return jsonify(r.json()), 200
         except Exception:
             pass
     return jsonify([]), 200
+
+
+@app.route("/api/auditor")
+def api_auditor():
+    """Proxy auditor findings from the Company Pi's company_server."""
+    if not COMPANY_URL:
+        return jsonify({'error': 'COMPANY_URL not configured', 'issues': [],
+                        'by_severity': {}, 'total_unresolved': 0,
+                        'scan_state': [], 'morning_report': None})
+    try:
+        import requests as _req
+        r = _req.get(f"{COMPANY_URL}/api/auditor/findings", timeout=8)
+        if r.status_code == 200:
+            return jsonify(r.json())
+        return jsonify({'error': f'Company server returned {r.status_code}',
+                        'issues': [], 'by_severity': {}, 'total_unresolved': 0,
+                        'scan_state': [], 'morning_report': None})
+    except Exception as e:
+        return jsonify({'error': str(e), 'issues': [], 'by_severity': {},
+                        'total_unresolved': 0, 'scan_state': [], 'morning_report': None})
 
 
 @app.route("/api/audit/<pi_id>")
@@ -1796,7 +2203,7 @@ AUDIT_PAGE_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos — Audit Agent</title>
+<title>Synthos — Auditor</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1817,36 +2224,25 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .nav-back{color:var(--muted);font-size:11px;text-decoration:none;padding:5px 12px;
           border-radius:8px;border:1px solid var(--border);margin-left:auto;transition:all 0.15s}
 .nav-back:hover{color:var(--text);border-color:var(--border2)}
-.page{max-width:1100px;margin:0 auto;padding:24px}
+.page{max-width:1200px;margin:0 auto;padding:24px}
 .title{font-size:22px;font-weight:700;letter-spacing:-0.3px;margin-bottom:4px}
 .title span{background:linear-gradient(90deg,var(--purple),var(--teal));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .subtitle{font-size:12px;color:var(--muted);margin-bottom:24px}
 
-/* PI selector */
-.pi-tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
-.pi-tab{padding:6px 14px;border-radius:10px;font-size:11px;font-weight:600;cursor:pointer;
-        background:transparent;border:1px solid var(--border);color:var(--muted);
-        font-family:var(--sans);transition:all 0.15s}
-.pi-tab.active{background:rgba(123,97,255,0.1);border-color:rgba(123,97,255,0.3);color:var(--purple)}
-.pi-tab:hover:not(.active){border-color:var(--border2);color:var(--text)}
+/* Stats row */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.stat-mini{padding:14px 16px;border-radius:12px;border:1px solid var(--border);background:var(--surface)}
+.sm-label{font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.sm-val{font-size:26px;font-weight:800;letter-spacing:-1px}
+.sm-sub{font-size:10px;color:var(--muted);margin-top:3px}
 
-/* Health score */
-.health-bar{border-radius:16px;padding:16px 20px;margin-bottom:20px;
-            display:flex;align-items:center;gap:16px;border:1px solid;
-            background:var(--surface)}
-.health-score{font-size:40px;font-weight:800;letter-spacing:-2px;flex-shrink:0;width:80px}
-.health-info{flex:1}
-.health-label{font-size:13px;font-weight:700;margin-bottom:3px}
-.health-summary{font-size:12px;color:var(--muted);line-height:1.5}
-.health-meta{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:4px}
-.score-ring{position:relative;width:64px;height:64px;flex-shrink:0}
-
-/* Two column */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-@media(max-width:800px){.two-col{grid-template-columns:1fr}}
+/* Two column layout */
+.two-col{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:900px){.two-col{grid-template-columns:1fr}}
 
 /* Panels */
-.panel{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden}
+.panel{border-radius:16px;border:1px solid var(--border);background:var(--surface);overflow:hidden;margin-bottom:16px}
+.panel:last-child{margin-bottom:0}
 .panel-header{padding:14px 16px;border-bottom:1px solid var(--border);
               display:flex;align-items:center;gap:8px}
 .panel-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);flex:1}
@@ -1855,390 +2251,244 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .pb-teal{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.2);color:var(--teal)}
 .pb-amber{background:rgba(255,179,71,0.08);border-color:rgba(255,179,71,0.2);color:var(--amber)}
 .pb-pink{background:rgba(255,75,110,0.08);border-color:rgba(255,75,110,0.2);color:var(--pink)}
-.panel-scroll{max-height:420px;overflow-y:auto}
+.panel-scroll{max-height:480px;overflow-y:auto}
 
-/* Task items */
-.task-item{padding:12px 16px;border-bottom:1px solid var(--border);
-           display:flex;align-items:flex-start;gap:10px}
-.task-item:last-child{border-bottom:none}
-.task-status{width:22px;height:22px;border-radius:6px;flex-shrink:0;margin-top:1px;
-             display:flex;align-items:center;justify-content:center;font-size:11px}
-.ts-pending{background:rgba(255,179,71,0.12);border:1px solid rgba(255,179,71,0.2);color:var(--amber)}
-.ts-done{background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.2);color:var(--teal)}
-.ts-fail{background:rgba(255,75,110,0.1);border:1px solid rgba(255,75,110,0.2);color:var(--pink)}
-.ts-active{background:rgba(123,97,255,0.15);border:1px solid rgba(123,97,255,0.3);color:var(--purple);
-           animation:spin 2s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.task-body{flex:1;min-width:0}
-.task-title{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
-.task-file{font-size:10px;font-family:var(--mono);color:var(--purple);margin-bottom:2px}
-.task-desc{font-size:11px;color:var(--muted);line-height:1.5}
-.task-result{font-size:10px;color:var(--teal);margin-top:3px;font-style:italic}
-.task-result.fail{color:var(--pink)}
-.task-meta{font-size:9px;color:var(--dim);margin-top:3px;font-family:var(--mono)}
-.cat-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;
-           letter-spacing:0.04em;margin-bottom:4px}
-.cat-UX{background:rgba(0,245,212,0.1);color:var(--teal)}
-.cat-Utility{background:rgba(123,97,255,0.1);color:var(--purple)}
-.cat-Performance{background:rgba(255,179,71,0.1);color:var(--amber)}
-.cat-Docs{background:rgba(255,255,255,0.06);color:var(--muted)}
-.pri-bar{display:flex;align-items:center;gap:4px;margin-top:4px}
-.pri-dot{width:5px;height:5px;border-radius:50%;background:var(--border)}
-.pri-dot.active{background:var(--purple)}
+/* Issue rows */
+.issue-row{padding:11px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start}
+.issue-row:last-child{border-bottom:none}
+.sev-badge{flex-shrink:0;padding:2px 7px;border-radius:5px;font-size:9px;font-weight:800;
+           letter-spacing:0.06em;text-transform:uppercase;margin-top:1px}
+.sev-critical{background:rgba(255,75,110,0.12);color:var(--pink);border:1px solid rgba(255,75,110,0.25)}
+.sev-high{background:rgba(255,179,71,0.12);color:var(--amber);border:1px solid rgba(255,179,71,0.25)}
+.sev-medium{background:rgba(123,97,255,0.12);color:var(--purple);border:1px solid rgba(123,97,255,0.25)}
+.sev-low{background:rgba(255,255,255,0.05);color:var(--muted);border:1px solid var(--border)}
+.issue-body{flex:1;min-width:0}
+.issue-file{font-size:10px;font-family:var(--mono);color:var(--purple);margin-bottom:3px}
+.issue-ctx{font-size:11px;color:var(--text);line-height:1.5;word-break:break-all}
+.issue-meta{font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:4px}
 
-/* Audit issues */
-.issue-item{padding:10px 16px;border-bottom:1px solid var(--border);
-            display:flex;gap:8px;font-size:11px}
-.issue-item:last-child{border-bottom:none}
-.issue-icon{flex-shrink:0;font-weight:700;width:14px}
-.ii-crit{color:var(--pink)}
-.ii-warn{color:var(--amber)}
-.ii-info{color:var(--dim)}
-.issue-body{flex:1}
-.issue-cat{font-weight:600;color:var(--text)}
-.issue-msg{color:var(--muted)}
-.issue-fix{font-size:10px;color:var(--teal);margin-top:2px}
+/* Scan state rows */
+.scan-row{padding:8px 16px;border-bottom:1px solid var(--border);font-size:10px;
+          display:flex;gap:8px;align-items:center;font-family:var(--mono)}
+.scan-row:last-child{border-bottom:none}
+.scan-file{color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scan-age{color:var(--muted);flex-shrink:0}
 
-/* Stats row */
-.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
-.stat-mini{padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface)}
-.sm-label{font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
-.sm-val{font-size:20px;font-weight:700;color:var(--text)}
-.sm-sub{font-size:10px;color:var(--muted);margin-top:2px}
+/* Morning report */
+.report-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 16px}
+.rg-cell{text-align:center}
+.rg-val{font-size:22px;font-weight:800;letter-spacing:-1px}
+.rg-lab{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-top:2px}
 
-/* Empty state */
+/* Error / empty */
 .empty{padding:32px;text-align:center;color:var(--muted);font-size:12px}
 .empty-icon{font-size:28px;margin-bottom:10px}
-
-/* Current task highlight */
-.current-task{border-radius:14px;border:1px solid rgba(123,97,255,0.3);
-              background:linear-gradient(135deg,rgba(123,97,255,0.08) 0%,var(--surface) 50%);
-              padding:16px 18px;margin-bottom:20px;position:relative;overflow:hidden}
-.current-task::before{content:'';position:absolute;top:0;left:15%;right:15%;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(123,97,255,0.6),transparent)}
-.ct-label{font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
-          color:var(--purple);margin-bottom:8px;display:flex;align-items:center;gap:6px}
-.ct-pulse{width:6px;height:6px;border-radius:50%;background:var(--purple);
-          box-shadow:0 0 6px var(--purple);animation:pulse 1.5s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-.ct-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px}
-.ct-file{font-size:11px;font-family:var(--mono);color:var(--purple);margin-bottom:6px}
-.ct-desc{font-size:12px;color:var(--muted);line-height:1.5}
+.error-bar{padding:12px 16px;font-size:11px;color:var(--pink);background:rgba(255,75,110,0.06);
+           border-bottom:1px solid rgba(255,75,110,0.15)}
 </style>
 </head>
 <body>
 
 <header class="header">
   <div class="wordmark">SYNTHOS</div>
-  <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">Audit Agent</div>
+  <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">Auditor</div>
   <a href="/console" class="nav-back">&#8592; Console</a>
 </header>
 
 <div class="page">
-  <div class="title">Agent 4 — <span>Self-Improvement</span></div>
-  <div class="subtitle" id="page-sub">Loading audit data...</div>
+  <div class="title">Auditor — <span>Log Monitor</span></div>
+  <div class="subtitle" id="page-sub">Loading findings...</div>
 
-  <!-- PI SELECTOR -->
-  <div class="pi-tabs" id="pi-tabs"></div>
-
-  <!-- CURRENT TASK -->
-  <div id="current-task-wrap" style="display:none">
-    <div class="current-task" id="current-task-card">
-      <div class="ct-label"><div class="ct-pulse"></div>Currently Working On</div>
-      <div class="ct-title" id="ct-title">—</div>
-      <div class="ct-file" id="ct-file">—</div>
-      <div class="ct-desc" id="ct-desc">—</div>
-    </div>
-  </div>
-
-  <!-- HEALTH + STATS -->
-  <div class="health-bar" id="health-bar" style="border-color:rgba(255,255,255,0.1)">
-    <div class="health-score" id="health-score" style="color:var(--muted)">—</div>
-    <div class="health-info">
-      <div class="health-label" id="health-label">No audit data yet</div>
-      <div class="health-summary" id="health-summary">Run: python3 agent4_audit.py on the Pi</div>
-      <div class="health-meta" id="health-meta"></div>
-    </div>
-  </div>
-
+  <!-- STATS -->
   <div class="stats-row">
     <div class="stat-mini">
-      <div class="sm-label">Tasks Done</div>
-      <div class="sm-val" id="stat-done" style="color:var(--teal)">0</div>
-      <div class="sm-sub">Completed</div>
+      <div class="sm-label">Critical</div>
+      <div class="sm-val" id="stat-crit" style="color:var(--pink)">—</div>
+      <div class="sm-sub">Unresolved</div>
     </div>
     <div class="stat-mini">
-      <div class="sm-label">Pending</div>
-      <div class="sm-val" id="stat-pending" style="color:var(--amber)">0</div>
-      <div class="sm-sub">In backlog</div>
+      <div class="sm-label">High</div>
+      <div class="sm-val" id="stat-high" style="color:var(--amber)">—</div>
+      <div class="sm-sub">Unresolved</div>
     </div>
     <div class="stat-mini">
-      <div class="sm-label">Failed</div>
-      <div class="sm-val" id="stat-failed" style="color:var(--pink)">0</div>
-      <div class="sm-sub">Skipped</div>
+      <div class="sm-label">Medium</div>
+      <div class="sm-val" id="stat-med" style="color:var(--purple)">—</div>
+      <div class="sm-sub">Unresolved</div>
     </div>
     <div class="stat-mini">
-      <div class="sm-label">Lines Changed</div>
-      <div class="sm-val" id="stat-lines" style="color:var(--purple)">0</div>
-      <div class="sm-sub">Total edits</div>
+      <div class="sm-label">Total</div>
+      <div class="sm-val" id="stat-total" style="color:var(--text)">—</div>
+      <div class="sm-sub">Unresolved</div>
     </div>
   </div>
 
-  <!-- TWO COLUMN: BACKLOG + AUDIT ISSUES -->
   <div class="two-col">
-
-    <!-- BACKLOG -->
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Improvement Backlog</span>
-        <span class="panel-badge pb-purple" id="backlog-badge">Loading</span>
-      </div>
-      <div class="panel-scroll" id="backlog-list">
-        <div class="empty"><div class="empty-icon">🤖</div>No tasks yet — runs after first clean audit pass</div>
-      </div>
-    </div>
-
-    <!-- COMPLETED -->
-    <div class="panel">
-      <div class="panel-header">
-        <span class="panel-title">Completed Improvements</span>
-        <span class="panel-badge pb-teal" id="completed-badge">0</span>
-      </div>
-      <div class="panel-scroll" id="completed-list">
-        <div class="empty"><div class="empty-icon">✓</div>No completed tasks yet</div>
+    <!-- LEFT: ISSUES LIST -->
+    <div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Unresolved Issues</span>
+          <span class="panel-badge pb-pink" id="issues-badge">Loading</span>
+        </div>
+        <div class="panel-scroll" id="issues-list">
+          <div class="empty"><div class="empty-icon">⏳</div>Fetching findings...</div>
+        </div>
       </div>
     </div>
 
-  </div>
+    <!-- RIGHT: SCAN COVERAGE + MORNING REPORT -->
+    <div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Scan Coverage</span>
+          <span class="panel-badge pb-teal" id="scan-badge">—</span>
+        </div>
+        <div id="scan-list">
+          <div class="empty" style="padding:20px">Loading...</div>
+        </div>
+      </div>
 
-  <!-- AUDIT FINDINGS -->
-  <div class="panel">
-    <div class="panel-header">
-      <span class="panel-title">Last Audit Findings</span>
-      <span class="panel-badge pb-amber" id="findings-badge">—</span>
-    </div>
-    <div id="findings-list">
-      <div class="empty">Select a Pi above to load audit data</div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Last Morning Report</span>
+          <span class="panel-badge pb-purple" id="report-badge">—</span>
+        </div>
+        <div id="report-body">
+          <div class="empty" style="padding:20px">No reports yet</div>
+        </div>
+      </div>
     </div>
   </div>
 
 </div>
 
 <script>
-let activePiId = null;
-let piData = {};
-
-// ── INIT ──
-async function init() {
-  try {
-    const r = await fetch('/api/status');
-    piData = await r.json();
-    renderPiTabs();
-    const pis = Object.keys(piData);
-    if (pis.length) loadPiData(pis[0]);
-  } catch(e) {
-    document.getElementById('page-sub').textContent = 'Could not load Pi list';
-  }
-}
-
-function renderPiTabs() {
-  const wrap = document.getElementById('pi-tabs');
-  const pis  = Object.values(piData);
-  if (!pis.length) {
-    wrap.innerHTML = '<div style="font-size:12px;color:var(--muted)">No Pis registered yet</div>';
-    return;
-  }
-  wrap.innerHTML = pis.map(pi =>
-    '<button class="pi-tab" id="tab-' + pi.pi_id + '" data-piid="' + pi.pi_id + '" onclick="loadPiData(this.dataset.piid)">'
-    + (pi.label || pi.pi_id)
-    + '</button>'
-  ).join('');
-}
-
-async function loadPiData(piId) {
-  activePiId = piId;
-  document.querySelectorAll('.pi-tab').forEach(b => b.classList.remove('active'));
-  const tab = document.getElementById('tab-' + piId);
-  if (tab) tab.classList.add('active');
-
-  const pi = piData[piId] || {};
-  document.getElementById('page-sub').textContent =
-    (pi.label || piId) + ' · ' + (pi.email || 'No email') + ' · Last seen ' + ageSince(pi.last_seen);
-
-  // Load audit + backlog in parallel
-  const [auditData, backlogData] = await Promise.all([
-    fetchAudit(piId),
-    fetchBacklog(piId),
-  ]);
-
-  renderHealth(auditData);
-  renderFindings(auditData);
-  renderBacklog(backlogData);
-}
-
-async function fetchAudit(piId) {
-  try {
-    const r = await fetch('/api/audit/' + encodeURIComponent(piId));
-    return r.ok ? await r.json() : null;
-  } catch(e) { return null; }
-}
-
-async function fetchBacklog(piId) {
-  try {
-    const r = await fetch('/api/backlog/' + encodeURIComponent(piId));
-    return r.ok ? await r.json() : {tasks:[]};
-  } catch(e) { return {tasks:[]}; }
-}
-
-// ── RENDER HEALTH ──
-function renderHealth(d) {
-  if (!d || !d.health_score) {
-    document.getElementById('health-label').textContent = 'No audit data yet';
-    document.getElementById('health-summary').textContent = 'Run: python3 agent4_audit.py on the Pi';
-    return;
-  }
-  const score = d.health_score;
-  const color = score >= 90 ? '--teal' : score >= 70 ? '--amber' : '--pink';
-  document.getElementById('health-score').textContent = score;
-  document.getElementById('health-score').style.color = 'var(' + color + ')';
-  document.getElementById('health-label').textContent =
-    d.health_label + ' · ' + (d.deep ? 'Deep pass' : 'Light pass');
-  document.getElementById('health-summary').textContent = d.summary || '';
-  const bar = document.getElementById('health-bar');
-  bar.style.borderColor = score >= 90 ? 'rgba(0,245,212,0.2)'
-    : score >= 70 ? 'rgba(255,179,71,0.2)' : 'rgba(255,75,110,0.2)';
-  if (d.timestamp) {
-    document.getElementById('health-meta').textContent =
-      'Last run: ' + new Date(d.timestamp).toLocaleString('en-US',{timeZone:'America/New_York',hour12:false}) + ' ET'
-      + ' · ' + (d.elapsed||0) + 's runtime';
-  }
-}
-
-// ── RENDER FINDINGS ──
-function renderFindings(d) {
-  const list  = document.getElementById('findings-list');
-  const badge = document.getElementById('findings-badge');
-  if (!d) {
-    list.innerHTML = '<div class="empty">Could not reach Pi portal — make sure it\'s running on port 5001</div>';
-    badge.textContent = '—';
-    return;
-  }
-  const all = [...(d.critical||[]).map(f=>({...f,level:'CRITICAL'})),
-               ...(d.warnings||[]).map(f=>({...f,level:'WARN'}))];
-  badge.textContent = all.length ? all.length + ' issues' : 'All clear';
-  badge.className   = 'panel-badge ' + (all.length ? 'pb-pink' : 'pb-teal');
-  if (!all.length) {
-    list.innerHTML = '<div class="empty"><div class="empty-icon">✓</div>No issues — system healthy</div>';
-    return;
-  }
-  list.innerHTML = all.map(f => {
-    const icon = f.level === 'CRITICAL' ? '✗' : '⚠';
-    const cls  = f.level === 'CRITICAL' ? 'ii-crit' : 'ii-warn';
-    return '<div class="issue-item">'
-      + '<div class="issue-icon ' + cls + '">' + icon + '</div>'
-      + '<div class="issue-body">'
-        + '<span class="issue-cat">[' + f.category + ']</span> '
-        + '<span class="issue-msg">' + escHtml(f.message) + '</span>'
-        + (f.fix ? '<div class="issue-fix">→ ' + escHtml(f.fix) + '</div>' : '')
-      + '</div>'
-    + '</div>';
-  }).join('');
-}
-
-// ── RENDER BACKLOG ──
-function renderBacklog(d) {
-  const tasks = (d && d.tasks) ? d.tasks : [];
-
-  const pending   = tasks.filter(t => t.status === 'pending');
-  const completed = tasks.filter(t => t.status === 'completed');
-  const failed    = tasks.filter(t => t.status === 'failed');
-
-  // Stats
-  document.getElementById('stat-done').textContent    = completed.length;
-  document.getElementById('stat-pending').textContent = pending.length;
-  document.getElementById('stat-failed').textContent  = failed.length;
-  document.getElementById('stat-lines').textContent   =
-    tasks.reduce((s,t) => s + (t.lines_changed||0), 0);
-
-  document.getElementById('backlog-badge').textContent  = pending.length + ' pending';
-  document.getElementById('completed-badge').textContent = completed.length;
-
-  // Current task (highest priority pending)
-  const sorted = [...pending].sort((a,b) => -((a.priority||0)-(b.priority||0)));
-  const current = sorted[0];
-  const wrap = document.getElementById('current-task-wrap');
-  if (current) {
-    wrap.style.display = 'block';
-    document.getElementById('ct-title').textContent = current.title || '—';
-    document.getElementById('ct-file').textContent  = current.file || '—';
-    document.getElementById('ct-desc').textContent  = current.description || '—';
-  } else {
-    wrap.style.display = 'none';
-  }
-
-  // Pending list
-  const backlogEl = document.getElementById('backlog-list');
-  if (!pending.length) {
-    backlogEl.innerHTML = '<div class="empty"><div class="empty-icon">✓</div>Backlog empty — new ideas generated on next clean pass</div>';
-  } else {
-    backlogEl.innerHTML = pending.map(t => taskCard(t, 'pending')).join('');
-  }
-
-  // Completed list
-  const completedEl = document.getElementById('completed-list');
-  const allDone = [...completed, ...failed].sort((a,b) =>
-    new Date(b.completed||0) - new Date(a.completed||0));
-  if (!allDone.length) {
-    completedEl.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div>No completed tasks yet</div>';
-  } else {
-    completedEl.innerHTML = allDone.map(t =>
-      taskCard(t, t.status === 'completed' ? 'done' : 'fail')
-    ).join('');
-  }
-}
-
-function taskCard(t, statusType) {
-  const icons = {pending:'·', done:'✓', fail:'✗', active:'↻'};
-  const classes = {pending:'ts-pending', done:'ts-done', fail:'ts-fail', active:'ts-active'};
-  const catClass = 'cat-' + (t.category||'Docs').replace(/[^a-zA-Z]/g,'');
-
-  // Priority dots (1-10 → 5 dots)
-  const dots = Array.from({length:5}, (_,i) =>
-    '<div class="pri-dot' + (i < Math.round((t.priority||5)/2) ? ' active' : '') + '"></div>'
-  ).join('');
-
-  return '<div class="task-item">'
-    + '<div class="task-status ' + classes[statusType] + '">' + icons[statusType] + '</div>'
-    + '<div class="task-body">'
-      + '<div class="cat-badge ' + catClass + '">' + (t.category||'?') + '</div>'
-      + '<div class="task-title">' + escHtml(t.title||'Untitled') + '</div>'
-      + '<div class="task-file">' + (t.file||'—') + '</div>'
-      + '<div class="task-desc">' + escHtml(t.description||'') + '</div>'
-      + (t.result ? '<div class="task-result' + (statusType==='fail'?' fail':'') + '">'
-          + (statusType==='done'?'✓ ':'✗ ') + escHtml(t.result) + '</div>' : '')
-      + '<div class="task-meta">'
-        + '<div class="pri-bar">' + dots + '<span style="font-size:9px;color:var(--dim);margin-left:4px">Priority ' + (t.priority||5) + '/10</span></div>'
-        + (t.lines_changed ? ' · ' + t.lines_changed + ' lines changed' : '')
-        + (t.completed ? ' · ' + new Date(t.completed).toLocaleDateString() : '')
-      + '</div>'
-    + '</div>'
-  + '</div>';
-}
-
-function escHtml(s) {
+function escHtml(s){
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
-function ageSince(isoStr) {
-  if (!isoStr) return 'unknown';
-  const secs = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
-  if (secs < 60) return secs + 's ago';
-  if (secs < 3600) return Math.floor(secs/60) + 'm ago';
-  return Math.floor(secs/3600) + 'h ago';
+function ageSince(isoStr){
+  if(!isoStr) return '—';
+  const secs=Math.floor((Date.now()-new Date(isoStr).getTime())/1000);
+  if(secs<60) return secs+'s ago';
+  if(secs<3600) return Math.floor(secs/60)+'m ago';
+  if(secs<86400) return Math.floor(secs/3600)+'h ago';
+  return Math.floor(secs/86400)+'d ago';
+}
+function fmtSize(bytes){
+  if(bytes==null) return '—';
+  if(bytes<1024) return bytes+'B';
+  if(bytes<1048576) return (bytes/1024).toFixed(0)+'K';
+  return (bytes/1048576).toFixed(1)+'M';
 }
 
-init();
-setInterval(() => { if (activePiId) loadPiData(activePiId); }, 60000);
+async function load(){
+  try{
+    const r=await fetch('/api/auditor');
+    const d=await r.json();
+    render(d);
+  }catch(e){
+    document.getElementById('page-sub').textContent='Could not reach company server';
+    document.getElementById('issues-list').innerHTML=
+      '<div class="empty"><div class="empty-icon">⚠</div>'+escHtml(e.message)+'</div>';
+  }
+}
+
+function render(d){
+  const sev=d.by_severity||{};
+  const issues=d.issues||[];
+  const total=d.total_unresolved||0;
+
+  // Subtitle
+  if(d.error && !issues.length){
+    document.getElementById('page-sub').textContent='Error: '+d.error;
+  } else {
+    document.getElementById('page-sub').textContent=
+      total+' unresolved issue'+(total!==1?'s':'')+
+      (d.scan_state&&d.scan_state.length ? ' · '+d.scan_state.length+' log files monitored' : '')+
+      ' · refreshes every 60s';
+  }
+
+  // Stats
+  document.getElementById('stat-crit').textContent  = sev.critical||0;
+  document.getElementById('stat-high').textContent  = sev.high||0;
+  document.getElementById('stat-med').textContent   = sev.medium||0;
+  document.getElementById('stat-total').textContent = total;
+
+  // Issues panel
+  const issuesEl=document.getElementById('issues-list');
+  const badge=document.getElementById('issues-badge');
+
+  if(d.error && !issues.length){
+    issuesEl.innerHTML='<div class="error-bar">'+escHtml(d.error)+'</div>'
+      +'<div class="empty">Check that the company server is reachable and the auditor has run.</div>';
+    badge.textContent='Error';
+    badge.className='panel-badge pb-pink';
+  } else if(!issues.length){
+    issuesEl.innerHTML='<div class="empty"><div class="empty-icon">✓</div>No unresolved issues — system healthy</div>';
+    badge.textContent='All clear';
+    badge.className='panel-badge pb-teal';
+  } else {
+    badge.textContent=total+' issue'+(total!==1?'s':'');
+    badge.className='panel-badge '+(sev.critical?'pb-pink':sev.high?'pb-amber':'pb-purple');
+    issuesEl.innerHTML=issues.map(iss=>{
+      const sevClass='sev-'+(iss.severity||'low');
+      const hits=iss.hit_count>1?' <span style="color:var(--dim)">×'+iss.hit_count+'</span>':'';
+      const firstSeen=iss.first_seen?ageSince(iss.first_seen):'?';
+      const lastSeen=iss.last_seen?ageSince(iss.last_seen):'?';
+      return '<div class="issue-row">'
+        +'<div class="sev-badge '+sevClass+'">'+escHtml(iss.severity)+'</div>'
+        +'<div class="issue-body">'
+          +'<div class="issue-file">'+escHtml(iss.source_file)+hits+'</div>'
+          +'<div class="issue-ctx">'+escHtml(iss.context||'')+'</div>'
+          +'<div class="issue-meta">first: '+firstSeen+' · last: '+lastSeen+'</div>'
+        +'</div>'
+      +'</div>';
+    }).join('');
+  }
+
+  // Scan coverage
+  const scanEl=document.getElementById('scan-list');
+  const scanBadge=document.getElementById('scan-badge');
+  const scanState=d.scan_state||[];
+  scanBadge.textContent=scanState.length+' files';
+  if(!scanState.length){
+    scanEl.innerHTML='<div class="empty" style="padding:16px">No log files tracked yet</div>';
+  } else {
+    scanEl.innerHTML=scanState.map(s=>{
+      const fname=s.log_file?s.log_file.split('/').pop():s.log_file;
+      const pct=s.file_size>0?Math.round(s.last_offset/s.file_size*100):100;
+      return '<div class="scan-row">'
+        +'<span class="scan-file">'+escHtml(fname)+'</span>'
+        +'<span class="scan-age" style="color:'+(pct<100?'var(--amber)':'var(--teal)')+'">'+pct+'%</span>'
+        +'<span class="scan-age">'+ageSince(s.last_scanned)+'</span>'
+      +'</div>';
+    }).join('');
+  }
+
+  // Morning report
+  const rpt=d.morning_report;
+  const reportBadge=document.getElementById('report-badge');
+  const reportBody=document.getElementById('report-body');
+  if(!rpt){
+    reportBadge.textContent='None yet';
+    reportBody.innerHTML='<div class="empty" style="padding:16px">Daily report generated at 6 AM ET</div>';
+  } else {
+    const status=rpt.status||'unknown';
+    reportBadge.textContent=rpt.date||'?';
+    reportBadge.className='panel-badge '+(status==='healthy'?'pb-teal':'pb-pink');
+    const last24=rpt.last_24h||{};
+    reportBody.innerHTML='<div class="report-grid">'
+      +'<div class="rg-cell"><div class="rg-val" style="color:var(--pink)">'+(last24.critical&&last24.critical.unique!=null?last24.critical.unique:(last24.critical||0))+'</div><div class="rg-lab">Critical</div></div>'
+      +'<div class="rg-cell"><div class="rg-val" style="color:var(--amber)">'+(last24.high&&last24.high.unique!=null?last24.high.unique:(last24.high||0))+'</div><div class="rg-lab">High</div></div>'
+      +'<div class="rg-cell"><div class="rg-val" style="color:var(--purple)">'+(last24.medium&&last24.medium.unique!=null?last24.medium.unique:(last24.medium||0))+'</div><div class="rg-lab">Medium</div></div>'
+      +'<div class="rg-cell"><div class="rg-val" style="color:var(--text)">'+(rpt.total_unresolved||0)+'</div><div class="rg-lab">Unresolved</div></div>'
+    +'</div>';
+  }
+}
+
+load();
+setInterval(load, 60000);
 </script>
 </body>
 </html>"""
