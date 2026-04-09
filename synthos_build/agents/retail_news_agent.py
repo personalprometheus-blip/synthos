@@ -673,13 +673,20 @@ def _alpaca_article_to_item(article: dict) -> dict:
 
     Alpaca article fields:
       id, headline, summary, author, created_at, updated_at,
-      content, url, symbols (list), source (e.g. 'Benzinga')
+      content, url, symbols (list), source (e.g. 'Benzinga'),
+      images (list of {size: thumb|small|large, url: str})
     """
     symbols   = article.get("symbols") or []
     ticker    = symbols[0].upper() if symbols else None
     pub_date  = (article.get("created_at") or "")[:10]   # "YYYY-MM-DD"
     source    = article.get("source", "Alpaca News")
     tier      = _alpaca_news_tier(source)
+    # Extract image URL — prefer "small", fall back to first available
+    images    = article.get("images") or []
+    image_url = next(
+        (img["url"] for img in images if img.get("size") == "small"),
+        images[0].get("url", "") if images else ""
+    )
     return {
         "headline":    (article.get("headline") or "").strip(),
         "subhead":     (article.get("summary")  or "")[:120].strip(),
@@ -691,6 +698,7 @@ def _alpaca_article_to_item(article: dict) -> dict:
         "tx_date":     pub_date,
         "ticker":      ticker,
         "all_symbols": symbols,
+        "image_url":   image_url,
     }
 
 
@@ -850,6 +858,7 @@ def fetch_and_store_alpaca_display_news(db) -> int:
                     "routing":    "NEWS",
                     "staleness":  "fresh",
                     "symbols":    item.get("all_symbols", []),
+                    "image_url":  item.get("image_url", ""),
                 },
                 source = "NEWS",
             )

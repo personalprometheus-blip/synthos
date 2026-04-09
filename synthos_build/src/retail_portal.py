@@ -4856,9 +4856,12 @@ async function loadNews(category) {
       const cat    = a.category || 'Markets';
       const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
       const age    = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
-      const cached = a.link && _metaCache[a.link];
-      const imgHtml = cached && cached.image
-        ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${cached.image}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
+      // Image priority: 1) stored CDN URL from Alpaca, 2) OG cached, 3) lazy-fetch placeholder
+      const storedImg = a.image_url || '';
+      const cachedImg = a.link && _metaCache[a.link] && _metaCache[a.link].image;
+      const imgSrc    = storedImg || cachedImg || '';
+      const imgHtml   = imgSrc
+        ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${imgSrc}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
         : `<div class="news-img-placeholder" id="nip-${idx}" style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center"><span style="font-size:22px;opacity:0.18">📰</span></div>`;
       return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative"
                    onclick="openNewsModal(${idx})">
@@ -4871,9 +4874,9 @@ async function loadNews(category) {
         <div style="font-size:11px;color:var(--muted)">${a.source || 'MarketWatch'}</div>
       </div>`;
     }).join('');
-    // Lazy-load OG images for cards without cached data
+    // Lazy-load OG images only for articles with no stored image_url
     _newsArticles.forEach((a, idx) => {
-      if (a.link && !_metaCache[a.link]) {
+      if (!a.image_url && a.link && !_metaCache[a.link]) {
         fetch('/api/article-meta?url=' + encodeURIComponent(a.link))
           .then(r => r.json()).then(m => {
             _metaCache[a.link] = m;
