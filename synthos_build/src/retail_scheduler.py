@@ -16,7 +16,9 @@ Design notes:
   - Each session fires once via systemd timer and exits cleanly
   - Per-customer subprocesses run in parallel; scheduler waits for all to finish
   - A lock file prevents overlapping runs of the same session
-  - Kill switch is respected — if active, all sessions abort immediately
+  - Kill switch halts trading only — retail_trade_logic_agent.py checks it at
+    Gate 1. All other agents (news, sentiment, screener, heartbeat) continue
+    running so market data collection and monitor visibility are unaffected.
   - Run history is written to logs/scheduler_history.json for the admin portal
   - If no customers exist yet, falls back to single-tenant (legacy / dev mode)
 
@@ -230,9 +232,15 @@ def run_session(session: str, dry_run: bool = False) -> bool:
                   f"Valid: {', '.join(SESSION_PIPELINES)}")
         return False
 
+    # Note: kill switch is NOT checked here. The trade logic agent (Gate 1)
+    # handles its own kill switch check. Other agents (news, sentiment, screener)
+    # do not have account access and continue running so that heartbeats and
+    # market data collection are unaffected when trading is halted.
     if KILL_SWITCH_FILE.exists():
-        log.warning(f"Kill switch is active — aborting session '{session}'")
-        return False
+        log.warning(
+            f"Kill switch is active — session '{session}' will run but "
+            f"retail_trade_logic_agent.py will halt at Gate 1"
+        )
 
     now = datetime.now(ET)
     started_at = datetime.now(timezone.utc).isoformat()
