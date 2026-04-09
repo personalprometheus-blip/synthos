@@ -37,8 +37,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-from flask import Flask, jsonify, redirect, render_template_string, request, url_for
+from flask import Flask, jsonify, redirect, render_template_string, request, session, url_for
 from dotenv import load_dotenv
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 load_dotenv()
@@ -47,9 +48,12 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB upload limit
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SECRET_TOKEN  = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
+SECRET_TOKEN   = os.getenv("SECRET_TOKEN") or os.getenv("COMPANY_TOKEN", "")
 CF_ADMIN_EMAIL = os.getenv("OPERATOR_EMAIL", "").lower().strip()
-PORT          = int(os.getenv("PORT", 5010))
+ADMIN_EMAIL    = os.getenv("ADMIN_EMAIL", CF_ADMIN_EMAIL).lower().strip()
+ADMIN_PW_HASH  = os.getenv("ADMIN_PASSWORD_HASH", "")
+PORT           = int(os.getenv("PORT", 5010))
+app.secret_key = os.getenv("FLASK_SECRET_KEY", SECRET_TOKEN or os.urandom(24).hex())
 ET            = ZoneInfo("America/New_York")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -164,9 +168,13 @@ def _token_authorized():
     return _hmac_mod.compare_digest(token, SECRET_TOKEN)
 
 
+def _session_authorized():
+    """Check Flask session login."""
+    return session.get("logged_in") is True
+
 def _authorized():
-    """Browser routes: accept either Cloudflare Access or SECRET_TOKEN."""
-    return _cf_authorized() or _token_authorized()
+    """Browser routes: accept session login, Cloudflare Access, or SECRET_TOKEN."""
+    return _session_authorized() or _cf_authorized() or _token_authorized()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -853,23 +861,90 @@ def company_logs():
     return html
 
 
+_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos — Command</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0c14;--surface:#111520;--border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.13);
+  --text:rgba(255,255,255,0.88);--muted:rgba(255,255,255,0.35);--dim:rgba(255,255,255,0.18);
+  --teal:#00f5d4;--mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+}
+html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem}
+.card{width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:20%;right:20%;height:1px;background:linear-gradient(90deg,transparent,rgba(0,245,212,0.3),transparent)}
+.logo{font-family:var(--mono);font-size:0.85rem;font-weight:500;letter-spacing:0.18em;color:var(--teal);text-shadow:0 0 18px rgba(0,245,212,0.35);margin-bottom:0.25rem}
+.sub{font-size:0.75rem;color:var(--muted);margin-bottom:1.75rem}
+label{display:block;font-size:0.62rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem}
+input{font-family:var(--mono);font-size:0.82rem;width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:7px;color:var(--text);margin-bottom:0.9rem;transition:border-color .15s}
+input:focus{outline:none;border-color:rgba(0,245,212,0.4);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
+input::placeholder{color:var(--dim)}
+.btn{font-family:var(--mono);font-size:0.75rem;font-weight:500;letter-spacing:0.07em;width:100%;padding:0.55rem;background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.25);border-radius:7px;cursor:pointer;transition:all .15s}
+.btn:hover{background:rgba(0,245,212,0.18);box-shadow:0 0 14px rgba(0,245,212,0.15)}
+.err{font-size:0.72rem;color:#ff4b6e;margin-bottom:0.8rem;padding:0.4rem 0.6rem;background:rgba(255,75,110,0.08);border:1px solid rgba(255,75,110,0.2);border-radius:6px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">SYNTHOS</div>
+  <div class="sub">Command Node</div>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="POST" action="/login">
+    <label>Email</label>
+    <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+    <label>Password</label>
+    <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+    <button class="btn" type="submit">Sign In →</button>
+  </form>
+</div>
+</body>
+</html>"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if _authorized():
+        return redirect(url_for("console"))
+    if request.method == "POST":
+        email = request.form.get("email", "").lower().strip()
+        password = request.form.get("password", "")
+        # Validate credentials
+        email_ok = email == ADMIN_EMAIL
+        pw_ok = (ADMIN_PW_HASH and check_password_hash(ADMIN_PW_HASH, password)) or \
+                (not ADMIN_PW_HASH and password == SECRET_TOKEN)
+        if email_ok and pw_ok:
+            session.clear()
+            session["logged_in"] = True
+            session["email"] = email
+            session.permanent = True
+            return redirect(url_for("console"))
+        return render_template_string(_LOGIN_HTML, error="Incorrect email or password")
+    return render_template_string(_LOGIN_HTML, error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
 @app.route("/console")
 def console():
-    """Ops dashboard — requires X-Token header, query param, or cookie."""
-    # If token provided as query param, set cookie and redirect clean
+    """Ops dashboard — requires login, Cloudflare Access, or SECRET_TOKEN."""
+    # Legacy token-in-URL still works (sets cookie for API calls)
     if request.args.get("token"):
         resp = redirect(url_for("console"))
         resp.set_cookie("company_token", request.args["token"], httponly=True, samesite="Lax")
         return resp
     if not _authorized():
-        return (
-            "<html><body style='font-family:monospace;background:#080b12;color:#fff;padding:40px'>"
-            "<h2>Synthos Company Node</h2>"
-            "<p style='color:rgba(255,255,255,0.5)'>Pass <code>?token=SECRET_TOKEN</code> "
-            "or set <code>X-Token</code> header to access the console.</p>"
-            "</body></html>"
-        ), 401
+        return redirect(url_for("login"))
     return render_template_string(DASHBOARD_HTML)
 
 
@@ -1859,6 +1934,123 @@ def api_display_logs():
         return jsonify({"logs": logs}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Project TODO ──────────────────────────────────────────────────────────────
+_TODO_PATH = os.path.join(os.path.dirname(_HERE), 'TODO.md')
+
+@app.route("/api/todos")
+def api_todos():
+    """
+    Parse TODO.md from the repo and return unresolved items as JSON.
+    Format: - [ ] [category] Title — action
+            - [x] [category] Title — action (resolved)
+    """
+    import re as _re
+    try:
+        with open(_TODO_PATH, 'r') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return jsonify([])
+
+    todos = []
+    section = 'Pending'
+    item_re = _re.compile(r'^\s*-\s+\[([ xX])\]\s+(?:\[([^\]]+)\]\s+)?(.+)')
+
+    for line in lines:
+        # Track section headings
+        heading = _re.match(r'^#+\s+(.+)', line.strip())
+        if heading:
+            section = heading.group(1).strip()
+            continue
+
+        m = item_re.match(line)
+        if not m:
+            continue
+
+        checked  = m.group(1).lower() == 'x'
+        category = (m.group(2) or section).strip()
+        rest     = m.group(3).strip()
+
+        # Split title from action on ' — '
+        if ' — ' in rest:
+            title, action = rest.split(' — ', 1)
+        else:
+            title, action = rest, ''
+
+        todos.append({
+            'id':       str(len(todos)),
+            'title':    title.strip(),
+            'category': category,
+            'action':   action.strip(),
+            'section':  section,
+            'resolved': checked,
+            'date':     '',
+            'pi_id':    '',
+        })
+
+    # Return only unresolved, ordered by section (Pending first, In Progress second)
+    section_order = {'Pending': 0, 'In Progress': 1}
+    unresolved = [t for t in todos if not t['resolved']]
+    unresolved.sort(key=lambda t: section_order.get(t['section'], 99))
+    return jsonify(unresolved)
+
+
+# ── Auditor Findings ──────────────────────────────────────────────────────────
+_AUDITOR_DB_PATH = os.getenv('AUDITOR_DB_PATH', os.path.join(_HERE, 'data', 'auditor.db'))
+
+@app.route("/api/auditor/findings")
+def api_auditor_findings():
+    """
+    Return live auditor findings from auditor.db.
+    Called by the monitor dashboard — no auth required (internal network only).
+    """
+    try:
+        conn = sqlite3.connect(_AUDITOR_DB_PATH, timeout=5)
+        conn.row_factory = sqlite3.Row
+
+        issues = conn.execute(
+            "SELECT id, first_seen, last_seen, source_file, severity, pattern, "
+            "       context, hit_count "
+            "FROM detected_issues WHERE resolved = 0 "
+            "ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+            "         WHEN 'medium' THEN 2 ELSE 3 END, hit_count DESC LIMIT 200"
+        ).fetchall()
+
+        by_sev: dict = {}
+        for row in issues:
+            by_sev[row['severity']] = by_sev.get(row['severity'], 0) + 1
+
+        scan_state = conn.execute(
+            "SELECT log_file, last_offset, file_size, last_scanned "
+            "FROM scan_state ORDER BY last_scanned DESC"
+        ).fetchall()
+
+        report_row = conn.execute(
+            "SELECT report FROM morning_reports ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+
+        conn.close()
+
+        return jsonify({
+            'issues':          [dict(r) for r in issues],
+            'by_severity':     by_sev,
+            'total_unresolved': len(issues),
+            'scan_state':      [dict(r) for r in scan_state],
+            'morning_report':  json.loads(report_row['report']) if report_row else None,
+        })
+    except FileNotFoundError:
+        return jsonify({
+            'issues': [], 'by_severity': {}, 'total_unresolved': 0,
+            'scan_state': [], 'morning_report': None,
+            'error': 'Auditor DB not found — auditor may not have run yet',
+        })
+    except Exception as e:
+        return jsonify({
+            'issues': [], 'by_severity': {}, 'total_unresolved': 0,
+            'scan_state': [], 'morning_report': None,
+            'error': str(e),
+        })
 
 
 # ── Retention ─────────────────────────────────────────────────────────────────

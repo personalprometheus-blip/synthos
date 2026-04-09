@@ -807,7 +807,7 @@ def check_auth():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if is_authenticated():
-        return redirect('/admin' if is_admin() else '/')
+        return redirect('/')
 
     if request.method == 'POST':
         ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
@@ -1647,7 +1647,7 @@ def sso_login():
     session.permanent       = True
     auth.record_login(customer['id'])
     log.info(f'SSO login: {customer["id"]} ({email}) access={reason}')
-    return redirect('/admin' if customer['role'] == 'admin' else '/')
+    return redirect('/')
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
@@ -2762,6 +2762,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             title="{% if operating_mode == 'AUTOMATIC' %}Automatic — bot executes trades{% else %}Managed — you approve all trades{% endif %}">
       {% if operating_mode == 'AUTOMATIC' %}Automatic{% else %}Managed{% endif %}
     </button>
+    {% if is_admin %}<a href="https://admin.synth-cloud.com" class="nav-btn" style="text-decoration:none;font-size:11px;color:var(--purple)">Company Admin →</a>{% endif %}
     <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
   </div>
 </header>
@@ -5013,6 +5014,7 @@ def index():
         portal_password_set=bool(PORTAL_PASSWORD),
         async_load=True,
         grace_warning=grace_warning,
+        is_admin=is_admin(),
     )
 
 
