@@ -797,6 +797,9 @@ def check_auth():
     # Token-based routes are public (the token IS the auth)
     if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/'):
         return
+    # Monitor-callable endpoints — bearer token handled inside the function
+    if request.path in {'/api/logs-audit', '/api/get-keys'}:
+        return
     # Stripe webhook — authenticated by Stripe signature, not session
     if request.path == '/webhook/stripe':
         return
@@ -807,7 +810,7 @@ def check_auth():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if is_authenticated():
-        return redirect('/')
+        return redirect('/admin' if is_admin() else '/')
 
     if request.method == 'POST':
         ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
@@ -1647,7 +1650,7 @@ def sso_login():
     session.permanent       = True
     auth.record_login(customer['id'])
     log.info(f'SSO login: {customer["id"]} ({email}) access={reason}')
-    return redirect('/')
+    return redirect('/admin' if customer['role'] == 'admin' else '/')
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
@@ -2638,6 +2641,41 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .toast.ok{border-color:rgba(0,245,212,0.4);color:var(--teal)}
 .toast.err{border-color:rgba(255,75,110,0.4);color:var(--pink)}
 
+/* ── AGENT PANEL ROWS ── */
+.agent-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.12s}
+.agent-row:last-child{border-bottom:none}
+.agent-row:hover{background:rgba(255,255,255,0.03)}
+.agent-row-icon{width:34px;height:34px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
+.agent-row-body{flex:1;min-width:0}
+.agent-row-ticker{font-size:12px;font-weight:700;color:var(--text)}
+.agent-row-sub{font-size:10px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agent-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
+.agent-row-time{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.qs-select,.qs-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;padding:6px 10px;font-family:var(--sans);outline:none}
+.qs-select:focus,.qs-input:focus{border-color:var(--border2)}
+.qs-input{font-family:var(--mono)}
+.intel-tooltip{position:fixed;z-index:600;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:10px 12px;width:220px;pointer-events:none;box-shadow:0 8px 32px rgba(0,0,0,0.5);opacity:0;transition:opacity 0.15s}
+.intel-tooltip.visible{opacity:1}
+.intel-tooltip-title{font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.intel-point{display:flex;align-items:flex-start;gap:6px;font-size:10px;color:var(--text);margin-bottom:4px;line-height:1.4}
+.intel-point:last-child{margin-bottom:0}
+.intel-point-dot{width:4px;height:4px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:5px}
+.logic-overlay{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center}
+.logic-overlay.open{display:flex}
+.logic-modal{background:var(--surface);border:1px solid var(--border2);border-radius:20px;width:min(560px,92vw);max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+.logic-modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+.logic-modal-title{font-size:13px;font-weight:700;color:var(--text);flex:1}
+.logic-modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:2px 4px;line-height:1}
+.logic-modal-close:hover{color:var(--text)}
+.logic-modal-body{padding:20px;overflow-y:auto;flex:1}
+.logic-placeholder{text-align:center;padding:32px 0;color:var(--muted)}
+.logic-placeholder-icon{font-size:32px;margin-bottom:10px}
+.logic-placeholder-title{font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.logic-placeholder-sub{font-size:11px;color:var(--muted);line-height:1.6}
+.status-strip{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px}
+@media(max-width:700px){.status-strip{grid-template-columns:1fr 1fr}}
+.agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+@media(max-width:700px){.agent-grid{grid-template-columns:1fr}}
 /* ── RESPONSIVE ── */
 @media(max-width:640px){
   .header{padding:0 14px}
@@ -2645,96 +2683,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .intel-grid{grid-template-columns:1fr}
 }
-
-/* ── AGENT PANEL ROWS ── */
-.agent-row{
-  display:flex;align-items:center;gap:10px;
-  padding:10px 14px;border-bottom:1px solid var(--border);
-  cursor:pointer;transition:background 0.12s;
-}
-.agent-row:last-child{border-bottom:none}
-.agent-row:hover{background:rgba(255,255,255,0.03)}
-.agent-row-icon{
-  width:34px;height:34px;border-radius:9px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;font-weight:800;letter-spacing:-0.2px;
-}
-.agent-row-body{flex:1;min-width:0}
-.agent-row-ticker{font-size:12px;font-weight:700;color:var(--text)}
-.agent-row-sub{font-size:10px;color:var(--muted);margin-top:1px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.agent-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
-.agent-row-time{font-size:9px;color:var(--dim);font-family:var(--mono)}
-
-/* ── QUICK SETTINGS INPUTS ── */
-.qs-select,.qs-input{
-  width:100%;background:var(--surface2);border:1px solid var(--border);
-  border-radius:8px;color:var(--text);font-size:12px;
-  padding:6px 10px;font-family:var(--sans);outline:none;
-}
-.qs-select:focus,.qs-input:focus{border-color:var(--border2)}
-.qs-input{font-family:var(--mono)}
-
-/* ── INTEL TOOLTIP ── */
-.intel-tooltip{
-  position:fixed;z-index:600;
-  background:var(--surface2);border:1px solid var(--border2);
-  border-radius:12px;padding:10px 12px;
-  width:220px;pointer-events:none;
-  box-shadow:0 8px 32px rgba(0,0,0,0.5);
-  opacity:0;transition:opacity 0.15s;
-}
-.intel-tooltip.visible{opacity:1}
-.intel-tooltip-title{
-  font-size:9px;font-weight:700;letter-spacing:0.08em;
-  text-transform:uppercase;color:var(--muted);margin-bottom:6px;
-}
-.intel-point{
-  display:flex;align-items:flex-start;gap:6px;
-  font-size:10px;color:var(--text);margin-bottom:4px;line-height:1.4;
-}
-.intel-point:last-child{margin-bottom:0}
-.intel-point-dot{
-  width:4px;height:4px;border-radius:50%;
-  background:var(--teal);flex-shrink:0;margin-top:5px;
-}
-
-/* ── LOGIC MODAL ── */
-.logic-overlay{
-  position:fixed;inset:0;z-index:700;
-  background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
-  display:none;align-items:center;justify-content:center;
-}
-.logic-overlay.open{display:flex}
-.logic-modal{
-  background:var(--surface);border:1px solid var(--border2);
-  border-radius:20px;width:min(560px,92vw);
-  max-height:80vh;overflow:hidden;
-  display:flex;flex-direction:column;
-  box-shadow:0 24px 80px rgba(0,0,0,0.6);
-}
-.logic-modal-head{
-  padding:16px 20px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:10px;flex-shrink:0;
-}
-.logic-modal-title{font-size:13px;font-weight:700;color:var(--text);flex:1}
-.logic-modal-close{
-  background:none;border:none;color:var(--muted);
-  font-size:20px;cursor:pointer;padding:2px 4px;line-height:1;
-}
-.logic-modal-close:hover{color:var(--text)}
-.logic-modal-body{padding:20px;overflow-y:auto;flex:1}
-.logic-placeholder{text-align:center;padding:32px 0;color:var(--muted)}
-.logic-placeholder-icon{font-size:32px;margin-bottom:10px}
-.logic-placeholder-title{font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
-.logic-placeholder-sub{font-size:11px;color:var(--muted);line-height:1.6}
-
-/* ── STATUS STRIP ── */
-.status-strip{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px}
-@media(max-width:700px){.status-strip{grid-template-columns:1fr 1fr}}
-/* ── AGENT GRID ── */
-.agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-@media(max-width:700px){.agent-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -2762,7 +2710,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             title="{% if operating_mode == 'AUTOMATIC' %}Automatic — bot executes trades{% else %}Managed — you approve all trades{% endif %}">
       {% if operating_mode == 'AUTOMATIC' %}Automatic{% else %}Managed{% endif %}
     </button>
-    {% if is_admin %}<a href="https://admin.synth-cloud.com" class="nav-btn" style="text-decoration:none;font-size:11px;color:var(--purple)">Company Admin →</a>{% endif %}
     <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
   </div>
 </header>
@@ -2838,7 +2785,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
 
-  <!-- hidden compat elements that existing JS writes to -->
+  <!-- hidden compat elements JS writes to -->
   <span id="stat-mode" style="display:none">{{ status.operating_mode }}</span>
   <span id="stat-positions" style="display:none">0</span>
   <span id="stat-flags" style="display:none">0</span>
@@ -2853,8 +2800,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="stat-card teal">
       <div class="stat-label">Portfolio</div>
       <div class="stat-val" id="stat-portfolio">$0.00</div>
-      <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap">
-        <span style="font-size:10px;font-weight:700" id="stat-day-pl">—</span>
+      <div style="display:flex;align-items:center;gap:6px;margin-top:3px">
+        <span style="font-size:10px;font-weight:700" id="stat-day-pl">&#x2014;</span>
         <span style="font-size:9px;color:var(--dim)">today</span>
       </div>
     </div>
@@ -2869,9 +2816,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="stat-card amber">
       <div class="stat-label">Agent Mode</div>
       <div style="font-size:13px;font-weight:700;margin-top:4px;font-family:var(--mono)" id="mode-display">Loading</div>
-      <div style="margin-top:5px">
-        <button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button>
-      </div>
+      <div style="margin-top:5px"><button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button></div>
     </div>
     <div class="stat-card pink">
       <div class="stat-label">Open Positions</div>
@@ -2883,42 +2828,36 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <!-- 4-PANEL AGENT GRID -->
   <div class="agent-grid">
 
-    <!-- PANEL: PLANNING -->
+    <!-- PLANNING -->
     <div class="glass teal-glow">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Planning</div>
         <div style="font-size:9px;color:var(--dim)">Signals under watch</div>
         <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="planning-count"></div>
       </div>
-      <div id="planning-list">
-        <div class="empty-state"><div class="empty-icon">🔍</div>Loading…</div>
-      </div>
+      <div id="planning-list"><div class="empty-state"><div class="empty-icon">&#x1F50D;</div>Loading&#x2026;</div></div>
     </div>
 
-    <!-- PANEL: APPROVALS -->
+    <!-- APPROVALS -->
     <div class="glass purple-glow">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase" id="queue-label">Approvals</div>
         <div style="padding:1px 7px;border-radius:99px;font-size:9px;font-weight:700;background:var(--purple2);border:1px solid rgba(123,97,255,0.3);color:var(--purple)" id="pending-badge">0 pending</div>
       </div>
-      <div id="approval-list" style="padding:0 14px 12px">
-        <div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>
-      </div>
+      <div id="approval-list" style="padding:0 14px 12px"><div class="empty-state"><div class="empty-icon">&#x2705;</div>No pending approvals</div></div>
     </div>
 
-    <!-- PANEL: HISTORY -->
+    <!-- HISTORY -->
     <div class="glass amber-glow">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">History</div>
         <div style="font-size:9px;color:var(--dim)">Recent agent decisions</div>
         <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="trader-activity-ts"></div>
       </div>
-      <div id="history-list">
-        <div class="empty-state"><div class="empty-icon">⚡</div>Loading…</div>
-      </div>
+      <div id="history-list"><div class="empty-state"><div class="empty-icon">&#x26A1;</div>Loading&#x2026;</div></div>
     </div>
 
-    <!-- PANEL: SETTINGS -->
+    <!-- SETTINGS -->
     <div class="glass">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Agent Settings</div>
@@ -2926,11 +2865,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       </div>
       <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
         <div>
-          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Min Confidence Threshold</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Min Confidence</div>
           <select id="qs-min-confidence" class="qs-select">
-            <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW — Trade more aggressively</option>
-            <option value="MEDIUM" {% if settings.min_confidence != 'LOW' and settings.min_confidence != 'HIGH' %}selected{% endif %}>MEDIUM — Balanced</option>
-            <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH — High confidence only</option>
+            <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW &#x2014; Trade aggressively</option>
+            <option value="MEDIUM" {% if settings.min_confidence != 'LOW' and settings.min_confidence != 'HIGH' %}selected{% endif %}>MEDIUM &#x2014; Balanced</option>
+            <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH &#x2014; High confidence only</option>
           </select>
         </div>
         <div>
@@ -2943,13 +2882,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div>
           <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Close Session Mode</div>
           <select id="qs-close-mode" class="qs-select">
-            <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative — Preserve gains</option>
-            <option value="moderate" {% if settings.close_session_mode == 'moderate' %}selected{% endif %}>Moderate — Balanced exits</option>
-            <option value="aggressive" {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive — Hold positions</option>
+            <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
+            <option value="moderate" {% if settings.close_session_mode == 'moderate' %}selected{% endif %}>Moderate</option>
+            <option value="aggressive" {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
           </select>
         </div>
         <div>
-          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Max Trade Size (USD)</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Max Trade (USD)</div>
           <div style="display:flex;align-items:center;gap:8px">
             <span style="font-size:11px;color:var(--muted)">$</span>
             <input id="qs-max-trade" type="number" min="0" class="qs-input" value="{{ settings.max_trade_usd }}" placeholder="0 = no limit">
@@ -2999,11 +2938,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="logic-modal-head">
       <div class="logic-modal-title" id="logic-modal-title">Agent Logic Breakdown</div>
       <div id="logic-modal-conf"></div>
-      <button class="logic-modal-close" onclick="closeLogicModal()">×</button>
+      <button class="logic-modal-close" onclick="closeLogicModal()">&#xD7;</button>
     </div>
     <div class="logic-modal-body" id="logic-modal-body">
       <div class="logic-placeholder">
-        <div class="logic-placeholder-icon">🧠</div>
+        <div class="logic-placeholder-icon">&#x1F9E0;</div>
         <div class="logic-placeholder-title">Logic Breakdown</div>
         <div class="logic-placeholder-sub">Full agent reasoning will appear here.</div>
       </div>
@@ -3326,10 +3265,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="flex:1">
           <div class="setting-label">Alpaca API Key</div>
           <div class="setting-desc">Paper or live trading account</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-key">Loading…</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-key">Loading&#x2026;</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK…" style="width:140px">
+          <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK&#x2026;" style="width:140px">
           <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_API_KEY','k-alpaca-key','obs-alpaca-key')">Update</button>
         </div>
       </div>
@@ -3339,10 +3278,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="flex:1">
           <div class="setting-label">Alpaca Secret Key</div>
           <div class="setting-desc">Keep this private</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-secret">Loading…</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-secret">Loading&#x2026;</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-alpaca-secret" placeholder="Secret…" style="width:140px">
+          <input class="glass-input" type="password" id="k-alpaca-secret" placeholder="Secret&#x2026;" style="width:140px">
           <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_SECRET_KEY','k-alpaca-secret','obs-alpaca-secret')">Update</button>
         </div>
       </div>
@@ -3367,10 +3306,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="flex:1">
           <div class="setting-label">Resend API Key</div>
           <div class="setting-desc">For trade alerts and account emails</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-resend">Loading…</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-resend">Loading&#x2026;</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-resend" placeholder="re_…" style="width:140px">
+          <input class="glass-input" type="password" id="k-resend" placeholder="re_&#x2026;" style="width:140px">
           <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('RESEND_API_KEY','k-resend','obs-resend')">Update</button>
         </div>
       </div>
@@ -3380,10 +3319,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="flex:1">
           <div class="setting-label">License Key</div>
           <div class="setting-desc">Synthos license (restore from backup)</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-license">Loading…</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-license">Loading&#x2026;</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-license" placeholder="SYN-…" style="width:140px">
+          <input class="glass-input" type="password" id="k-license" placeholder="SYN-&#x2026;" style="width:140px">
           <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('LICENSE_KEY','k-license','obs-license')">Update</button>
         </div>
       </div>
@@ -3392,8 +3331,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="setting-row" style="align-items:flex-start;gap:10px">
         <div style="flex:1">
           <div class="setting-label">Alert Email</div>
-          <div class="setting-desc">Trade alerts destination — if different from your account email</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alert-to">Loading…</div>
+          <div class="setting-desc">Trade alerts destination &#x2014; if different from your account email</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alert-to">Loading&#x2026;</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           <input class="glass-input" type="email" id="k-alert-to" placeholder="you@email.com" style="width:170px">
@@ -3416,7 +3355,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
-  <!-- Trading Parameters moved to Dashboard → Agent Settings panel -->
+  <!-- Trading Parameters moved to Dashboard → Agent Settings -->
+  <!-- Old operator API Keys moved to Monitor Settings (/settings on command portal) -->
 
   <div class="section-title">Alert Preferences</div>
   <div class="glass" style="margin-bottom:16px">
@@ -3454,8 +3394,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div class="section-title">My Account</div>
   <div class="glass" style="margin-bottom:16px">
     <div class="settings-section">
-
-      <!-- Change Email -->
       <div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Change Email</div>
         <div style="display:flex;flex-direction:column;gap:8px;max-width:320px">
@@ -3465,8 +3403,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div id="acct-email-status" style="font-size:10px;color:var(--muted)"></div>
         </div>
       </div>
-
-      <!-- Change Password -->
       <div>
         <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Change Password</div>
         <div style="display:flex;flex-direction:column;gap:8px;max-width:320px">
@@ -3477,7 +3413,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div id="acct-pw-status" style="font-size:10px;color:var(--muted)"></div>
         </div>
       </div>
-
     </div>
   </div>
 
@@ -3666,7 +3601,6 @@ async function loadPerformance() {
     const r = await fetch('/api/performance-summary');
     const d = await r.json();
 
-    // Summary cards
     const sign = d.total_pnl >= 0 ? '+' : '';
     const retEl = document.getElementById('perf-total-return');
     if (retEl) {
@@ -3685,30 +3619,19 @@ async function loadPerformance() {
     if (wrSub) wrSub.textContent = (d.winning_trades || 0) + ' wins / ' + (d.total_trades || 0) + ' trades';
 
     const holdEl = document.getElementById('perf-avg-hold');
-    if (holdEl) holdEl.textContent = d.avg_hold || '—';
+    if (holdEl) holdEl.textContent = d.avg_hold || '--';
 
-    // Tax lots
     const stEl = document.getElementById('tax-st');
     const ltEl = document.getElementById('tax-lt');
     if (stEl) stEl.textContent = (d.tax_st >= 0 ? '+' : '') + '$' + Math.abs(d.tax_st || 0).toFixed(2);
     if (ltEl) ltEl.textContent = (d.tax_lt >= 0 ? '+' : '') + '$' + Math.abs(d.tax_lt || 0).toFixed(2);
 
-    // P&L attribution bars (map to our fixed sector buckets)
     const sp = d.sector_pnl || {};
     const allVals = Object.values(sp).map(v => Math.abs(v));
     const maxVal  = allVals.length ? Math.max(...allVals) : 1;
-    const buckets = {
-      tech:   ['Technology','Tech','Information Technology','Software'],
-      health: ['Healthcare','Health Care','Biotechnology','Pharma'],
-      fin:    ['Financials','Finance','Financial Services','Banks'],
-    };
-    const sum = (keys) => keys.reduce((a,k) => {
-      for (const s of Object.keys(sp)) { if (keys.some(kk => s.toLowerCase().includes(kk.toLowerCase()))) a += sp[s]; }
-      return a;
-    }, 0);
-    const techPnl  = Object.entries(sp).filter(([k])=>buckets.tech.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
-    const healthPnl= Object.entries(sp).filter(([k])=>buckets.health.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
-    const finPnl   = Object.entries(sp).filter(([k])=>buckets.fin.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
+    const techPnl  = Object.entries(sp).filter(([k])=>['technology','tech','information technology','software'].some(b=>k.toLowerCase().includes(b))).reduce((a,[,v])=>a+v,0);
+    const healthPnl= Object.entries(sp).filter(([k])=>['healthcare','health care','biotechnology','pharma'].some(b=>k.toLowerCase().includes(b))).reduce((a,[,v])=>a+v,0);
+    const finPnl   = Object.entries(sp).filter(([k])=>['financials','finance','financial services','banks'].some(b=>k.toLowerCase().includes(b))).reduce((a,[,v])=>a+v,0);
     const otherPnl = Object.values(sp).reduce((a,v)=>a+v,0) - techPnl - healthPnl - finPnl;
     const setBar = (id, barId, val) => {
       const el = document.getElementById(id); const barEl = document.getElementById(barId);
@@ -3720,8 +3643,7 @@ async function loadPerformance() {
     setBar('attr-fin',    'attr-fin-bar',    finPnl);
     setBar('attr-other',  'attr-other-bar',  otherPnl);
 
-    // Trade history table
-    const tbody = document.getElementById('trade-history-body');
+    const tbody  = document.getElementById('trade-history-body');
     const hCount = document.getElementById('history-count');
     if (tbody) {
       const trades = d.trades || [];
@@ -3733,26 +3655,25 @@ async function loadPerformance() {
           const pnlColor = t.pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
           const pnlSign  = t.pnl >= 0 ? '+' : '';
           const retSign  = t.ret_pct >= 0 ? '+' : '';
-          return `<tr>
-            <td style="font-weight:700;font-family:var(--mono)">${t.ticker}</td>
-            <td><span style="font-size:9px;padding:1px 6px;border-radius:99px;background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.25)">${t.side}</span></td>
-            <td style="font-family:var(--mono)">$${t.entry.toFixed(2)}</td>
-            <td style="font-family:var(--mono)">$${t.exit.toFixed(2)}</td>
-            <td style="color:var(--muted)">${t.hold}</td>
-            <td style="font-family:var(--mono);color:${pnlColor};font-weight:700">${pnlSign}$${Math.abs(t.pnl).toFixed(2)}</td>
-            <td style="font-family:var(--mono);color:${pnlColor}">${retSign}${Math.abs(t.ret_pct).toFixed(2)}%</td>
-            <td style="color:var(--dim)">—</td>
-          </tr>`;
+          return '<tr>'
+            + '<td style="font-weight:700;font-family:var(--mono)">' + t.ticker + '</td>'
+            + '<td><span style="font-size:9px;padding:1px 6px;border-radius:99px;background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.25)">' + t.side + '</span></td>'
+            + '<td style="font-family:var(--mono)">$' + t.entry.toFixed(2) + '</td>'
+            + '<td style="font-family:var(--mono)">$' + t.exit.toFixed(2) + '</td>'
+            + '<td style="color:var(--muted)">' + t.hold + '</td>'
+            + '<td style="font-family:var(--mono);color:' + pnlColor + ';font-weight:700">' + pnlSign + '$' + Math.abs(t.pnl).toFixed(2) + '</td>'
+            + '<td style="font-family:var(--mono);color:' + pnlColor + '">' + retSign + Math.abs(t.ret_pct).toFixed(2) + '%</td>'
+            + '<td style="color:var(--dim)">\u2014</td>'
+            + '</tr>';
         }).join('');
       }
     }
 
-    // Milestone badges — unlock First Trade and First Win if applicable
     const badgeGrid = document.getElementById('badge-grid');
     if (badgeGrid && d.total_trades > 0) {
       const badges = badgeGrid.querySelectorAll('.badge');
-      if (badges[0]) badges[0].classList.remove('locked');   // First Trade
-      if (d.winning_trades > 0 && badges[1]) badges[1].classList.remove('locked'); // First Win
+      if (badges[0]) badges[0].classList.remove('locked');
+      if (d.winning_trades > 0 && badges[1]) badges[1].classList.remove('locked');
     }
 
   } catch(e) { console.warn('loadPerformance error', e); }
@@ -3859,9 +3780,8 @@ async function submitUnlockKey() {
   else toast('Invalid key — contact synthos.signal@gmail.com', 'err');
 }
 
-// ── SETTINGS ──
 // ── API KEYS — per-field update with overwrite confirmation ──
-let _keyCurrentValues = {};  // cache of obfuscated current values
+let _keyCurrentValues = {};
 
 async function loadKeyValues() {
   try {
@@ -3874,17 +3794,12 @@ async function loadKeyValues() {
     set('obs-resend',        d.RESEND_API_KEY);
     set('obs-license',       d.LICENSE_KEY);
     set('obs-alert-to',      d.ALERT_TO);
-    // Trading mode dropdown
     const modeEl = document.getElementById('k-trading-mode');
     const liveOpt = document.getElementById('k-live-option');
     if (modeEl) modeEl.value = d.trading_mode || 'paper';
     if (liveOpt) {
-      if (d.live_enabled) {
-        liveOpt.disabled = false;
-      } else {
-        liveOpt.disabled = true;
-        liveOpt.textContent = 'Live Trading (locked — contact operator)';
-      }
+      if (d.live_enabled) { liveOpt.disabled = false; }
+      else { liveOpt.disabled = true; liveOpt.textContent = 'Live Trading (locked — contact operator)'; }
     }
   } catch(e) { console.warn('loadKeyValues error', e); }
 }
@@ -3893,23 +3808,15 @@ function updateKey(keyName, inputId, obsId) {
   const inputEl = document.getElementById(inputId);
   const val     = inputEl?.value?.trim();
   if (!val) { toast('Enter a value first', 'err'); return; }
-
   const currentObs = _keyCurrentValues[keyName] || '';
   const hasExisting = currentObs && currentObs !== 'Not set';
-
   const doSave = async () => {
     document.getElementById('key-confirm-overlay').style.display = 'none';
     const r = await fetch('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({[keyName]: val})});
     const d = await r.json();
-    if (d.ok) {
-      toast('\u2713 ' + keyName + ' updated', 'ok');
-      if (inputEl) inputEl.value = '';
-      await loadKeyValues();
-    } else {
-      toast('Error: ' + (d.errors||[]).join(', '), 'err');
-    }
+    if (d.ok) { toast('✓ ' + keyName + ' updated', 'ok'); if (inputEl) inputEl.value = ''; await loadKeyValues(); }
+    else toast('Error: ' + (d.errors||[]).join(', '), 'err');
   };
-
   if (hasExisting) {
     document.getElementById('key-confirm-title').textContent = 'Overwrite existing key?';
     document.getElementById('key-confirm-msg').textContent   = keyName + ' already has a value (' + currentObs + '). This will permanently replace it.';
@@ -3930,7 +3837,7 @@ async function updateTradingMode() {
   if (!url) { toast('Select a mode first', 'err'); return; }
   const r = await fetch('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({'ALPACA_BASE_URL': url})});
   const d = await r.json();
-  toast(d.ok ? '\u2713 Trading mode set to ' + mode : 'Error: ' + (d.errors||[]).join(', '), d.ok ? 'ok' : 'err');
+  toast(d.ok ? '✓ Trading mode set to ' + mode : 'Error: ' + (d.errors||[]).join(', '), d.ok ? 'ok' : 'err');
 }
 
 // ── MY ACCOUNT ──
@@ -3941,10 +3848,7 @@ async function changeEmail() {
   if (!newEmail || !curPw) { if (statusEl) { statusEl.textContent = 'All fields required'; statusEl.style.color = 'var(--pink)'; } return; }
   const r = await fetch('/api/account/change-email', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({new_email: newEmail, current_password: curPw})});
   const d = await r.json();
-  if (statusEl) {
-    statusEl.textContent = d.ok ? '\u2713 Email updated' : '\u2717 ' + (d.error || 'Error');
-    statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)';
-  }
+  if (statusEl) { statusEl.textContent = d.ok ? '✓ Email updated' : '✗ ' + (d.error||'Error'); statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)'; }
   if (d.ok) { document.getElementById('acct-new-email').value = ''; document.getElementById('acct-email-pw').value = ''; }
 }
 
@@ -3956,10 +3860,7 @@ async function changePassword() {
   if (!curPw || !newPw || !confirmPw) { if (statusEl) { statusEl.textContent = 'All fields required'; statusEl.style.color = 'var(--pink)'; } return; }
   const r = await fetch('/api/account/change-password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({current_password: curPw, new_password: newPw, confirm_password: confirmPw})});
   const d = await r.json();
-  if (statusEl) {
-    statusEl.textContent = d.ok ? '\u2713 Password updated' : '\u2717 ' + (d.error || 'Error');
-    statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)';
-  }
+  if (statusEl) { statusEl.textContent = d.ok ? '✓ Password updated' : '✗ ' + (d.error||'Error'); statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)'; }
   if (d.ok) { ['acct-cur-pw','acct-new-pw','acct-confirm-pw'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; }); }
 }
 
@@ -4408,14 +4309,12 @@ async function loadLiveStatus() {
     sv('stat-flags', s.urgent_flags||0);
     sv('stat-heartbeat', (s.last_heartbeat||'Never').slice(0,16));
     sv('stat-mode', s.operating_mode||'SUPERVISED');
-    // mode-display card on dashboard
     const modeEl = document.getElementById('mode-display');
     if (modeEl) {
       const m = s.operating_mode || 'SUPERVISED';
       modeEl.textContent = m;
       modeEl.style.color = m === 'AUTONOMOUS' ? 'var(--amber)' : 'var(--teal)';
     }
-    // heartbeat age
     const hbAge = document.getElementById('stat-hb-age');
     if (hbAge && s.last_heartbeat) {
       try {
@@ -4827,17 +4726,16 @@ async function loadTraderActivity() {
     if (!el) return;
     const items = [];
     (d.scans||[]).slice(0,8).forEach(s => {
-      const tier = (s.tier||'LOW').toUpperCase();
+      const tier    = (s.tier||'LOW').toUpperCase();
       const tierCls = tier==='HIGH'?'conf-high':tier==='MEDIUM'?'conf-med':'conf-low';
-      const cascade = s.cascade_detected
-        ? '<span style="color:var(--pink);font-size:8px;margin-left:4px">CASCADE</span>' : '';
+      const cascade = s.cascade_detected ? '<span style="color:var(--pink);font-size:8px;margin-left:4px">CASCADE</span>' : '';
       const summary = (s.event_summary||'Scanned').slice(0,60);
       const time    = (s.scanned_at||'').slice(11,16);
       const ticker  = s.ticker||'?';
       items.push(`<div class="agent-row"
-          data-ticker="${escHtml(ticker)}"
+          data-ticker="${ticker.replace(/"/g,'')}"
           data-conf="${tier}"
-          data-summary="${escHtml(summary)}"
+          data-summary="${summary.replace(/"/g,'')}"
           data-type="SCAN"
           onmouseenter="showIntelTooltip(event,this)"
           onmouseleave="hideIntelTooltip()"
@@ -4854,7 +4752,7 @@ async function loadTraderActivity() {
       </div>`);
     });
     if (!items.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div>No recent trader scans</div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\u26a1</div>No recent trader scans</div>';
     } else {
       el.innerHTML = items.join('');
       if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
@@ -4868,13 +4766,13 @@ async function loadPlanning() {
     const r = await fetch('/api/watchlist');
     const d = await r.json();
     const signals = d.signals || [];
-    const el = document.getElementById('planning-list');
+    const el    = document.getElementById('planning-list');
     const cntEl = document.getElementById('planning-count');
     if (!el) return;
     const fresh = signals.filter(s => !s.is_stale);
     if (cntEl) cntEl.textContent = fresh.length + ' active';
     if (!signals.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div>No signals under watch</div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\U0001f50d</div>No signals under watch</div>';
       return;
     }
     el.innerHTML = signals.slice(0,8).map(sig => {
@@ -4883,55 +4781,44 @@ async function loadPlanning() {
       const ticker  = sig.ticker||'?';
       const sigType = sig.signal_type||'WATCH';
       const summary = (sig.headline||sig.reason||sig.summary||'Signal detected').slice(0,60);
-      const staleTag = sig.is_stale
-        ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">archive</span>' : '';
+      const stale   = sig.is_stale ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">archive</span>' : '';
       return `<div class="agent-row"
-          data-ticker="${escHtml(ticker)}"
+          data-ticker="${ticker.replace(/"/g,'')}"
           data-conf="${conf}"
-          data-summary="${escHtml(summary)}"
-          data-type="${escHtml(sigType)}"
+          data-summary="${summary.replace(/"/g,'')}"
+          data-type="${sigType}"
           onmouseenter="showIntelTooltip(event,this)"
           onmouseleave="hideIntelTooltip()"
           onclick="openLogicModal(this)">
         <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.2),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal)">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
-          <div class="agent-row-ticker">${ticker}
-            <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:4px">${sigType}</span>${staleTag}
-          </div>
+          <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:4px">${sigType}</span>${stale}</div>
           <div class="agent-row-sub">${summary}</div>
         </div>
-        <div class="agent-row-right">
-          <div class="conf-chip ${confCls}">${conf}</div>
-        </div>
+        <div class="agent-row-right"><div class="conf-chip ${confCls}">${conf}</div></div>
       </div>`;
     }).join('');
-  } catch(e) { console.log('Planning load error:', e); }
+  } catch(e) { console.log('Planning error:', e); }
 }
 
 // ── INTEL TOOLTIP ──
 function showIntelTooltip(event, el) {
-  const tt   = document.getElementById('intel-tooltip');
+  const tt = document.getElementById('intel-tooltip');
   const body = document.getElementById('intel-tooltip-body');
-  if (!tt || !body) return;
-  const ticker  = el.dataset.ticker || '?';
-  const conf    = el.dataset.conf   || 'LOW';
-  const summary = el.dataset.summary|| 'Signal detected';
-  const type    = el.dataset.type   || 'WATCH';
-  const points  = [
-    `${ticker} flagged as ${type} · confidence: ${conf}`,
+  if (!tt||!body) return;
+  const ticker  = el.dataset.ticker  || '?';
+  const conf    = el.dataset.conf    || 'LOW';
+  const summary = el.dataset.summary || 'Signal detected';
+  const type    = el.dataset.type    || 'WATCH';
+  body.innerHTML = [
+    ticker + ' flagged as ' + type + ' \u00b7 confidence: ' + conf,
     summary.slice(0,80),
     'Click to view full agent logic breakdown'
-  ];
-  body.innerHTML = points.map(p =>
-    `<div class="intel-point"><div class="intel-point-dot"></div><span>${p}</span></div>`
-  ).join('');
-  const x = Math.min(event.clientX + 14, window.innerWidth  - 234);
-  const y = Math.min(event.clientY + 10, window.innerHeight - 130);
-  tt.style.left = x + 'px';
-  tt.style.top  = y + 'px';
+  ].map(p => '<div class="intel-point"><div class="intel-point-dot"></div><span>' + p + '</span></div>').join('');
+  tt.style.left = Math.min(event.clientX+14, window.innerWidth-234) + 'px';
+  tt.style.top  = Math.min(event.clientY+10, window.innerHeight-130) + 'px';
   tt.classList.add('visible');
 }
-
 function hideIntelTooltip() {
   const tt = document.getElementById('intel-tooltip');
   if (tt) tt.classList.remove('visible');
@@ -4947,31 +4834,26 @@ function openLogicModal(el) {
   const summary = el.dataset.summary || '';
   const type    = el.dataset.type    || 'SIGNAL';
   const confCls = conf==='HIGH'?'conf-high':conf==='MEDIUM'?'conf-med':'conf-low';
-  const titleEl = document.getElementById('logic-modal-title');
-  const confEl  = document.getElementById('logic-modal-conf');
-  const bodyEl  = document.getElementById('logic-modal-body');
-  if (titleEl) titleEl.textContent = ticker + ' — Agent Logic Breakdown';
-  if (confEl)  confEl.innerHTML = `<div class="conf-chip ${confCls}">${conf}</div>`;
-  if (bodyEl) {
-    bodyEl.innerHTML = `
-      <div style="margin-bottom:16px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid var(--border)">
-        <div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Signal Summary</div>
-        <div style="font-size:12px;color:var(--text)">${ticker} · ${type} · Confidence: ${conf}</div>
-        ${summary ? `<div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5">${summary}</div>` : ''}
-      </div>
-      <div class="logic-placeholder">
-        <div class="logic-placeholder-icon">🧠</div>
-        <div class="logic-placeholder-title">Full Logic Breakdown Coming Soon</div>
-        <div class="logic-placeholder-sub">Gate-by-gate analysis, sentiment scores,<br>congressional signals, and agent reasoning chain<br>will appear here in the next update.</div>
-      </div>`;
-  }
+  const t = document.getElementById('logic-modal-title');
+  const c = document.getElementById('logic-modal-conf');
+  const b = document.getElementById('logic-modal-body');
+  if (t) t.textContent = ticker + ' \u2014 Agent Logic Breakdown';
+  if (c) c.innerHTML = '<div class="conf-chip ' + confCls + '">' + conf + '</div>';
+  if (b) b.innerHTML =
+    '<div style="margin-bottom:16px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid var(--border)">'
+    + '<div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Signal Summary</div>'
+    + '<div style="font-size:12px;color:var(--text)">' + ticker + ' \u00b7 ' + type + ' \u00b7 Confidence: ' + conf + '</div>'
+    + (summary ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + summary + '</div>' : '')
+    + '</div>'
+    + '<div class="logic-placeholder"><div class="logic-placeholder-icon">\U0001f9e0</div>'
+    + '<div class="logic-placeholder-title">Full Logic Breakdown Coming Soon</div>'
+    + '<div class="logic-placeholder-sub">Gate-by-gate analysis and agent reasoning<br>will appear here in the next update.</div></div>';
   overlay.classList.add('open');
 }
-
 function closeLogicModal(e) {
   if (e && e.target !== document.getElementById('logic-overlay')) return;
-  const overlay = document.getElementById('logic-overlay');
-  if (overlay) overlay.classList.remove('open');
+  const o = document.getElementById('logic-overlay');
+  if (o) o.classList.remove('open');
 }
 
 // ── SETTINGS SAVE (dashboard + settings tab share one function) ──
@@ -4993,7 +4875,6 @@ async function saveQuickSettings() {
     else toast('Save failed: ' + (d.error||'unknown'), 'err');
   } catch(e) { toast('Settings save error', 'err'); }
 }
-// Alias so old references still work
 const saveSettings = saveQuickSettings;
 
 // ── INIT ──
@@ -5008,15 +4889,18 @@ function updateClock() {
 loadLiveStatus();
 loadPlanning();
 loadKeyValues();
+loadMarketChart(36);
 loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
 loadNews('all');
 updateMarketClock();
+updateSessionTimeline();
 loadPerformance();
 setInterval(loadLiveStatus, 30000);
 setInterval(loadPlanning, 60000);
+setInterval(updateSessionTimeline, 60000);
 setInterval(loadHealth, 60000);
 setInterval(loadAudit, 300000);
 setInterval(loadMarketIndices, 120000);
@@ -5047,7 +4931,6 @@ async function loadNews(category) {
       const cat    = a.category || 'Markets';
       const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
       const age    = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
-      // Image priority: 1) stored CDN URL from Alpaca, 2) OG cached, 3) lazy-fetch placeholder
       const storedImg = a.image_url || '';
       const cachedImg = a.link && _metaCache[a.link] && _metaCache[a.link].image;
       const imgSrc    = storedImg || cachedImg || '';
@@ -5208,7 +5091,6 @@ def index():
         portal_password_set=bool(PORTAL_PASSWORD),
         async_load=True,
         grace_warning=grace_warning,
-        is_admin=is_admin(),
     )
 
 
@@ -5338,16 +5220,12 @@ def api_unlock_autonomous():
 
 @app.route('/api/keys', methods=['POST'])
 def api_keys():
-    """Update API keys. Accepts either a portal session (customer) or a
-    monitor-token bearer header (operator push). Alpaca credentials are stored
-    encrypted in auth.db; other system keys write to .env."""
-    # Allow monitor token bypass for operator-level pushes
-    auth_header  = request.headers.get('Authorization', '')
+    """Update API keys. Accepts portal session or monitor-token bearer."""
+    auth_header   = request.headers.get('Authorization', '')
     monitor_token = os.environ.get('MONITOR_TOKEN', '')
     token_ok = bool(monitor_token and auth_header == f'Bearer {monitor_token}')
     if not token_ok and not session.get('customer_id'):
         return jsonify({'ok': False, 'updated': [], 'errors': ['Not authenticated']}), 401
-
     data = request.get_json(silent=True) or {}
 
     # Alpaca credentials go to auth.db (encrypted), not .env
@@ -5357,12 +5235,12 @@ def api_keys():
     ALLOWED_KEYS = {
         'ANTHROPIC_API_KEY',
         'ALPACA_BASE_URL',
-        'LIVE_TRADING_ENABLED',
         'RESEND_API_KEY',
         'MONITOR_TOKEN',
         'MONITOR_URL',
         'COMPANY_URL',
         'LICENSE_KEY',
+        'LIVE_TRADING_ENABLED',
         'PORTAL_PASSWORD',
         'PI_LABEL',
         'PI_EMAIL',
@@ -5431,56 +5309,44 @@ def api_keys():
     return jsonify({'ok': len(errors) == 0, 'updated': updated, 'errors': errors})
 
 
+
 @app.route('/api/get-keys')
 @login_required
 def api_get_keys():
-    """Return obfuscated current values of customer-visible keys for display."""
+    """Return obfuscated current values of customer-visible keys."""
     def _obs(val):
-        if not val:
-            return ''
+        if not val: return ''
         s = str(val)
-        if len(s) <= 8:
-            return '••••••••'
-        return s[:4] + '••••••' + s[-4:]
-
+        return s[:4] + '••••••' + s[-4:] if len(s) > 8 else '••••••••'
     customer_id = session.get('customer_id', '')
-    alpaca_key  = alpaca_secret = ''
+    alpaca_key = alpaca_secret = ''
     try:
         alpaca_key, alpaca_secret = auth.get_alpaca_credentials(customer_id)
     except Exception:
         pass
-
     base_url = os.environ.get('ALPACA_BASE_URL', '')
-    if 'paper' in base_url.lower():
-        trading_mode = 'paper'
-    elif base_url:
-        trading_mode = 'live'
-    else:
-        trading_mode = 'paper'  # default
-
+    trading_mode = 'live' if (base_url and 'paper' not in base_url.lower()) else 'paper'
     live_enabled = os.environ.get('LIVE_TRADING_ENABLED', 'false').lower() == 'true'
-
     return jsonify({
-        'ALPACA_API_KEY':     _obs(alpaca_key),
-        'ALPACA_SECRET_KEY':  _obs(alpaca_secret),
-        'RESEND_API_KEY':     _obs(os.environ.get('RESEND_API_KEY', '')),
-        'LICENSE_KEY':        _obs(os.environ.get('LICENSE_KEY', '')),
-        'ALERT_TO':           _obs(os.environ.get('ALERT_TO', '')),
-        'trading_mode':       trading_mode,
-        'live_enabled':       live_enabled,
+        'ALPACA_API_KEY':    _obs(alpaca_key),
+        'ALPACA_SECRET_KEY': _obs(alpaca_secret),
+        'RESEND_API_KEY':    _obs(os.environ.get('RESEND_API_KEY', '')),
+        'LICENSE_KEY':       _obs(os.environ.get('LICENSE_KEY', '')),
+        'ALERT_TO':          _obs(os.environ.get('ALERT_TO', '')),
+        'trading_mode':      trading_mode,
+        'live_enabled':      live_enabled,
     })
 
 
 @app.route('/api/account/change-password', methods=['POST'])
 @login_required
 def api_change_password():
-    """Change password — requires current password verification."""
-    data           = request.get_json(silent=True) or {}
-    current_pw     = data.get('current_password', '').strip()
-    new_pw         = data.get('new_password', '').strip()
-    confirm_pw     = data.get('confirm_password', '').strip()
-    customer_id    = session.get('customer_id', '')
-
+    """Change password — requires current password."""
+    data        = request.get_json(silent=True) or {}
+    current_pw  = data.get('current_password', '').strip()
+    new_pw      = data.get('new_password', '').strip()
+    confirm_pw  = data.get('confirm_password', '').strip()
+    customer_id = session.get('customer_id', '')
     if not current_pw or not new_pw or not confirm_pw:
         return jsonify({'ok': False, 'error': 'All fields are required'})
     if new_pw != confirm_pw:
@@ -5493,19 +5359,17 @@ def api_change_password():
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)})
     except Exception as e:
-        log.error(f"change-password error: {e}")
         return jsonify({'ok': False, 'error': 'Server error'})
 
 
 @app.route('/api/account/change-email', methods=['POST'])
 @login_required
 def api_change_email():
-    """Change email — requires current password verification."""
+    """Change email — requires current password."""
     data        = request.get_json(silent=True) or {}
     current_pw  = data.get('current_password', '').strip()
     new_email   = data.get('new_email', '').strip()
     customer_id = session.get('customer_id', '')
-
     if not current_pw or not new_email:
         return jsonify({'ok': False, 'error': 'All fields are required'})
     if '@' not in new_email or '.' not in new_email.split('@')[-1]:
@@ -5517,9 +5381,7 @@ def api_change_email():
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)})
     except Exception as e:
-        log.error(f"change-email error: {e}")
         return jsonify({'ok': False, 'error': 'Server error'})
-
 
 @app.route('/api/settings', methods=['POST'])
 @login_required
@@ -5591,9 +5453,9 @@ def api_portfolio_history():
 
 @app.route('/api/performance-summary')
 def api_performance_summary():
-    """Closed trade history + computed performance stats for the Performance tab."""
+    """Closed trade history + computed stats for the Performance tab."""
     try:
-        from datetime import datetime, timedelta
+        from datetime import datetime
         db     = _customer_db()
         trades = db.get_closed_positions(limit=200)
         port   = db.get_portfolio()
@@ -5606,14 +5468,13 @@ def api_performance_summary():
         rows = []
 
         for t in trades:
-            pnl      = t.get('pnl') or 0.0
+            pnl = t.get('pnl') or 0.0
             total_pnl += pnl
             if pnl >= 0:
                 wins += 1
             else:
                 losses += 1
 
-            # Hold duration
             try:
                 opened = datetime.fromisoformat(t['opened_at'])
                 closed = datetime.fromisoformat(t['closed_at'])
@@ -5621,10 +5482,9 @@ def api_performance_summary():
                 hold_hours_list.append(hrs)
                 hold_label = f"{int(hrs)}h" if hrs < 48 else f"{int(hrs/24)}d"
             except Exception:
-                hrs        = 0
-                hold_label = '—'
+                hrs = 0
+                hold_label = '--'
 
-            # Tax lot classification (< 1 year = short-term)
             try:
                 hold_days = (datetime.fromisoformat(t['closed_at']) - datetime.fromisoformat(t['opened_at'])).days
                 if hold_days < 365:
@@ -5634,47 +5494,43 @@ def api_performance_summary():
             except Exception:
                 tax_st += pnl
 
-            # Sector P&L attribution
             sector = t.get('sector') or 'Other'
             sector_pnl[sector] = round(sector_pnl.get(sector, 0.0) + pnl, 2)
 
-            # Return % per trade
-            cost = (t.get('entry_price') or 0) * (t.get('shares') or 0)
+            cost    = (t.get('entry_price') or 0) * (t.get('shares') or 0)
             ret_pct = round(pnl / cost * 100, 2) if cost else 0.0
 
             rows.append({
-                'ticker':    t.get('ticker', '—'),
-                'side':      'LONG',
-                'entry':     round(t.get('entry_price') or 0, 2),
-                'exit':      round(t.get('current_price') or 0, 2),
-                'hold':      hold_label,
-                'pnl':       round(pnl, 2),
-                'ret_pct':   ret_pct,
-                'opened_at': (t.get('opened_at') or '')[:10],
-                'closed_at': (t.get('closed_at') or '')[:10],
-                'exit_reason': t.get('exit_reason') or '—',
+                'ticker':      t.get('ticker', '--'),
+                'side':        'LONG',
+                'entry':       round(t.get('entry_price') or 0, 2),
+                'exit':        round(t.get('current_price') or 0, 2),
+                'hold':        hold_label,
+                'pnl':         round(pnl, 2),
+                'ret_pct':     ret_pct,
+                'opened_at':   (t.get('opened_at') or '')[:10],
+                'closed_at':   (t.get('closed_at') or '')[:10],
+                'exit_reason': t.get('exit_reason') or '--',
             })
 
-        total_trades = wins + losses
-        win_rate     = round(wins / total_trades * 100, 1) if total_trades else 0.0
-        avg_hold_hrs = round(sum(hold_hours_list) / len(hold_hours_list), 1) if hold_hours_list else 0.0
-        avg_hold_lbl = (f"{int(avg_hold_hrs)}h" if avg_hold_hrs < 48 else f"{round(avg_hold_hrs/24,1)}d") if avg_hold_hrs else '—'
-
-        # Starting capital for total return %
-        month_start  = port.get('month_start') or port.get('cash') or 1
+        total_trades  = wins + losses
+        win_rate      = round(wins / total_trades * 100, 1) if total_trades else 0.0
+        avg_hold_hrs  = round(sum(hold_hours_list) / len(hold_hours_list), 1) if hold_hours_list else 0.0
+        avg_hold_lbl  = (f"{int(avg_hold_hrs)}h" if avg_hold_hrs < 48 else f"{round(avg_hold_hrs/24,1)}d") if avg_hold_hrs else '--'
+        month_start   = port.get('month_start') or port.get('cash') or 1
         total_ret_pct = round(total_pnl / month_start * 100, 2) if month_start else 0.0
 
         return jsonify({
             'total_pnl':      round(total_pnl, 2),
             'total_ret_pct':  total_ret_pct,
-            'win_rate':       win_rate,
-            'total_trades':   total_trades,
-            'winning_trades': wins,
-            'avg_hold':       avg_hold_lbl,
-            'tax_st':         round(tax_st, 2),
-            'tax_lt':         round(tax_lt, 2),
-            'sector_pnl':     sector_pnl,
-            'trades':         rows,
+            'win_rate':        win_rate,
+            'total_trades':    total_trades,
+            'winning_trades':  wins,
+            'avg_hold':        avg_hold_lbl,
+            'tax_st':          round(tax_st, 2),
+            'tax_lt':          round(tax_lt, 2),
+            'sector_pnl':      sector_pnl,
+            'trades':          rows,
         })
     except Exception as e:
         return jsonify({'total_pnl': 0, 'win_rate': 0, 'total_trades': 0,
@@ -6323,6 +6179,115 @@ def api_trader_activity():
     except Exception as e:
         return jsonify({'scans': [], 'recent': [], 'error': str(e)})
 
+
+
+@app.route('/api/logs-audit')
+def api_logs_audit():
+    """
+    Scan pi5 log directory for error/warning patterns.
+    Returns findings in the same JSON shape as company_auditor's /api/auditor,
+    so the monitor auditor page can render both nodes identically.
+    Requires monitor bearer token.
+    """
+    import re as _re
+    from datetime import datetime as _dt, timezone as _tz
+
+    auth_header  = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_token or auth_header != f'Bearer {monitor_token}':
+        return jsonify({'error': 'unauthorized'}), 401
+
+    _log_dir = LOG_DIR  # module-level constant: _ROOT_DIR/logs
+    IGNORE = [
+        _re.compile(r'connection retry', _re.I),
+        _re.compile(r'graceful shutdown', _re.I),
+        _re.compile(r'no new issues', _re.I),
+        _re.compile(r'Scan complete', _re.I),
+        _re.compile(r'critical checks pass', _re.I),
+        _re.compile(r'All \w+ checks', _re.I),
+    ]
+    # Match log-level tokens: ] LEVEL or line-start LEVEL (not mid-sentence words)
+    PATTERNS = [
+        (_re.compile(r'] CRITICAL\b|^CRITICAL\b'), 'critical'),
+        (_re.compile(r'] ERROR\b|^ERROR\b'),       'high'),
+        (_re.compile(r'Traceback'),                  'high'),
+        (_re.compile(r'Exception:'),                 'high'),
+        (_re.compile(r'] WARNING\b|^WARNING\b'),   'medium'),
+        (_re.compile(r'] \w+ failed\b', _re.I),   'medium'),
+        (_re.compile(r'\btimeout\b', _re.I),       'low'),
+    ]
+
+    issues   = []
+    by_sev   = {}
+    scan_state = []
+    seen     = {}   # (source_file, context[:80]) → issue dict  (dedup)
+
+    try:
+        import glob as _glob, os as _os
+        log_files = sorted(_glob.glob(_os.path.join(_log_dir, '*.log')))
+    except Exception:
+        log_files = []
+
+    now_iso = _dt.now(_tz.utc).isoformat()
+
+    for log_path in log_files:
+        fname = _os.path.basename(log_path)
+        try:
+            size = _os.path.getsize(log_path)
+            with open(log_path, 'r', errors='replace') as fh:
+                lines = fh.readlines()
+            offset = size
+
+            for line in lines:
+                line = line.rstrip()
+                if not line:
+                    continue
+                if any(p.search(line) for p in IGNORE):
+                    continue
+                for pat, sev in PATTERNS:
+                    if pat.search(line):
+                        ctx = line[:120]
+                        key = (fname, ctx[:80])
+                        if key in seen:
+                            seen[key]['hit_count'] += 1
+                            seen[key]['last_seen']  = now_iso
+                        else:
+                            entry = {
+                                'id':          len(issues) + 1,
+                                'source_file': fname,
+                                'severity':    sev,
+                                'context':     ctx,
+                                'hit_count':   1,
+                                'first_seen':  now_iso,
+                                'last_seen':   now_iso,
+                            }
+                            seen[key] = entry
+                            issues.append(entry)
+                            by_sev[sev] = by_sev.get(sev, 0) + 1
+                        break
+
+            scan_state.append({
+                'log_file':     log_path,
+                'last_offset':  offset,
+                'file_size':    size,
+                'last_scanned': now_iso,
+            })
+        except Exception:
+            pass
+
+    # Sort by severity
+    sev_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+    issues.sort(key=lambda x: sev_order.get(x['severity'], 9))
+    issues = issues[:200]
+
+    return jsonify({
+        'issues':           issues,
+        'by_severity':      by_sev,
+        'total_unresolved': len(issues),
+        'scan_state':       scan_state,
+        'morning_report':   None,   # retail node has no morning report
+        'node':             'retail',
+    })
 
 @app.route('/api/audit')
 def api_audit():
