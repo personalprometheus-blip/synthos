@@ -433,6 +433,51 @@ def update_customer_name(customer_id: str, display_name: str):
         )
 
 
+def update_password(customer_id: str, current_password: str, new_password: str) -> None:
+    """Change a customer's password after verifying the current one."""
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT password_hash FROM customers WHERE id = ? AND is_active = 1",
+            (customer_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Account not found")
+        if not verify_password(current_password, row['password_hash']):
+            raise ValueError("Current password is incorrect")
+        c.execute(
+            "UPDATE customers SET password_hash = ? WHERE id = ?",
+            (hash_password(new_password), customer_id)
+        )
+    log.info(f"Password updated for customer {customer_id}")
+
+
+def update_email(customer_id: str, current_password: str, new_email: str) -> None:
+    """Change a customer's email after verifying the current password."""
+    new_email  = new_email.lower().strip()
+    new_hash   = _email_lookup_hash(new_email)
+    new_enc    = encrypt_field(new_email)
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT password_hash FROM customers WHERE id = ? AND is_active = 1",
+            (customer_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Account not found")
+        if not verify_password(current_password, row['password_hash']):
+            raise ValueError("Current password is incorrect")
+        conflict = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ? AND id != ?",
+            (new_hash, customer_id)
+        ).fetchone()
+        if conflict:
+            raise ValueError("Email address is already in use")
+        c.execute(
+            "UPDATE customers SET email_hash = ?, email_enc = ? WHERE id = ?",
+            (new_hash, new_enc, customer_id)
+        )
+    log.info(f"Email updated for customer {customer_id}")
+
+
 def ensure_admin_account():
     """
     Create the default admin account from .env if no accounts exist yet.

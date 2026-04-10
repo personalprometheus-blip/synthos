@@ -618,6 +618,15 @@ class DB:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_closed_positions(self, limit=200):
+        """Return closed positions newest-first for performance summary."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def open_position(self, ticker, company, sector, entry_price, shares,
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,

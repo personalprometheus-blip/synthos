@@ -2873,10 +2873,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button>
       </div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">Last Heartbeat</div>
-      <div style="font-size:11px;font-weight:600;font-family:var(--mono);color:var(--text);margin-top:4px" id="stat-heartbeat">Loading…</div>
-      <div style="font-size:9px;color:var(--dim);margin-top:2px" id="stat-hb-age"></div>
+    <div class="stat-card pink">
+      <div class="stat-label">Open Positions</div>
+      <div class="stat-val" id="stat-pos-display">0</div>
+      <div style="font-size:9px;color:var(--dim);margin-top:2px" id="stat-positions-sub">—</div>
     </div>
   </div>
 
@@ -2954,6 +2954,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             <span style="font-size:11px;color:var(--muted)">$</span>
             <input id="qs-max-trade" type="number" min="0" class="qs-input" value="{{ settings.max_trade_usd }}" placeholder="0 = no limit">
           </div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Max Sector Concentration</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input id="qs-max-sector" type="number" min="1" max="100" class="qs-input" value="{{ settings.max_sector_pct }}" placeholder="40">
+            <span style="font-size:11px;color:var(--muted);white-space:nowrap">% per sector</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Staleness Cutoff</div>
+          <select id="qs-staleness" class="qs-select">
+            <option value="Fresh" {% if settings.max_staleness == 'Fresh' %}selected{% endif %}>Fresh (≤3 days)</option>
+            <option value="Aging" {% if settings.max_staleness == 'Aging' %}selected{% endif %}>Aging (≤7 days)</option>
+            <option value="Stale" {% if settings.max_staleness == 'Stale' %}selected{% endif %}>Stale (≤14 days)</option>
+            <option value="Expired" {% if settings.max_staleness == 'Expired' %}selected{% endif %}>All (up to 45 days)</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Spousal Filings</div>
+          <select id="qs-spousal" class="qs-select">
+            <option value="reduced" {% if settings.spousal_weight == 'reduced' %}selected{% endif %}>Reduced confidence</option>
+            <option value="skip" {% if settings.spousal_weight == 'skip' %}selected{% endif %}>Skip spousal trades</option>
+            <option value="equal" {% if settings.spousal_weight == 'equal' %}selected{% endif %}>Equal weight</option>
+          </select>
         </div>
         <button class="btn-approve" style="font-size:10px;padding:7px" onclick="saveQuickSettings()">Save Settings</button>
       </div>
@@ -3294,119 +3318,105 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div class="glass" style="margin-bottom:16px">
     <div class="settings-section">
       <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.6;padding:8px 10px;background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.15);border-radius:8px">
-        &#9888; Keys are written directly to <code style="font-size:10px">.env</code> on this Pi. Leave a field blank to keep the existing value.
+        &#9888; Keys are written to this Pi's secure store. Enter a new value and click <strong>Update</strong> to overwrite.
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Anthropic API Key</div><div class="setting-desc">Required for AI-assisted trade analysis</div></div>
-        <input class="glass-input" type="password" id="k-anthropic" placeholder="sk-ant-..." style="width:180px">
+
+      <!-- Alpaca API Key -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">Alpaca API Key</div>
+          <div class="setting-desc">Paper or live trading account</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-key">Loading…</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK…" style="width:140px">
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_API_KEY','k-alpaca-key','obs-alpaca-key')">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Alpaca API Key</div><div class="setting-desc">Paper or live trading account</div></div>
-        <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK..." style="width:160px">
+
+      <!-- Alpaca Secret Key -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">Alpaca Secret Key</div>
+          <div class="setting-desc">Keep this private</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-secret">Loading…</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="k-alpaca-secret" placeholder="Secret…" style="width:140px">
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_SECRET_KEY','k-alpaca-secret','obs-alpaca-secret')">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Alpaca Secret Key</div><div class="setting-desc">Keep this private</div></div>
-        <input class="glass-input" type="password" id="k-alpaca-secret" placeholder="Secret..." style="width:160px">
+
+      <!-- Trading Mode -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">Trading Mode</div>
+          <div class="setting-desc">Paper trades safely; Live requires operator approval</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select class="glass-input" id="k-trading-mode" style="width:140px">
+            <option value="paper">Paper Trading</option>
+            <option value="live" id="k-live-option" disabled>Live Trading</option>
+          </select>
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateTradingMode()">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Alpaca Base URL</div><div class="setting-desc">Paper: paper-api.alpaca.markets</div></div>
-        <input class="glass-input" type="text" id="k-alpaca-url" placeholder="https://paper-api.alpaca.markets" style="width:260px">
+
+      <!-- Resend API Key -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">Resend API Key</div>
+          <div class="setting-desc">For trade alerts and account emails</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-resend">Loading…</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="k-resend" placeholder="re_…" style="width:140px">
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('RESEND_API_KEY','k-resend','obs-resend')">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Resend API Key</div><div class="setting-desc">For email alerts and account setup emails</div></div>
-        <input class="glass-input" type="password" id="k-resend" placeholder="re_..." style="width:160px">
+
+      <!-- License Key -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">License Key</div>
+          <div class="setting-desc">Synthos license (restore from backup)</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-license">Loading…</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="k-license" placeholder="SYN-…" style="width:140px">
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('LICENSE_KEY','k-license','obs-license')">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Monitor URL</div><div class="setting-desc">Heartbeat destination (Monitor Pi)</div></div>
-        <input class="glass-input" type="text" id="k-monitor-url" placeholder="http://monitor-pi.local:5000" style="width:240px">
+
+      <!-- Alert Email (To) -->
+      <div class="setting-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="setting-label">Alert Email</div>
+          <div class="setting-desc">Trade alerts destination — if different from your account email</div>
+          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alert-to">Loading…</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="email" id="k-alert-to" placeholder="you@email.com" style="width:170px">
+          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALERT_TO','k-alert-to','obs-alert-to')">Update</button>
+        </div>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Monitor Token</div><div class="setting-desc">Shared secret with monitor server</div></div>
-        <input class="glass-input" type="password" id="k-monitor-token" placeholder="Token..." style="width:160px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Company URL</div><div class="setting-desc">Company Pi endpoint for alerts &amp; backups</div></div>
-        <input class="glass-input" type="text" id="k-company-url" placeholder="http://company-pi.local:5010" style="width:240px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">License Key</div><div class="setting-desc">Synthos license (restore from backup)</div></div>
-        <input class="glass-input" type="password" id="k-license" placeholder="SYN-..." style="width:180px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Portal Password</div><div class="setting-desc">Login password for this portal</div></div>
-        <input class="glass-input" type="password" id="k-portal-pw" placeholder="New password..." style="width:160px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Alert Email (From)</div><div class="setting-desc">Verified Resend sender address</div></div>
-        <input class="glass-input" type="email" id="k-alert-from" placeholder="alerts@yourdomain.com" style="width:220px">
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Alert Email (To)</div><div class="setting-desc">Where error alerts are delivered</div></div>
-        <input class="glass-input" type="email" id="k-alert-to" placeholder="you@email.com" style="width:200px">
-      </div>
-    </div>
-    <div style="padding:0 18px 16px;display:flex;align-items:center;gap:10px">
-      <button class="save-btn" onclick="saveKeys()">Save Keys</button>
-      <span style="font-size:10px;color:var(--muted)">Only filled fields will be updated</span>
+
     </div>
   </div>
 
-  <div class="section-title">Trading Parameters</div>
-  <div class="glass" style="margin-bottom:16px">
-    <div class="settings-section">
-      <div class="setting-row">
-        <div><div class="setting-label">Max Trade Size (USD)</div><div class="setting-desc">Hard dollar cap per trade · 0 = no cap</div></div>
-        <input class="glass-input" type="number" id="s-max-trade-usd" min="0" value="{{ settings.max_trade_usd|int }}">
-        <span style="font-size:11px;color:var(--muted)">$</span>
+  <!-- KEY OVERWRITE CONFIRM POPUP -->
+  <div id="key-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:900;align-items:center;justify-content:center">
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:24px;width:320px;text-align:center">
+      <div style="font-size:13px;color:var(--text);margin-bottom:8px;font-weight:700" id="key-confirm-title">Overwrite Key?</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5" id="key-confirm-msg"></div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button onclick="document.getElementById('key-confirm-overlay').style.display='none'" style="padding:8px 18px;border-radius:9px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans)">Cancel</button>
+        <button id="key-confirm-btn" style="padding:8px 18px;border-radius:9px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans)">Confirm Update</button>
       </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Max Position Size</div><div class="setting-desc">% of tradeable capital per position</div></div>
-        <input class="glass-input" type="number" id="s-max-pos" min="1" max="100" value="{{ settings.max_position_pct }}">
-        <span style="font-size:11px;color:var(--muted)">%</span>
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Max Sector Concentration</div><div class="setting-desc">% in any one sector before penalty</div></div>
-        <input class="glass-input" type="number" id="s-max-sector" min="1" max="100" value="{{ settings.max_sector_pct }}">
-        <span style="font-size:11px;color:var(--muted)">%</span>
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Minimum Confidence</div><div class="setting-desc">Only act on signals at or above this level</div></div>
-        <select class="glass-select" id="s-min-conf">
-          <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH only</option>
-          <option value="MEDIUM" {% if settings.min_confidence != 'HIGH' and settings.min_confidence != 'LOW' %}selected{% endif %}>MEDIUM and above</option>
-          <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW and above</option>
-        </select>
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Staleness Cutoff</div><div class="setting-desc">Maximum disclosure age to act on</div></div>
-        <select class="glass-select" id="s-staleness">
-          <option value="Fresh" {% if settings.max_staleness == 'Fresh' %}selected{% endif %}>Fresh (≤3 days)</option>
-          <option value="Aging" {% if settings.max_staleness == 'Aging' %}selected{% endif %}>Aging (≤7 days)</option>
-          <option value="Stale" {% if settings.max_staleness == 'Stale' %}selected{% endif %}>Stale (≤14 days)</option>
-          <option value="Expired" {% if settings.max_staleness == 'Expired' %}selected{% endif %}>All (up to 45 days)</option>
-        </select>
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Close Session Mode</div><div class="setting-desc">3:30pm session behavior</div></div>
-        <select class="glass-select" id="s-close-mode">
-          <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
-          <option value="normal" {% if settings.close_session_mode == 'normal' %}selected{% endif %}>Normal</option>
-          <option value="aggressive" {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
-        </select>
-      </div>
-      <div class="setting-row">
-        <div><div class="setting-label">Spousal Filings</div><div class="setting-desc">How to weight spouse/dependent disclosures</div></div>
-        <select class="glass-select" id="s-spousal">
-          <option value="reduced" {% if settings.spousal_weight == 'reduced' %}selected{% endif %}>Reduced confidence</option>
-          <option value="skip" {% if settings.spousal_weight == 'skip' %}selected{% endif %}>Skip spousal trades</option>
-          <option value="equal" {% if settings.spousal_weight == 'equal' %}selected{% endif %}>Equal weight</option>
-        </select>
-      </div>
-    </div>
-    <div style="padding:0 18px 16px">
-      <button class="save-btn" onclick="saveSettings()">Save Settings</button>
     </div>
   </div>
+
+  <!-- Trading Parameters moved to Dashboard → Agent Settings panel -->
 
   <div class="section-title">Alert Preferences</div>
   <div class="glass" style="margin-bottom:16px">
@@ -3438,6 +3448,36 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div style="padding:0 18px 16px;display:flex;align-items:center;gap:10px">
       <button class="save-btn" onclick="saveAlertPrefs()">Save Preferences</button>
       <span style="font-size:10px;color:var(--muted)">Alerts sent to your registered email</span>
+    </div>
+  </div>
+
+  <div class="section-title">My Account</div>
+  <div class="glass" style="margin-bottom:16px">
+    <div class="settings-section">
+
+      <!-- Change Email -->
+      <div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Change Email</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-width:320px">
+          <input class="glass-input" type="email" id="acct-new-email" placeholder="New email address" style="width:100%">
+          <input class="glass-input" type="password" id="acct-email-pw" placeholder="Current password to confirm" style="width:100%">
+          <button class="save-btn" onclick="changeEmail()">Update Email</button>
+          <div id="acct-email-status" style="font-size:10px;color:var(--muted)"></div>
+        </div>
+      </div>
+
+      <!-- Change Password -->
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Change Password</div>
+        <div style="display:flex;flex-direction:column;gap:8px;max-width:320px">
+          <input class="glass-input" type="password" id="acct-cur-pw" placeholder="Current password" style="width:100%">
+          <input class="glass-input" type="password" id="acct-new-pw" placeholder="New password (min 8 characters)" style="width:100%">
+          <input class="glass-input" type="password" id="acct-confirm-pw" placeholder="Confirm new password" style="width:100%">
+          <button class="save-btn" onclick="changePassword()">Update Password</button>
+          <div id="acct-pw-status" style="font-size:10px;color:var(--muted)"></div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -3621,12 +3661,103 @@ function updateSessionTimeline() {
 
 // ── PERFORMANCE TAB ──
 async function loadPerformance() {
-  // Stub — populates from portfolio history when wired
-  const histEl = document.getElementById('trade-history-body');
-  if (histEl && histEl.children.length <= 1) {
-    // placeholder already set
-  }
-  // Compute drawdown from portfolio history if available
+  // ── 1. Trade stats from closed positions ──
+  try {
+    const r = await fetch('/api/performance-summary');
+    const d = await r.json();
+
+    // Summary cards
+    const sign = d.total_pnl >= 0 ? '+' : '';
+    const retEl = document.getElementById('perf-total-return');
+    if (retEl) {
+      retEl.textContent = sign + '$' + Math.abs(d.total_pnl || 0).toFixed(2);
+      retEl.style.color = d.total_pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
+    }
+    const retSubEl = document.getElementById('perf-total-sub');
+    if (retSubEl) retSubEl.textContent = (d.total_ret_pct >= 0 ? '+' : '') + (d.total_ret_pct || 0).toFixed(2) + '% all time';
+
+    const wrEl = document.getElementById('perf-win-rate');
+    if (wrEl) {
+      wrEl.textContent = (d.win_rate || 0) + '%';
+      wrEl.style.color = d.win_rate >= 50 ? 'var(--teal)' : 'var(--pink)';
+    }
+    const wrSub = document.getElementById('perf-trades-sub');
+    if (wrSub) wrSub.textContent = (d.winning_trades || 0) + ' wins / ' + (d.total_trades || 0) + ' trades';
+
+    const holdEl = document.getElementById('perf-avg-hold');
+    if (holdEl) holdEl.textContent = d.avg_hold || '—';
+
+    // Tax lots
+    const stEl = document.getElementById('tax-st');
+    const ltEl = document.getElementById('tax-lt');
+    if (stEl) stEl.textContent = (d.tax_st >= 0 ? '+' : '') + '$' + Math.abs(d.tax_st || 0).toFixed(2);
+    if (ltEl) ltEl.textContent = (d.tax_lt >= 0 ? '+' : '') + '$' + Math.abs(d.tax_lt || 0).toFixed(2);
+
+    // P&L attribution bars (map to our fixed sector buckets)
+    const sp = d.sector_pnl || {};
+    const allVals = Object.values(sp).map(v => Math.abs(v));
+    const maxVal  = allVals.length ? Math.max(...allVals) : 1;
+    const buckets = {
+      tech:   ['Technology','Tech','Information Technology','Software'],
+      health: ['Healthcare','Health Care','Biotechnology','Pharma'],
+      fin:    ['Financials','Finance','Financial Services','Banks'],
+    };
+    const sum = (keys) => keys.reduce((a,k) => {
+      for (const s of Object.keys(sp)) { if (keys.some(kk => s.toLowerCase().includes(kk.toLowerCase()))) a += sp[s]; }
+      return a;
+    }, 0);
+    const techPnl  = Object.entries(sp).filter(([k])=>buckets.tech.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
+    const healthPnl= Object.entries(sp).filter(([k])=>buckets.health.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
+    const finPnl   = Object.entries(sp).filter(([k])=>buckets.fin.some(b=>k.toLowerCase().includes(b.toLowerCase()))).reduce((a,[,v])=>a+v,0);
+    const otherPnl = Object.values(sp).reduce((a,v)=>a+v,0) - techPnl - healthPnl - finPnl;
+    const setBar = (id, barId, val) => {
+      const el = document.getElementById(id); const barEl = document.getElementById(barId);
+      if (el) { el.textContent = (val>=0?'+':'') + '$' + Math.abs(val).toFixed(2); el.style.color = val>=0?'var(--teal)':'var(--pink)'; }
+      if (barEl) barEl.style.width = maxVal > 0 ? (Math.abs(val)/maxVal*100).toFixed(0)+'%' : '0%';
+    };
+    setBar('attr-tech',   'attr-tech-bar',   techPnl);
+    setBar('attr-health', 'attr-health-bar', healthPnl);
+    setBar('attr-fin',    'attr-fin-bar',    finPnl);
+    setBar('attr-other',  'attr-other-bar',  otherPnl);
+
+    // Trade history table
+    const tbody = document.getElementById('trade-history-body');
+    const hCount = document.getElementById('history-count');
+    if (tbody) {
+      const trades = d.trades || [];
+      if (hCount) hCount.textContent = trades.length + ' closed trades';
+      if (!trades.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No closed trades yet</td></tr>';
+      } else {
+        tbody.innerHTML = trades.map(t => {
+          const pnlColor = t.pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
+          const pnlSign  = t.pnl >= 0 ? '+' : '';
+          const retSign  = t.ret_pct >= 0 ? '+' : '';
+          return `<tr>
+            <td style="font-weight:700;font-family:var(--mono)">${t.ticker}</td>
+            <td><span style="font-size:9px;padding:1px 6px;border-radius:99px;background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.25)">${t.side}</span></td>
+            <td style="font-family:var(--mono)">$${t.entry.toFixed(2)}</td>
+            <td style="font-family:var(--mono)">$${t.exit.toFixed(2)}</td>
+            <td style="color:var(--muted)">${t.hold}</td>
+            <td style="font-family:var(--mono);color:${pnlColor};font-weight:700">${pnlSign}$${Math.abs(t.pnl).toFixed(2)}</td>
+            <td style="font-family:var(--mono);color:${pnlColor}">${retSign}${Math.abs(t.ret_pct).toFixed(2)}%</td>
+            <td style="color:var(--dim)">—</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+
+    // Milestone badges — unlock First Trade and First Win if applicable
+    const badgeGrid = document.getElementById('badge-grid');
+    if (badgeGrid && d.total_trades > 0) {
+      const badges = badgeGrid.querySelectorAll('.badge');
+      if (badges[0]) badges[0].classList.remove('locked');   // First Trade
+      if (d.winning_trades > 0 && badges[1]) badges[1].classList.remove('locked'); // First Win
+    }
+
+  } catch(e) { console.warn('loadPerformance error', e); }
+
+  // ── 2. Max drawdown from portfolio history ──
   try {
     const r = await fetch('/api/portfolio-history');
     const d = await r.json();
@@ -3635,13 +3766,13 @@ async function loadPerformance() {
       const vals = hist.map(h => h.value || 0);
       const peak = Math.max(...vals);
       const curr = vals[vals.length - 1];
-      const dd = peak > 0 ? ((curr - peak) / peak * 100) : 0;
-      const ddEl = document.getElementById('drawdown-val');
+      const dd   = peak > 0 ? ((curr - peak) / peak * 100) : 0;
+      const ddEl    = document.getElementById('drawdown-val');
       const ddSubEl = document.getElementById('drawdown-sub');
       if (ddEl) { ddEl.textContent = dd.toFixed(2) + '%'; ddEl.style.color = dd < 0 ? 'var(--pink)' : 'var(--teal)'; }
       if (ddSubEl) ddSubEl.textContent = 'from $' + peak.toFixed(0) + ' peak';
       const ddPerfEl = document.getElementById('perf-max-dd');
-      if (ddPerfEl) ddPerfEl.textContent = dd.toFixed(2) + '%';
+      if (ddPerfEl) { ddPerfEl.textContent = dd.toFixed(2) + '%'; ddPerfEl.style.color = dd < 0 ? 'var(--pink)' : 'var(--teal)'; }
     }
   } catch(e) {}
 }
@@ -3729,51 +3860,107 @@ async function submitUnlockKey() {
 }
 
 // ── SETTINGS ──
-async function saveKeys() {
-  const fields = {
-    'ANTHROPIC_API_KEY': document.getElementById('k-anthropic').value,
-    'ALPACA_API_KEY':    document.getElementById('k-alpaca-key').value,
-    'ALPACA_SECRET_KEY': document.getElementById('k-alpaca-secret').value,
-    'ALPACA_BASE_URL':   document.getElementById('k-alpaca-url').value,
-    'RESEND_API_KEY':    document.getElementById('k-resend').value,
-    'MONITOR_URL':       document.getElementById('k-monitor-url').value,
-    'MONITOR_TOKEN':     document.getElementById('k-monitor-token').value,
-    'COMPANY_URL':       document.getElementById('k-company-url').value,
-    'LICENSE_KEY':       document.getElementById('k-license').value,
-    'PORTAL_PASSWORD':   document.getElementById('k-portal-pw').value,
-    'ALERT_FROM':        document.getElementById('k-alert-from').value,
-    'ALERT_TO':          document.getElementById('k-alert-to').value,
+// ── API KEYS — per-field update with overwrite confirmation ──
+let _keyCurrentValues = {};  // cache of obfuscated current values
+
+async function loadKeyValues() {
+  try {
+    const r = await fetch('/api/get-keys');
+    const d = await r.json();
+    _keyCurrentValues = d;
+    const set = (obsId, val) => { const el = document.getElementById(obsId); if (el) el.textContent = val || 'Not set'; };
+    set('obs-alpaca-key',    d.ALPACA_API_KEY);
+    set('obs-alpaca-secret', d.ALPACA_SECRET_KEY);
+    set('obs-resend',        d.RESEND_API_KEY);
+    set('obs-license',       d.LICENSE_KEY);
+    set('obs-alert-to',      d.ALERT_TO);
+    // Trading mode dropdown
+    const modeEl = document.getElementById('k-trading-mode');
+    const liveOpt = document.getElementById('k-live-option');
+    if (modeEl) modeEl.value = d.trading_mode || 'paper';
+    if (liveOpt) {
+      if (d.live_enabled) {
+        liveOpt.disabled = false;
+      } else {
+        liveOpt.disabled = true;
+        liveOpt.textContent = 'Live Trading (locked — contact operator)';
+      }
+    }
+  } catch(e) { console.warn('loadKeyValues error', e); }
+}
+
+function updateKey(keyName, inputId, obsId) {
+  const inputEl = document.getElementById(inputId);
+  const val     = inputEl?.value?.trim();
+  if (!val) { toast('Enter a value first', 'err'); return; }
+
+  const currentObs = _keyCurrentValues[keyName] || '';
+  const hasExisting = currentObs && currentObs !== 'Not set';
+
+  const doSave = async () => {
+    document.getElementById('key-confirm-overlay').style.display = 'none';
+    const r = await fetch('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({[keyName]: val})});
+    const d = await r.json();
+    if (d.ok) {
+      toast('\u2713 ' + keyName + ' updated', 'ok');
+      if (inputEl) inputEl.value = '';
+      await loadKeyValues();
+    } else {
+      toast('Error: ' + (d.errors||[]).join(', '), 'err');
+    }
   };
-  // Only send fields that have values
-  const data = Object.fromEntries(Object.entries(fields).filter(([,v]) => v.trim()));
-  if (!Object.keys(data).length) { toast('No keys to save — fill in at least one field', 'err'); return; }
-  const r = await fetch('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
-  const d = await r.json();
-  if (d.ok) {
-    toast('✓ Keys saved: ' + d.updated.join(', '), 'ok');
-    // Clear fields after save
-    Object.keys(fields).forEach(k => {
-      const el = document.querySelector('[id^="k-"]');
-    });
-    document.querySelectorAll('[id^="k-"]').forEach(el => el.value = '');
+
+  if (hasExisting) {
+    document.getElementById('key-confirm-title').textContent = 'Overwrite existing key?';
+    document.getElementById('key-confirm-msg').textContent   = keyName + ' already has a value (' + currentObs + '). This will permanently replace it.';
+    document.getElementById('key-confirm-btn').onclick       = doSave;
+    document.getElementById('key-confirm-overlay').style.display = 'flex';
   } else {
-    toast('Errors: ' + d.errors.join(', '), 'err');
+    document.getElementById('key-confirm-title').textContent = 'Save new key?';
+    document.getElementById('key-confirm-msg').textContent   = 'Save ' + keyName + '?';
+    document.getElementById('key-confirm-btn').onclick       = doSave;
+    document.getElementById('key-confirm-overlay').style.display = 'flex';
   }
 }
 
-async function saveSettings() {
-  const data = {
-    max_trade_usd:    document.getElementById('s-max-trade-usd').value,
-    max_position_pct: document.getElementById('s-max-pos').value,
-    max_sector_pct:   document.getElementById('s-max-sector').value,
-    min_confidence:   document.getElementById('s-min-conf').value,
-    max_staleness:    document.getElementById('s-staleness').value,
-    close_session_mode: document.getElementById('s-close-mode').value,
-    spousal_weight:   document.getElementById('s-spousal').value,
-  };
-  const r = await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+async function updateTradingMode() {
+  const mode   = document.getElementById('k-trading-mode')?.value;
+  const urlMap = { paper: 'https://paper-api.alpaca.markets', live: 'https://api.alpaca.markets' };
+  const url    = urlMap[mode];
+  if (!url) { toast('Select a mode first', 'err'); return; }
+  const r = await fetch('/api/keys', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({'ALPACA_BASE_URL': url})});
   const d = await r.json();
-  toast(d.ok ? '✓ Settings saved' : 'Save failed: '+d.error, d.ok ? 'ok' : 'err');
+  toast(d.ok ? '\u2713 Trading mode set to ' + mode : 'Error: ' + (d.errors||[]).join(', '), d.ok ? 'ok' : 'err');
+}
+
+// ── MY ACCOUNT ──
+async function changeEmail() {
+  const newEmail  = document.getElementById('acct-new-email')?.value?.trim();
+  const curPw     = document.getElementById('acct-email-pw')?.value?.trim();
+  const statusEl  = document.getElementById('acct-email-status');
+  if (!newEmail || !curPw) { if (statusEl) { statusEl.textContent = 'All fields required'; statusEl.style.color = 'var(--pink)'; } return; }
+  const r = await fetch('/api/account/change-email', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({new_email: newEmail, current_password: curPw})});
+  const d = await r.json();
+  if (statusEl) {
+    statusEl.textContent = d.ok ? '\u2713 Email updated' : '\u2717 ' + (d.error || 'Error');
+    statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)';
+  }
+  if (d.ok) { document.getElementById('acct-new-email').value = ''; document.getElementById('acct-email-pw').value = ''; }
+}
+
+async function changePassword() {
+  const curPw     = document.getElementById('acct-cur-pw')?.value?.trim();
+  const newPw     = document.getElementById('acct-new-pw')?.value?.trim();
+  const confirmPw = document.getElementById('acct-confirm-pw')?.value?.trim();
+  const statusEl  = document.getElementById('acct-pw-status');
+  if (!curPw || !newPw || !confirmPw) { if (statusEl) { statusEl.textContent = 'All fields required'; statusEl.style.color = 'var(--pink)'; } return; }
+  const r = await fetch('/api/account/change-password', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({current_password: curPw, new_password: newPw, confirm_password: confirmPw})});
+  const d = await r.json();
+  if (statusEl) {
+    statusEl.textContent = d.ok ? '\u2713 Password updated' : '\u2717 ' + (d.error || 'Error');
+    statusEl.style.color = d.ok ? 'var(--teal)' : 'var(--pink)';
+  }
+  if (d.ok) { ['acct-cur-pw','acct-new-pw','acct-confirm-pw'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; }); }
 }
 
 async function selfUpdate() {
@@ -4217,6 +4404,7 @@ async function loadLiveStatus() {
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
     sv('stat-cash', '$'+(s.cash||0).toFixed(2));
     sv('stat-positions', s.open_positions||0);
+    sv('stat-pos-display', s.open_positions||0);
     sv('stat-flags', s.urgent_flags||0);
     sv('stat-heartbeat', (s.last_heartbeat||'Never').slice(0,16));
     sv('stat-mode', s.operating_mode||'SUPERVISED');
@@ -4786,25 +4974,27 @@ function closeLogicModal(e) {
   if (overlay) overlay.classList.remove('open');
 }
 
-// ── QUICK SETTINGS SAVE ──
+// ── SETTINGS SAVE (dashboard + settings tab share one function) ──
 async function saveQuickSettings() {
-  const settings = {
-    min_confidence:    document.getElementById('qs-min-confidence')?.value || 'MEDIUM',
-    max_position_pct:  (parseInt(document.getElementById('qs-max-pos')?.value) || 10) / 100,
-    close_session_mode:document.getElementById('qs-close-mode')?.value || 'conservative',
-    max_trade_usd:     parseFloat(document.getElementById('qs-max-trade')?.value) || 0,
+  const g = id => document.getElementById(id);
+  const data = {
+    min_confidence:    (g('qs-min-confidence') || g('s-min-conf'))?.value    || 'MEDIUM',
+    max_position_pct:  (parseInt((g('qs-max-pos') || g('s-max-pos'))?.value) || 10) / 100,
+    close_session_mode:(g('qs-close-mode') || g('s-close-mode'))?.value      || 'conservative',
+    max_trade_usd:     parseFloat((g('qs-max-trade') || g('s-max-trade-usd'))?.value) || 0,
+    max_sector_pct:    parseFloat((g('qs-max-sector') || g('s-max-sector'))?.value)   || 40,
+    max_staleness:     (g('qs-staleness') || g('s-staleness'))?.value        || 'Fresh',
+    spousal_weight:    (g('qs-spousal')   || g('s-spousal'))?.value          || 'reduced',
   };
   try {
-    const r = await fetch('/api/settings', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(settings)
-    });
+    const r = await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
     const d = await r.json();
     if (d.ok) toast('Settings saved', 'ok');
     else toast('Save failed: ' + (d.error||'unknown'), 'err');
   } catch(e) { toast('Settings save error', 'err'); }
 }
+// Alias so old references still work
+const saveSettings = saveQuickSettings;
 
 // ── INIT ──
 updateClock();
@@ -4817,6 +5007,7 @@ function updateClock() {
 
 loadLiveStatus();
 loadPlanning();
+loadKeyValues();
 loadHealth();
 loadAudit();
 loadMarketIndices();
@@ -5146,10 +5337,17 @@ def api_unlock_autonomous():
 
 
 @app.route('/api/keys', methods=['POST'])
-@login_required
 def api_keys():
-    """Update API keys. Alpaca credentials are stored encrypted in auth.db;
-    other system keys write to .env."""
+    """Update API keys. Accepts either a portal session (customer) or a
+    monitor-token bearer header (operator push). Alpaca credentials are stored
+    encrypted in auth.db; other system keys write to .env."""
+    # Allow monitor token bypass for operator-level pushes
+    auth_header  = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    token_ok = bool(monitor_token and auth_header == f'Bearer {monitor_token}')
+    if not token_ok and not session.get('customer_id'):
+        return jsonify({'ok': False, 'updated': [], 'errors': ['Not authenticated']}), 401
+
     data = request.get_json(silent=True) or {}
 
     # Alpaca credentials go to auth.db (encrypted), not .env
@@ -5159,6 +5357,7 @@ def api_keys():
     ALLOWED_KEYS = {
         'ANTHROPIC_API_KEY',
         'ALPACA_BASE_URL',
+        'LIVE_TRADING_ENABLED',
         'RESEND_API_KEY',
         'MONITOR_TOKEN',
         'MONITOR_URL',
@@ -5232,6 +5431,96 @@ def api_keys():
     return jsonify({'ok': len(errors) == 0, 'updated': updated, 'errors': errors})
 
 
+@app.route('/api/get-keys')
+@login_required
+def api_get_keys():
+    """Return obfuscated current values of customer-visible keys for display."""
+    def _obs(val):
+        if not val:
+            return ''
+        s = str(val)
+        if len(s) <= 8:
+            return '••••••••'
+        return s[:4] + '••••••' + s[-4:]
+
+    customer_id = session.get('customer_id', '')
+    alpaca_key  = alpaca_secret = ''
+    try:
+        alpaca_key, alpaca_secret = auth.get_alpaca_credentials(customer_id)
+    except Exception:
+        pass
+
+    base_url = os.environ.get('ALPACA_BASE_URL', '')
+    if 'paper' in base_url.lower():
+        trading_mode = 'paper'
+    elif base_url:
+        trading_mode = 'live'
+    else:
+        trading_mode = 'paper'  # default
+
+    live_enabled = os.environ.get('LIVE_TRADING_ENABLED', 'false').lower() == 'true'
+
+    return jsonify({
+        'ALPACA_API_KEY':     _obs(alpaca_key),
+        'ALPACA_SECRET_KEY':  _obs(alpaca_secret),
+        'RESEND_API_KEY':     _obs(os.environ.get('RESEND_API_KEY', '')),
+        'LICENSE_KEY':        _obs(os.environ.get('LICENSE_KEY', '')),
+        'ALERT_TO':           _obs(os.environ.get('ALERT_TO', '')),
+        'trading_mode':       trading_mode,
+        'live_enabled':       live_enabled,
+    })
+
+
+@app.route('/api/account/change-password', methods=['POST'])
+@login_required
+def api_change_password():
+    """Change password — requires current password verification."""
+    data           = request.get_json(silent=True) or {}
+    current_pw     = data.get('current_password', '').strip()
+    new_pw         = data.get('new_password', '').strip()
+    confirm_pw     = data.get('confirm_password', '').strip()
+    customer_id    = session.get('customer_id', '')
+
+    if not current_pw or not new_pw or not confirm_pw:
+        return jsonify({'ok': False, 'error': 'All fields are required'})
+    if new_pw != confirm_pw:
+        return jsonify({'ok': False, 'error': 'New passwords do not match'})
+    if len(new_pw) < 8:
+        return jsonify({'ok': False, 'error': 'New password must be at least 8 characters'})
+    try:
+        auth.update_password(customer_id, current_pw, new_pw)
+        return jsonify({'ok': True})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)})
+    except Exception as e:
+        log.error(f"change-password error: {e}")
+        return jsonify({'ok': False, 'error': 'Server error'})
+
+
+@app.route('/api/account/change-email', methods=['POST'])
+@login_required
+def api_change_email():
+    """Change email — requires current password verification."""
+    data        = request.get_json(silent=True) or {}
+    current_pw  = data.get('current_password', '').strip()
+    new_email   = data.get('new_email', '').strip()
+    customer_id = session.get('customer_id', '')
+
+    if not current_pw or not new_email:
+        return jsonify({'ok': False, 'error': 'All fields are required'})
+    if '@' not in new_email or '.' not in new_email.split('@')[-1]:
+        return jsonify({'ok': False, 'error': 'Invalid email address'})
+    try:
+        auth.update_email(customer_id, current_pw, new_email)
+        session['customer_email'] = new_email
+        return jsonify({'ok': True})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)})
+    except Exception as e:
+        log.error(f"change-email error: {e}")
+        return jsonify({'ok': False, 'error': 'Server error'})
+
+
 @app.route('/api/settings', methods=['POST'])
 @login_required
 def api_settings():
@@ -5298,6 +5587,98 @@ def api_portfolio_history():
         return jsonify({'history': data, 'days': days})
     except Exception as e:
         return jsonify({'history': [], 'days': days, 'error': str(e)})
+
+
+@app.route('/api/performance-summary')
+def api_performance_summary():
+    """Closed trade history + computed performance stats for the Performance tab."""
+    try:
+        from datetime import datetime, timedelta
+        db     = _customer_db()
+        trades = db.get_closed_positions(limit=200)
+        port   = db.get_portfolio()
+
+        wins = losses = 0
+        total_pnl = 0.0
+        hold_hours_list = []
+        tax_st = tax_lt = 0.0
+        sector_pnl = {}
+        rows = []
+
+        for t in trades:
+            pnl      = t.get('pnl') or 0.0
+            total_pnl += pnl
+            if pnl >= 0:
+                wins += 1
+            else:
+                losses += 1
+
+            # Hold duration
+            try:
+                opened = datetime.fromisoformat(t['opened_at'])
+                closed = datetime.fromisoformat(t['closed_at'])
+                hrs    = (closed - opened).total_seconds() / 3600
+                hold_hours_list.append(hrs)
+                hold_label = f"{int(hrs)}h" if hrs < 48 else f"{int(hrs/24)}d"
+            except Exception:
+                hrs        = 0
+                hold_label = '—'
+
+            # Tax lot classification (< 1 year = short-term)
+            try:
+                hold_days = (datetime.fromisoformat(t['closed_at']) - datetime.fromisoformat(t['opened_at'])).days
+                if hold_days < 365:
+                    tax_st += pnl
+                else:
+                    tax_lt += pnl
+            except Exception:
+                tax_st += pnl
+
+            # Sector P&L attribution
+            sector = t.get('sector') or 'Other'
+            sector_pnl[sector] = round(sector_pnl.get(sector, 0.0) + pnl, 2)
+
+            # Return % per trade
+            cost = (t.get('entry_price') or 0) * (t.get('shares') or 0)
+            ret_pct = round(pnl / cost * 100, 2) if cost else 0.0
+
+            rows.append({
+                'ticker':    t.get('ticker', '—'),
+                'side':      'LONG',
+                'entry':     round(t.get('entry_price') or 0, 2),
+                'exit':      round(t.get('current_price') or 0, 2),
+                'hold':      hold_label,
+                'pnl':       round(pnl, 2),
+                'ret_pct':   ret_pct,
+                'opened_at': (t.get('opened_at') or '')[:10],
+                'closed_at': (t.get('closed_at') or '')[:10],
+                'exit_reason': t.get('exit_reason') or '—',
+            })
+
+        total_trades = wins + losses
+        win_rate     = round(wins / total_trades * 100, 1) if total_trades else 0.0
+        avg_hold_hrs = round(sum(hold_hours_list) / len(hold_hours_list), 1) if hold_hours_list else 0.0
+        avg_hold_lbl = (f"{int(avg_hold_hrs)}h" if avg_hold_hrs < 48 else f"{round(avg_hold_hrs/24,1)}d") if avg_hold_hrs else '—'
+
+        # Starting capital for total return %
+        month_start  = port.get('month_start') or port.get('cash') or 1
+        total_ret_pct = round(total_pnl / month_start * 100, 2) if month_start else 0.0
+
+        return jsonify({
+            'total_pnl':      round(total_pnl, 2),
+            'total_ret_pct':  total_ret_pct,
+            'win_rate':       win_rate,
+            'total_trades':   total_trades,
+            'winning_trades': wins,
+            'avg_hold':       avg_hold_lbl,
+            'tax_st':         round(tax_st, 2),
+            'tax_lt':         round(tax_lt, 2),
+            'sector_pnl':     sector_pnl,
+            'trades':         rows,
+        })
+    except Exception as e:
+        return jsonify({'total_pnl': 0, 'win_rate': 0, 'total_trades': 0,
+                        'trades': [], 'error': str(e)})
 
 
 @app.route('/api/watchlist')

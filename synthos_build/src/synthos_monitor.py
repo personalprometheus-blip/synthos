@@ -865,6 +865,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <a href="/audit" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
        background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.3);color:var(--purple);
        text-decoration:none;letter-spacing:0.04em">Auditor</a>
+    <a href="/settings" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
+       background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.25);color:var(--teal);
+       text-decoration:none;letter-spacing:0.04em">Settings</a>
     <div class="live-pill"><div class="live-dot"></div><span id="pi-count">No Nodes</span></div>
   </div>
 </header>
@@ -2477,6 +2480,403 @@ setInterval(load, 60000);
 @app.route("/audit")
 def audit_page():
     return AUDIT_PAGE_HTML
+
+
+# ── Monitor Settings ──────────────────────────────────────────────────────────
+
+SETTINGS_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos Monitor · Settings</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{--teal:#00f5d4;--teal2:rgba(0,245,212,0.1);--pink:#ff4b6e;--pink2:rgba(255,75,110,0.1);
+        --amber:#ffb347;--purple:#7b61ff;--text:#e8eaf0;--muted:rgba(232,234,240,0.55);
+        --dim:rgba(232,234,240,0.3);--surface:rgba(255,255,255,0.04);
+        --surface2:rgba(255,255,255,0.07);--border:rgba(255,255,255,0.08);
+        --border2:rgba(255,255,255,0.14);--sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono','Fira Code',monospace}
+  body{background:#0a0b10;color:var(--text);font-family:var(--sans);min-height:100vh}
+  .header{display:flex;align-items:center;gap:14px;padding:0 24px;height:56px;
+          border-bottom:1px solid var(--border);background:rgba(10,11,16,0.95);
+          position:sticky;top:0;z-index:100;backdrop-filter:blur(12px)}
+  .wordmark{font-size:15px;font-weight:800;letter-spacing:0.12em;color:var(--teal)}
+  .header-sub{font-size:10px;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase}
+  .header-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .page{max-width:760px;margin:0 auto;padding:24px 16px}
+  .section-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
+                 color:var(--muted);margin:24px 0 10px;padding-left:2px}
+  .glass{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .settings-section{padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+  .setting-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .setting-label{font-size:12px;font-weight:600;color:var(--text)}
+  .setting-desc{font-size:10px;color:var(--muted);margin-top:2px}
+  .setting-obs{font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px}
+  .glass-input{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;
+               padding:7px 10px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none}
+  .glass-input:focus{border-color:rgba(0,245,212,0.4)}
+  .save-btn{padding:7px 14px;border-radius:9px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);
+            color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);
+            white-space:nowrap;transition:all 0.15s}
+  .save-btn:hover{background:rgba(0,245,212,0.18)}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;
+              border-bottom:1px solid var(--border)}
+  .toggle-row:last-child{border-bottom:none}
+  .toggle{position:relative;display:inline-block;width:40px;height:22px}
+  .toggle input{opacity:0;width:0;height:0}
+  .toggle-slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;
+                 background:rgba(255,255,255,0.1);border-radius:22px;border:1px solid var(--border2);transition:.3s}
+  .toggle-slider::before{position:absolute;content:"";height:16px;width:16px;left:2px;bottom:2px;
+                          background:var(--muted);border-radius:50%;transition:.3s}
+  input:checked + .toggle-slider{background:rgba(0,245,212,0.2);border-color:rgba(0,245,212,0.4)}
+  input:checked + .toggle-slider::before{transform:translateX(18px);background:var(--teal)}
+  .warn-box{font-size:11px;color:var(--muted);padding:8px 10px;background:rgba(255,179,71,0.06);
+            border:1px solid rgba(255,179,71,0.15);border-radius:8px;line-height:1.5}
+  .live-gate-on{background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.25);border-radius:10px;padding:12px 14px}
+  .live-gate-off{background:rgba(255,75,110,0.06);border:1px solid rgba(255,75,110,0.2);border-radius:10px;padding:12px 14px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
+         padding:10px 20px;border-radius:12px;font-size:12px;font-weight:600;
+         background:var(--surface);border:1px solid var(--border2);color:var(--text);
+         z-index:1000;transition:transform 0.25s;pointer-events:none;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:rgba(0,245,212,0.4);color:var(--teal)}
+  .toast.err{border-color:rgba(255,75,110,0.4);color:var(--pink)}
+  .confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);
+                   z-index:600;display:none;align-items:center;justify-content:center}
+  .confirm-overlay.show{display:flex}
+  .confirm-box{background:var(--surface);border:1px solid var(--border2);border-radius:16px;
+               padding:24px;width:340px;text-align:center}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="toast" id="toast"></div>
+
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <div style="font-size:13px;color:var(--text);margin-bottom:8px;font-weight:700" id="confirm-title">Confirm</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5" id="confirm-msg"></div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="document.getElementById('confirm-overlay').classList.remove('show')"
+              style="padding:8px 18px;border-radius:9px;background:transparent;border:1px solid var(--border2);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans)">Cancel</button>
+      <button id="confirm-ok-btn"
+              style="padding:8px 18px;border-radius:9px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<header class="header">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="header-sub">Operator Settings</div>
+  <div class="header-right">
+    <a href="/monitor" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
+       background:rgba(255,255,255,0.05);border:1px solid var(--border2);color:var(--muted);
+       text-decoration:none">&larr; Monitor</a>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- LIVE TRADING GATE -->
+  <div class="section-title">Trading Gate</div>
+  <div class="glass" style="margin-bottom:14px">
+    <div style="padding:14px 18px">
+      <div id="gate-display" class="live-gate-off" style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--pink)">&#128274; Live Trading Locked</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">All accounts restricted to paper trading</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="setLiveGate(true)" style="padding:8px 18px;border-radius:9px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">&#128275; Unlock Live Trading</button>
+        <button onclick="setLiveGate(false)" style="padding:8px 18px;border-radius:9px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">&#128274; Lock to Paper Only</button>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-top:10px">When locked, Live Trading option is disabled in all customer portals regardless of their preference.</div>
+    </div>
+  </div>
+
+  <!-- OPERATOR API KEYS -->
+  <div class="section-title">Operator Keys — pushed to Retail Pi</div>
+  <div class="glass" style="margin-bottom:14px">
+    <div class="settings-section">
+      <div class="warn-box">&#9888; These keys are pushed directly to the retail portal at 10.0.0.11:5001.
+        Requires the portal to be reachable on the local network. Alpaca keys (per-customer) are managed from each customer's own Settings page.</div>
+
+      <!-- Anthropic API Key -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Anthropic API Key</div>
+          <div class="setting-desc">AI-assisted trade analysis (sk-ant-...)</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="op-anthropic" placeholder="sk-ant-…" style="width:160px">
+          <button class="save-btn" onclick="pushToRetail('ANTHROPIC_API_KEY','op-anthropic')">Push</button>
+        </div>
+      </div>
+
+      <!-- Monitor URL -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Monitor URL</div>
+          <div class="setting-desc">Heartbeat destination (this Pi: http://10.0.0.10:5050)</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="text" id="op-monitor-url" placeholder="http://10.0.0.10:5050" style="width:210px">
+          <button class="save-btn" onclick="pushToRetail('MONITOR_URL','op-monitor-url')">Push</button>
+        </div>
+      </div>
+
+      <!-- Monitor Token -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Monitor Token</div>
+          <div class="setting-desc">Shared secret between retail Pi and monitor</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="op-monitor-token" placeholder="Token…" style="width:160px">
+          <button class="save-btn" onclick="pushToRetail('MONITOR_TOKEN','op-monitor-token')">Push</button>
+        </div>
+      </div>
+
+      <!-- Company URL -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Company URL</div>
+          <div class="setting-desc">Company Pi endpoint (http://10.0.0.10:5010)</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="text" id="op-company-url" placeholder="http://10.0.0.10:5010" style="width:210px">
+          <button class="save-btn" onclick="pushToRetail('COMPANY_URL','op-company-url')">Push</button>
+        </div>
+      </div>
+
+      <!-- Resend API Key -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Resend API Key</div>
+          <div class="setting-desc">Email service key — also saved to monitor</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="password" id="op-resend" placeholder="re_…" style="width:160px">
+          <button class="save-btn" onclick="pushToRetailAndMonitor('RESEND_API_KEY','op-resend')">Push</button>
+        </div>
+      </div>
+
+      <!-- Alert From -->
+      <div class="setting-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div class="setting-label">Alert Email (From)</div>
+          <div class="setting-desc">Verified Resend sender address — monitor only</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="glass-input" type="email" id="op-alert-from" placeholder="alerts@yourdomain.com" style="width:200px">
+          <button class="save-btn" onclick="saveMonitorEnv('ALERT_FROM','op-alert-from')">Save</button>
+        </div>
+      </div>
+
+      <div style="padding:8px 0 0">
+        <button onclick="pushAllOperatorKeys()" style="padding:9px 20px;border-radius:10px;background:rgba(123,97,255,0.12);border:1px solid rgba(123,97,255,0.3);color:var(--purple);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push All Filled Keys to Retail Pi</button>
+        <div id="push-all-result" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ALERT PREFERENCES (GLOBAL — future) -->
+  <div class="section-title">Global Alert Preferences</div>
+  <div class="glass" style="margin-bottom:14px">
+    <div style="padding:14px 18px;font-size:11px;color:var(--muted)">
+      Global broadcast alerts to all customers will be configured here in a future release.
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SECRET_TOKEN = {{ secret_token|tojson }};
+const RETAIL_URL   = 'http://10.0.0.11:5001';
+
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast show ' + (type||'');
+  setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// Load current gate state on page load
+(async () => {
+  try {
+    const r = await fetch(RETAIL_URL + '/api/get-keys', {credentials:'omit'});
+    const d = await r.json().catch(()=>({}));
+    updateGateDisplay(d.live_enabled === true);
+  } catch(e) { /* retail Pi unreachable — gate state unknown */ }
+})();
+
+function updateGateDisplay(enabled) {
+  const el = document.getElementById('gate-display');
+  if (!el) return;
+  if (enabled) {
+    el.className = 'live-gate-on';
+    el.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--teal)">&#128275; Live Trading Unlocked</div>'
+      + '<div style="font-size:10px;color:var(--muted);margin-top:3px">Customers may choose Live or Paper trading</div>';
+  } else {
+    el.className = 'live-gate-off';
+    el.innerHTML = '<div style="font-size:12px;font-weight:700;color:var(--pink)">&#128274; Live Trading Locked</div>'
+      + '<div style="font-size:10px;color:var(--muted);margin-top:3px">All accounts restricted to paper trading</div>';
+  }
+}
+
+async function setLiveGate(enable) {
+  const msg = enable
+    ? 'Unlock live trading for all customer accounts?'
+    : 'Lock all accounts to paper trading only?';
+  document.getElementById('confirm-title').textContent = enable ? 'Unlock Live Trading?' : 'Lock to Paper?';
+  document.getElementById('confirm-msg').textContent   = msg;
+  document.getElementById('confirm-ok-btn').onclick    = async () => {
+    document.getElementById('confirm-overlay').classList.remove('show');
+    const payload = { LIVE_TRADING_ENABLED: enable ? 'true' : 'false' };
+    try {
+      const r = await fetch(RETAIL_URL + '/api/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SECRET_TOKEN },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        toast(enable ? '\\u2713 Live trading unlocked' : '\\u2713 Locked to paper', 'ok');
+        updateGateDisplay(enable);
+      } else {
+        toast('Error: ' + (d.errors||[]).join(', '), 'err');
+      }
+    } catch(e) { toast('Could not reach retail portal', 'err'); }
+  };
+  document.getElementById('confirm-overlay').classList.add('show');
+}
+
+async function pushToRetail(keyName, inputId) {
+  const val = document.getElementById(inputId)?.value?.trim();
+  if (!val) { toast('Enter a value first', 'err'); return; }
+  try {
+    const r = await fetch(RETAIL_URL + '/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SECRET_TOKEN },
+      body: JSON.stringify({ [keyName]: val }),
+    });
+    const d = await r.json();
+    if (d.ok) { toast('\\u2713 ' + keyName + ' pushed to retail Pi', 'ok'); document.getElementById(inputId).value = ''; }
+    else toast('Error: ' + (d.errors||[]).join(', '), 'err');
+  } catch(e) { toast('Could not reach retail portal at ' + RETAIL_URL, 'err'); }
+}
+
+async function pushToRetailAndMonitor(keyName, inputId) {
+  const val = document.getElementById(inputId)?.value?.trim();
+  if (!val) { toast('Enter a value first', 'err'); return; }
+  // Push to retail
+  try {
+    await fetch(RETAIL_URL + '/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SECRET_TOKEN },
+      body: JSON.stringify({ [keyName]: val }),
+    });
+  } catch(e) { toast('Retail push failed — check network', 'err'); }
+  // Save to monitor
+  try {
+    const r = await fetch('/api/monitor-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Token': SECRET_TOKEN },
+      body: JSON.stringify({ [keyName]: val }),
+    });
+    const d = await r.json();
+    if (d.ok) { toast('\\u2713 ' + keyName + ' pushed to both nodes', 'ok'); document.getElementById(inputId).value = ''; }
+    else toast('Monitor save error: ' + d.error, 'err');
+  } catch(e) { toast('Monitor save failed', 'err'); }
+}
+
+async function saveMonitorEnv(keyName, inputId) {
+  const val = document.getElementById(inputId)?.value?.trim();
+  if (!val) { toast('Enter a value first', 'err'); return; }
+  try {
+    const r = await fetch('/api/monitor-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Token': SECRET_TOKEN },
+      body: JSON.stringify({ [keyName]: val }),
+    });
+    const d = await r.json();
+    if (d.ok) { toast('\\u2713 Saved to monitor', 'ok'); document.getElementById(inputId).value = ''; }
+    else toast('Error: ' + d.error, 'err');
+  } catch(e) { toast('Save failed', 'err'); }
+}
+
+async function pushAllOperatorKeys() {
+  const keyMap = {
+    'ANTHROPIC_API_KEY': 'op-anthropic',
+    'MONITOR_URL':       'op-monitor-url',
+    'MONITOR_TOKEN':     'op-monitor-token',
+    'COMPANY_URL':       'op-company-url',
+    'RESEND_API_KEY':    'op-resend',
+  };
+  const payload = {};
+  for (const [k, id] of Object.entries(keyMap)) {
+    const v = document.getElementById(id)?.value?.trim();
+    if (v) payload[k] = v;
+  }
+  if (!Object.keys(payload).length) { toast('Fill in at least one key field', 'err'); return; }
+  const result = document.getElementById('push-all-result');
+  if (result) result.textContent = 'Pushing...';
+  try {
+    const r = await fetch(RETAIL_URL + '/api/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SECRET_TOKEN },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast('\\u2713 Pushed: ' + d.updated.join(', '), 'ok');
+      if (result) { result.textContent = '\\u2713 ' + d.updated.join(', '); result.style.color = 'var(--teal)'; }
+      Object.values(keyMap).forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    } else {
+      toast('Errors: ' + (d.errors||[]).join(', '), 'err');
+      if (result) { result.textContent = '\\u2717 ' + d.errors.join(', '); result.style.color = 'var(--pink)'; }
+    }
+  } catch(e) { toast('Could not reach retail portal', 'err'); if (result) result.textContent = '\\u2717 Unreachable'; }
+}
+</script>
+</body>
+</html>"""
+
+
+@app.route("/settings")
+def settings_page():
+    """Operator settings — API key management and global trading gate."""
+    return render_template_string(SETTINGS_PAGE_HTML, secret_token=SECRET_TOKEN)
+
+
+@app.route("/api/monitor-settings", methods=["POST"])
+def api_monitor_settings():
+    """Save settings to the monitor's own environment (.env)."""
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN:
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    ALLOWED = {"RESEND_API_KEY", "ALERT_FROM", "ALERT_TO", "COMPANY_URL", "MONITOR_TOKEN"}
+    data    = request.get_json(silent=True) or {}
+    updated = []
+    for key, val in data.items():
+        if key not in ALLOWED:
+            continue
+        if not isinstance(val, str) or not val.strip():
+            continue
+        try:
+            from dotenv import set_key
+            env_path = os.path.join(os.path.dirname(__file__), ".env")
+            if not os.path.exists(env_path):
+                env_path = os.path.join(os.getcwd(), ".env")
+            if os.path.exists(env_path):
+                set_key(env_path, key, val.strip())
+            os.environ[key] = val.strip()
+            updated.append(key)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    return jsonify({"ok": True, "updated": updated})
 
 
 # ── Boot ──────────────────────────────────────────────────────────────────────
