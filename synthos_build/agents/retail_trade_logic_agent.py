@@ -2,10 +2,9 @@
 trade_logic_agent.py — Trade Logic Agent (ExecutionAgent)
 Synthos · Agent 1 · Version 2.0
 
-Runs:
-  9:30 AM ET  --session=open
-  12:30 PM ET --session=midday
-  3:30 PM ET  --session=close
+Runs hourly 24/7 weekdays via retail_scheduler.py --session trade.
+Accepts --session (open/midday/close/hourly) for backward compatibility;
+actual behavior is driven by time of day (ET).
 
 Decision architecture: 14-gate deterministic control spine.
 No LLM calls in any decision path.
@@ -202,6 +201,14 @@ class TradingControls:
     FLASH_CRASH_PCT           = float(os.environ.get('FLASH_CRASH_PCT', '0.03'))
     FLASH_CRASH_MINUTES       = int(os.environ.get('FLASH_CRASH_MINUTES', '10'))
     BENCHMARK_CRASH_PCT       = float(os.environ.get('BENCHMARK_CRASH_PCT', '0.05'))
+
+    # Session timing
+    CONSERVATIVE_AFTER_HOUR   = int(os.environ.get('CONSERVATIVE_AFTER_HOUR', '15'))
+    LATE_DAY_TIGHTEN_PCT      = float(os.environ.get('LATE_DAY_TIGHTEN_PCT', '0.25'))
+
+    # Benchmark correlation
+    BENCHMARK_CORR_WIDEN      = float(os.environ.get('BENCHMARK_CORR_WIDEN', '1.50'))
+    BENCHMARK_CORR_TIGHTEN    = float(os.environ.get('BENCHMARK_CORR_TIGHTEN', '0.75'))
 
     # Evaluation (Gate 14)
     EVAL_MIN_SHARPE           = float(os.environ.get('EVAL_MIN_SHARPE', '0.3'))
@@ -403,6 +410,61 @@ def is_last_trading_day_of_month():
         last -= timedelta(days=1)
     return today == last
 
+
+def get_market_time_regime(now=None):
+    """
+    Derive market time regime from current ET time.
+    Replaces all session-name-based branching.
+    """
+    if now is None:
+        now = datetime.now(ET)
+    hour, minute = now.hour, now.minute
+    mins = hour * 60 + minute
+    return {
+        "is_market_hours": 570 <= mins <= 960,  # 9:30-16:00
+        "is_premarket":    mins < 570,
+        "is_afterhours":   mins > 960,
+        "is_late_day":     hour >= C.CONSERVATIVE_AFTER_HOUR,
+        "is_overnight":    hour >= 16 or hour < 8,
+        "hour": hour,
+        "minute": minute,
+    }
+
+
+def compute_spy_correlation(alpaca, ticker, spy_bars_cache=None, lookback=20):
+    """
+    Compute rolling correlation between ticker and SPY daily returns.
+    Returns correlation coefficient (-1 to 1) or None if insufficient data.
+    Pass spy_bars_cache to avoid redundant API calls in a loop.
+    """
+    spy_bars = spy_bars_cache or alpaca.get_bars(C.BENCHMARK_SYMBOL, days=lookback + 5)
+    ticker_bars = alpaca.get_bars(ticker, days=lookback + 5)
+    if not spy_bars or not ticker_bars:
+        return None
+    if len(spy_bars) < lookback or len(ticker_bars) < lookback:
+        return None
+
+    spy_ret = [(spy_bars[i]["c"] - spy_bars[i-1]["c"]) / spy_bars[i-1]["c"]
+               for i in range(1, len(spy_bars))][-lookback:]
+    tkr_ret = [(ticker_bars[i]["c"] - ticker_bars[i-1]["c"]) / ticker_bars[i-1]["c"]
+               for i in range(1, len(ticker_bars))][-lookback:]
+
+    n = min(len(spy_ret), len(tkr_ret))
+    if n < 10:
+        return None
+    spy_ret, tkr_ret = spy_ret[-n:], tkr_ret[-n:]
+
+    mean_s = sum(spy_ret) / n
+    mean_t = sum(tkr_ret) / n
+    cov   = sum((s - mean_s) * (t - mean_t) for s, t in zip(spy_ret, tkr_ret)) / n
+    std_s = (sum((s - mean_s)**2 for s in spy_ret) / n) ** 0.5
+    std_t = (sum((t - mean_t)**2 for t in tkr_ret) / n) ** 0.5
+
+    if std_s < 1e-10 or std_t < 1e-10:
+        return None
+    return round(cov / (std_s * std_t), 4)
+
+
 def confidence_to_score(confidence_str: str) -> float:
     """Map legacy confidence label to numeric score."""
     return {"HIGH": 0.85, "MEDIUM": 0.60, "LOW": 0.35, "NOISE": 0.10}.get(
@@ -562,6 +624,16 @@ class AlpacaClient:
             log.info(f"Notional order: {side} ${notional:.2f} {ticker}")
         return result
 
+    def get_filled_orders(self, ticker, after_date=None):
+        """Fetch recently filled sell orders for a ticker."""
+        params = {"status": "closed", "symbols": ticker, "direction": "desc", "limit": 10}
+        if after_date:
+            params["after"] = after_date
+        try:
+            return self._request("get", "/v2/orders", params=params) or []
+        except Exception:
+            return []
+
     def close_position(self, ticker):
         return self._request("delete", f"/v2/positions/{ticker}")
 
@@ -575,22 +647,14 @@ def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bo
     """
     now = datetime.now(ET)
 
-    # Market hours check
-    session_windows = {
-        "open":   (9, 30, 10, 30),
-        "midday": (12, 0, 14, 0),
-        "close":  (15, 0, 16, 30),
-    }
-    if session in session_windows:
-        sh, sm, eh, em = session_windows[session]
-        session_start = now.replace(hour=sh, minute=sm, second=0, microsecond=0)
-        session_end   = now.replace(hour=eh, minute=em, second=0, microsecond=0)
-        in_window = session_start <= now <= session_end
-        decision_log.gate("1_SYSTEM_HOURS", in_window, {
-            "current_time": now.strftime("%H:%M ET"),
-            "window": f"{sh}:{sm:02d}–{eh}:{em:02d}",
-        }, "session within trading window" if in_window else "outside session window")
-        # Non-fatal — sessions triggered by cron should be within window; log and continue
+    # Market time regime check (hourly runs — no fixed session windows)
+    mtr = get_market_time_regime(now)
+    decision_log.gate("1_MARKET_TIME", mtr["is_market_hours"], {
+        "current_time": now.strftime("%H:%M ET"),
+        "market_hours": "9:30–16:00",
+        "regime": "market" if mtr["is_market_hours"] else ("premarket" if mtr["is_premarket"] else "afterhours"),
+    }, "within market hours" if mtr["is_market_hours"] else "outside market hours (evaluation only)")
+    # Non-fatal — agent runs 24/7, evaluates signals any time
 
     # Kill switch
     if kill_switch_active():
@@ -1072,8 +1136,8 @@ def gate8_risk(candidate: dict, atr: float, session: str,
     target   = round(price + stop_d * C.PROFIT_TARGET_MULTIPLE, 4)
     trail    = round(atr * C.ATR_TRAIL_MULTIPLIER if atr else price * 0.02, 4)
 
-    # Overnight risk: close session → flag
-    overnight_flag = (session == "close")
+    # Overnight risk: flag if after 4pm ET (position held overnight)
+    overnight_flag = get_market_time_regime(datetime.now(ET))['is_overnight']
 
     # Gap risk: use ATR as proxy for gap std
     gap_risk = atr and (atr / price) > 0.03  # >3% ATR/price = elevated gap risk
@@ -1549,6 +1613,24 @@ def reconcile_with_alpaca(db, alpaca):
             log.critical(f"ORPHAN: {t} in Alpaca but not DB")
             db.log_event("ORPHAN_POSITION", agent="Trade Logic", details=f"Ticker {t}")
         for t in ghosts:
+            # Check if Alpaca filled a trailing stop order for this ghost
+            db_pos = next((p for p in db.get_open_positions() if p['ticker'] == t), None)
+            if db_pos:
+                filled = alpaca.get_filled_orders(t, after_date=db_pos.get('opened_at'))
+                trail_fill = next(
+                    (o for o in filled
+                     if o.get('type') == 'trailing_stop' and o.get('side') == 'sell'
+                     and o.get('status') == 'filled'),
+                    None
+                )
+                if trail_fill:
+                    fill_price = float(trail_fill.get('filled_avg_price', 0))
+                    pnl = db.close_position(db_pos['id'], fill_price,
+                                            exit_reason='TRAILING_STOP_FILLED')
+                    db.log_event("TRAILING_STOP_FILLED", agent="Trade Logic",
+                                 details=f"{t} filled @ ${fill_price:.2f} pnl=${pnl:+.2f}")
+                    log.info(f"Alpaca trailing stop filled: {t} @ ${fill_price:.2f} pnl=${pnl:+.2f}")
+                    continue
             log.critical(f"GHOST: {t} in DB but not Alpaca")
             for pos in db.get_open_positions():
                 if pos['ticker'] == t:
@@ -1628,6 +1710,9 @@ def run(session="open"):
     urgent_flags    = db.get_urgent_flags()
     urgent_tickers  = {f['ticker'] for f in urgent_flags}
 
+    # Cache SPY bars for benchmark-relative checks (one API call for all positions)
+    _spy_bars_cache = alpaca.get_bars(C.BENCHMARK_SYMBOL, days=30)
+
     for pos in positions:
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
@@ -1637,6 +1722,29 @@ def run(session="open"):
         )).days if pos.get('opened_at') else 0
 
         exit_reason = None
+
+        # ── Trailing stop ratchet: move stop up as price increases
+        if current_price > pos['entry_price']:
+            atr = alpaca.get_atr(pos['ticker'])
+            if atr:
+                new_stop = current_price - (atr * C.ATR_TRAIL_MULTIPLIER)
+                current_stop = pos.get('trail_stop_amt', 0) or 0
+                if new_stop > current_stop:
+                    db.update_trail_stop(pos['id'], new_stop)
+                    pos['trail_stop_amt'] = new_stop
+                    pos_log.note(f"Trailing stop ratcheted: ${current_stop:.2f} -> ${new_stop:.2f}")
+
+        # ── Late-day stop tightening: reduce gap risk before close
+        _mtr_exit = get_market_time_regime(now)
+        if _mtr_exit['is_late_day']:
+            tighten = C.LATE_DAY_TIGHTEN_PCT
+            distance = current_price - (pos.get('trail_stop_amt', 0) or 0)
+            if distance > 0:
+                tightened = current_price - distance * (1 - tighten)
+                if tightened > (pos.get('trail_stop_amt', 0) or 0):
+                    db.update_trail_stop(pos['id'], tightened)
+                    pos['trail_stop_amt'] = tightened
+                    pos_log.note(f"Late-day tightening ({tighten*100:.0f}%): stop -> ${tightened:.2f}")
 
         # Protective exit (urgent flag)
         if pos['ticker'] in urgent_tickers:
@@ -1648,15 +1756,37 @@ def run(session="open"):
                 "detected": flag_info.get('detected_at', 'unknown'),
             }, "CASCADE signal — protective exit triggered")
 
-        # Stop loss hit: price <= stop_level
-        elif current_price <= pos.get('trail_stop_amt', 0) or \
-             current_price <= pos['entry_price'] - (pos.get('trail_stop_amt', 0) or pos['entry_price'] * 0.02):
-            exit_reason = "STOP_LOSS"
-            pos_log.gate("10_STOP_LOSS", True, {
-                "current":    f"${current_price:.2f}",
-                "stop_level": f"${pos.get('trail_stop_amt', 0):.2f}",
-                "entry":      f"${pos['entry_price']:.2f}",
-            }, "stop loss triggered")
+        # Stop loss hit (with benchmark-relative adjustment)
+        elif True:
+            effective_stop = pos.get('trail_stop_amt', 0) or 0
+            # Adjust stop based on SPY correlation
+            corr = compute_spy_correlation(alpaca, pos['ticker'],
+                                           spy_bars_cache=_spy_bars_cache)
+            if corr is not None and abs(corr) > 0.01:
+                spy_change = 0
+                if _spy_bars_cache and len(_spy_bars_cache) >= 2:
+                    spy_change = (_spy_bars_cache[-1]["c"] - _spy_bars_cache[-2]["c"]) / _spy_bars_cache[-2]["c"]
+
+                if corr > C.MAX_PORTFOLIO_CORR and spy_change < -0.01:
+                    # High correlation + SPY dropping → widen stop (market-wide move)
+                    effective_stop = pos['entry_price'] - (pos['entry_price'] - effective_stop) * C.BENCHMARK_CORR_WIDEN
+                    pos_log.note(f"SPY corr={corr:.2f}, SPY={spy_change*100:+.1f}% — stop widened to ${effective_stop:.2f}")
+                elif corr < 0.3 and spy_change >= -0.005:
+                    # Low correlation + SPY flat = idiosyncratic risk → tighten
+                    distance = current_price - effective_stop
+                    if distance > 0:
+                        effective_stop = current_price - distance * C.BENCHMARK_CORR_TIGHTEN
+                        pos_log.note(f"SPY corr={corr:.2f}, SPY flat — stop tightened to ${effective_stop:.2f}")
+
+            if current_price <= effective_stop:
+                exit_reason = "STOP_LOSS"
+                pos_log.gate("10_STOP_LOSS", True, {
+                    "current":    f"${current_price:.2f}",
+                    "stop_level": f"${effective_stop:.2f}",
+                    "trail_stop": f"${pos.get('trail_stop_amt', 0):.2f}",
+                    "entry":      f"${pos['entry_price']:.2f}",
+                    "spy_corr":   f"{corr:.2f}" if corr is not None else "N/A",
+                }, "stop loss triggered")
 
         # Max holding time
         elif holding_days > C.MAX_HOLDING_DAYS:
@@ -1667,9 +1797,11 @@ def run(session="open"):
             }, f"max holding time {C.MAX_HOLDING_DAYS}d exceeded")
 
         else:
-            # Profit-taking check (KEEP from v1.x — REVIEW: unify with Gate 10)
+            # Profit-taking: tiered partial sells, reduce shares in-place
             gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
-            triggered = [r for r in PROFIT_RULES if gain_pct >= r["gain_pct"]]
+            last_tier = float(pos.get('last_profit_tier') or 0)
+            triggered = [r for r in PROFIT_RULES
+                         if gain_pct >= r["gain_pct"] and r["gain_pct"] > last_tier]
             if triggered:
                 rule = triggered[-1]
                 sell_shares = round(pos['shares'] * rule['sell_pct'], 4)
@@ -1678,28 +1810,21 @@ def run(session="open"):
                     "gain_pct":   f"{gain_pct*100:.2f}%",
                     "rule":       rule['label'],
                     "sell_shares":f"{sell_shares:.4f}",
+                    "last_tier":  f"{last_tier*100:.0f}%",
                 }, f"profit target {rule['label']} triggered")
                 pos_log.decide("PARTIAL_EXIT", rule['label'])
                 if reconcile_ok:
                     order = alpaca.submit_order(pos['ticker'], sell_shares, "sell")
                     if order:
-                        pnl = db.close_position(pos['id'], current_price, exit_reason="PROFIT_TAKE")
+                        pnl = db.reduce_position(pos['id'], sell_shares, current_price,
+                                                  exit_reason="PROFIT_TAKE")
+                        db.update_profit_tier(pos['id'], rule['gain_pct'])
                         try:
                             sig = db.get_signal_by_id(pos.get('signal_id'))
                             if sig and sig.get('politician'):
                                 db.update_member_weight_after_trade(sig['politician'], pnl)
                         except Exception:
                             pass
-                        remaining = pos['shares'] - sell_shares
-                        if remaining > 0.0001:
-                            _, _, vl = calculate_trail_stop(
-                                pos['trail_stop_amt'] / 1.1, current_price, pos.get('sector',''))
-                            db.open_position(ticker=pos['ticker'], company=pos.get('company'),
-                                             sector=pos.get('sector'), entry_price=current_price,
-                                             shares=remaining, trail_stop_amt=pos['trail_stop_amt'],
-                                             trail_stop_pct=pos['trail_stop_pct'],
-                                             vol_bucket=pos.get('vol_bucket'),
-                                             signal_id=pos.get('signal_id'))
                 pos_log.commit(db)
                 continue
 
@@ -1809,10 +1934,11 @@ def run(session="open"):
                     log.info("Deployment cap reached mid-session — stopping")
                     break
 
-                # Close session conservatism (KEEP from v1.x)
-                if session == 'close' and C.CLOSE_SESSION_MODE == 'conservative':
+                # Late-day conservatism: after CONSERVATIVE_AFTER_HOUR, only HIGH confidence
+                _mtr = get_market_time_regime(now)
+                if _mtr['is_late_day'] and C.CLOSE_SESSION_MODE == 'conservative':
                     if (signal.get('confidence', 'LOW') or 'LOW').upper() != 'HIGH':
-                        log.info(f"Signal {signal['ticker']} skipped — close session conservative")
+                        log.info(f"Signal {signal['ticker']} skipped — late-day conservative (after {C.CONSERVATIVE_AFTER_HOUR}:00 ET)")
                         continue
 
                 # Spousal filter (KEEP from v1.x)
@@ -1915,16 +2041,20 @@ def run(session="open"):
                 sig_log.commit(db)
                 time.sleep(1)
 
-    # ── Monthly tax sweep (KEEP from v1.x)
-    if is_last_trading_day_of_month() and session == "close":
-        portfolio = db.get_portfolio()
-        positions = db.get_open_positions()
-        unrealized  = sum(p.get('pnl', 0) for p in positions)
-        total_gains = portfolio['realized_gains'] + unrealized
-        if total_gains > 0:
-            tax = round(total_gains * C.GAIN_TAX_PCT, 2)
-            log.info(f"Month-end tax sweep: ${tax:.2f}")
-            db.sweep_monthly_tax(tax)
+    # ── Monthly tax sweep — runs once on last trading day, after 3pm
+    if is_last_trading_day_of_month() and now.hour >= 15:
+        today_str = now.strftime('%Y-%m-%d')
+        if not db.has_event_today('TAX_SWEEP', today_str):
+            portfolio = db.get_portfolio()
+            positions = db.get_open_positions()
+            unrealized  = sum(p.get('pnl', 0) for p in positions)
+            total_gains = portfolio['realized_gains'] + unrealized
+            if total_gains > 0:
+                tax = round(total_gains * C.GAIN_TAX_PCT, 2)
+                log.info(f"Month-end tax sweep: ${tax:.2f}")
+                db.sweep_monthly_tax(tax)
+                db.log_event("TAX_SWEEP", agent="Trade Logic",
+                             details=f"monthly sweep ${tax:.2f}")
 
     # ── Session complete
     portfolio   = db.get_portfolio()
@@ -1943,8 +2073,10 @@ def run(session="open"):
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
-    # Daily report (KEEP from v1.x)
-    if session == "close":
+    # Daily report — runs once per day after 4pm
+    _mtr_report = get_market_time_regime(now)
+    today_str_rpt = now.strftime('%Y-%m-%d')
+    if _mtr_report['hour'] >= 16 and not db.has_event_today('DAILY_REPORT', today_str_rpt):
         try:
             monitor_url   = os.environ.get('MONITOR_URL', '')
             monitor_token = os.environ.get('MONITOR_TOKEN', '')
@@ -1966,6 +2098,7 @@ def run(session="open"):
                           "summary": f"{len(today_out)} trades — {wins}W/{losses}L — ${total_value:.2f}"},
                     headers={"X-Token": monitor_token}, timeout=10,
                 )
+                db.log_event("DAILY_REPORT", agent="Trade Logic", details=f"sent to {monitor_url}")
         except Exception as e:
             log.warning(f"Daily report POST failed: {e}")
 
@@ -1973,7 +2106,7 @@ def run(session="open"):
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Synthos — ExecutionAgent (Agent 1)')
-    parser.add_argument('--session', choices=['open', 'midday', 'close'], default='open')
+    parser.add_argument('--session', choices=['open', 'midday', 'close', 'hourly'], default='hourly')
     parser.add_argument('--customer-id', default=None,
                         help='Customer UUID — routes DB and Alpaca credentials to per-customer sources')
     args = parser.parse_args()

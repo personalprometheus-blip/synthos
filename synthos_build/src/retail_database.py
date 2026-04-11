@@ -525,6 +525,8 @@ class DB:
             "ALTER TABLE positions ADD COLUMN entry_signal_score TEXT",
             "ALTER TABLE positions ADD COLUMN price_history_used TEXT",
             "ALTER TABLE positions ADD COLUMN interrogation_status TEXT",
+            # v1.3 — profit tier tracking for idempotent partial sells
+            "ALTER TABLE positions ADD COLUMN last_profit_tier REAL DEFAULT 0.0",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -719,6 +721,66 @@ class DB:
         log.info(f"Closed position: {pos['ticker']} {verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f})")
         return pnl_dollar
 
+
+    def reduce_position(self, pos_id, sell_shares, sell_price, exit_reason="PROFIT_TAKE"):
+        """
+        Partial sell: reduce shares in-place, record outcome, update cash.
+        Keeps original entry_price and position ID intact.
+        Returns pnl_dollar for the sold portion.
+        """
+        with self.conn() as c:
+            pos = c.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
+            if not pos:
+                raise ValueError(f"Position {pos_id} not found")
+            pos = dict(pos)
+
+        remaining = round(float(pos['shares']) - sell_shares, 4)
+        if remaining < 0.0001:
+            return self.close_position(pos_id, sell_price, exit_reason)
+
+        proceeds   = round(sell_price * sell_shares, 2)
+        cost_basis = round(float(pos['entry_price']) * sell_shares, 2)
+        pnl_dollar = round(proceeds - cost_basis, 2)
+        pnl_pct    = round((pnl_dollar / cost_basis) * 100, 2) if cost_basis else 0
+        verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
+
+        try:
+            hold_days = (datetime.now() - datetime.strptime(
+                pos['opened_at'][:19], '%Y-%m-%d %H:%M:%S')).days
+        except (ValueError, TypeError):
+            hold_days = 0
+
+        portfolio = self.get_portfolio()
+        new_cash  = round(portfolio['cash'] + proceeds, 2)
+        new_gains = round(portfolio['realized_gains'] + pnl_dollar, 2)
+
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET shares=?, current_price=?, updated_at=? "
+                "WHERE id=? AND status='OPEN'",
+                (remaining, sell_price, self.now(), pos_id)
+            )
+            c.execute("""
+                INSERT INTO outcomes
+                    (position_id, ticker, entry_price, exit_price, shares,
+                     hold_days, pnl_pct, pnl_dollar, vol_bucket,
+                     exit_reason, verdict, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (pos_id, pos['ticker'], pos['entry_price'], sell_price,
+                  sell_shares, hold_days, pnl_pct, pnl_dollar,
+                  pos.get('vol_bucket'), exit_reason, verdict, self.now()))
+
+        self.update_portfolio(cash=new_cash, realized_gains=new_gains)
+        self.add_ledger_entry(
+            entry_type="PARTIAL_EXIT",
+            description=f"{pos['ticker']} · {exit_reason} · sold {sell_shares:.4f}sh · "
+                        f"{'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
+            amount=proceeds, balance=new_cash, position_id=pos_id,
+        )
+        log.info(f"Partial exit: {pos['ticker']} sold {sell_shares:.4f}sh "
+                 f"{verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f}) — {remaining:.4f}sh remaining")
+        return pnl_dollar
+
     def update_position_price(self, pos_id, current_price):
         """Update mark-to-market price and recalculate unrealized P&L."""
         with self.conn() as c:
@@ -731,6 +793,24 @@ class DB:
             c.execute(
                 "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
                 (current_price, pnl, pos_id)
+            )
+
+
+    def update_trail_stop(self, pos_id, new_stop_amt):
+        """Ratchet trailing stop upward. Only increases, never decreases."""
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET trail_stop_amt=? WHERE id=? AND status='OPEN' "
+                "AND (trail_stop_amt IS NULL OR trail_stop_amt < ?)",
+                (round(new_stop_amt, 4), pos_id, round(new_stop_amt, 4))
+            )
+
+    def update_profit_tier(self, pos_id, tier_pct):
+        """Record which profit-taking tier was last triggered for this position."""
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET last_profit_tier=? WHERE id=?",
+                (tier_pct, pos_id)
             )
 
     def flag_orphan(self, pos_id):
@@ -1489,6 +1569,18 @@ class DB:
                 VALUES (?,?,?,?,?)
             """, (self.now(), event, agent, details, portfolio_value))
         log.info(f"System event: {event} — {details or ''}")
+
+
+    def has_event_today(self, event_type, date_str=None):
+        """Check if a specific event type already occurred today. For idempotency guards."""
+        if not date_str:
+            date_str = self.now()[:10]
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT 1 FROM system_log WHERE event=? AND timestamp LIKE ?",
+                (event_type, f"{date_str}%")
+            ).fetchone()
+            return row is not None
 
     def get_last_heartbeat(self, agent_name=None):
         with self.conn() as c:
