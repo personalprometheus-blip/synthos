@@ -680,6 +680,11 @@ def _alpaca_article_to_item(article: dict) -> dict:
     pub_date  = (article.get("created_at") or "")[:10]   # "YYYY-MM-DD"
     source    = article.get("source", "Alpaca News")
     tier      = _alpaca_news_tier(source)
+    images    = article.get("images") or []
+    image_url = next(
+        (img["url"] for img in images if img.get("size") == "small"),
+        images[0].get("url", "") if images else ""
+    )
     return {
         "headline":    (article.get("headline") or "").strip(),
         "subhead":     (article.get("summary")  or "")[:120].strip(),
@@ -691,6 +696,7 @@ def _alpaca_article_to_item(article: dict) -> dict:
         "tx_date":     pub_date,
         "ticker":      ticker,
         "all_symbols": symbols,
+        "image_url":   image_url,
     }
 
 
@@ -850,6 +856,7 @@ def fetch_and_store_alpaca_display_news(db) -> int:
                     "routing":    "NEWS",
                     "staleness":  "fresh",
                     "symbols":    item.get("all_symbols", []),
+                    "image_url":  item.get("image_url", ""),
                 },
                 source = "NEWS",
             )
@@ -2648,6 +2655,7 @@ def run(session="market"):
                         "routing":     "STALE",
                         "is_amended":  False,
                         "is_spousal":  False,
+                        "image_url":   item.get("image_url", ""),
                     },
                     source = "ALPACA",
                 )
@@ -2719,6 +2727,7 @@ def run(session="market"):
                         "is_spousal":      is_spousal,
                         "ind_etf":         item.get("ind_etf", ""),
                         "sec_etf":         item.get("sector", ""),
+                        "image_url":       item.get("image_url", ""),
                     },
                     source = "ALPACA",
                 )
@@ -2785,6 +2794,7 @@ def run(session="market"):
                     "impact_score":      state.impact_score,
                     "routing":           routing,
                     "persistence_state": state.persistence_state,
+                    "image_url":       item.get("image_url", ""),
                 },
                 source = "CONGRESS" if source_tier == 1 else "RSS",
             )
@@ -2970,6 +2980,17 @@ def run(session="market"):
 
     except Exception as e:
         log.warning(f"Re-evaluation step failed: {e}")
+
+    # ── Cross-validate: boost signals that reinforce each other ──
+    try:
+        xval = db.cross_validate_signals(hours_back=96)
+        xval_tickers = xval.get('tickers_corroborated', [])
+        xval_sectors = xval.get('sector_clusters', [])
+        if xval_tickers or xval_sectors:
+            log.info(f'Cross-validation: {len(xval_tickers)} ticker(s) corroborated, '
+                     f'{len(xval_sectors)} sector cluster(s)')
+    except Exception as e:
+        log.warning(f'Cross-validation error (non-fatal): {e}')
 
     portfolio = db.get_portfolio()
     log.info(

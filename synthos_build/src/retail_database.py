@@ -618,6 +618,15 @@ class DB:
             ).fetchall()
             return [dict(r) for r in rows]
 
+    def get_closed_positions(self, limit=200):
+        """Return closed positions newest-first for performance summary."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def open_position(self, ticker, company, sector, entry_price, shares,
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,
@@ -990,6 +999,183 @@ class DB:
             """, (self.now(), self.now()))
             if result.rowcount:
                 log.info(f"Expired {result.rowcount} signal(s)")
+
+
+    def cross_validate_signals(self, hours_back=96):
+        """
+        Scan QUEUED signals for cross-validation patterns:
+        1. Same ticker from 2+ signals → corroborated, promote if different sources
+        2. Sector cluster: 3+ different tickers in same sector, MEDIUM+ conf, 2+ sources
+
+        Staleness decay (relative to newest signal in group):
+          0-8h: 1.0x | 8-24h: 0.8x | 24-48h: 0.6x | 48-96h: 0.4x
+
+        Returns: {tickers_corroborated: [str], sector_clusters: [str]}
+        """
+        from collections import defaultdict
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).strftime('%Y-%m-%d %H:%M:%S')
+        now_str = self.now()
+
+        # Extract sub-source from 'Alpaca News (benzinga)' format
+        import re as _re
+        def _subsource(s):
+            src_str = s.get('source') or ''
+            m = _re.search(r'\(([^)]+)\)', src_str)
+            return m.group(1) if m else src_str
+
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT id, ticker, sector, source, confidence,
+                       corroboration_note, interrogation_status, created_at
+                FROM signals
+                WHERE status = 'QUEUED' AND created_at > ?
+                ORDER BY created_at DESC
+            """, (cutoff,)).fetchall()
+
+        signals = [dict(r) for r in rows]
+        if not signals:
+            return {"tickers_corroborated": [], "sector_clusters": []}
+
+        # ── Helper: staleness decay weight ──
+        def _decay_weight(created_at_str, newest_str):
+            try:
+                # Parse naive timestamps
+                created = datetime.strptime(created_at_str[:19], '%Y-%m-%d %H:%M:%S')
+                newest  = datetime.strptime(newest_str[:19], '%Y-%m-%d %H:%M:%S')
+                age_hours = (newest - created).total_seconds() / 3600
+            except (ValueError, TypeError):
+                return 0.4
+            if age_hours <= 8:   return 1.0
+            if age_hours <= 24:  return 0.8
+            if age_hours <= 48:  return 0.6
+            return 0.4
+
+        # ── Group by ticker ──
+        by_ticker = defaultdict(list)
+        for s in signals:
+            by_ticker[s['ticker']].append(s)
+
+        tickers_corroborated = []
+        ids_to_update = {}  # id → {corroborated, interrogation_status, note_append}
+
+        for ticker, group in by_ticker.items():
+            if len(group) < 2:
+                continue
+
+            sources = set(_subsource(s) for s in group if s.get('source'))
+            newest_ts = group[0]['created_at']  # already ordered DESC
+            multi_source = len(sources) >= 2
+
+            for s in group:
+                decay = _decay_weight(s['created_at'], newest_ts)
+                source_list = ', '.join(sorted(sources))
+                note = f"[CROSS-VALIDATED: {len(group)} signals ({decay:.1f}x), sources: {source_list}]"
+
+                # Don't re-annotate if already cross-validated this run
+                existing_note = s.get('corroboration_note') or ''
+                if '[CROSS-VALIDATED' in existing_note:
+                    continue
+
+                update = {'corroborated': 1, 'note_append': note}
+
+                # Promote interrogation_status only if different sources and
+                # current status is below CORROBORATED
+                current_status = s.get('interrogation_status') or 'UNVALIDATED'
+                if multi_source and current_status in ('UNVALIDATED', ''):
+                    update['interrogation_status'] = 'CORROBORATED'
+
+                ids_to_update[s['id']] = update
+
+            tickers_corroborated.append(ticker)
+
+        # ── Sector clusters ──
+        by_sector = defaultdict(list)
+        for s in signals:
+            sector = s.get('sector') or ''
+            if sector:
+                by_sector[sector].append(s)
+
+        sector_clusters = []
+
+        for sector, group in by_sector.items():
+            # Unique tickers in this sector
+            tickers_in_sector = set(s['ticker'] for s in group)
+            if len(tickers_in_sector) < 3:
+                continue
+
+            # Quality gate: all must be MEDIUM+
+            quality_signals = [s for s in group
+                               if (s.get('confidence') or '').upper() in ('MEDIUM', 'HIGH')]
+            quality_tickers = set(s['ticker'] for s in quality_signals)
+            if len(quality_tickers) < 3:
+                continue
+
+            # Source diversity gate: at least 2 different sources
+            quality_sources = set(_subsource(s) for s in quality_signals if s.get('source'))
+            # Require 2+ sub-sources, OR 4+ tickers if single sub-source
+            if len(quality_sources) < 2 and len(quality_tickers) < 4:
+                continue
+
+            sector_clusters.append(sector)
+            newest_ts = group[0]['created_at']
+
+            for s in quality_signals:
+                existing_note = s.get('corroboration_note') or ''
+                if '[SECTOR_CLUSTER' in existing_note:
+                    continue
+
+                sid = s['id']
+                note = f"[SECTOR_CLUSTER: {len(quality_tickers)} tickers in {sector}]"
+
+                if sid in ids_to_update:
+                    ids_to_update[sid]['note_append'] += ' | ' + note
+                else:
+                    update = {'corroborated': 1, 'note_append': note}
+                    current_status = s.get('interrogation_status') or 'UNVALIDATED'
+                    if current_status in ('UNVALIDATED', ''):
+                        update['interrogation_status'] = 'CORROBORATED'
+                    ids_to_update[sid] = update
+
+        # ── Apply updates ──
+        if ids_to_update:
+            with self.conn() as c:
+                for sid, upd in ids_to_update.items():
+                    note = upd['note_append']
+                    new_status = upd.get('interrogation_status')
+
+                    if new_status:
+                        c.execute("""
+                            UPDATE signals SET
+                                corroborated = 1,
+                                interrogation_status = ?,
+                                corroboration_note = CASE
+                                    WHEN corroboration_note IS NULL OR corroboration_note = ''
+                                    THEN ?
+                                    ELSE corroboration_note || ' | ' || ?
+                                END,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (new_status, note, note, now_str, sid))
+                    else:
+                        c.execute("""
+                            UPDATE signals SET
+                                corroborated = 1,
+                                corroboration_note = CASE
+                                    WHEN corroboration_note IS NULL OR corroboration_note = ''
+                                    THEN ?
+                                    ELSE corroboration_note || ' | ' || ?
+                                END,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (note, note, now_str, sid))
+
+            log.info(f"[CROSS-VAL] Updated {len(ids_to_update)} signals — "
+                     f"tickers: {tickers_corroborated}, sectors: {sector_clusters}")
+
+        return {"tickers_corroborated": tickers_corroborated,
+                "sector_clusters": sector_clusters}
 
     def discard_signal(self, signal_id, reason=None):
         with self.conn() as c:
@@ -1435,21 +1621,34 @@ class DB:
     def update_approval_status(self, signal_id, status, decided_by='portal',
                                 decision_note=None):
         """
-        Set status to APPROVED or REJECTED with audit fields.
+        Update approval status. Accepts APPROVED, REJECTED, or PENDING_APPROVAL.
+        Cannot modify already-EXECUTED rows.
         Returns True if a row was updated, False if not found or wrong state.
         """
-        if status not in ('APPROVED', 'REJECTED'):
+        if status not in ('APPROVED', 'REJECTED', 'PENDING_APPROVAL'):
             raise ValueError(f"Invalid status for decision: {status}")
         now = self.now()
         with self.conn() as c:
-            result = c.execute("""
-                UPDATE pending_approvals
-                SET status        = ?,
-                    decided_at    = ?,
-                    decided_by    = ?,
-                    decision_note = ?
-                WHERE id = ? AND status = 'PENDING_APPROVAL'
-            """, (status, now, decided_by, decision_note, str(signal_id)))
+            # Clear decision fields when revoking back to PENDING_APPROVAL
+            if status == 'PENDING_APPROVAL':
+                result = c.execute("""
+                    UPDATE pending_approvals
+                    SET status        = 'PENDING_APPROVAL',
+                        decided_at    = NULL,
+                        decided_by    = NULL,
+                        decision_note = NULL
+                    WHERE id = ? AND status IN ('APPROVED', 'REJECTED')
+                """, (str(signal_id),))
+            else:
+                result = c.execute("""
+                    UPDATE pending_approvals
+                    SET status        = ?,
+                        decided_at    = ?,
+                        decided_by    = ?,
+                        decision_note = ?
+                    WHERE id = ? AND status IN ('PENDING_APPROVAL', 'REJECTED', 'APPROVED')
+                    AND status != 'EXECUTED'
+                """, (status, now, decided_by, decision_note, str(signal_id)))
             updated = result.rowcount > 0
         if updated:
             log.info(f"[DB] Approval {status}: id={signal_id} by={decided_by}")

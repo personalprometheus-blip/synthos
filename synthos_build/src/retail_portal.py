@@ -47,7 +47,6 @@ LOG_DIR              = os.path.join(_ROOT_DIR, 'logs')
 ET                   = ZoneInfo("America/New_York")
 PORT                 = int(os.environ.get('PORTAL_PORT', 5001))
 PI_ID                = os.environ.get('PI_ID', 'synthos-pi')
-PORTAL_PASSWORD      = os.environ.get('PORTAL_PASSWORD', '')
 AUTONOMOUS_UNLOCK_KEY = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 OPERATING_MODE       = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
 MONITOR_URL          = os.environ.get('MONITOR_URL', 'http://localhost:5000')
@@ -289,17 +288,14 @@ def timestamp_to_date(ts):
 
 
 def login_required(f):
-    """Full access gate: requires valid session AND accepted current ToS.
-    PORTAL_PASSWORD admin sessions ('admin' literal id) bypass ToS — no customer record exists."""
+    """Full access gate: requires valid session AND accepted current ToS."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
         if not is_authenticated():
             return redirect('/login')
-        # Legacy PORTAL_PASSWORD admin has no customer record — skip ToS gate
-        if session.get('customer_id') != 'admin':
-            if session.get('tos_version') != TOS_CURRENT_VERSION:
-                return redirect('/terms')
+        if session.get('tos_version') != TOS_CURRENT_VERSION:
+            return redirect('/terms')
         return f(*args, **kwargs)
     return decorated
 
@@ -615,7 +611,7 @@ footer{
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
     </svg>
-    <div class="auth-drop" id="auth-drop">
+    <div class="auth-drop" id="auth-drop" onclick="event.stopPropagation()">
       <div class="auth-drop-title">Welcome back</div>
       <div class="auth-drop-sub">Sign in to your Synthos account</div>
       <form method="POST" action="/login">
@@ -903,16 +899,6 @@ def login():
                     return redirect('/')
             except Exception as e:
                 log.error(f"Auth error during login: {e}")
-
-        # ── Fallback: legacy PORTAL_PASSWORD for admin (migration window) ──
-        if not email and PORTAL_PASSWORD and password == PORTAL_PASSWORD:
-            session.clear()
-            session['customer_id']  = 'admin'
-            session['role']         = 'admin'
-            session['display_name'] = 'Admin'
-            session.permanent       = True
-            log.info("Login: legacy PORTAL_PASSWORD admin access")
-            return redirect('/')
 
         return render_template_string(LOGIN_HTML, error="Incorrect email or password")
 
@@ -2320,13 +2306,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 /* ── STAT CARDS ── */
 .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
 .stat-card{
-  padding:8px 12px;border-radius:10px;
+  padding:3px 10px;border-radius:10px;
   border:1px solid var(--border);
   background:var(--surface);
   position:relative;overflow:hidden;
 }
-.stat-label{font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
-.stat-val{font-size:15px;font-weight:700;letter-spacing:-0.3px;color:var(--text)}
+.stat-label{font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:1px}
+.stat-val{font-size:13px;font-weight:700;letter-spacing:-0.3px;color:var(--text)}
 .stat-sub{font-size:10px;color:var(--muted);margin-top:2px}
 .stat-card.teal .stat-val{color:var(--teal);text-shadow:0 0 20px rgba(0,245,212,0.18)}
 .stat-card.pink .stat-val{color:var(--pink);text-shadow:0 0 20px rgba(255,75,110,0.18)}
@@ -2449,6 +2435,50 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   transition:all 0.15s;
 }
 .btn-reject:hover{background:rgba(255,75,110,0.18)}
+
+/* ── APPROVAL QUEUE SECTIONS ── */
+.queue-divider{
+  font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--dim);padding:10px 0 6px;margin-top:4px;
+  border-top:1px solid var(--border);
+}
+.queued-card{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04);
+  font-size:11px;
+}
+.queued-card:last-child{border-bottom:none}
+.qc-ticker{
+  width:36px;height:36px;border-radius:9px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:800;letter-spacing:-0.2px;
+}
+.qc-approved .qc-ticker{
+  background:linear-gradient(135deg,rgba(0,245,212,0.14),rgba(0,245,212,0.05));
+  border:1px solid rgba(0,245,212,0.18);color:var(--teal);
+}
+.qc-rejected .qc-ticker{
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.08);color:var(--dim);
+}
+.qc-info{flex:1;min-width:0}
+.qc-name{font-weight:600;color:var(--text)}
+.qc-rejected .qc-name{color:var(--muted)}
+.qc-detail{font-size:9px;color:var(--muted);margin-top:1px}
+.qc-rejected .qc-detail{color:var(--dim)}
+.btn-revoke{
+  font-size:9px;font-weight:600;padding:3px 10px;border-radius:6px;cursor:pointer;
+  background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.18);
+  color:var(--amber);white-space:nowrap;
+}
+.btn-revoke:hover{background:rgba(245,166,35,0.15)}
+.btn-reapprove{
+  font-size:9px;font-weight:600;padding:3px 10px;border-radius:6px;cursor:pointer;
+  background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.14);
+  color:var(--teal);white-space:nowrap;
+}
+.btn-reapprove:hover{background:rgba(0,245,212,0.12)}
+
 .empty-state{
   text-align:center;padding:28px 0;
   font-size:12px;color:var(--muted);
@@ -2874,6 +2904,18 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .logic-placeholder-icon{font-size:32px;margin-bottom:10px}
 .logic-placeholder-title{font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
 .logic-placeholder-sub{font-size:11px;color:var(--muted);line-height:1.6}
+
+/* ── DASHBOARD PANELS ROW ── */
+.dash-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:700px){.dash-row{grid-template-columns:1fr}}
+.dash-panel-head{
+  padding:8px 14px;display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid var(--border);
+}
+.dash-panel-title{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase}
+.dash-panel-sub{font-size:9px;color:var(--dim)}
+.dash-panel-right{margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)}
+
 .status-strip{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:16px}
 @media(max-width:700px){.status-strip{grid-template-columns:1fr 1fr}}
 .agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
@@ -2991,11 +3033,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <span id="stat-mode" style="display:none">{{ status.operating_mode }}</span>
   <span id="stat-positions" style="display:none">0</span>
   <span id="stat-flags" style="display:none">0</span>
-  <div id="positions-list" style="display:none"></div>
+  <!-- positions-list moved to visible panel below -->
   <div id="agent-running-banner" style="display:none"></div>
   <div id="market-indices-bar" style="display:none"></div>
-  <canvas id="market-chart" style="display:none"></canvas>
-  <div id="market-chart-loading" style="display:none"></div>
+  <!-- market-chart moved to visible panel below -->
 
   <!-- STATUS STRIP -->
   <div class="status-strip">
@@ -3025,6 +3066,41 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="stat-val" id="stat-pos-display">0</div>
       <div style="font-size:9px;color:var(--dim);margin-top:2px" id="stat-positions-sub">—</div>
     </div>
+  </div>
+
+
+  <!-- POSITIONS + CHART ROW -->
+  <div class="dash-row">
+
+    <!-- OPEN POSITIONS -->
+    <div class="glass teal-glow">
+      <div class="dash-panel-head">
+        <div class="dash-panel-title">Open Positions</div>
+        <div id="positions-count" class="dash-panel-sub">0 open</div>
+        <div class="dash-panel-right" id="positions-refresh-ts"></div>
+      </div>
+      <div id="positions-list" style="max-height:260px;overflow-y:auto">
+        <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
+      </div>
+    </div>
+
+    <!-- PORTFOLIO GROWTH -->
+    <div class="glass">
+      <div class="dash-panel-head">
+        <div class="dash-panel-title">Portfolio vs Benchmarks</div>
+        <div class="dash-panel-sub" id="chart-period">36h</div>
+        <div class="dash-panel-right">
+          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=12;loadMarketChart()">12h</button>
+          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=36;loadMarketChart()">36h</button>
+          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=168;loadMarketChart()">7d</button>
+        </div>
+      </div>
+      <div style="padding:8px 10px;position:relative;height:200px">
+        <canvas id="market-chart" style="width:100%;height:100%"></canvas>
+        <div id="market-chart-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted)">Loading chart...</div>
+      </div>
+    </div>
+
   </div>
 
   <!-- 4-PANEL AGENT GRID -->
@@ -4105,7 +4181,8 @@ async function actionTrade(id, status) {
   });
   const d = await r.json();
   if (d.ok) {
-    toast(status === 'APPROVED' ? '✓ Trade approved' : '✗ Trade rejected', status === 'APPROVED' ? 'ok' : 'err');
+    const msgs = {'APPROVED': '✓ Trade approved', 'REJECTED': '✗ Trade rejected', 'PENDING_APPROVAL': '↩ Decision revoked'};
+    toast(msgs[status] || status, status === 'APPROVED' ? 'ok' : status === 'PENDING_APPROVAL' ? 'ok' : 'err');
     loadLiveStatus();
   }
 }
@@ -4457,52 +4534,110 @@ function renderPositions(positions) {
 
 function renderApprovals(approvals) {
   const isAuto  = (document.getElementById('stat-mode')||{}).textContent === 'AUTONOMOUS';
-  // In AUTONOMOUS mode show recent EXECUTED/APPROVED; in SUPERVISED show PENDING
-  const relevant = isAuto
-    ? approvals.filter(a => ['EXECUTED','APPROVED'].includes(a.status)).slice(-5).reverse()
-    : approvals.filter(a => a.status === 'PENDING_APPROVAL');
   const el = document.getElementById('approval-list');
   const badge = document.getElementById('pending-badge');
   const qLabel = document.getElementById('queue-label');
+
   if (isAuto) {
+    // Autonomous mode — show recent executed signals
+    const recent = approvals.filter(a => ['EXECUTED','APPROVED'].includes(a.status)).slice(-5).reverse();
     if (qLabel) qLabel.textContent = 'Recent Signals';
-    badge.textContent = relevant.length + ' recent';
-    if (!relevant.length) {
+    badge.textContent = recent.length + ' recent';
+    if (!recent.length) {
       el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚡</div>No signals executed yet</div>';
       return;
     }
-  } else {
-    badge.textContent = relevant.length + ' pending';
-    if (!relevant.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>';
-      return;
-    }
-  }
-  el.innerHTML = relevant.map(t => {
-    const conf    = (t.confidence||'').toUpperCase();
-    const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
-    const reasoning = t.reasoning ? t.reasoning.slice(0,180) + (t.reasoning.length > 180 ? '...' : '') : '';
-    const statusBadge = isAuto
-      ? `<div style="font-size:8px;padding:2px 6px;border-radius:99px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.14);color:#00f5d4">${t.status}</div>`
-      : '';
-    const price   = t.price ? ` · $${parseFloat(t.price).toFixed(2)}` : '';
-    const shares  = t.shares ? ` · ${parseFloat(t.shares).toFixed(4)} sh` : '';
-    return `<div class="trade-item">
-      <div class="trade-header">
+    el.innerHTML = recent.map(t => {
+      const conf = (t.confidence||'').toUpperCase();
+      const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
+      return `<div class="trade-item"><div class="trade-header">
         <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
         <div class="trade-meta">
-          <div class="trade-headline">${t.ticker||'?'} · ${t.politician||'Unknown'}${statusBadge}</div>
-          <div class="trade-sub">${(t.queued_at||t.executed_at||'').slice(0,16)}${price}${shares}</div>
+          <div class="trade-headline">${t.ticker||'?'} <span style="font-size:8px;padding:2px 6px;border-radius:99px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.14);color:#00f5d4">${t.status}</span></div>
+          <div class="trade-sub">${(t.executed_at||t.queued_at||'').slice(0,16)}</div>
         </div>
         <div class="conf-chip ${confCls}">${conf}</div>
-      </div>
-      ${reasoning ? `<div class="trade-reasoning">${reasoning}</div>` : ''}
-      ${!isAuto ? `<div class="trade-actions">
-        <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
-        <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED')">✗ Reject</button>
-      </div>` : ''}
-    </div>`;
-  }).join('');
+      </div></div>`;
+    }).join('');
+    return;
+  }
+
+  // Supervised/Managed mode — three tiers
+  const pending  = approvals.filter(a => a.status === 'PENDING_APPROVAL');
+  const queued   = approvals.filter(a => a.status === 'APPROVED');
+  const rejected = approvals.filter(a => a.status === 'REJECTED');
+
+  badge.textContent = pending.length ? pending.length + ' pending' :
+                      queued.length  ? queued.length + ' queued'  : '0';
+
+  let html = '';
+
+  // ── Pending review ──
+  if (pending.length) {
+    html += pending.map(t => {
+      const conf    = (t.confidence||'').toUpperCase();
+      const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
+      const reasoning = t.reasoning ? t.reasoning.slice(0,180) + (t.reasoning.length > 180 ? '...' : '') : '';
+      const price   = t.price ? ` · $${parseFloat(t.price).toFixed(2)}` : '';
+      const shares  = t.shares ? ` · ${parseFloat(t.shares).toFixed(4)} sh` : '';
+      return `<div class="trade-item">
+        <div class="trade-header">
+          <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
+          <div class="trade-meta">
+            <div class="trade-headline">${t.ticker||'?'} · ${t.politician||'Unknown'}</div>
+            <div class="trade-sub">${(t.queued_at||'').slice(0,16)}${price}${shares}</div>
+          </div>
+          <div class="conf-chip ${confCls}">${conf}</div>
+        </div>
+        ${reasoning ? `<div class="trade-reasoning">${reasoning}</div>` : ''}
+        <div class="trade-actions">
+          <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
+          <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED')">✗ Reject</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Queued for execution ──
+  if (queued.length) {
+    html += '<div class="queue-divider">Queued for next session</div>';
+    html += queued.map(t => {
+      const price  = t.price ? '$' + parseFloat(t.price).toFixed(2) : '';
+      const shares = t.shares ? parseFloat(t.shares).toFixed(2) + ' sh' : '';
+      return `<div class="queued-card qc-approved">
+        <div class="qc-ticker">${(t.ticker||'?').slice(0,4)}</div>
+        <div class="qc-info">
+          <div class="qc-name">${t.ticker||'?'}</div>
+          <div class="qc-detail">${shares} @ ${price} · ${t.session||'next'} session</div>
+        </div>
+        <button class="btn-revoke" onclick="actionTrade(${t.id},'PENDING_APPROVAL')">Revoke</button>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Recently rejected ──
+  if (rejected.length) {
+    html += '<div class="queue-divider">Rejected</div>';
+    html += rejected.map(t => {
+      const price  = t.price ? '$' + parseFloat(t.price).toFixed(2) : '';
+      const shares = t.shares ? parseFloat(t.shares).toFixed(2) + ' sh' : '';
+      return `<div class="queued-card qc-rejected">
+        <div class="qc-ticker">${(t.ticker||'?').slice(0,4)}</div>
+        <div class="qc-info">
+          <div class="qc-name">${t.ticker||'?'}</div>
+          <div class="qc-detail">${shares} @ ${price}</div>
+        </div>
+        <button class="btn-reapprove" onclick="actionTrade(${t.id},'APPROVED')">Approve</button>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Empty state ──
+  if (!html) {
+    html = '<div class="empty-state"><div class="empty-icon">✅</div>No pending approvals</div>';
+  }
+
+  el.innerHTML = html;
 }
 
 // ── SYSTEM HEALTH ──
@@ -4644,6 +4779,9 @@ async function loadLiveStatus() {
     if (!sr.ok || !ar.ok) return;
     const s = await sr.json();
     const a = await ar.json();
+    // Render approvals and positions immediately — don't let status processing errors block them
+    try { renderApprovals(a); } catch(ae) { console.log('Approvals render error:', ae); }
+    try { renderPositions(s.positions||[]); } catch(pe) { console.log('Positions render error:', pe); }
     // Stats
     const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
@@ -4754,8 +4892,7 @@ async function loadLiveStatus() {
     } else {
       if (agentEl) agentEl.style.display = 'none';
     }
-    renderPositions(s.positions||[]);
-    renderApprovals(a);
+    // renderPositions moved to top of function
   } catch(e) { console.log('Status load error:', e); }
 }
 
@@ -5432,7 +5569,6 @@ def index():
         operating_mode=operating_mode,
         pi_id=PI_ID,
         settings=settings,
-        portal_password_set=bool(PORTAL_PASSWORD),
         async_load=True,
         grace_warning=grace_warning,
     )
@@ -5496,7 +5632,7 @@ def api_approval():
 
     if not signal_id:
         return jsonify({"ok": False, "error": "Missing id"}), 400
-    if status not in ('APPROVED', 'REJECTED'):
+    if status not in ('APPROVED', 'REJECTED', 'PENDING_APPROVAL'):
         return jsonify({"ok": False, "error": "Invalid status"}), 400
 
     try:
@@ -5585,7 +5721,6 @@ def api_keys():
         'COMPANY_URL',
         'LICENSE_KEY',
         'LIVE_TRADING_ENABLED',
-        'PORTAL_PASSWORD',
         'PI_LABEL',
         'PI_EMAIL',
         'OPERATOR_EMAIL',
@@ -5769,7 +5904,9 @@ def api_status():
 
 @app.route('/api/approvals')
 def api_approvals():
-    return jsonify(load_pending_approvals())
+    data = load_pending_approvals()
+    log.info(f'[DEBUG] api_approvals returning {len(data)} items, customer_id={session.get("customer_id", "MISSING")}')
+    return jsonify(data)
 
 
 @app.route('/api/portfolio-history')
@@ -6105,13 +6242,13 @@ def api_market_chart_data():
         db = _customer_db()
         with db.conn() as c:
             pos_rows = c.execute("""
-                SELECT ticker, entry_price, created_at FROM positions
-                WHERE created_at >= ?
-                ORDER BY created_at ASC
+                SELECT ticker, entry_price, opened_at FROM positions
+                WHERE opened_at >= ?
+                ORDER BY opened_at ASC
             """, (start_dt.strftime('%Y-%m-%d %H:%M:%S'),)).fetchall()
         for row in pos_rows:
             try:
-                entry_key = row['created_at'][:13]
+                entry_key = row['opened_at'][:13]
                 # Find nearest base_ts index
                 for j, bt in enumerate(base_ts):
                     if bt[:13].replace('T', ' ') == entry_key:
