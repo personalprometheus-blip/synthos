@@ -16,7 +16,9 @@ Design notes:
   - Each session fires once via systemd timer and exits cleanly
   - Per-customer subprocesses run in parallel; scheduler waits for all to finish
   - A lock file prevents overlapping runs of the same session
-  - Kill switch is respected — if active, all sessions abort immediately
+  - Kill switch halts trading only — retail_trade_logic_agent.py checks it at
+    Gate 1. All other agents (news, sentiment, screener, heartbeat) continue
+    running so market data collection and monitor visibility are unaffected.
   - Run history is written to logs/scheduler_history.json for the admin portal
   - If no customers exist yet, falls back to single-tenant (legacy / dev mode)
 
@@ -99,6 +101,11 @@ SESSION_PIPELINES = {
     'overnight': [
         ('retail_news_agent.py',             ['--session=overnight'], 420),
     ],
+    'trade': [
+        # Hourly trader evaluation + execution.
+        # Session type (open/midday/close) auto-resolved based on time of day.
+        ('retail_trade_logic_agent.py',      None,                 300),
+    ],
 }
 
 # Maximum history entries to retain in scheduler_history.json
@@ -115,6 +122,18 @@ def is_market_hours() -> bool:
     t = now.time()
     from datetime import time as dtime
     return dtime(9, 30) <= t <= dtime(16, 0)
+
+
+def resolve_trade_args() -> list:
+    """Auto-select trade session type based on time of day (ET)."""
+    from zoneinfo import ZoneInfo
+    hour = datetime.now(ZoneInfo("America/New_York")).hour
+    if hour < 12:
+        return ['--session=open']
+    elif hour < 15:
+        return ['--session=midday']
+    else:
+        return ['--session=close']
 
 
 def resolve_news_args() -> list:
@@ -230,9 +249,15 @@ def run_session(session: str, dry_run: bool = False) -> bool:
                   f"Valid: {', '.join(SESSION_PIPELINES)}")
         return False
 
+    # Note: kill switch is NOT checked here. The trade logic agent (Gate 1)
+    # handles its own kill switch check. Other agents (news, sentiment, screener)
+    # do not have account access and continue running so that heartbeats and
+    # market data collection are unaffected when trading is halted.
     if KILL_SWITCH_FILE.exists():
-        log.warning(f"Kill switch is active — aborting session '{session}'")
-        return False
+        log.warning(
+            f"Kill switch is active — session '{session}' will run but "
+            f"retail_trade_logic_agent.py will halt at Gate 1"
+        )
 
     now = datetime.now(ET)
     started_at = datetime.now(timezone.utc).isoformat()
@@ -249,7 +274,16 @@ def run_session(session: str, dry_run: bool = False) -> bool:
 
     for script, args, timeout in pipeline:
         # Resolve dynamic args (e.g. news agent market vs overnight)
-        effective_args = resolve_news_args() if args is None else args
+        # Resolve dynamic args based on which agent needs them
+        if args is None:
+            if 'news_agent' in script:
+                effective_args = resolve_news_args()
+            elif 'trade_logic' in script:
+                effective_args = resolve_trade_args()
+            else:
+                effective_args = []
+        else:
+            effective_args = args
 
         log.info(
             f"Step: {script}"
