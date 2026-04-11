@@ -1,0 +1,1730 @@
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T09:31:18.691015-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : True
+    Reason : session within trading window
+    current_time          : 09:31 ET
+    window                : 9:30–10:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99955.19
+    peak_equity           : $99955.19
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.0% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $681.53
+    ma_short              : $658.25 (20d)
+    ma_long               : $674.30 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.01%
+    dd_threshold          : 5%
+    bm_volatility         : 1.509%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.509%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.24%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T12:30:15.200959-04:00
+  Session   : MIDDAY
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : True
+    Reason : session within trading window
+    current_time          : 12:30 ET
+    window                : 12:00–14:00
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.61
+    ma_short              : $658.15 (20d)
+    ma_long               : $674.27 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.29%
+    dd_threshold          : 5%
+    bm_volatility         : 1.524%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.524%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.04%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T15:30:01.876081-04:00
+  Session   : CLOSE
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : True
+    Reason : session within trading window
+    current_time          : 15:30 ET
+    window                : 15:00–16:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.67
+    peak_equity           : $99960.67
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.64
+    ma_short              : $658.15 (20d)
+    ma_long               : $674.27 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.28%
+    dd_threshold          : 5%
+    bm_volatility         : 1.531%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.531%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.03%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T15:30:18.164915-04:00
+  Session   : CLOSE
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : True
+    Reason : session within trading window
+    current_time          : 15:30 ET
+    window                : 15:00–16:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99962.83
+    peak_equity           : $99962.83
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.64
+    ma_short              : $658.15 (20d)
+    ma_long               : $674.27 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.28%
+    dd_threshold          : 5%
+    bm_volatility         : 1.531%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.531%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.03%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:52:23.357994-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : False
+    Reason : outside session window
+    current_time          : 16:52 ET
+    window                : 9:30–10:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99961.74
+    peak_equity           : $99961.74
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:53:04.966048-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : False
+    Reason : outside session window
+    current_time          : 16:53 ET
+    window                : 9:30–10:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:16.405072-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : False
+    Reason : outside session window
+    current_time          : 16:54 ET
+    window                : 9:30–10:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:17.282633-04:00
+  Session   : OPEN
+  Ticker    : BIL
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 10_ACTIVE
+    Result : False
+    Reason : HOLD — no exit condition met
+    ticker                : BIL
+    current               : $91.49
+    entry                 : $91.65
+    gain_pct              : -0.17%
+    holding_days          : 0
+------------------------------------------------------------------------
+  FINAL DECISION : HOLD
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:17.322307-04:00
+  Session   : OPEN
+  Ticker    : AMZN
+  Signal ID : 1
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : AMZN
+    avg_volume_30d        : 1,798,070
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : 
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6350
+    Reason : score 0.6350 ≥ threshold 0.55
+    ticker                : AMZN
+    tier_score            : 0.70 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.50 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6350
+    rel_strength_5d       : 8.95%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : MOMENTUM
+    Reason : entry=MOMENTUM score=0.6350
+    ticker                : AMZN
+    entry_type            : MOMENTUM
+    entry_score           : 0.6350
+    regime                : SIDEWAYS/NORMAL
+    candidates_found      : 1
+    detail                : price $238.42 > MA20 $212.21, ROC 13.73%
+  GATE 7_SIZING
+    Result : 4.1926 shares ($999.60)
+    Reason : 4.1926 shares × $238.42 = $999.60
+    equity                : $99960.65
+    tier                  : Mature
+    atr                   : $6.91
+    stop_distance         : $13.82
+    base_risk             : $999.61 (1.0%)
+    base_size             : 72.3304
+    vol_adjustment        : ×0.518
+    mode_adjustment       : ×1.00
+    drawdown_scale        : ×1.000 (dd=0.0%)
+    max_cap               : 4.1926 shares
+    usd_cap               : $1000.00
+    final_size            : 4.1926 shares @ $238.42
+  GATE 8_RISK_SETUP
+    Result : stop=$224.6 target=$266.06 trail=$13.82
+    Reason : risk parameters set
+    entry_price           : $238.4200
+    atr                   : $6.9100
+    stop_loss             : $224.6000 (−$13.8200)
+    profit_target         : $266.0600 (+$27.6400)
+    trailing_stop         : $13.8200
+    r_r_ratio             : 1:2.0
+    overnight_flag        : False
+    gap_risk              : False
+  GATE 11_GROSS_EXPOSURE
+    Result : True
+    Reason : exposure OK
+    current_deployed      : $19999.13
+    new_position          : $4.19
+    projected_gross       : 20.0%
+    limit                 : 80%
+  GATE 11_POSITION_COUNT
+    Result : True
+    Reason : position count OK
+    open_positions        : 1
+    max_positions         : 12
+    tier                  : Mature
+  GATE 11_SECTOR_EXPOSURE
+    Result : True
+    Reason : sector OK
+    sector                : 
+    projected_sector_pct  : 0.0%
+    limit                 : 2500%
+------------------------------------------------------------------------
+  FINAL DECISION : MIRROR
+    → politician= staleness=Fresh headline=Amazon, Snowflake, Tempus AI, Arrive AI And Eos Energy: Why 
+    → MOMENTUM entry | 4.1926 shares @ $238.42 | stop=$224.6 target=$266.06
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:22.170248-04:00
+  Session   : OPEN
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:22.260074-04:00
+  Session   : OPEN
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:22.386095-04:00
+  Session   : OPEN
+  Ticker    : AVGO
+  Signal ID : 4
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : AVGO
+    avg_volume_30d        : 713,959
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : 
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6350
+    Reason : score 0.6350 ≥ threshold 0.55
+    ticker                : AVGO
+    tier_score            : 0.70 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.50 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6350
+    rel_strength_5d       : 15.00%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : MOMENTUM
+    Reason : entry=MOMENTUM score=0.6350
+    ticker                : AVGO
+    entry_type            : MOMENTUM
+    entry_score           : 0.6350
+    regime                : SIDEWAYS/NORMAL
+    candidates_found      : 1
+    detail                : price $371.44 > MA20 $322.06, ROC 18.12%
+  GATE 7_SIZING
+    Result : 2.6912 shares ($999.61)
+    Reason : 2.6912 shares × $371.44 = $999.61
+    equity                : $99960.65
+    tier                  : Mature
+    atr                   : $12.77
+    stop_distance         : $25.54
+    base_risk             : $999.61 (1.0%)
+    base_size             : 39.1389
+    vol_adjustment        : ×0.436
+    mode_adjustment       : ×1.00
+    drawdown_scale        : ×1.000 (dd=0.0%)
+    max_cap               : 2.6912 shares
+    usd_cap               : $1000.00
+    final_size            : 2.6912 shares @ $371.44
+  GATE 8_RISK_SETUP
+    Result : stop=$345.895 target=$422.515 trail=$25.54
+    Reason : risk parameters set
+    entry_price           : $371.4350
+    atr                   : $12.7700
+    stop_loss             : $345.8950 (−$25.5400)
+    profit_target         : $422.5150 (+$51.0800)
+    trailing_stop         : $25.5400
+    r_r_ratio             : 1:2.0
+    overnight_flag        : False
+    gap_risk              : True
+  GATE 11_GROSS_EXPOSURE
+    Result : True
+    Reason : exposure OK
+    current_deployed      : $19999.13
+    new_position          : $2.69
+    projected_gross       : 20.0%
+    limit                 : 80%
+  GATE 11_POSITION_COUNT
+    Result : True
+    Reason : position count OK
+    open_positions        : 1
+    max_positions         : 12
+    tier                  : Mature
+  GATE 11_SECTOR_EXPOSURE
+    Result : True
+    Reason : sector OK
+    sector                : 
+    projected_sector_pct  : 0.0%
+    limit                 : 2500%
+------------------------------------------------------------------------
+  FINAL DECISION : MIRROR
+    → politician= staleness=Fresh headline=Michael Burry Saying Anthropic Eating Palantir's Lunch Is 'T
+    → Gap risk elevated (ATR/price = 3.4%). Stops set wider.
+    → MOMENTUM entry | 2.6912 shares @ $371.44 | stop=$345.895 target=$422.515
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:27.241636-04:00
+  Session   : OPEN
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T16:54:27.332364-04:00
+  Session   : OPEN
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:51.243378-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : False
+    Reason : outside session window
+    current_time          : 17:41 ET
+    window                : 9:30–10:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:52.108375-04:00
+  Session   : OPEN
+  Ticker    : BIL
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 10_ACTIVE
+    Result : False
+    Reason : HOLD — no exit condition met
+    ticker                : BIL
+    current               : $91.49
+    entry                 : $91.65
+    gain_pct              : -0.17%
+    holding_days          : 0
+------------------------------------------------------------------------
+  FINAL DECISION : HOLD
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:55.493210-04:00
+  Session   : OPEN
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:55.590920-04:00
+  Session   : OPEN
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:55.685076-04:00
+  Session   : OPEN
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T17:41:55.773751-04:00
+  Session   : OPEN
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T22:20:01.981774-04:00
+  Session   : CLOSE
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_SYSTEM_HOURS
+    Result : False
+    Reason : outside session window
+    current_time          : 22:20 ET
+    window                : 15:00–16:30
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $98961.05
+    peak_equity           : $98961.05
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T22:20:02.643070-04:00
+  Session   : CLOSE
+  Ticker    : BIL
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 10_ACTIVE
+    Result : False
+    Reason : HOLD — no exit condition met
+    ticker                : BIL
+    current               : $91.49
+    entry                 : $91.65
+    gain_pct              : -0.17%
+    holding_days          : 0
+------------------------------------------------------------------------
+  FINAL DECISION : HOLD
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:05.819140-04:00
+  Session   : HOURLY
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 23:15 ET
+    market_hours          : 9:30–16:00
+    regime                : afterhours
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $98961.04
+    peak_equity           : $98961.04
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:14.381018-04:00
+  Session   : HOURLY
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 23:15 ET
+    market_hours          : 9:30–16:00
+    regime                : afterhours
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:15.511283-04:00
+  Session   : HOURLY
+  Ticker    : AMZN
+  Signal ID : 1
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : AMZN
+    avg_volume_30d        : 1,798,070
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Technology
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.7050
+    Reason : score 0.7050 ≥ threshold 0.55
+    ticker                : AMZN
+    tier_score            : 0.70 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.7050
+    rel_strength_5d       : 8.95%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : MOMENTUM
+    Reason : entry=MOMENTUM score=0.7050
+    ticker                : AMZN
+    entry_type            : MOMENTUM
+    entry_score           : 0.7050
+    regime                : SIDEWAYS/NORMAL
+    candidates_found      : 1
+    detail                : price $238.42 > MA20 $212.21, ROC 13.73%
+  GATE 7_SIZING
+    Result : 0.0419 shares ($9.99)
+    Reason : 0.0419 shares × $238.42 = $9.99
+    equity                : $99960.65
+    tier                  : Mature
+    atr                   : $6.91
+    stop_distance         : $13.82
+    base_risk             : $999.61 (1.0%)
+    base_size             : 72.3304
+    vol_adjustment        : ×0.518
+    mode_adjustment       : ×1.00
+    drawdown_scale        : ×1.000 (dd=0.0%)
+    max_cap               : 0.0419 shares
+    usd_cap               : $1000.00
+    final_size            : 0.0419 shares @ $238.42
+  GATE 8_RISK_SETUP
+    Result : stop=$224.6 target=$266.06 trail=$13.82
+    Reason : risk parameters set
+    entry_price           : $238.4200
+    atr                   : $6.9100
+    stop_loss             : $224.6000 (−$13.8200)
+    profit_target         : $266.0600 (+$27.6400)
+    trailing_stop         : $13.8200
+    r_r_ratio             : 1:2.0
+    overnight_flag        : True
+    gap_risk              : False
+  GATE 11_GROSS_EXPOSURE
+    Result : True
+    Reason : exposure OK
+    current_deployed      : $19999.13
+    new_position          : $0.04
+    projected_gross       : 20.0%
+    limit                 : 80%
+  GATE 11_POSITION_COUNT
+    Result : True
+    Reason : position count OK
+    open_positions        : 1
+    max_positions         : 12
+    tier                  : Mature
+  GATE 11_SECTOR_EXPOSURE
+    Result : True
+    Reason : sector OK
+    sector                : Technology
+    projected_sector_pct  : 0.0%
+    limit                 : 2500%
+------------------------------------------------------------------------
+  FINAL DECISION : MIRROR
+    → politician= staleness=Fresh headline=Amazon, Snowflake, Tempus AI, Arrive AI And Eos Energy: Why 
+    → Close session — position held overnight. Review position sizing.
+    → MOMENTUM entry | 0.0419 shares @ $238.42 | stop=$224.6 target=$266.06
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:20.341280-04:00
+  Session   : HOURLY
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:20.449700-04:00
+  Session   : HOURLY
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:20.543780-04:00
+  Session   : HOURLY
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:15:20.633373-04:00
+  Session   : HOURLY
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:20:01.927310-04:00
+  Session   : CLOSE
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 23:20 ET
+    market_hours          : 9:30–16:00
+    regime                : afterhours
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:20:02.988965-04:00
+  Session   : CLOSE
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:20:03.081279-04:00
+  Session   : CLOSE
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:20:03.172893-04:00
+  Session   : CLOSE
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:20:03.269572-04:00
+  Session   : CLOSE
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:16.099854-04:00
+  Session   : HOURLY
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 23:36 ET
+    market_hours          : 9:30–16:00
+    regime                : afterhours
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:17.157323-04:00
+  Session   : HOURLY
+  Ticker    : PFE
+  Signal ID : 81
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : PFE
+    avg_volume_30d        : 1,879,918
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Healthcare
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6630
+    Reason : score 0.6630 ≥ threshold 0.55
+    ticker                : PFE
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6630
+    rel_strength_5d       : -6.45%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : PFE
+    price                 : $26.91
+    ma20                  : $27.37
+    roc_5d                : -5.05%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician= staleness=Fresh headline=TEST: Pfizer Beats Q2 Earnings Estimates on Strong Drug Sale
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:20.696028-04:00
+  Session   : HOURLY
+  Ticker    : ABBV
+  Signal ID : 83
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 265,269 below 500,000
+    ticker                : ABBV
+    avg_volume_30d        : 265,269
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=TEST: AbbVie Pipeline Drug Shows Positive Phase 3 Results
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:20.803302-04:00
+  Session   : HOURLY
+  Ticker    : MSFT
+  Signal ID : 86
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : MSFT
+    avg_volume_30d        : 798,603
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Technology
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.7225
+    Reason : score 0.7225 ≥ threshold 0.55
+    ticker                : MSFT
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.90 × 0.2
+    composite_score       : 0.7225
+    rel_strength_5d       : -3.60%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : MSFT
+    price                 : $370.89
+    ma20                  : $377.12
+    roc_5d                : -0.70%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician=Mark Warner staleness=Fresh headline=TEST: Sen. Warner Discloses $1M+ Microsoft Stock Purchase
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:24.385957-04:00
+  Session   : HOURLY
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:24.478602-04:00
+  Session   : HOURLY
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:24.576676-04:00
+  Session   : HOURLY
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-10T23:36:24.669863-04:00
+  Session   : HOURLY
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================

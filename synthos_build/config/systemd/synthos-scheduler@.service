@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/synthos/synthos_build/src
-ExecStart=/home/pi/synthos/venv/bin/python3 retail_scheduler.py --session %i
-StandardOutput=append:/home/pi/synthos/synthos_build/logs/scheduler.log
-StandardError=append:/home/pi/synthos/synthos_build/logs/scheduler.log
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/usr/bin/python3 retail_scheduler.py --session %i
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/scheduler.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/scheduler.log
 
 # oneshot services exit when done — no Restart needed.
 # systemd records success/failure in the journal automatically.

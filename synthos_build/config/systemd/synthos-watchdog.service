@@ -5,14 +5,14 @@ Wants=synthos-portal.service
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/synthos/synthos_build/src
-ExecStart=/home/pi/synthos/venv/bin/python3 retail_watchdog.py
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/usr/bin/python3 retail_watchdog.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/home/pi/synthos/synthos_build/logs/watchdog.log
-StandardError=append:/home/pi/synthos/synthos_build/logs/watchdog.log
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/watchdog.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/watchdog.log
 
 [Install]
 WantedBy=multi-user.target

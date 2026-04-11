@@ -1,0 +1,1855 @@
+"""
+database.py — Shared SQLite foundation for the Synthos.
+
+All three agents import this module. It handles:
+  - Schema creation on first run (cold start safe)
+  - Read/write helpers used by every agent
+  - Portfolio state persistence and recovery
+  - Position reconciliation helpers
+  - System logging
+
+Usage:
+  from retail_database import DB
+  db = DB()
+  db.log_heartbeat("agent1_trader", "OK", portfolio_value=102.34)
+"""
+
+import sqlite3
+import os
+import sys
+import time
+import json
+import logging
+from datetime import datetime, timedelta
+from contextlib import contextmanager
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+
+# ── AGENT DB LOCK ──────────────────────────────────────────────────────────
+# Agents write a lock file before running so the portal backs off.
+# Priority order: agent1 > agent3 > agent4 > agent2 > portal
+# The portal waits up to 10 minutes — agents typically finish in 1-2 min.
+
+_PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+AGENT_LOCK_FILE = os.path.join(_PROJECT_DIR, '.agent_lock')
+
+# Callers that get DB priority (write the lock file).
+# Lower number = higher priority. Agents not listed default to 99 (lowest).
+PRIORITY_AGENTS = {
+    'retail_trade_logic_agent.py':      1,   # trader   — trade execution
+    'retail_market_sentiment_agent.py': 2,   # sentiment — cascade/deterioration
+    'retail_news_agent.py':             3,   # research  — signal scoring
+    'retail_sector_screener.py':        4,   # screener  — sector enrichment
+}
+
+# Callers that back off fast when DB is locked (max 5s wait, never block a request)
+BACKOFF_CALLERS = {
+    'retail_portal.py',
+    'retail_heartbeat.py',
+    'retail_health_check.py',
+    'daily_digest.py',
+}
+
+
+def acquire_agent_lock(agent_name):
+    """
+    Write the agent lock file. Call at start of agent run.
+    Returns the lock path so caller can release it.
+    """
+    try:
+        priority = PRIORITY_AGENTS.get(agent_name, 99)
+        with open(AGENT_LOCK_FILE, 'w') as f:
+            f.write(f"{agent_name}\n{priority}\n{time.time()}\n")
+    except Exception:
+        pass
+    return AGENT_LOCK_FILE
+
+
+def release_agent_lock():
+    """Remove the agent lock file. Call at end of agent run."""
+    try:
+        if os.path.exists(AGENT_LOCK_FILE):
+            os.remove(AGENT_LOCK_FILE)
+    except Exception:
+        pass
+
+
+def _wait_for_agent_lock(caller='unknown', max_wait=None):
+    """
+    If a higher-priority agent holds the lock, wait for it to finish.
+    Never waits for itself. Clears stale/malformed locks immediately.
+    Portal and backoff callers wait max 5s — agents wait up to 10 min.
+    """
+    if not os.path.exists(AGENT_LOCK_FILE):
+        return
+
+    # Portal and background callers bail out fast — never block a request thread
+    if max_wait is None:
+        max_wait = 5 if caller in BACKOFF_CALLERS else 600
+
+    caller_priority = PRIORITY_AGENTS.get(caller, 99)
+
+    try:
+        content = open(AGENT_LOCK_FILE).read().strip()
+        parts = content.split('\n')
+
+        # Malformed lock file — clear it
+        if len(parts) < 3:
+            release_agent_lock()
+            return
+
+        lock_agent    = parts[0]
+        lock_priority = int(parts[1])
+        lock_time     = float(parts[2])
+
+        # Stale lock (over 10 min old) — remove it
+        if time.time() - lock_time > 600:
+            import logging as _log
+            _log.getLogger('database').warning(
+                f"Clearing stale lock from {lock_agent} ({int(time.time()-lock_time)}s old)"
+            )
+            release_agent_lock()
+            return
+
+        # Never wait for yourself
+        if lock_agent == caller:
+            import logging as _log
+            _log.getLogger('database').warning(
+                f"{caller} found its own lock — clearing and proceeding"
+            )
+            release_agent_lock()
+            return
+
+        # Higher priority caller — take over the lock
+        if caller_priority < lock_priority:
+            import logging as _log
+            _log.getLogger('database').info(
+                f"{caller} (p{caller_priority}) preempting {lock_agent} (p{lock_priority})"
+            )
+            acquire_agent_lock(caller)
+            time.sleep(2)
+            return
+
+        # Lower or equal priority — wait up to max_wait
+        if lock_priority <= caller_priority:
+            waited = 0
+            while os.path.exists(AGENT_LOCK_FILE) and waited < max_wait:
+                try:
+                    current = open(AGENT_LOCK_FILE).read().strip().split('\n')
+                    if current[0] == caller:
+                        release_agent_lock()
+                        return
+                    if time.time() - float(current[2]) > 600:
+                        release_agent_lock()
+                        return
+                except Exception:
+                    release_agent_lock()
+                    return
+                if waited > 0 and waited % 30 == 0:
+                    import logging as _log
+                    _log.getLogger('database').info(
+                        f"Waiting for {lock_agent} to release DB lock... ({waited}s)"
+                    )
+                time.sleep(5)
+                waited += 5
+            # Timed out — log and proceed anyway
+            if waited >= max_wait and max_wait > 10:
+                import logging as _log
+                _log.getLogger('database').warning(
+                    f"{caller} timed out waiting for {lock_agent} after {max_wait}s — proceeding anyway"
+                )
+
+    except Exception:
+        release_agent_lock()
+
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'user', 'signals.db')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+log = logging.getLogger('database')
+
+
+# ── SCHEMA ────────────────────────────────────────────────────────────────
+SCHEMA = """
+-- ── PORTFOLIO ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS portfolio (
+    id              INTEGER PRIMARY KEY,
+    cash            REAL    NOT NULL,
+    realized_gains  REAL    NOT NULL DEFAULT 0.0,
+    tax_withdrawn   REAL    NOT NULL DEFAULT 0.0,
+    month_start     REAL    NOT NULL,
+    updated_at      TEXT    NOT NULL
+);
+
+-- ── POSITIONS ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS positions (
+    id              TEXT    PRIMARY KEY,   -- e.g. "pos_AAPL_20240214"
+    ticker          TEXT    NOT NULL,
+    company         TEXT,
+    sector          TEXT,
+    entry_price     REAL    NOT NULL,
+    current_price   REAL,
+    shares          REAL    NOT NULL,
+    trail_stop_amt  REAL    NOT NULL,      -- ATR-based dollar amount
+    trail_stop_pct  REAL    NOT NULL,      -- percentage for display
+    vol_bucket      TEXT,                  -- Low Vol / Mid Vol / High Vol
+    pnl             REAL    NOT NULL DEFAULT 0.0,
+    status          TEXT    NOT NULL DEFAULT 'OPEN',   -- OPEN / CLOSED / RECONCILE_NEEDED
+    opened_at       TEXT    NOT NULL,
+    closed_at       TEXT,
+    exit_reason     TEXT,                  -- TRAILING_STOP / PROFIT_TAKE / MANUAL
+    signal_id       INTEGER,               -- FK to signals table
+    FOREIGN KEY (signal_id) REFERENCES signals(id)
+);
+
+-- ── SIGNALS ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS signals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker          TEXT    NOT NULL,
+    company         TEXT,
+    sector          TEXT,
+    source          TEXT    NOT NULL,
+    source_tier     INTEGER NOT NULL,      -- 1=Official 2=Wire 3=Press 4=Opinion
+    headline        TEXT,
+    politician      TEXT,
+    tx_date         TEXT,                  -- transaction date from disclosure
+    disc_date       TEXT,                  -- disclosure filing date
+    amount_range    TEXT,
+    confidence      TEXT    NOT NULL,      -- HIGH / MEDIUM / LOW / NOISE
+    staleness       TEXT,                  -- Fresh / Aging / Stale / Expired
+    corroborated    INTEGER NOT NULL DEFAULT 0,  -- 0/1
+    corroboration_note TEXT,
+    status          TEXT    NOT NULL DEFAULT 'PENDING',
+                                           -- PENDING / WATCHING / QUEUED /
+                                           -- ACTED_ON / DISCARDED / EXPIRED /
+                                           -- INTERRUPTED
+    is_amended      INTEGER NOT NULL DEFAULT 0,
+    is_spousal      INTEGER NOT NULL DEFAULT 0,
+    needs_reeval    INTEGER NOT NULL DEFAULT 0,
+    expires_at      TEXT,
+    discard_delete_at TEXT,
+    created_at      TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL
+);
+
+-- ── LEDGER ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS ledger (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL,
+    type            TEXT    NOT NULL,      -- DEPOSIT / ENTRY / EXIT / TAX / BIL
+    description     TEXT,
+    amount          REAL    NOT NULL,
+    balance         REAL    NOT NULL,
+    position_id     TEXT,
+    created_at      TEXT    NOT NULL
+);
+
+-- ── OUTCOMES ───────────────────────────────────────────────────────────
+-- Closed trade outcomes — feeds the learning loop
+CREATE TABLE IF NOT EXISTS outcomes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id     TEXT    NOT NULL,
+    ticker          TEXT    NOT NULL,
+    entry_price     REAL    NOT NULL,
+    exit_price      REAL    NOT NULL,
+    shares          REAL    NOT NULL,
+    hold_days       INTEGER,
+    pnl_pct         REAL,
+    pnl_dollar      REAL,
+    signal_tier     INTEGER,
+    staleness       TEXT,
+    vol_bucket      TEXT,
+    exit_reason     TEXT,
+    verdict         TEXT,                  -- WIN / LOSS
+    lesson          TEXT,                  -- Claude-generated lesson
+    created_at      TEXT    NOT NULL
+);
+
+-- ── HANDSHAKES ─────────────────────────────────────────────────────────
+-- Tracks signal passing between The Daily and The Trader
+CREATE TABLE IF NOT EXISTS handshakes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id       INTEGER NOT NULL,
+    ticker          TEXT    NOT NULL,
+    from_agent      TEXT    NOT NULL,      -- "The Daily"
+    to_agent        TEXT    NOT NULL,      -- "The Trader"
+    queued_at       TEXT    NOT NULL,
+    acknowledged_at TEXT,
+    ack             INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (signal_id) REFERENCES signals(id)
+);
+
+-- ── SCAN LOG ───────────────────────────────────────────────────────────
+-- The Pulse 30-min scan results — capped by cleanup.py
+CREATE TABLE IF NOT EXISTS scan_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker          TEXT    NOT NULL,
+    put_call_ratio  REAL,
+    put_call_avg30d REAL,
+    insider_net     TEXT,
+    volume_vs_avg   TEXT,
+    seller_dominance TEXT,
+    cascade_detected INTEGER NOT NULL DEFAULT 0,
+    tier            INTEGER NOT NULL,      -- 1=Critical 2=Elevated 3=Neutral 4=Quiet
+    event_summary   TEXT,
+    scanned_at      TEXT    NOT NULL
+);
+
+-- ── SYSTEM LOG ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS system_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT    NOT NULL,
+    event           TEXT    NOT NULL,      -- HEARTBEAT / SHUTDOWN / REBOOT_OK / etc
+    agent           TEXT,
+    details         TEXT,
+    portfolio_value REAL
+);
+
+-- ── URGENT FLAGS ───────────────────────────────────────────────────────
+-- Cascade alerts that bypass normal session schedule
+CREATE TABLE IF NOT EXISTS urgent_flags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker          TEXT    NOT NULL,
+    detected_at     TEXT    NOT NULL,
+    tier            INTEGER NOT NULL DEFAULT 1,
+    acknowledged    INTEGER NOT NULL DEFAULT 0,
+    acknowledged_at TEXT,
+    scan_log_id     INTEGER,
+    FOREIGN KEY (scan_log_id) REFERENCES scan_log(id)
+);
+
+-- ── PENDING APPROVALS ─────────────────────────────────────────────────
+-- Supervised mode trade approval queue.
+-- Full lifecycle preserved — rows are never deleted.
+-- Active queue: filter WHERE status = 'PENDING_APPROVAL'
+-- Statuses: PENDING_APPROVAL / APPROVED / REJECTED / EXECUTED / EXPIRED
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id              TEXT    PRIMARY KEY,   -- signal id (e.g. "42" or "sig_AAPL_...")
+    ticker          TEXT    NOT NULL,
+    company         TEXT,
+    sector          TEXT,
+    politician      TEXT,
+    confidence      TEXT,                  -- HIGH / MEDIUM / LOW
+    staleness       TEXT,                  -- Fresh / Aging / Stale / Expired
+    headline        TEXT,
+    price           REAL,
+    shares          REAL,
+    max_trade       REAL,
+    trail_amt       REAL,
+    trail_pct       REAL,
+    vol_label       TEXT,
+    reasoning       TEXT,
+    session         TEXT,
+    status          TEXT    NOT NULL DEFAULT 'PENDING_APPROVAL',
+    queued_at       TEXT    NOT NULL,
+    decided_at      TEXT,
+    decided_by      TEXT,                  -- 'portal' or agent name
+    executed_at     TEXT,
+    decision_note   TEXT
+);
+
+-- ── MEMBER WEIGHTS ──────────────────────────────────────────────────────
+-- Per-member signal reliability scores updated after each trade closes.
+CREATE TABLE IF NOT EXISTS member_weights (
+    congress_member TEXT    PRIMARY KEY,
+    win_count       INTEGER NOT NULL DEFAULT 0,
+    loss_count      INTEGER NOT NULL DEFAULT 0,
+    weight          REAL    NOT NULL DEFAULT 1.0,  -- floor 0.5, ceiling 1.5
+    last_updated    TEXT
+);
+
+-- ── NEWS FEED ────────────────────────────────────────────────────────────
+-- All signals seen by Scout, good and bad, before Bolt acts.
+-- Displayed in portal /news page. Cleared after 30 days by cleanup.
+CREATE TABLE IF NOT EXISTS news_feed (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp        TEXT    NOT NULL,
+    congress_member  TEXT,
+    ticker           TEXT,
+    signal_score     TEXT,                  -- adjusted score: HIGH/MEDIUM/LOW/NOISE
+    sentiment_score  REAL,
+    raw_headline     TEXT,
+    metadata         TEXT,                  -- JSON blob
+    source           TEXT,                  -- CONGRESS / RSS
+    created_at       TEXT    NOT NULL
+);
+
+-- ── SECTOR SCREENING ────────────────────────────────────────────────────
+-- Candidates identified by the sector screener for review before trading.
+-- Each run inserts a fresh set of rows. Portal reads the latest run_id.
+-- Status: considering / passed_to_bolt / rejected
+CREATE TABLE IF NOT EXISTS sector_screening (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id              TEXT    NOT NULL,      -- ISO timestamp of screener run
+    sector              TEXT    NOT NULL,      -- e.g. "Energy"
+    etf                 TEXT    NOT NULL,      -- e.g. "XLE"
+    etf_5yr_return      REAL,                  -- decimal e.g. 0.42 = +42%
+    ticker              TEXT    NOT NULL,
+    company             TEXT,
+    etf_weight_pct      REAL,                  -- weight in the ETF
+    news_signal         TEXT,                  -- "bullish" / "bearish" / "neutral" / "pending"
+    news_headline       TEXT,                  -- top headline from Scout
+    news_score          REAL,                  -- numeric score from Scout (0-1)
+    sentiment_signal    TEXT,                  -- "bullish" / "bearish" / "neutral" / "pending"
+    sentiment_score     REAL,                  -- numeric score from Pulse (0-1)
+    congressional_flag  TEXT,                  -- "recent_buy" / "recent_sell" / "none"
+    combined_score      REAL,                  -- weighted composite
+    status              TEXT    NOT NULL DEFAULT 'considering',
+    notes               TEXT,
+    created_at          TEXT    NOT NULL
+);
+
+-- ── SCREENING REQUESTS ───────────────────────────────────────────────────
+-- Inter-agent request queue. Sector screener writes requests here;
+-- Scout and Pulse read pending rows on each run and write results back
+-- to sector_screening. Rows are never deleted — archive is useful.
+-- Status: pending / fulfilled / failed
+CREATE TABLE IF NOT EXISTS screening_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          TEXT    NOT NULL,      -- links back to sector_screening run_id
+    requested_by    TEXT    NOT NULL,      -- e.g. "sector_screener"
+    ticker          TEXT    NOT NULL,
+    request_type    TEXT    NOT NULL,      -- "news" or "sentiment"
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    created_at      TEXT    NOT NULL,
+    fulfilled_at    TEXT
+);
+
+-- ── INDEXES ────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_signals_status        ON signals(status);
+CREATE INDEX IF NOT EXISTS idx_signals_ticker        ON signals(ticker);
+CREATE INDEX IF NOT EXISTS idx_positions_status      ON positions(status);
+CREATE INDEX IF NOT EXISTS idx_scan_log_scanned      ON scan_log(scanned_at);
+CREATE INDEX IF NOT EXISTS idx_system_log_event      ON system_log(event);
+CREATE INDEX IF NOT EXISTS idx_urgent_flags_ack      ON urgent_flags(acknowledged);
+CREATE INDEX IF NOT EXISTS idx_approvals_status      ON pending_approvals(status);
+CREATE INDEX IF NOT EXISTS idx_approvals_queued      ON pending_approvals(queued_at);
+CREATE INDEX IF NOT EXISTS idx_news_feed_created     ON news_feed(created_at);
+CREATE INDEX IF NOT EXISTS idx_news_feed_ticker      ON news_feed(ticker);
+CREATE INDEX IF NOT EXISTS idx_screening_run         ON sector_screening(run_id);
+CREATE INDEX IF NOT EXISTS idx_screening_ticker      ON sector_screening(ticker);
+CREATE INDEX IF NOT EXISTS idx_screen_req_status     ON screening_requests(status);
+CREATE INDEX IF NOT EXISTS idx_screen_req_type       ON screening_requests(request_type);
+"""
+
+
+# ── DB CLASS ──────────────────────────────────────────────────────────────
+class DB:
+    def __init__(self, path=DB_PATH):
+        self.path = path
+        self._persistent_conn = None
+        self._init_schema()
+
+    @contextmanager
+    def conn(self):
+        """
+        Context manager — always commits or rolls back cleanly.
+        Waits for agent lock to clear before proceeding (portal backs off).
+        """
+        if self.path == ':memory:':
+            try:
+                yield self._persistent_conn
+                self._persistent_conn.commit()
+            except Exception as e:
+                self._persistent_conn.rollback()
+                log.error(f"DB error — rolled back: {e}")
+                raise
+            return
+
+        # Wait for agent lock — portal backs off in 5s, agents wait up to 10min
+        _wait_for_agent_lock(caller=os.path.basename(sys.argv[0] if sys.argv else 'unknown'))
+
+        c = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA busy_timeout=30000")
+        c.execute("PRAGMA foreign_keys=ON")
+        try:
+            yield c
+            c.commit()
+        except Exception as e:
+            c.rollback()
+            log.error(f"DB error — rolled back: {e}")
+            raise
+        finally:
+            c.close()
+
+    def _init_schema(self):
+        """Create all tables on first run. Safe to call every startup."""
+        if self.path == ':memory:':
+            self._persistent_conn = sqlite3.connect(':memory:')
+            self._persistent_conn.row_factory = sqlite3.Row
+            self._persistent_conn.execute("PRAGMA foreign_keys=ON")
+            self._persistent_conn.executescript(SCHEMA)
+            self._persistent_conn.commit()
+        else:
+            # Note: no lock check here — _init_schema is called during get_db()
+            # which may be called by the agent that already holds the lock.
+            # Only conn() checks the lock for individual operations.
+            c = sqlite3.connect(self.path, timeout=30)
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA busy_timeout=15000")
+            c.execute("PRAGMA foreign_keys=ON")
+            c.executescript(SCHEMA)
+            c.commit()
+            c.close()
+        log.info(f"Schema verified: {self.path}")
+        self._run_migrations()
+
+    def _run_migrations(self):
+        """
+        Apply any schema changes that can't be handled by CREATE TABLE IF NOT EXISTS.
+        Safe to run every startup — each migration checks before applying.
+        Add new migrations as ALTER TABLE statements at the bottom of MIGRATIONS list.
+        """
+        if self.path == ':memory:':
+            return  # in-memory DB always starts fresh, no migrations needed
+
+        MIGRATIONS = [
+            # v1.1 — add lesson column to outcomes if missing
+            "ALTER TABLE outcomes ADD COLUMN lesson TEXT",
+            # v1.1 — add needs_reeval column to signals if missing
+            "ALTER TABLE signals ADD COLUMN needs_reeval INTEGER NOT NULL DEFAULT 0",
+            # v1.1 — add label column to urgent_flags if missing
+            "ALTER TABLE urgent_flags ADD COLUMN label TEXT",
+            # v1.2 — member weight tracking and interrogation fields on signals
+            "ALTER TABLE signals ADD COLUMN price_history_used TEXT",
+            "ALTER TABLE signals ADD COLUMN interrogation_status TEXT",
+            "ALTER TABLE signals ADD COLUMN entry_signal_score TEXT",
+            # v1.2 — trade-entry context fields on positions
+            "ALTER TABLE positions ADD COLUMN entry_sentiment_score REAL",
+            "ALTER TABLE positions ADD COLUMN entry_signal_score TEXT",
+            "ALTER TABLE positions ADD COLUMN price_history_used TEXT",
+            "ALTER TABLE positions ADD COLUMN interrogation_status TEXT",
+        ]
+
+        c = sqlite3.connect(self.path, timeout=30)
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA busy_timeout=15000")
+        for sql in MIGRATIONS:
+            try:
+                c.execute(sql)
+                c.commit()
+                log.info(f"Migration applied: {sql[:60]}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                    pass  # column already exists — skip silently
+                else:
+                    log.warning(f"Migration skipped ({sql[:40]}): {e}")
+        c.close()
+
+    def now(self):
+        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # ── PORTFOLIO ──────────────────────────────────────────────────────────
+
+    def get_portfolio(self):
+        """Returns current portfolio row or seeds it with starting capital."""
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM portfolio ORDER BY id DESC LIMIT 1").fetchone()
+            if row:
+                return dict(row)
+            # Cold start — seed with starting capital, return directly (no recursion)
+            starting = float(os.environ.get('STARTING_CAPITAL', 100000.0))
+            c.execute("""
+                INSERT INTO portfolio (cash, realized_gains, tax_withdrawn, month_start, updated_at)
+                VALUES (?, 0.0, 0.0, ?, ?)
+            """, (starting, starting, self.now()))
+            log.info(f"Cold start — portfolio seeded at ${starting:.2f}")
+            row_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            return {
+                'id': row_id, 'cash': starting, 'realized_gains': 0.0,
+                'tax_withdrawn': 0.0, 'month_start': starting, 'updated_at': self.now()
+            }
+
+    def update_portfolio(self, cash=None, realized_gains=None, tax_withdrawn=None, month_start=None):
+        """Partial update — only changes fields you pass."""
+        portfolio = self.get_portfolio()
+        with self.conn() as c:
+            c.execute("""
+                UPDATE portfolio SET
+                    cash            = ?,
+                    realized_gains  = ?,
+                    tax_withdrawn   = ?,
+                    month_start     = ?,
+                    updated_at      = ?
+                WHERE id = ?
+            """, (
+                cash            if cash            is not None else portfolio['cash'],
+                realized_gains  if realized_gains  is not None else portfolio['realized_gains'],
+                tax_withdrawn   if tax_withdrawn    is not None else portfolio['tax_withdrawn'],
+                month_start     if month_start      is not None else portfolio['month_start'],
+                self.now(),
+                portfolio['id'],
+            ))
+
+    def sweep_monthly_tax(self, tax_amount):
+        """
+        Sweep 10% of gains at month end.
+        Reduces cash, logs to ledger, resets realized_gains.
+        """
+        portfolio = self.get_portfolio()
+        new_cash = portfolio['cash'] - tax_amount
+        new_withdrawn = portfolio['tax_withdrawn'] + tax_amount
+        self.update_portfolio(
+            cash=new_cash,
+            tax_withdrawn=new_withdrawn,
+            realized_gains=0.0,
+            month_start=new_cash,
+        )
+        self.add_ledger_entry(
+            entry_type="TAX",
+            description=f"10% monthly gain sweep",
+            amount=-tax_amount,
+            balance=new_cash,
+        )
+        log.info(f"Tax sweep: ${tax_amount:.2f} — new cash: ${new_cash:.2f}")
+
+    # ── POSITIONS ──────────────────────────────────────────────────────────
+
+    def get_open_positions(self):
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM positions WHERE status='OPEN' ORDER BY opened_at"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_closed_positions(self, limit=200):
+        """Return closed positions newest-first for performance summary."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def open_position(self, ticker, company, sector, entry_price, shares,
+                      trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
+                      entry_sentiment_score=None, entry_signal_score=None,
+                      interrogation_status=None, price_history_used=None):
+        """
+        Opens a new position. Also deducts cost from portfolio cash
+        and writes a ledger entry.
+        """
+        pos_id   = f"pos_{ticker}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        cost     = round(entry_price * shares, 2)
+        portfolio = self.get_portfolio()
+        new_cash  = round(portfolio['cash'] - cost, 2)
+
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO positions
+                    (id, ticker, company, sector, entry_price, current_price,
+                     shares, trail_stop_amt, trail_stop_pct, vol_bucket,
+                     pnl, status, opened_at, signal_id,
+                     entry_sentiment_score, entry_signal_score,
+                     interrogation_status, price_history_used)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?)
+            """, (pos_id, ticker, company, sector, entry_price, entry_price,
+                  shares, trail_stop_amt, trail_stop_pct, vol_bucket,
+                  self.now(), signal_id,
+                  entry_sentiment_score, entry_signal_score,
+                  interrogation_status, price_history_used))
+
+        self.update_portfolio(cash=new_cash)
+        self.add_ledger_entry(
+            entry_type="ENTRY",
+            description=f"{ticker} · {shares:.4f} sh @ ${entry_price:.2f}",
+            amount=-cost,
+            balance=new_cash,
+            position_id=pos_id,
+        )
+        log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
+        return pos_id
+
+    def close_position(self, pos_id, exit_price, exit_reason):
+        """
+        Closes a position. Adds proceeds to cash, records outcome,
+        writes ledger entry.
+        """
+        with self.conn() as c:
+            pos = c.execute(
+                "SELECT * FROM positions WHERE id=?", (pos_id,)
+            ).fetchone()
+            if not pos:
+                raise ValueError(f"Position {pos_id} not found")
+            pos = dict(pos)
+
+        proceeds   = round(exit_price * float(pos['shares']), 2)
+        cost       = round(float(pos['entry_price']) * float(pos['shares']), 2)
+        pnl_dollar = round(proceeds - cost, 2)
+        pnl_pct    = round((pnl_dollar / cost) * 100, 2)
+        hold_days  = (datetime.now() - datetime.strptime(pos['opened_at'], '%Y-%m-%d %H:%M:%S')).days
+        verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
+        portfolio  = self.get_portfolio()
+        new_cash   = round(portfolio['cash'] + proceeds, 2)
+        new_gains  = round(portfolio['realized_gains'] + pnl_dollar, 2)
+
+        with self.conn() as c:
+            c.execute("""
+                UPDATE positions SET
+                    current_price=?, pnl=?, status='CLOSED',
+                    closed_at=?, exit_reason=?
+                WHERE id=?
+            """, (exit_price, pnl_dollar, self.now(), exit_reason, pos_id))
+
+            c.execute("""
+                INSERT INTO outcomes
+                    (position_id, ticker, entry_price, exit_price, shares,
+                     hold_days, pnl_pct, pnl_dollar, signal_tier, staleness,
+                     vol_bucket, exit_reason, verdict, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (pos_id, pos['ticker'], pos['entry_price'], exit_price,
+                  pos['shares'], hold_days, pnl_pct, pnl_dollar,
+                  None, None, pos['vol_bucket'],
+                  exit_reason, verdict, self.now()))
+
+        self.update_portfolio(cash=new_cash, realized_gains=new_gains)
+        self.add_ledger_entry(
+            entry_type="EXIT",
+            description=f"{pos['ticker']} · {exit_reason} · {'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
+            amount=proceeds,
+            balance=new_cash,
+            position_id=pos_id,
+        )
+        log.info(f"Closed position: {pos['ticker']} {verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f})")
+        return pnl_dollar
+
+    def update_position_price(self, pos_id, current_price):
+        """Update mark-to-market price and recalculate unrealized P&L."""
+        with self.conn() as c:
+            pos = c.execute(
+                "SELECT entry_price, shares FROM positions WHERE id=?", (pos_id,)
+            ).fetchone()
+            if not pos:
+                return
+            pnl = round((current_price - pos['entry_price']) * pos['shares'], 2)
+            c.execute(
+                "UPDATE positions SET current_price=?, pnl=? WHERE id=?",
+                (current_price, pnl, pos_id)
+            )
+
+    def flag_orphan(self, pos_id):
+        """Mark a position as needing human reconciliation."""
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET status='RECONCILE_NEEDED' WHERE id=?",
+                (pos_id,)
+            )
+        log.warning(f"Position {pos_id} flagged as RECONCILE_NEEDED — human review required")
+
+    # ── SIGNALS ────────────────────────────────────────────────────────────
+
+    def upsert_signal(self, ticker, source, source_tier, headline,
+                      politician=None, tx_date=None, disc_date=None,
+                      amount_range=None, confidence="MEDIUM",
+                      staleness="Fresh", corroborated=False,
+                      corroboration_note=None, sector=None, company=None,
+                      is_amended=False, is_spousal=False):
+        """
+        Insert a new signal or update if same ticker+tx_date already exists.
+        Returns signal id.
+        """
+        # Deduplication check — same ticker + tx_date = same disclosure
+        with self.conn() as c:
+            existing = c.execute("""
+                SELECT id, status FROM signals
+                WHERE ticker=? AND tx_date=? AND status NOT IN ('DISCARDED','EXPIRED')
+                LIMIT 1
+            """, (ticker, tx_date or '')).fetchone()
+
+            if existing:
+                log.info(f"Signal dedup: {ticker} {tx_date} already exists (id={existing['id']}, status={existing['status']})")
+                return existing['id']
+
+            # Calculate expiry based on tier
+            expiry_days = {1:30, 2:7, 3:2, 4:1}.get(source_tier, 7)
+            expires_at  = (datetime.now() + timedelta(days=expiry_days)).strftime('%Y-%m-%d %H:%M:%S')
+            discard_del = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Tier 4 always discarded immediately
+            status = "DISCARDED" if source_tier == 4 else "PENDING"
+
+            c.execute("""
+                INSERT INTO signals
+                    (ticker, company, sector, source, source_tier, headline,
+                     politician, tx_date, disc_date, amount_range, confidence,
+                     staleness, corroborated, corroboration_note,
+                     is_amended, is_spousal, status, expires_at,
+                     discard_delete_at, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (ticker, company, sector, source, source_tier, headline,
+                  politician, tx_date, disc_date, amount_range, confidence,
+                  staleness, int(corroborated), corroboration_note,
+                  int(is_amended), int(is_spousal), status, expires_at,
+                  discard_del, self.now(), self.now()))
+
+            sig_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            log.info(f"New signal: {ticker} T{source_tier} {confidence} — id={sig_id}")
+            return sig_id
+
+    def queue_signal_for_trader(self, signal_id):
+        """Mark signal as QUEUED and create handshake record."""
+        with self.conn() as c:
+            sig = c.execute(
+                "SELECT ticker, status FROM signals WHERE id=?", (signal_id,)
+            ).fetchone()
+            if not sig:
+                raise ValueError(f"Signal {signal_id} not found")
+            if sig['status'] == 'QUEUED':
+                log.info(f"Signal {signal_id} already queued")
+                return
+
+            c.execute("""
+                UPDATE signals SET status='QUEUED', updated_at=? WHERE id=?
+            """, (self.now(), signal_id))
+
+            c.execute("""
+                INSERT INTO handshakes (signal_id, ticker, from_agent, to_agent, queued_at)
+                VALUES (?,?,'The Daily','The Trader',?)
+            """, (signal_id, sig['ticker'], self.now()))
+
+        log.info(f"Signal {signal_id} ({sig['ticker']}) queued for trader")
+
+    def annotate_signal_pulse(self, signal_id, tier, summary):
+        """
+        The Pulse writes its pre-trade sentiment finding to the signal record.
+        Appends to corroboration_note so The Daily's existing note is preserved.
+        The Trader reads this note in analyze_signal_with_claude().
+        """
+        note = f"[PULSE Tier {tier}] {summary}"
+        with self.conn() as c:
+            c.execute("""
+                UPDATE signals SET
+                    corroboration_note = CASE
+                        WHEN corroboration_note IS NULL OR corroboration_note = ''
+                        THEN ?
+                        ELSE corroboration_note || ' | ' || ?
+                    END,
+                    updated_at = ?
+                WHERE id = ?
+            """, (note, note, self.now(), signal_id))
+        log.info(f"Signal {signal_id} annotated by Pulse: Tier {tier} — {summary[:60]}")
+
+    # ── MEMBER WEIGHTS ─────────────────────────────────────────────────────
+
+    def get_member_weight(self, congress_member):
+        """
+        Return weight record for a congress member.
+        Returns dict with weight, win_count, loss_count.
+        Default weight is 1.0 for unknown members.
+        """
+        if not congress_member:
+            return {'weight': 1.0, 'win_count': 0, 'loss_count': 0}
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT weight, win_count, loss_count FROM member_weights WHERE congress_member=?",
+                (congress_member,)
+            ).fetchone()
+        return dict(row) if row else {'weight': 1.0, 'win_count': 0, 'loss_count': 0}
+
+    def update_member_weight_after_trade(self, congress_member, pnl_dollar):
+        """
+        Update win/loss counts and recompute weight after a trade closes.
+        Weight formula: clamp(win_count / total * 2, 0.5, 1.5)
+        Requires >= 5 trades before adjusting from 1.0.
+        Called by Bolt after every close_position().
+        """
+        if not congress_member:
+            return
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT win_count, loss_count FROM member_weights WHERE congress_member=?",
+                (congress_member,)
+            ).fetchone()
+            if row:
+                wins   = row['win_count']   + (1 if pnl_dollar > 0 else 0)
+                losses = row['loss_count']  + (1 if pnl_dollar < 0 else 0)
+            else:
+                wins   = 1 if pnl_dollar > 0 else 0
+                losses = 1 if pnl_dollar < 0 else 0
+
+            total  = wins + losses
+            weight = 1.0 if total < 5 else max(0.5, min(1.5, (wins / total) * 2))
+
+            c.execute("""
+                INSERT INTO member_weights
+                    (congress_member, win_count, loss_count, weight, last_updated)
+                VALUES (?,?,?,?,?)
+                ON CONFLICT(congress_member) DO UPDATE SET
+                    win_count    = excluded.win_count,
+                    loss_count   = excluded.loss_count,
+                    weight       = excluded.weight,
+                    last_updated = excluded.last_updated
+            """, (congress_member, wins, losses, round(weight, 4), self.now()))
+        log.info(f"Member weight: {congress_member} {wins}W/{losses}L → {weight:.3f}")
+
+    # ── NEWS FEED ──────────────────────────────────────────────────────────
+
+    def write_news_feed_entry(self, congress_member, ticker, signal_score,
+                               sentiment_score, raw_headline, metadata, source):
+        """
+        Write a signal to the news_feed table for portal display.
+        Called by Scout for every signal processed — QUEUE, WATCH, and DISCARD alike.
+        """
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO news_feed
+                    (timestamp, congress_member, ticker, signal_score, sentiment_score,
+                     raw_headline, metadata, source, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (
+                self.now(), congress_member, ticker, signal_score, sentiment_score,
+                raw_headline,
+                json.dumps(metadata) if metadata else None,
+                source, self.now()
+            ))
+
+    def get_news_feed(self, limit=50):
+        """Return recent news feed entries for portal display, newest first."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM news_feed ORDER BY created_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_news_headlines(self, category=None, limit=100, min_floor=30):
+        """Return display-only news headlines (source='NEWS') for the News panel.
+
+        Same 30-article minimum floor as Intel page. Optionally filters by
+        category ('Breaking', 'Markets', 'US', 'Global').
+        """
+        with self.conn() as c:
+            if category and category != 'all':
+                rows = c.execute("""
+                    SELECT raw_headline, metadata, created_at FROM news_feed
+                    WHERE source='NEWS'
+                      AND json_extract(metadata,'$.category')=?
+                    ORDER BY created_at DESC LIMIT ?
+                """, (category, max(limit, min_floor))).fetchall()
+            else:
+                rows = c.execute("""
+                    SELECT raw_headline, metadata, created_at FROM news_feed
+                    WHERE source='NEWS'
+                    ORDER BY created_at DESC LIMIT ?
+                """, (max(limit, min_floor),)).fetchall()
+
+            result = []
+            seen: set = set()
+            for r in rows:
+                meta = {}
+                try:
+                    meta = json.loads(r['metadata'] or '{}')
+                except Exception:
+                    pass
+                headline = r['raw_headline'] or ''
+                key = headline.lower()[:60]
+                if key in seen:
+                    continue
+                seen.add(key)
+                result.append({
+                    'headline':  headline,
+                    'source':    meta.get('source', 'Unknown'),
+                    'category':  meta.get('category', 'Breaking'),
+                    'link':      meta.get('link', ''),
+                    'pub_date':  meta.get('pub_date', ''),
+                    'staleness': meta.get('staleness', 'fresh'),
+                    'created_at': r['created_at'] or '',
+                    'summary':   meta.get('summary', ''),
+                    'image':     meta.get('image', None),
+                    'symbols':   meta.get('symbols', []),
+                    'provider':  meta.get('provider', 'rss'),
+                })
+            return result
+
+    def acknowledge_signal(self, signal_id):
+        """Trader acknowledges it has acted on a signal."""
+        with self.conn() as c:
+            c.execute("""
+                UPDATE signals SET status='ACTED_ON', updated_at=? WHERE id=?
+            """, (self.now(), signal_id))
+            c.execute("""
+                UPDATE handshakes SET ack=1, acknowledged_at=?
+                WHERE signal_id=? AND ack=0
+            """, (self.now(), signal_id))
+        log.info(f"Signal {signal_id} acknowledged by trader")
+
+    def get_queued_signals(self):
+        """All signals ready for the trader to act on."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM signals
+                WHERE status='QUEUED'
+                ORDER BY source_tier ASC, created_at ASC
+            """).fetchall()
+            return [dict(r) for r in rows]
+
+    def expire_old_signals(self):
+        """Move signals past their expiry to EXPIRED status."""
+        with self.conn() as c:
+            result = c.execute("""
+                UPDATE signals SET status='EXPIRED', updated_at=?
+                WHERE status IN ('PENDING','WATCHING')
+                AND expires_at < ?
+                AND expires_at IS NOT NULL
+            """, (self.now(), self.now()))
+            if result.rowcount:
+                log.info(f"Expired {result.rowcount} signal(s)")
+
+
+    def cross_validate_signals(self, hours_back=96):
+        """
+        Scan QUEUED signals for cross-validation patterns:
+        1. Same ticker from 2+ signals → corroborated, promote if different sources
+        2. Sector cluster: 3+ different tickers in same sector, MEDIUM+ conf, 2+ sources
+
+        Staleness decay (relative to newest signal in group):
+          0-8h: 1.0x | 8-24h: 0.8x | 24-48h: 0.6x | 48-96h: 0.4x
+
+        Returns: {tickers_corroborated: [str], sector_clusters: [str]}
+        """
+        from collections import defaultdict
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).strftime('%Y-%m-%d %H:%M:%S')
+        now_str = self.now()
+
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT id, ticker, sector, source, confidence,
+                       corroboration_note, interrogation_status, created_at
+                FROM signals
+                WHERE status = 'QUEUED' AND created_at > ?
+                ORDER BY created_at DESC
+            """, (cutoff,)).fetchall()
+
+        signals = [dict(r) for r in rows]
+        if not signals:
+            return {"tickers_corroborated": [], "sector_clusters": []}
+
+        # ── Helper: staleness decay weight ──
+        def _decay_weight(created_at_str, newest_str):
+            try:
+                # Parse naive timestamps
+                created = datetime.strptime(created_at_str[:19], '%Y-%m-%d %H:%M:%S')
+                newest  = datetime.strptime(newest_str[:19], '%Y-%m-%d %H:%M:%S')
+                age_hours = (newest - created).total_seconds() / 3600
+            except (ValueError, TypeError):
+                return 0.4
+            if age_hours <= 8:   return 1.0
+            if age_hours <= 24:  return 0.8
+            if age_hours <= 48:  return 0.6
+            return 0.4
+
+        # ── Group by ticker ──
+        by_ticker = defaultdict(list)
+        for s in signals:
+            by_ticker[s['ticker']].append(s)
+
+        tickers_corroborated = []
+        ids_to_update = {}  # id → {corroborated, interrogation_status, note_append}
+
+        for ticker, group in by_ticker.items():
+            if len(group) < 2:
+                continue
+
+            # Extract sub-source from 'Alpaca News (benzinga)' format
+            import re as _re
+            def _subsource(s):
+                src = s.get('source') or ''
+                m = _re.search(r'\(([^)]+)\)', src)
+                return m.group(1) if m else src
+            sources = set(_subsource(s) for s in group if s.get('source'))
+            newest_ts = group[0]['created_at']  # already ordered DESC
+            multi_source = len(sources) >= 2
+
+            for s in group:
+                decay = _decay_weight(s['created_at'], newest_ts)
+                source_list = ', '.join(sorted(sources))
+                note = f"[CROSS-VALIDATED: {len(group)} signals ({decay:.1f}x), sources: {source_list}]"
+
+                # Don't re-annotate if already cross-validated this run
+                existing_note = s.get('corroboration_note') or ''
+                if '[CROSS-VALIDATED' in existing_note:
+                    continue
+
+                update = {'corroborated': 1, 'note_append': note}
+
+                # Promote interrogation_status only if different sources and
+                # current status is below CORROBORATED
+                current_status = s.get('interrogation_status') or 'UNVALIDATED'
+                if multi_source and current_status in ('UNVALIDATED', ''):
+                    update['interrogation_status'] = 'CORROBORATED'
+
+                ids_to_update[s['id']] = update
+
+            tickers_corroborated.append(ticker)
+
+        # ── Sector clusters ──
+        by_sector = defaultdict(list)
+        for s in signals:
+            sector = s.get('sector') or ''
+            if sector:
+                by_sector[sector].append(s)
+
+        sector_clusters = []
+
+        for sector, group in by_sector.items():
+            # Unique tickers in this sector
+            tickers_in_sector = set(s['ticker'] for s in group)
+            if len(tickers_in_sector) < 3:
+                continue
+
+            # Quality gate: all must be MEDIUM+
+            quality_signals = [s for s in group
+                               if (s.get('confidence') or '').upper() in ('MEDIUM', 'HIGH')]
+            quality_tickers = set(s['ticker'] for s in quality_signals)
+            if len(quality_tickers) < 3:
+                continue
+
+            # Source diversity gate: at least 2 different sources
+            quality_sources = set(_subsource(s) for s in quality_signals if s.get('source'))
+            # Require 2+ sub-sources, OR 4+ tickers if single sub-source
+            if len(quality_sources) < 2 and len(quality_tickers) < 4:
+                continue
+
+            sector_clusters.append(sector)
+            newest_ts = group[0]['created_at']
+
+            for s in quality_signals:
+                existing_note = s.get('corroboration_note') or ''
+                if '[SECTOR_CLUSTER' in existing_note:
+                    continue
+
+                sid = s['id']
+                note = f"[SECTOR_CLUSTER: {len(quality_tickers)} tickers in {sector}]"
+
+                if sid in ids_to_update:
+                    ids_to_update[sid]['note_append'] += ' | ' + note
+                else:
+                    update = {'corroborated': 1, 'note_append': note}
+                    current_status = s.get('interrogation_status') or 'UNVALIDATED'
+                    if current_status in ('UNVALIDATED', ''):
+                        update['interrogation_status'] = 'CORROBORATED'
+                    ids_to_update[sid] = update
+
+        # ── Apply updates ──
+        if ids_to_update:
+            with self.conn() as c:
+                for sid, upd in ids_to_update.items():
+                    note = upd['note_append']
+                    new_status = upd.get('interrogation_status')
+
+                    if new_status:
+                        c.execute("""
+                            UPDATE signals SET
+                                corroborated = 1,
+                                interrogation_status = ?,
+                                corroboration_note = CASE
+                                    WHEN corroboration_note IS NULL OR corroboration_note = ''
+                                    THEN ?
+                                    ELSE corroboration_note || ' | ' || ?
+                                END,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (new_status, note, note, now_str, sid))
+                    else:
+                        c.execute("""
+                            UPDATE signals SET
+                                corroborated = 1,
+                                corroboration_note = CASE
+                                    WHEN corroboration_note IS NULL OR corroboration_note = ''
+                                    THEN ?
+                                    ELSE corroboration_note || ' | ' || ?
+                                END,
+                                updated_at = ?
+                            WHERE id = ?
+                        """, (note, note, now_str, sid))
+
+            log.info(f"[CROSS-VAL] Updated {len(ids_to_update)} signals — "
+                     f"tickers: {tickers_corroborated}, sectors: {sector_clusters}")
+
+        return {"tickers_corroborated": tickers_corroborated,
+                "sector_clusters": sector_clusters}
+
+    def discard_signal(self, signal_id, reason=None):
+        with self.conn() as c:
+            c.execute("""
+                UPDATE signals SET status='DISCARDED', updated_at=?,
+                corroboration_note=COALESCE(?, corroboration_note)
+                WHERE id=?
+            """, (self.now(), reason, signal_id))
+
+    def get_signal_by_id(self, signal_id):
+        """Return a single signal row as dict, or None if not found."""
+        if not signal_id:
+            return None
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT * FROM signals WHERE id=?", (signal_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    # ── LEDGER ─────────────────────────────────────────────────────────────
+
+    def add_ledger_entry(self, entry_type, description, amount, balance, position_id=None):
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO ledger
+                    (date, type, description, amount, balance, position_id, created_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, (datetime.now().strftime('%Y-%m-%d'), entry_type,
+                  description, amount, balance, position_id, self.now()))
+
+    def get_ledger(self, limit=100):
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM ledger ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_portfolio_history(self, days=30):
+        """
+        Return portfolio value over time for the graph.
+        Uses system_log heartbeat entries that record portfolio_value.
+        Falls back to ledger balance snapshots.
+        """
+        with self.conn() as c:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            rows = c.execute("""
+                SELECT DATE(timestamp) as date,
+                       MAX(portfolio_value) as value
+                FROM system_log
+                WHERE portfolio_value IS NOT NULL
+                  AND portfolio_value > 0
+                  AND DATE(timestamp) >= ?
+                GROUP BY DATE(timestamp)
+                ORDER BY date ASC
+            """, (cutoff,)).fetchall()
+            if rows:
+                return [{'date': r['date'], 'value': round(r['value'], 2)} for r in rows]
+            # Fallback: ledger balance snapshots
+            rows = c.execute("""
+                SELECT date, balance as value
+                FROM ledger
+                WHERE date >= ?
+                ORDER BY date ASC
+            """, (cutoff,)).fetchall()
+            return [{'date': r['date'], 'value': round(r['value'], 2)} for r in rows]
+
+    def get_watching_signals(self, limit=100, min_floor=30):
+        """Return signals for the Intelligence page from news_feed.
+
+        Always returns at least min_floor articles — fresh signals first,
+        stale articles padded in to fill the floor. Field names are mapped
+        to what the portal's renderIntelGrid expects.
+        """
+        with self.conn() as c:
+            def _fetch(routing_filter, n):
+                if routing_filter == "fresh":
+                    rows = c.execute("""
+                        SELECT ticker, congress_member, signal_score,
+                               sentiment_score, raw_headline, metadata,
+                               source, timestamp, created_at
+                        FROM news_feed
+                        WHERE COALESCE(json_extract(metadata,'$.routing'),'?') != 'STALE'
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (n,)).fetchall()
+                else:
+                    rows = c.execute("""
+                        SELECT ticker, congress_member, signal_score,
+                               sentiment_score, raw_headline, metadata,
+                               source, timestamp, created_at
+                        FROM news_feed
+                        WHERE json_extract(metadata,'$.routing') = 'STALE'
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (n,)).fetchall()
+                return [dict(r) for r in rows]
+
+            fresh = _fetch("fresh", limit)
+            result = list(fresh)
+            if len(result) < min_floor:
+                result.extend(_fetch("stale", min_floor - len(result)))
+
+            # Map field names and flatten metadata for portal consumption
+            out = []
+            for r in result:
+                meta = {}
+                try:
+                    meta = json.loads(r.get('metadata') or '{}')
+                except Exception:
+                    pass
+                out.append({
+                    "ticker":       r.get("ticker") or "?",
+                    "politician":   r.get("congress_member") or "",
+                    "confidence":   r.get("signal_score") or "NOISE",
+                    "headline":     r.get("raw_headline") or "",
+                    "disc_date":    (r.get("timestamp") or r.get("created_at") or "")[:10],
+                    "created_at":   r.get("created_at") or "",
+                    "staleness":    meta.get("staleness") or "unknown",
+                    "sector":       meta.get("sec_etf") or meta.get("source") or "",
+                    "amount_range": meta.get("source") or "",
+                    "corroborated": meta.get("routing") in ("QUEUE", "WATCH"),
+                    "is_spousal":   bool(meta.get("is_spousal")),
+                    "source":       r.get("source") or "",
+                    "is_stale":     meta.get("routing") == "STALE",
+                })
+            return out
+
+    # ── SCAN LOG ───────────────────────────────────────────────────────────
+
+    def log_scan(self, ticker, put_call_ratio, put_call_avg30d, insider_net,
+                 volume_vs_avg, seller_dominance, cascade_detected, tier, event_summary):
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO scan_log
+                    (ticker, put_call_ratio, put_call_avg30d, insider_net,
+                     volume_vs_avg, seller_dominance, cascade_detected,
+                     tier, event_summary, scanned_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (ticker, put_call_ratio, put_call_avg30d, insider_net,
+                  volume_vs_avg, seller_dominance, int(cascade_detected),
+                  tier, event_summary, self.now()))
+
+        if cascade_detected:
+            self.raise_urgent_flag(ticker, tier)
+
+    def raise_urgent_flag(self, ticker, tier=1):
+        """Raises an urgent flag — bypasses normal session schedule."""
+        with self.conn() as c:
+            existing = c.execute("""
+                SELECT id FROM urgent_flags
+                WHERE ticker=? AND acknowledged=0
+            """, (ticker,)).fetchone()
+            if existing:
+                log.info(f"Urgent flag already active for {ticker}")
+                return
+            c.execute("""
+                INSERT INTO urgent_flags (ticker, detected_at, tier, acknowledged)
+                VALUES (?,?,?,0)
+            """, (ticker, self.now(), tier))
+        log.warning(f"URGENT FLAG raised: {ticker} Tier {tier}")
+
+    def get_urgent_flags(self):
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM urgent_flags WHERE acknowledged=0 ORDER BY detected_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def acknowledge_urgent_flag(self, flag_id):
+        with self.conn() as c:
+            c.execute("""
+                UPDATE urgent_flags SET acknowledged=1, acknowledged_at=? WHERE id=?
+            """, (self.now(), flag_id))
+
+    # ── SECTOR SCREENING ──────────────────────────────────────────────────
+
+    def write_screening_run(self, run_id, sector, etf, etf_5yr_return, candidates):
+        """
+        Write a full set of screening candidates for one screener run.
+        candidates: list of dicts with keys:
+            ticker, company, etf_weight_pct
+        All signal fields start as 'pending'; Scout and Pulse fill them in.
+        """
+        now = self.now()
+        with self.conn() as c:
+            for cd in candidates:
+                c.execute("""
+                    INSERT INTO sector_screening
+                        (run_id, sector, etf, etf_5yr_return, ticker, company,
+                         etf_weight_pct, news_signal, sentiment_signal,
+                         congressional_flag, status, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    run_id, sector, etf, etf_5yr_return,
+                    cd['ticker'], cd.get('company', ''),
+                    cd.get('etf_weight_pct', 0.0),
+                    'pending', 'pending', 'none',
+                    'considering', now,
+                ))
+            # Issue screening requests for Scout and Pulse
+            for cd in candidates:
+                for req_type in ('news', 'sentiment'):
+                    c.execute("""
+                        INSERT INTO screening_requests
+                            (run_id, requested_by, ticker, request_type, status, created_at)
+                        VALUES (?,?,?,?,?,?)
+                    """, (run_id, 'sector_screener', cd['ticker'], req_type, 'pending', now))
+
+    def get_pending_screening_requests(self, request_type):
+        """Return pending requests of a given type (news or sentiment)."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM screening_requests
+                WHERE request_type=? AND status='pending'
+                ORDER BY created_at ASC
+            """, (request_type,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def fulfill_screening_request(self, run_id, ticker, request_type,
+                                  signal, score, headline=None, notes=None):
+        """
+        Called by Scout (request_type='news') or Pulse (request_type='sentiment')
+        to write results back into sector_screening and mark the request fulfilled.
+        """
+        now = self.now()
+        with self.conn() as c:
+            if request_type == 'news':
+                c.execute("""
+                    UPDATE sector_screening
+                    SET news_signal=?, news_score=?, news_headline=?
+                    WHERE run_id=? AND ticker=?
+                """, (signal, score, headline, run_id, ticker))
+            elif request_type == 'sentiment':
+                c.execute("""
+                    UPDATE sector_screening
+                    SET sentiment_signal=?, sentiment_score=?, notes=?
+                    WHERE run_id=? AND ticker=?
+                """, (signal, score, notes, run_id, ticker))
+            # Recompute combined_score and update status
+            row = c.execute("""
+                SELECT news_score, sentiment_score, etf_weight_pct
+                FROM sector_screening WHERE run_id=? AND ticker=?
+            """, (run_id, ticker)).fetchone()
+            if row:
+                ns = row['news_score'] or 0.0
+                ss = row['sentiment_score'] or 0.0
+                wt = min((row['etf_weight_pct'] or 0.0) / 25.0, 1.0)  # normalise weight
+                combined = round(ns * 0.40 + ss * 0.40 + wt * 0.20, 4)
+                c.execute("""
+                    UPDATE sector_screening SET combined_score=?
+                    WHERE run_id=? AND ticker=?
+                """, (combined, run_id, ticker))
+            # Mark request fulfilled
+            c.execute("""
+                UPDATE screening_requests
+                SET status='fulfilled', fulfilled_at=?
+                WHERE run_id=? AND ticker=? AND request_type=?
+            """, (now, run_id, ticker, request_type))
+
+    def flag_congressional_screening(self, ticker, flag):
+        """
+        Called by Bolt when it spots a congressional signal for a ticker
+        that is currently under sector screening consideration.
+        flag: 'recent_buy' | 'recent_sell' | 'none'
+        """
+        with self.conn() as c:
+            # Only update the most recent run's row for this ticker
+            c.execute("""
+                UPDATE sector_screening SET congressional_flag=?
+                WHERE ticker=? AND id=(
+                    SELECT id FROM sector_screening WHERE ticker=?
+                    ORDER BY created_at DESC LIMIT 1
+                )
+            """, (flag, ticker, ticker))
+
+    def get_latest_screening_run(self, sector=None):
+        """Return all candidates from the most recent screener run."""
+        with self.conn() as c:
+            if sector:
+                row = c.execute("""
+                    SELECT run_id FROM sector_screening
+                    WHERE sector=? ORDER BY created_at DESC LIMIT 1
+                """, (sector,)).fetchone()
+            else:
+                row = c.execute("""
+                    SELECT run_id FROM sector_screening
+                    ORDER BY created_at DESC LIMIT 1
+                """).fetchone()
+            if not row:
+                return []
+            run_id = row['run_id']
+            rows = c.execute("""
+                SELECT * FROM sector_screening WHERE run_id=?
+                ORDER BY combined_score DESC, etf_weight_pct DESC
+            """, (run_id,)).fetchall()
+            return [dict(r) for r in rows]
+
+    # ── SYSTEM LOG & HEARTBEAT ─────────────────────────────────────────────
+
+    def log_heartbeat(self, agent_name, status="OK", portfolio_value=None):
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO system_log (timestamp, event, agent, details, portfolio_value)
+                VALUES (?,?,?,?,?)
+            """, (self.now(), 'HEARTBEAT', agent_name, status, portfolio_value))
+
+    def log_event(self, event, agent=None, details=None, portfolio_value=None):
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO system_log (timestamp, event, agent, details, portfolio_value)
+                VALUES (?,?,?,?,?)
+            """, (self.now(), event, agent, details, portfolio_value))
+        log.info(f"System event: {event} — {details or ''}")
+
+    def get_last_heartbeat(self, agent_name=None):
+        with self.conn() as c:
+            if agent_name:
+                row = c.execute("""
+                    SELECT * FROM system_log
+                    WHERE event='HEARTBEAT' AND agent=?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (agent_name,)).fetchone()
+            else:
+                row = c.execute("""
+                    SELECT * FROM system_log
+                    WHERE event='HEARTBEAT'
+                    ORDER BY timestamp DESC LIMIT 1
+                """).fetchone()
+            return dict(row) if row else None
+
+    # ── OUTCOMES / LEARNING ────────────────────────────────────────────────
+
+    def get_recent_outcomes(self, limit=10):
+        """Returns closed trade outcomes for learning context."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM outcomes ORDER BY created_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_outcome_lesson(self, outcome_id, lesson):
+        """Store Claude-generated lesson for a closed trade."""
+        with self.conn() as c:
+            c.execute(
+                "UPDATE outcomes SET lesson=? WHERE id=?", (lesson, outcome_id)
+            )
+
+    # ── INTEGRITY & RECONCILIATION ─────────────────────────────────────────
+
+    def integrity_check(self):
+        """Run SQLite PRAGMA integrity_check. Returns True if clean."""
+        with self.conn() as c:
+            result = c.execute("PRAGMA integrity_check").fetchone()
+            ok = result[0] == 'ok'
+            if not ok:
+                log.error(f"Integrity check FAILED: {result[0]}")
+            return ok
+
+    def get_open_tickers(self):
+        """Returns set of tickers with open positions — for Alpaca reconciliation."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT ticker FROM positions WHERE status='OPEN'"
+            ).fetchall()
+            return {r['ticker'] for r in rows}
+
+    # ── PENDING APPROVALS ──────────────────────────────────────────────────
+
+    def queue_approval(self, signal_id, ticker, company='', sector='',
+                       politician='', confidence='', staleness='',
+                       headline='', price=None, shares=None, max_trade=None,
+                       trail_amt=None, trail_pct=None, vol_label='',
+                       reasoning='', session=''):
+        """
+        Insert or replace a pending approval entry.
+        Deduplicates by signal_id — re-queuing the same signal id
+        replaces the existing row only if it is still PENDING_APPROVAL.
+        """
+        now = self.now()
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO pending_approvals (
+                    id, ticker, company, sector, politician,
+                    confidence, staleness, headline,
+                    price, shares, max_trade, trail_amt, trail_pct,
+                    vol_label, reasoning, session,
+                    status, queued_at
+                ) VALUES (
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                )
+                ON CONFLICT(id) DO UPDATE SET
+                    ticker        = excluded.ticker,
+                    company       = excluded.company,
+                    sector        = excluded.sector,
+                    politician    = excluded.politician,
+                    confidence    = excluded.confidence,
+                    staleness     = excluded.staleness,
+                    headline      = excluded.headline,
+                    price         = excluded.price,
+                    shares        = excluded.shares,
+                    max_trade     = excluded.max_trade,
+                    trail_amt     = excluded.trail_amt,
+                    trail_pct     = excluded.trail_pct,
+                    vol_label     = excluded.vol_label,
+                    reasoning     = excluded.reasoning,
+                    session       = excluded.session,
+                    status        = 'PENDING_APPROVAL',
+                    queued_at     = excluded.queued_at,
+                    decided_at    = NULL,
+                    decided_by    = NULL,
+                    executed_at   = NULL,
+                    decision_note = NULL
+                WHERE pending_approvals.status = 'PENDING_APPROVAL'
+            """, (
+                str(signal_id), ticker, company, sector, politician,
+                confidence, staleness, headline,
+                price, shares, max_trade, trail_amt, trail_pct,
+                vol_label, reasoning, session,
+                'PENDING_APPROVAL', now
+            ))
+        log.info(f"[DB] Approval queued: {ticker} id={signal_id}")
+
+    def get_pending_approvals(self, status_filter=None):
+        """
+        Return approval rows as dicts.
+        status_filter: list of statuses, e.g. ['PENDING_APPROVAL']
+                       None returns all rows.
+        """
+        with self.conn() as c:
+            if status_filter:
+                placeholders = ','.join('?' * len(status_filter))
+                rows = c.execute(
+                    f"SELECT * FROM pending_approvals "
+                    f"WHERE status IN ({placeholders}) ORDER BY queued_at ASC",
+                    status_filter
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT * FROM pending_approvals ORDER BY queued_at ASC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_approval_status(self, signal_id, status, decided_by='portal',
+                                decision_note=None):
+        """
+        Update approval status. Accepts APPROVED, REJECTED, or PENDING_APPROVAL.
+        Cannot modify already-EXECUTED rows.
+        Returns True if a row was updated, False if not found or wrong state.
+        """
+        if status not in ('APPROVED', 'REJECTED', 'PENDING_APPROVAL'):
+            raise ValueError(f"Invalid status for decision: {status}")
+        now = self.now()
+        with self.conn() as c:
+            # Clear decision fields when revoking back to PENDING_APPROVAL
+            if status == 'PENDING_APPROVAL':
+                result = c.execute("""
+                    UPDATE pending_approvals
+                    SET status        = 'PENDING_APPROVAL',
+                        decided_at    = NULL,
+                        decided_by    = NULL,
+                        decision_note = NULL
+                    WHERE id = ? AND status IN ('APPROVED', 'REJECTED')
+                """, (str(signal_id),))
+            else:
+                result = c.execute("""
+                    UPDATE pending_approvals
+                    SET status        = ?,
+                        decided_at    = ?,
+                        decided_by    = ?,
+                        decision_note = ?
+                    WHERE id = ? AND status IN ('PENDING_APPROVAL', 'REJECTED', 'APPROVED')
+                    AND status != 'EXECUTED'
+                """, (status, now, decided_by, decision_note, str(signal_id)))
+            updated = result.rowcount > 0
+        if updated:
+            log.info(f"[DB] Approval {status}: id={signal_id} by={decided_by}")
+        else:
+            log.warning(
+                f"[DB] update_approval_status: no PENDING_APPROVAL row for id={signal_id}"
+            )
+        return updated
+
+    def mark_approval_executed(self, signal_id):
+        """
+        Transition an APPROVED entry to EXECUTED.
+        Preserves the row for audit — does not delete.
+        Returns True if updated.
+        """
+        now = self.now()
+        with self.conn() as c:
+            result = c.execute("""
+                UPDATE pending_approvals
+                SET status      = 'EXECUTED',
+                    executed_at = ?
+                WHERE id = ? AND status = 'APPROVED'
+            """, (now, str(signal_id)))
+            updated = result.rowcount > 0
+        if updated:
+            log.info(f"[DB] Approval EXECUTED: id={signal_id}")
+        else:
+            log.warning(
+                f"[DB] mark_approval_executed: no APPROVED row for id={signal_id}"
+            )
+        return updated
+
+    def expire_stale_approvals(self, max_age_hours=48):
+        """
+        Mark PENDING_APPROVAL entries older than max_age_hours as EXPIRED.
+        Called at agent startup to clean the actionable queue.
+        Returns count of rows expired.
+        """
+        cutoff = (
+            datetime.now() - timedelta(hours=max_age_hours)
+        ).strftime('%Y-%m-%d %H:%M:%S')
+        with self.conn() as c:
+            result = c.execute("""
+                UPDATE pending_approvals
+                SET status = 'EXPIRED'
+                WHERE status = 'PENDING_APPROVAL'
+                  AND queued_at < ?
+            """, (cutoff,))
+            count = result.rowcount
+        if count:
+            log.info(
+                f"[DB] Expired {count} stale pending approvals (>{max_age_hours}h old)"
+            )
+        return count
+
+    # ── CLEANUP ────────────────────────────────────────────────────────────
+
+    def cleanup(self):
+        """
+        Nightly maintenance:
+        - Expire stale signals
+        - Delete discarded signals older than 180 days
+        - Delete scan_log entries older than 180 days
+        - Keep heartbeat/system_log for 180 days (6 months)
+        - Vacuum the database
+        """
+        self.expire_old_signals()
+        cutoff_180 = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d %H:%M:%S')
+        cutoff_30  = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+
+        with self.conn() as c:
+            r1 = c.execute(
+                "DELETE FROM signals WHERE status='DISCARDED' AND discard_delete_at < ?",
+                (cutoff_180,)
+            )
+            r2 = c.execute(
+                "DELETE FROM scan_log WHERE scanned_at < ?", (cutoff_30,)
+            )
+            r3 = c.execute(
+                # Keep heartbeats 180 days for portfolio history graph
+                "DELETE FROM system_log WHERE event='HEARTBEAT' AND timestamp < ?",
+                (cutoff_180,)
+            )
+            r4 = c.execute(
+                # Keep other system events 180 days
+                "DELETE FROM system_log WHERE event != 'HEARTBEAT' AND timestamp < ?",
+                (cutoff_180,)
+            )
+            r5 = c.execute(
+                "DELETE FROM news_feed WHERE created_at < ?", (cutoff_30,)
+            )
+
+        log.info(
+            f"Cleanup: removed {r1.rowcount} discarded signals, "
+            f"{r2.rowcount} scan log entries, "
+            f"{r3.rowcount + r4.rowcount} old system log entries, "
+            f"{r5.rowcount} news feed entries (30d retention)"
+        )
+
+        # Compact the database
+        with sqlite3.connect(self.path, timeout=30) as c:
+            c.execute("PRAGMA busy_timeout=15000")
+            c.execute("VACUUM")
+        log.info("VACUUM complete")
+
+
+# ── CONVENIENCE SINGLETON ─────────────────────────────────────────────────
+_db_instance = None
+
+def get_db():
+    """Returns a shared DB instance — safe to call from multiple places."""
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = DB()
+    return _db_instance
+
+
+_CUSTOMERS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'customers')
+
+def get_customer_db(customer_id: str) -> 'DB':
+    """
+    Return a DB instance scoped to a specific customer.
+    DB lives at data/customers/<customer_id>/signals.db.
+    Directory is created on first call if it doesn't exist.
+    Each agent process gets its own instance — no cross-customer sharing.
+    """
+    if not customer_id:
+        raise ValueError("customer_id must not be empty")
+    customer_dir = os.path.join(_CUSTOMERS_DIR, customer_id)
+    os.makedirs(customer_dir, exist_ok=True)
+    return DB(path=os.path.join(customer_dir, 'signals.db'))
+
+
+# ── SELF-TEST ─────────────────────────────────────────────────────────────
+if __name__ == '__main__':
+    print("Running database self-test...")
+    db = DB(path=':memory:')   # in-memory — does not write to disk
+
+    # Portfolio
+    p = db.get_portfolio()
+    assert p['cash'] == 100.0, f"Expected $100 starting cash, got ${p['cash']}"
+    print(f"  ✓ Portfolio cold start: ${p['cash']:.2f}")
+
+    # Signal
+    sig_id = db.upsert_signal(
+        ticker="NVDA", source="Capitol Trades API", source_tier=1,
+        headline="Test signal", politician="Nancy Pelosi",
+        tx_date="2024-01-08", disc_date="2024-01-15",
+        confidence="HIGH", staleness="Fresh",
+    )
+    assert sig_id is not None
+    print(f"  ✓ Signal created: id={sig_id}")
+
+    # Deduplication
+    sig_id2 = db.upsert_signal(
+        ticker="NVDA", source="Capitol Trades API", source_tier=1,
+        headline="Duplicate signal", politician="Nancy Pelosi",
+        tx_date="2024-01-08", disc_date="2024-01-15",
+        confidence="HIGH", staleness="Fresh",
+    )
+    assert sig_id2 == sig_id, "Deduplication failed — created duplicate signal"
+    print(f"  ✓ Deduplication: blocked duplicate signal")
+
+    # Queue signal
+    db.queue_signal_for_trader(sig_id)
+    queued = db.get_queued_signals()
+    assert len(queued) == 1
+    print(f"  ✓ Signal queued: {queued[0]['ticker']}")
+
+    # Open position
+    pos_id = db.open_position(
+        ticker="NVDA", company="NVIDIA Corp", sector="Technology",
+        entry_price=495.00, shares=0.0162,
+        trail_stop_amt=14.45, trail_stop_pct=2.92,
+        vol_bucket="High Vol", signal_id=sig_id,
+    )
+    p2 = db.get_portfolio()
+    assert p2['cash'] < 100.0, "Cash should have decreased after opening position"
+    print(f"  ✓ Position opened: {pos_id} — cash now ${p2['cash']:.2f}")
+
+    # Close position
+    pnl = db.close_position(pos_id, exit_price=510.00, exit_reason="PROFIT_TAKE")
+    print(f"  ✓ Position closed: P&L ${pnl:+.2f}")
+
+    # Outcomes
+    outcomes = db.get_recent_outcomes()
+    assert len(outcomes) == 1
+    assert outcomes[0]['verdict'] == "WIN"
+    print(f"  ✓ Outcome recorded: {outcomes[0]['verdict']}")
+
+    # Integrity check
+    assert db.integrity_check()
+    print(f"  ✓ Integrity check: passed")
+
+    # Heartbeat
+    db.log_heartbeat("test_agent", "OK", portfolio_value=101.23)
+    hb = db.get_last_heartbeat("test_agent")
+    assert hb is not None
+    print(f"  ✓ Heartbeat logged: {hb['timestamp']}")
+
+    # Cleanup
+    db.cleanup()
+    print(f"  ✓ Cleanup: ran without errors")
+
+    print("\n✅ All database tests passed.")

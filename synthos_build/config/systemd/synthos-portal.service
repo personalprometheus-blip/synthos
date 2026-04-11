@@ -5,14 +5,14 @@ Wants=network.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/synthos/synthos_build/src
-ExecStart=/home/pi/synthos/venv/bin/python3 retail_portal.py
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/usr/bin/python3 retail_portal.py
 Restart=always
 RestartSec=5
-StandardOutput=append:/home/pi/synthos/synthos_build/logs/portal.log
-StandardError=append:/home/pi/synthos/synthos_build/logs/portal.log
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/portal.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/portal.log
 
 # Env file loaded by the portal itself via python-dotenv
 # Do not duplicate secrets here

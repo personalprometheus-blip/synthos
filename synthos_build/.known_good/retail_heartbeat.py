@@ -25,9 +25,7 @@ Monitor endpoint: POST /heartbeat
 """
 
 import os
-import re
 import logging
-import tempfile
 from dotenv import load_dotenv
 
 def _system_metrics() -> dict:
@@ -95,18 +93,12 @@ def _system_metrics() -> dict:
         pass
     return metrics
 
-_SRC_DIR          = os.path.dirname(os.path.abspath(__file__))
-_ROOT_DIR         = os.path.dirname(_SRC_DIR)                   # synthos_build/
-_ENV_PATH         = os.path.join(_ROOT_DIR, 'user', '.env')
-if not os.path.exists(_ENV_PATH):
-    _ENV_PATH     = os.path.join(_SRC_DIR, '.env')              # fallback for dev
-
-load_dotenv(_ENV_PATH)
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 log = logging.getLogger('heartbeat')
 
-_PROJECT_DIR      = _SRC_DIR
-_KILL_SWITCH_FILE = os.path.join(_ROOT_DIR, '.kill_switch')
+_PROJECT_DIR      = os.path.dirname(os.path.abspath(__file__))
+_KILL_SWITCH_FILE = os.path.join(_PROJECT_DIR, '.kill_switch')
 
 
 def _kill_switch_active() -> bool:
@@ -194,96 +186,6 @@ def _build_payload(agent_name: str, status: str) -> dict:
     return payload
 
 
-def _update_env(key: str, value: str) -> bool:
-    """
-    Safely update a single key in the .env file.
-    Reads, replaces the matching KEY=VALUE line, writes atomically via temp file.
-    Adds the key if it doesn't already exist.
-    Returns True on success, False on any error.
-    """
-    try:
-        if os.path.exists(_ENV_PATH):
-            with open(_ENV_PATH, 'r') as f:
-                lines = f.readlines()
-        else:
-            lines = []
-
-        pattern = re.compile(rf'^{re.escape(key)}\s*=.*$', re.MULTILINE)
-        new_line = f'{key}={value}\n'
-        replaced = False
-        for i, line in enumerate(lines):
-            if pattern.match(line.rstrip()):
-                lines[i] = new_line
-                replaced = True
-                break
-        if not replaced:
-            lines.append(new_line)
-
-        # Write atomically
-        dir_ = os.path.dirname(_ENV_PATH) or '.'
-        with tempfile.NamedTemporaryFile('w', dir=dir_, delete=False, suffix='.tmp') as tf:
-            tf.writelines(lines)
-            tmp_path = tf.name
-        os.replace(tmp_path, _ENV_PATH)
-
-        # Reload into current process environment
-        os.environ[key] = value
-        log.info(f"[CMD] .env updated: {key}={value}")
-        return True
-    except Exception as e:
-        log.warning(f"[CMD] Failed to update .env ({key}={value}): {e}")
-        return False
-
-
-def _process_commands(commands: list) -> None:
-    """
-    Process commands delivered in the heartbeat response from the monitor.
-
-    Supported command types:
-      set_kill_switch    — value: true/false  → create/remove .kill_switch file
-      set_trading_mode   — value: "PAPER"/"LIVE" → update TRADING_MODE in .env
-      set_operating_mode — value: "SUPERVISED"/"AUTONOMOUS" → update OPERATING_MODE in .env
-    """
-    for cmd in commands:
-        cmd_type = cmd.get('type', '')
-        value    = cmd.get('value')
-
-        if cmd_type == 'set_kill_switch':
-            active = bool(value)
-            if active:
-                try:
-                    open(_KILL_SWITCH_FILE, 'w').close()
-                    log.warning(f"[CMD] Kill switch ACTIVATED — file created at {_KILL_SWITCH_FILE}")
-                except Exception as e:
-                    log.error(f"[CMD] Failed to create kill switch file: {e}")
-            else:
-                try:
-                    if os.path.exists(_KILL_SWITCH_FILE):
-                        os.remove(_KILL_SWITCH_FILE)
-                        log.info("[CMD] Kill switch DEACTIVATED — file removed")
-                    else:
-                        log.debug("[CMD] Kill switch deactivate received — already inactive")
-                except Exception as e:
-                    log.error(f"[CMD] Failed to remove kill switch file: {e}")
-
-        elif cmd_type == 'set_trading_mode':
-            mode = str(value).upper()
-            if mode in ('PAPER', 'LIVE'):
-                _update_env('TRADING_MODE', mode)
-            else:
-                log.warning(f"[CMD] Unrecognised trading_mode value: {value!r}")
-
-        elif cmd_type == 'set_operating_mode':
-            mode = str(value).upper()
-            if mode in ('SUPERVISED', 'AUTONOMOUS'):
-                _update_env('OPERATING_MODE', mode)
-            else:
-                log.warning(f"[CMD] Unrecognised operating_mode value: {value!r}")
-
-        else:
-            log.warning(f"[CMD] Unknown command type received: {cmd_type!r}")
-
-
 def write_heartbeat(agent_name: str = "unknown", status: str = "OK") -> bool:
     """
     POST current system state to the Synthos Monitor server.
@@ -314,15 +216,6 @@ def write_heartbeat(agent_name: str = "unknown", status: str = "OK") -> bool:
                 f"[HB] Heartbeat sent — agent={agent_name} status={status} "
                 f"portfolio=${payload.get('portfolio_value', 0):.2f}"
             )
-            # Process any commands queued by the monitor (trading mode, kill switch, etc.)
-            try:
-                resp_data = r.json()
-                cmds = resp_data.get('commands', [])
-                if cmds:
-                    log.info(f"[HB] Received {len(cmds)} command(s) from monitor")
-                    _process_commands(cmds)
-            except Exception as e:
-                log.warning(f"[HB] Could not parse command response: {e}")
             return True
         elif r.status_code == 401:
             log.warning(

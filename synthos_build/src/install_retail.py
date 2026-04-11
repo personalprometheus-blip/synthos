@@ -232,30 +232,33 @@ def install_packages() -> bool:
 
 def bootstrap_database() -> bool:
     """
-    Initialize auth.db schema by importing retail_database.py from src/.
-    If auth.db already exists, this is a no-op (migrations run on import).
+    Initialize auth.db schema by importing auth.py from src/.
+    Calls init_auth_db() to create schema and ensure_admin_account() to seed
+    the admin user from .env. Safe to re-run — both calls are idempotent.
     Never overwrites existing data.
     """
     if DB_PATH.exists():
         _log_ui(f"  → auth.db exists — skipping bootstrap (protected)")
         return True
 
-    db_module = CORE_DIR / "retail_database.py"
-    if not db_module.exists():
-        _log_ui("  ✗ src/retail_database.py not found — cannot bootstrap DB", "error")
+    auth_module = CORE_DIR / "auth.py"
+    if not auth_module.exists():
+        _log_ui("  ✗ src/auth.py not found — cannot bootstrap DB", "error")
         return False
 
     try:
-        # Import database.py dynamically from src/
+        # Ensure packages installed during this run are importable in this process.
+        import site
+        user_site = site.getusersitepackages()
+        if user_site not in sys.path:
+            sys.path.insert(0, user_site)
+
         import importlib.util
-        spec = importlib.util.spec_from_file_location("database", db_module)
-        db_mod = importlib.util.module_from_spec(spec)
-        # Set DB path via environment before import
-        os.environ["SYNTHOS_HOME"] = str(SYNTHOS_HOME)
-        spec.loader.exec_module(db_mod)
-        # database.py initializes schema on import via get_db() or similar
-        if hasattr(db_mod, "get_db"):
-            db_mod.get_db()
+        spec = importlib.util.spec_from_file_location("auth", auth_module)
+        auth_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(auth_mod)
+        auth_mod.init_auth_db()
+        auth_mod.ensure_admin_account()
         _log_ui("  ✓ auth.db schema bootstrapped")
         return True
     except Exception as exc:
@@ -745,28 +748,7 @@ class WizardHandler(BaseHTTPRequestHandler):
           <div class="note">Portal runs at http://&lt;your-pi&gt;.local:{cfg.get("portal_port","5001")}</div>
           <button class="btn" type="submit">Next →</button>
         </form>"""
-        return _render_page("Portal", body, "Step 2 of 5 — Portal")
-
-    def page_capital(self) -> bytes:
-        cfg = _state["config"]
-        body = f"""
-        <div class="card-sub">Set your starting capital and operating mode.</div>
-        <form method="POST" action="/capital">
-          <label>Starting Capital (USD)</label>
-          <input name="starting_capital" type="number" min="10" max="100000"
-                 value="{cfg.get('starting_capital', '1000')}" required>
-          <label>Operating Mode</label>
-          <select name="operating_mode">
-            <option value="SUPERVISED" {"selected" if cfg.get("operating_mode","SUPERVISED")=="SUPERVISED" else ""}>
-              SUPERVISED — you approve all trades</option>
-            <option value="AUTONOMOUS" {"selected" if cfg.get("operating_mode")=="AUTONOMOUS" else ""}>
-              AUTONOMOUS — requires unlock key</option>
-          </select>
-          <div class="note warn">In SUPERVISED mode, all trades queue for your approval via the portal.
-          AUTONOMOUS mode requires a separate unlock key from Synthos.</div>
-          <button class="btn" type="submit">Next →</button>
-        </form>"""
-        return _render_page("Capital", body, "Step 3 of 5 — Capital")
+        return _render_page("Portal", body, "Step 2 of 4 — Portal")
 
     def page_disclaimer(self) -> bytes:
         body = """
@@ -789,7 +771,7 @@ class WizardHandler(BaseHTTPRequestHandler):
         <form method="POST" action="/">
           <button class="btn btn-secondary" type="submit" style="margin-top:8px">← Back</button>
         </form>"""
-        return _render_page("Disclaimer", body, "Step 4 of 5 — Agreement")
+        return _render_page("Disclaimer", body, "Step 3 of 4 — Agreement")
 
     def page_review(self) -> bytes:
         cfg = _state["config"]
@@ -805,10 +787,6 @@ class WizardHandler(BaseHTTPRequestHandler):
               <td>{cfg.get('pi_id','—')}</td></tr>
           <tr><td style="padding:5px 0;color:#555">Portal port</td>
               <td>{cfg.get('portal_port','5001')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Mode</td>
-              <td>{cfg.get('operating_mode','SUPERVISED')}</td></tr>
-          <tr><td style="padding:5px 0;color:#555">Capital</td>
-              <td>${cfg.get('starting_capital','—')}</td></tr>
           <tr><td style="padding:5px 0;color:#555">API keys</td>
               <td style="color:#999">Restore from backup after install</td></tr>
         </table>
