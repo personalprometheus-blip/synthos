@@ -225,7 +225,65 @@ class TradingControls:
     GAIN_TAX_PCT              = float(os.environ.get('GAIN_TAX_PCT', '0.10'))
 
 
-C = TradingControls()
+C = TradingControls()  # Global defaults — overridden per-customer in run()
+
+
+
+def _apply_customer_settings():
+    """Override TradingControls with per-customer settings from signals.db.
+    Hierarchy: customer_settings DB → global .env (already loaded) → hardcoded default.
+    Only overrides the settings exposed in the config panel."""
+    global C
+    if not _CUSTOMER_ID:
+        return  # single-tenant mode — use global env as-is
+
+    try:
+        db = _db()
+        settings = db.get_all_settings()
+        if not settings:
+            return  # no customer overrides — use global
+
+        # Map DB keys to Controls attributes with type conversion
+        overrides = {
+            'MIN_CONFIDENCE':     ('MIN_CONFIDENCE_SCORE', lambda v: {'LOW': 0.30, 'MEDIUM': 0.55, 'HIGH': 0.75}.get(v, float(v))),
+            'MAX_POSITION_PCT':   ('MAX_POSITION_PCT',     float),
+            'MAX_TRADE_USD':      ('MAX_TRADE_USD',        float),
+            'MAX_SECTOR_PCT':     ('MAX_SECTOR_PCT',       lambda v: float(v) / 100 if float(v) > 1 else float(v)),
+            'CLOSE_SESSION_MODE': ('CLOSE_SESSION_MODE',   str),
+            'SPOUSAL_WEIGHT':     ('SPOUSAL_WEIGHT',       str),
+            'MAX_STALENESS':      ('MAX_STALENESS',        str),
+        }
+
+        applied = []
+        for db_key, (attr, converter) in overrides.items():
+            if db_key in settings:
+                try:
+                    val = converter(settings[db_key])
+                    setattr(C, attr, val)
+                    applied.append(f"{attr}={val}")
+                except (ValueError, TypeError) as e:
+                    print(f"[Controls] Bad value for {db_key}: {settings[db_key]} ({e})")
+
+        if applied:
+            print(f"[Controls] Customer {_CUSTOMER_ID[:8]} overrides: {', '.join(applied)}")
+
+        # Per-customer kill switch
+        if settings.get('KILL_SWITCH') == '1':
+            # Create a temporary kill switch indicator
+            C._customer_kill_switch = True
+            print(f"[Controls] Customer {_CUSTOMER_ID[:8]} has KILL SWITCH engaged")
+        else:
+            C._customer_kill_switch = False
+
+        # Per-customer operating mode
+        if 'OPERATING_MODE' in settings:
+            global OPERATING_MODE
+            OPERATING_MODE = settings['OPERATING_MODE'].upper()
+            print(f"[Controls] Customer {_CUSTOMER_ID[:8]} mode: {OPERATING_MODE}")
+
+    except Exception as e:
+        print(f"[Controls] Could not load customer settings: {e} — using global defaults")
+
 
 PORTFOLIO_TIERS = [
     {"threshold": 0,      "max_deployed": 0.30, "max_positions": 3,  "label": "Seed"   },
@@ -373,7 +431,7 @@ def kill_switch_active():
 
 def clear_kill_switch():
     try:
-        if os.path.exists(KILL_SWITCH_FILE):
+        if os.path.exists(KILL_SWITCH_FILE) or getattr(C, "_customer_kill_switch", False):
             os.remove(KILL_SWITCH_FILE)
             log.info("Kill switch cleared")
     except Exception as e:

@@ -39,6 +39,9 @@ log = logging.getLogger('auth')
 AUTH_DB_PATH  = os.path.join(_ROOT_DIR, 'data', 'auth.db')
 CUSTOMERS_DIR = os.path.join(_ROOT_DIR, 'data', 'customers')
 
+# Shared invite code for public signup (set in .env)
+SIGNUP_ACCESS_CODE = os.environ.get('SIGNUP_ACCESS_CODE', '')
+
 
 # ── ENCRYPTION ─────────────────────────────────────────────────────────────
 # Fernet symmetric encryption. Key must be set in .env as ENCRYPTION_KEY.
@@ -150,6 +153,28 @@ def init_auth_db():
     os.makedirs(CUSTOMERS_DIR, exist_ok=True)
     with _auth_conn() as c:
         c.executescript(_AUTH_SCHEMA)
+        c.executescript("""
+            CREATE TABLE IF NOT EXISTS invite_codes (
+                code        TEXT    PRIMARY KEY,
+                created_at  TEXT    NOT NULL,
+                created_by  TEXT    NOT NULL DEFAULT 'admin',
+                used_at     TEXT,
+                used_by     TEXT,
+                is_used     INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS pending_signups (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT    NOT NULL,
+                email           TEXT    NOT NULL UNIQUE,
+                phone           TEXT    NOT NULL,
+                password_hash   TEXT    NOT NULL,
+                status          TEXT    NOT NULL DEFAULT 'PENDING',  -- PENDING | APPROVED | REJECTED
+                customer_id     TEXT,            -- filled on approval
+                created_at      TEXT    NOT NULL,
+                reviewed_at     TEXT,
+                reviewed_by     TEXT
+            );
+        """)
     _migrate_auth_db()
     # Restrict permissions — auth.db contains encrypted PII and password hashes
     os.chmod(AUTH_DB_PATH, 0o600)
@@ -190,6 +215,7 @@ def _migrate_auth_db():
         ("pricing_locked_at",    "TEXT"),
         ("tos_accepted_at",      "TEXT"),
         ("tos_version",          "TEXT"),
+        ("phone_enc",            "BLOB"),
     ]
     with _auth_conn() as c:
         for col_name, col_def in new_columns:
@@ -415,6 +441,274 @@ def list_customers() -> list:
             'stripe_customer_id':  row['stripe_customer_id']        if 'stripe_customer_id'  in row.keys() else None,
         })
     return result
+
+
+# ── SIGNUP MANAGEMENT ─────────────────────────────────────────────────────
+
+def create_pending_signup(name: str, email: str, phone: str, password: str) -> int:
+    """
+    Create a pending signup. Stores password hash (not plaintext).
+    Returns the signup row ID. Raises ValueError if email already registered or pending.
+    """
+    email = email.lower().strip()
+    now   = datetime.now(timezone.utc).isoformat()
+
+    # Check if email already exists as a customer
+    email_hash = _email_lookup_hash(email)
+    with _auth_conn() as c:
+        existing = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ?", (email_hash,)
+        ).fetchone()
+        if existing:
+            raise ValueError("An account already exists for this email address")
+
+        # Check if already pending
+        existing_signup = c.execute(
+            "SELECT id, status FROM pending_signups WHERE email = ?", (email,)
+        ).fetchone()
+        if existing_signup:
+            if existing_signup['status'] == 'PENDING':
+                raise ValueError("A signup request for this email is already pending")
+            elif existing_signup['status'] == 'APPROVED':
+                raise ValueError("This email has already been approved")
+            # If REJECTED, allow re-signup by updating the row
+            c.execute(
+                "UPDATE pending_signups SET name=?, phone=?, password_hash=?, "
+                "status='PENDING', created_at=?, reviewed_at=NULL, reviewed_by=NULL "
+                "WHERE id=?",
+                (name, phone, hash_password(password), now, existing_signup['id'])
+            )
+            log.info(f"Re-submitted rejected signup: {email}")
+            return existing_signup['id']
+
+        c.execute(
+            "INSERT INTO pending_signups (name, email, phone, password_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (name, email, phone, hash_password(password), now)
+        )
+        signup_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    log.info(f"New pending signup #{signup_id}: {email}")
+    return signup_id
+
+
+def list_pending_signups(status_filter: str = None) -> list:
+    """
+    List pending signups. If status_filter is provided, only return that status.
+    """
+    with _auth_conn() as c:
+        if status_filter:
+            rows = c.execute(
+                "SELECT * FROM pending_signups WHERE status = ? ORDER BY created_at DESC",
+                (status_filter.upper(),)
+            ).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT * FROM pending_signups ORDER BY created_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
+    """
+    Approve a pending signup: creates the customer account with auto_activate=True,
+    provisions the customer directory & signals.db. Returns customer info dict.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT * FROM pending_signups WHERE id = ? AND status = 'PENDING'",
+            (signup_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Signup #{signup_id} not found or not pending")
+        row = dict(row)
+
+    # Create the customer account using existing create_customer,
+    # but we need to pass the already-hashed password, so we do it manually.
+    customer_id = str(uuid.uuid4())
+    email       = row['email'].lower().strip()
+    email_hash  = _email_lookup_hash(email)
+
+    with _auth_conn() as c:
+        # Check for existing customer with this email (race condition guard)
+        existing = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ?", (email_hash,)
+        ).fetchone()
+        if existing:
+            raise ValueError("An account already exists for this email address")
+
+        c.execute(
+            """INSERT INTO customers
+               (id, email_hash, email_enc, display_name_enc, phone_enc,
+                password_hash, role, email_verified, subscription_status,
+                pricing_tier, pricing_locked_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                customer_id,
+                email_hash,
+                encrypt_field(email),
+                encrypt_field(row['name']) if row['name'] else b'',
+                encrypt_field(row['phone']) if row['phone'] else b'',
+                row['password_hash'],   # Already hashed during signup
+                'customer',
+                1,                      # email_verified = true (admin-approved)
+                'active',               # active subscription (trial)
+                'early_adopter',        # trial users get early_adopter pricing
+                now,                    # pricing_locked_at
+                now,                    # created_at
+            )
+        )
+
+        c.execute(
+            "UPDATE pending_signups SET status='APPROVED', customer_id=?, "
+            "reviewed_at=?, reviewed_by=? WHERE id=?",
+            (customer_id, now, reviewed_by, signup_id)
+        )
+
+    # Create per-customer data directory
+    os.makedirs(os.path.join(CUSTOMERS_DIR, customer_id), exist_ok=True)
+
+    log.info(f"Approved signup #{signup_id}: {email} -> customer {customer_id}")
+    return {
+        'customer_id': customer_id,
+        'email':       email,
+        'name':        row['name'],
+        'phone':       row['phone'],
+    }
+
+
+def reject_signup(signup_id: int, reviewed_by: str = 'admin'):
+    """Reject a pending signup."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT * FROM pending_signups WHERE id = ? AND status = 'PENDING'",
+            (signup_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Signup #{signup_id} not found or not pending")
+        c.execute(
+            "UPDATE pending_signups SET status='REJECTED', reviewed_at=?, reviewed_by=? WHERE id=?",
+            (now, reviewed_by, signup_id)
+        )
+    log.info(f"Rejected signup #{signup_id}")
+
+
+def generate_signup_verify_token(signup_id: int) -> str:
+    """Generate a one-time email verification token for a pending signup."""
+    import secrets
+    token = secrets.token_urlsafe(32)
+    db = sqlite3.connect(AUTH_DB_PATH, timeout=10)
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute(
+            "UPDATE pending_signups SET email_verify_token=? WHERE id=?",
+            (token, signup_id)
+        )
+        db.commit()
+    finally:
+        db.close()
+    return token
+
+
+def verify_signup_email(token: str) -> dict:
+    """
+    Verify a signup email using the token from the verification link.
+    Returns {signup_id, name, email} on success.
+    Raises ValueError on invalid/expired/already-used token.
+    """
+    from datetime import datetime, timedelta, timezone
+    db = sqlite3.connect(AUTH_DB_PATH, timeout=10)
+    db.row_factory = sqlite3.Row
+    try:
+        row = db.execute(
+            "SELECT id, name, email, status, email_verified, created_at "
+            "FROM pending_signups WHERE email_verify_token=?",
+            (token,)
+        ).fetchone()
+
+        if not row:
+            raise ValueError("Invalid or expired verification link")
+
+        signup_id, name, email, status, already_verified, created_at = row
+
+        if already_verified:
+            return {"signup_id": signup_id, "name": name, "email": email, "already": True}
+
+        if status not in ("PENDING",):
+            raise ValueError("This signup has already been processed")
+
+        # Check 48-hour expiry
+        try:
+            created = datetime.fromisoformat(created_at)
+            if (datetime.now(timezone.utc) - created.replace(tzinfo=timezone.utc)).total_seconds() > 48 * 3600:
+                raise ValueError("Verification link has expired (48 hour limit)")
+        except (ValueError, TypeError) as e:
+            if "expired" in str(e):
+                raise
+            pass  # If date parsing fails, allow verification
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.execute(
+            "UPDATE pending_signups SET email_verified=1, email_verified_at=?, "
+            "email_verify_token=NULL WHERE id=?",
+            (now_iso, signup_id)
+        )
+        db.commit()
+        return {"signup_id": signup_id, "name": name, "email": email}
+    finally:
+        db.close()
+
+
+
+def verify_signup_access_code(code: str) -> bool:
+    """
+    Check if the provided code is valid.
+    Accepts the static SIGNUP_ACCESS_CODE OR a valid one-time invite code.
+    One-time codes are consumed (marked used) on successful verification.
+    """
+    code = code.strip()
+    if not code:
+        return False
+    # Check static code first
+    if SIGNUP_ACCESS_CODE and _hmac.compare_digest(code, SIGNUP_ACCESS_CODE.strip()):
+        return True
+    # Check one-time invite codes
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT code FROM invite_codes WHERE code = ? AND is_used = 0", (code,)
+        ).fetchone()
+        if row:
+            c.execute(
+                "UPDATE invite_codes SET is_used = 1, used_at = ? WHERE code = ?",
+                (datetime.now(timezone.utc).isoformat(), code)
+            )
+            log.info(f"One-time invite code consumed: {code[:8]}...")
+            return True
+    return False
+
+
+def generate_invite_code(created_by: str = "admin") -> str:
+    """Generate a one-time invite code. Returns the code string."""
+    code = "SYN-" + secrets.token_hex(4).upper()
+    now = datetime.now(timezone.utc).isoformat()
+    with _auth_conn() as c:
+        c.execute(
+            "INSERT INTO invite_codes (code, created_at, created_by) VALUES (?, ?, ?)",
+            (code, now, created_by)
+        )
+    log.info(f"Generated invite code: {code} by {created_by}")
+    return code
+
+
+def list_invite_codes() -> list:
+    """List all invite codes with usage status."""
+    with _auth_conn() as c:
+        rows = c.execute(
+            "SELECT * FROM invite_codes ORDER BY created_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def deactivate_customer(customer_id: str):

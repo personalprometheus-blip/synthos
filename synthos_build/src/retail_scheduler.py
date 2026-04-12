@@ -77,6 +77,10 @@ log = logging.getLogger('scheduler')
 # Agents run sequentially within a session — order matters.
 # Within each agent step, all customer subprocesses run in parallel.
 
+# Agents that need per-customer execution (separate run per active customer).
+# Everything else is "shared" — runs once, output visible to all customers.
+_PER_CUSTOMER_AGENTS = {'retail_trade_logic_agent.py'}
+
 SESSION_PIPELINES = {
     'open': [
         ('retail_sector_screener.py',        ['--sector=Energy'],  180),
@@ -100,6 +104,13 @@ SESSION_PIPELINES = {
     ],
     'overnight': [
         ('retail_news_agent.py',             ['--session=overnight'], 420),
+    ],
+    'prep': [
+        # Sunday evening prep — builds Monday context
+        # Screener picks top sector + candidates, news scores them, sentiment sets baseline
+        ('retail_sector_screener.py',        [],                     300),
+        ('retail_news_agent.py',             ['--session=overnight'], 420),
+        ('retail_market_sentiment_agent.py', [],                     240),
     ],
     'trade': [
         # Hourly trader evaluation + execution.
@@ -290,9 +301,33 @@ def run_session(session: str, dry_run: bool = False) -> bool:
             + (f" {' '.join(effective_args)}" if effective_args else "")
         )
         t0 = time.monotonic()
-        results = run_agent_for_all_customers(
-            script, effective_args, timeout, dry_run=dry_run
-        )
+        if script in _PER_CUSTOMER_AGENTS:
+            # Per-customer: spawn one process per active customer
+            results = run_agent_for_all_customers(
+                script, effective_args, timeout, dry_run=dry_run
+            )
+        else:
+            # Shared: run once in single-tenant mode (market data is universal)
+            import subprocess as _sp
+            log.info(f"  [shared] Running {script} once (not per-customer)")
+            try:
+                if dry_run:
+                    results = {'__shared__': 'skipped'}
+                else:
+                    r = _sp.run(
+                        [sys.executable, str(_AGENTS_DIR / script)] + effective_args,
+                        capture_output=True, text=True,
+                        timeout=timeout, cwd=str(_AGENTS_DIR),
+                    )
+                    outcome = 'ok' if r.returncode == 0 else 'failed'
+                    if outcome == 'failed':
+                        log.warning(f"  [shared] {script} stderr: {(r.stderr or '')[-300:]}")
+                    results = {'__shared__': outcome}
+            except _sp.TimeoutExpired:
+                results = {'__shared__': 'timeout'}
+            except Exception as e:
+                log.error(f"  [shared] {script} error: {e}")
+                results = {'__shared__': 'failed'}
         elapsed = time.monotonic() - t0
 
         ok      = sum(1 for v in results.values() if v == 'ok')

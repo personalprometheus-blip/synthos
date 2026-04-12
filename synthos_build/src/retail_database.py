@@ -419,6 +419,17 @@ CREATE TABLE IF NOT EXISTS screening_requests (
     fulfilled_at    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notifications (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category    TEXT    NOT NULL,           -- 'system' | 'daily' | 'account' | 'trade' | 'alert'
+    title       TEXT    NOT NULL,
+    body        TEXT    NOT NULL DEFAULT '',
+    is_read     INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL,
+    read_at     TEXT,
+    meta        TEXT                        -- JSON blob for structured data
+);
+
 -- ── INDEXES ────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_signals_status        ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker        ON signals(ticker);
@@ -434,6 +445,14 @@ CREATE INDEX IF NOT EXISTS idx_screening_run         ON sector_screening(run_id)
 CREATE INDEX IF NOT EXISTS idx_screening_ticker      ON sector_screening(ticker);
 CREATE INDEX IF NOT EXISTS idx_screen_req_status     ON screening_requests(status);
 CREATE INDEX IF NOT EXISTS idx_screen_req_type       ON screening_requests(request_type);
+CREATE INDEX IF NOT EXISTS idx_notif_unread          ON notifications(is_read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notif_category        ON notifications(category);
+
+CREATE TABLE IF NOT EXISTS customer_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -1040,7 +1059,8 @@ class DB:
                     'staleness': meta.get('staleness', 'fresh'),
                     'created_at': r['created_at'] or '',
                     'summary':   meta.get('summary', ''),
-                    'image':     meta.get('image', None),
+                    'image':     meta.get('image_url') or meta.get('image'),
+                    'image_url':  meta.get('image_url') or meta.get('image'),
                     'symbols':   meta.get('symbols', []),
                     'provider':  meta.get('provider', 'rss'),
                 })
@@ -1057,6 +1077,46 @@ class DB:
                 WHERE signal_id=? AND ack=0
             """, (self.now(), signal_id))
         log.info(f"Signal {signal_id} acknowledged by trader")
+
+
+    # ── Per-Customer Settings ─────────────────────────────────────────────────
+
+    def get_setting(self, key, default=None):
+        """Get a single customer setting. Returns default if not set."""
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT value FROM customer_settings WHERE key=?", (key,)
+            ).fetchone()
+            return row['value'] if row else default
+
+    def set_setting(self, key, value):
+        """Set a customer setting (upsert)."""
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO customer_settings (key, value, updated_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, str(value), self.now())
+            )
+
+    def get_all_settings(self):
+        """Get all customer settings as a dict."""
+        with self.conn() as c:
+            rows = c.execute("SELECT key, value FROM customer_settings").fetchall()
+            return {r['key']: r['value'] for r in rows}
+
+    def get_settings_with_defaults(self, global_defaults=None):
+        """Get merged settings: customer DB overrides global defaults.
+        
+        Args:
+            global_defaults: dict of {key: value} from global .env
+        Returns:
+            dict with customer settings overriding global defaults
+        """
+        defaults = dict(global_defaults or {})
+        customer = self.get_all_settings()
+        defaults.update(customer)
+        return defaults
 
     def get_queued_signals(self):
         """All signals ready for the trader to act on."""
@@ -1797,6 +1857,78 @@ class DB:
         return count
 
     # ── CLEANUP ────────────────────────────────────────────────────────────
+
+    # ── NOTIFICATIONS ─────────────────────────────────────────────────────
+
+    def add_notification(self, category, title, body='', meta=None):
+        """Insert a notification. Returns the new notification ID."""
+        import json as _json
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        meta_str = _json.dumps(meta) if meta else None
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO notifications (category, title, body, created_at, meta) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (category, title, body, now, meta_str)
+            )
+            return c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def get_notifications(self, limit=50, unread_only=False, category=None):
+        """Fetch notifications, newest first."""
+        import json as _json
+        sql = "SELECT * FROM notifications WHERE 1=1"
+        params = []
+        if unread_only:
+            sql += " AND is_read = 0"
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.conn() as c:
+            rows = c.execute(sql, params).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get('meta'):
+                try:
+                    d['meta'] = _json.loads(d['meta'])
+                except Exception:
+                    pass
+            result.append(d)
+        return result
+
+    def get_unread_count(self):
+        """Fast unread notification count."""
+        with self.conn() as c:
+            return c.execute(
+                "SELECT COUNT(*) FROM notifications WHERE is_read = 0"
+            ).fetchone()[0]
+
+    def mark_notification_read(self, notification_id):
+        """Mark a single notification as read."""
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with self.conn() as c:
+            c.execute(
+                "UPDATE notifications SET is_read = 1, read_at = ? WHERE id = ?",
+                (now, notification_id)
+            )
+
+    def mark_all_notifications_read(self, category=None):
+        """Mark all notifications as read. Optionally filter by category."""
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with self.conn() as c:
+            if category:
+                c.execute(
+                    "UPDATE notifications SET is_read = 1, read_at = ? "
+                    "WHERE is_read = 0 AND category = ?",
+                    (now, category)
+                )
+            else:
+                c.execute(
+                    "UPDATE notifications SET is_read = 1, read_at = ? WHERE is_read = 0",
+                    (now,)
+                )
 
     def cleanup(self):
         """

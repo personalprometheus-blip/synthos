@@ -143,7 +143,7 @@ def _security_headers(response):
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: https://cdn.benzinga.com https://*.benzinga.com; "
         "connect-src 'self'; "
         "frame-ancestors 'none';"
     )
@@ -178,7 +178,7 @@ def _send_construction_otp() -> bool:
             "text": (
                 f"Your Synthos construction access code is: {otp}\n\n"
                 f"Valid for 10 minutes.\n"
-                f"Enter this code at portal.synth-cloud.com/admin/construction-verify\n\n"
+                f"Enter this code at synth-cloud.com/admin/construction-verify\n\n"
                 f"If you did not request this, someone with admin credentials is "
                 f"attempting to access construction routes — check immediately."
             ),
@@ -249,14 +249,14 @@ def _send_setup_email(email: str, setup_link: str, display_name: str = '') -> bo
         payload = _json.dumps({
             "from":    f"Synthos <{ALERT_FROM}>",
             "to":      [email],
-            "subject": "Set up your Synthos account",
+            "subject": "Your Synthos account is ready",
             "text": (
                 f"Hi {name},\n\n"
-                f"Your Synthos account is ready. Click the link below to set your "
-                f"password and activate your account:\n\n"
+                f"Your Synthos account has been approved and is ready to use. "
+                f"Click the link below to activate your account:\n\n"
                 f"{setup_link}\n\n"
                 f"This link expires in 48 hours.\n\n"
-                f"Once activated, you can log in at portal.synth-cloud.com\n\n"
+                f"Once activated, log in at synth-cloud.com\n\n"
                 f"— The Synthos Team"
             ),
         }).encode()
@@ -276,6 +276,54 @@ def _send_setup_email(email: str, setup_link: str, display_name: str = '') -> bo
         log.error(f"Setup email failed for {email}: {e}")
         return False
 
+
+
+
+def _send_verification_email(email, name, token):
+    """Send email verification link to new signup via Resend."""
+    if not RESEND_API_KEY:
+        print("[Portal] RESEND_API_KEY not set — skipping verification email")
+        return False
+
+    verify_url = f"https://synth-cloud.com/verify-email/{token}"
+    subject = "Verify your Synthos email"
+    body = (
+        f"Hi {name},\n\n"
+        f"Thank you for signing up for Synthos.\n\n"
+        f"Please click the link below to verify your email address:\n\n"
+        f"{verify_url}\n\n"
+        f"This link expires in 48 hours.\n\n"
+        f"If you did not create this account, you can ignore this email.\n\n"
+        f"— Synthos"
+    )
+
+    import urllib.request, json as _json
+    alert_from = os.getenv("ALERT_FROM", "alerts@synth-cloud.com")
+    payload = _json.dumps({
+        "from": f"Synthos <{alert_from}>",
+        "to": [email],
+        "subject": subject,
+        "text": body,
+    }).encode()
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status in (200, 201):
+                print(f"[Portal] Verification email sent to {email}")
+                return True
+            print(f"[Portal] Resend returned {resp.status} for verification email")
+            return False
+    except Exception as e:
+        print(f"[Portal] Verification email failed: {e}")
+        return False
 
 # Custom Jinja filter for file timestamps
 @app.template_filter('timestamp_to_date')
@@ -621,6 +669,13 @@ footer{
         <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
         <button class="auth-drop-btn" type="submit">Sign In →</button>
       </form>
+      <div style="text-align:right;margin-top:0.4rem">
+        <a href="/forgot-password" style="font-size:0.62rem;color:var(--muted);text-decoration:none;letter-spacing:0.03em">Forgot password?</a>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:0.8rem;padding-top:0.75rem;text-align:center">
+        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:0.4rem">Don't have an account?</div>
+        <a href="/signup" style="font-family:var(--mono);font-size:0.72rem;color:var(--teal);text-decoration:none;letter-spacing:0.04em">Create Account →</a>
+      </div>
     </div>
   </div>
 </nav>
@@ -738,7 +793,7 @@ function toggleAuthDrop(e){
   e.stopPropagation();
   document.getElementById('auth-drop').classList.toggle('open');
 }
-function toggleSidebar(){ /* sidebar — wired later */ }
+function toggleSidebar(){ /* wired in dashboard script */ }
 document.addEventListener('click',function(){
   document.getElementById('auth-drop').classList.remove('open');
 });
@@ -838,7 +893,7 @@ def is_admin():
 @app.before_request
 def check_auth():
     # Routes that are always public — no session required
-    public_routes = {'/', '/login', '/logout', '/sso', '/check-email',
+    public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email',
                      '/admin/construction-verify'}
     if request.path in public_routes:
         return
@@ -853,6 +908,428 @@ def check_auth():
         return
     if not is_authenticated():
         return redirect('/login')
+
+
+
+# ── SIGNUP ────────────────────────────────────────────────────────────────────
+
+_SIGNUP_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos — Create Account</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
+    --border:#1e2535;--border2:rgba(255,255,255,0.08);
+    --text:#e0ddd8;--muted:#556;--dim:rgba(255,255,255,0.18);
+    --teal:#00f5d4;--pink:#ff4b6e;--amber:#f5a623;
+    --sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+  .signup-wrap{
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:40px 20px;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0,245,212,0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(123,97,255,0.04) 0%, transparent 60%);
+  }
+  .signup-card{
+    width:100%;max-width:420px;
+    background:var(--surface);border:1px solid var(--border2);border-radius:16px;
+    padding:2rem;box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .signup-logo{
+    font-family:var(--mono);font-size:0.85rem;font-weight:600;
+    letter-spacing:0.18em;color:var(--teal);text-align:center;margin-bottom:0.5rem;
+    text-shadow:0 0 18px rgba(0,245,212,0.20);
+  }
+  .signup-title{font-size:1.1rem;font-weight:600;text-align:center;margin-bottom:0.3rem}
+  .signup-sub{font-size:0.78rem;color:var(--muted);text-align:center;margin-bottom:1.5rem}
+  .field{margin-bottom:1rem}
+  .field label{
+    display:block;font-size:0.62rem;font-weight:500;letter-spacing:0.09em;
+    text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem;
+  }
+  .field input{
+    font-family:var(--mono);font-size:0.82rem;width:100%;
+    padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);
+    border:1px solid var(--border);border-radius:8px;
+    color:var(--text);transition:border-color .15s;
+  }
+  .field input:focus{outline:none;border-color:rgba(0,245,212,0.25);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
+  .field input::placeholder{color:var(--dim)}
+  .field-row{display:flex;gap:12px}
+  .field-row .field{flex:1}
+  .submit-btn{
+    font-family:var(--mono);font-size:0.78rem;font-weight:600;letter-spacing:0.05em;
+    width:100%;padding:0.65rem;margin-top:0.5rem;
+    background:rgba(0,245,212,0.12);color:var(--teal);
+    border:1px solid rgba(0,245,212,0.18);border-radius:8px;
+    cursor:pointer;transition:all .15s;
+  }
+  .submit-btn:hover{background:rgba(0,245,212,0.18);box-shadow:0 0 14px rgba(0,245,212,0.09)}
+  .submit-btn:disabled{opacity:0.4;cursor:not-allowed}
+  .error-msg{
+    background:rgba(255,75,110,0.08);border:1px solid rgba(255,75,110,0.18);
+    border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;
+    font-size:0.78rem;color:var(--pink);
+  }
+  .success-msg{
+    background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.14);
+    border-radius:8px;padding:0.75rem;margin-bottom:1rem;
+    font-size:0.82rem;color:var(--teal);text-align:center;line-height:1.6;
+  }
+  .back-link{
+    display:block;text-align:center;margin-top:1.2rem;
+    font-size:0.72rem;color:var(--muted);text-decoration:none;
+  }
+  .back-link:hover{color:var(--text)}
+  .code-note{font-size:0.68rem;color:var(--dim);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="signup-wrap">
+  <div class="signup-card">
+    <div class="signup-logo">SYNTHOS</div>
+    <div class="signup-title">Create Account</div>
+    <div class="signup-sub">Enter your details to request access</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+    {% if success %}
+      <div class="success-msg">
+        Your signup request has been submitted.<br>
+        You will receive access once an administrator approves your account.
+      </div>
+    {% else %}
+    <form method="POST" action="/signup" autocomplete="off">
+      <div class="field">
+        <label>Access Code</label>
+        <input type="text" name="access_code" placeholder="Enter your invite code" required
+               value="{{ request.form.get('access_code', '') }}">
+        <div class="code-note">Contact the operator for an invite code</div>
+      </div>
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" name="name" placeholder="Jane Smith" required
+               value="{{ request.form.get('name', '') }}">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" placeholder="you@example.com" required
+               value="{{ request.form.get('email', '') }}">
+      </div>
+      <div class="field">
+        <label>Phone</label>
+        <input type="tel" name="phone" placeholder="+1 (555) 000-0000" required
+               value="{{ request.form.get('phone', '') }}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Password</label>
+          <input type="password" name="password" placeholder="Min 8 characters" required minlength="8">
+        </div>
+        <div class="field">
+          <label>Confirm</label>
+          <input type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
+        </div>
+      </div>
+      <button class="submit-btn" type="submit">Request Access &rarr;</button>
+    </form>
+    {% endif %}
+    <a href="/" class="back-link">&larr; Back to Synthos</a>
+  </div>
+</div>
+</body>
+</html>
+"""
+
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password_page():
+    """Placeholder forgot-password page — collects email. Reset mechanism TBD."""
+    submitted = False
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        if email:
+            log.info(f"Password reset requested for: {email}")
+            submitted = True
+
+    return render_template_string("""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Synthos — Reset Password</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
+    --border:#1e2535;--border2:rgba(255,255,255,0.08);
+    --text:#e0ddd8;--muted:#556;--dim:rgba(255,255,255,0.18);
+    --teal:#00f5d4;--pink:#ff4b6e;
+    --sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
+  .wrap{
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:40px 20px;
+    background:radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0,245,212,0.05) 0%, transparent 60%);
+  }
+  .card{
+    width:100%;max-width:380px;
+    background:var(--surface);border:1px solid var(--border2);border-radius:16px;
+    padding:2rem;box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .logo{font-family:var(--mono);font-size:0.85rem;font-weight:600;letter-spacing:0.18em;color:var(--teal);text-align:center;margin-bottom:0.5rem;text-shadow:0 0 18px rgba(0,245,212,0.20)}
+  .title{font-size:1rem;font-weight:600;text-align:center;margin-bottom:0.3rem}
+  .sub{font-size:0.78rem;color:var(--muted);text-align:center;margin-bottom:1.5rem;line-height:1.6}
+  label{display:block;font-size:0.62rem;font-weight:500;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem}
+  input{font-family:var(--mono);font-size:0.82rem;width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:1rem}
+  input:focus{outline:none;border-color:rgba(0,245,212,0.25);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
+  input::placeholder{color:var(--dim)}
+  .btn{font-family:var(--mono);font-size:0.78rem;font-weight:600;width:100%;padding:0.65rem;background:rgba(0,245,212,0.12);color:var(--teal);border:1px solid rgba(0,245,212,0.18);border-radius:8px;cursor:pointer;transition:all .15s}
+  .btn:hover{background:rgba(0,245,212,0.18)}
+  .success{background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.14);border-radius:8px;padding:0.75rem;font-size:0.82rem;color:var(--teal);text-align:center;line-height:1.6}
+  .back{display:block;text-align:center;margin-top:1.2rem;font-size:0.72rem;color:var(--muted);text-decoration:none}
+  .back:hover{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="logo">SYNTHOS</div>
+    <div class="title">Reset Password</div>
+    <div class="sub">Enter your email address and we'll send you instructions to reset your password.</div>
+    {% if submitted %}
+      <div class="success">
+        If an account exists for that email, you'll receive reset instructions shortly.
+      </div>
+    {% else %}
+    <form method="POST" action="/forgot-password">
+      <label>Email</label>
+      <input type="email" name="email" placeholder="you@example.com" required>
+      <button class="btn" type="submit">Send Reset Instructions &rarr;</button>
+    </form>
+    {% endif %}
+    <a href="/" class="back">&larr; Back to Synthos</a>
+  </div>
+</div>
+</body>
+</html>""", submitted=submitted)
+
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup_page():
+    """Public signup page — validates access code, stores pending signup for admin approval."""
+    error   = None
+    success = False
+
+    if request.method == 'POST':
+        code     = request.form.get('access_code', '').strip()
+        name     = request.form.get('name', '').strip()
+        email    = request.form.get('email', '').strip()
+        phone    = request.form.get('phone', '').strip()
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+
+        if not auth.verify_signup_access_code(code):
+            error = "Invalid access code. Contact the operator for an invite code."
+        elif not name or not email or not phone:
+            error = "All fields are required."
+        elif len(password) < 8:
+            error = "Password must be at least 8 characters."
+        elif password != confirm:
+            error = "Passwords do not match."
+        else:
+            try:
+                _sid = auth.create_pending_signup(name, email, phone, password)
+                # Send email verification link
+                try:
+                    _vtoken = auth.generate_signup_verify_token(_sid)
+                    _send_verification_email(email, name, _vtoken)
+                except Exception as _ve:
+                    log.warning(f"Verification email failed: {_ve}")
+                success = True
+                log.info(f"Signup submitted: {email} (verification email sent)")
+            except ValueError as e:
+                error = str(e)
+            except Exception as e:
+                log.error(f"Signup error: {e}")
+                error = "An unexpected error occurred. Please try again."
+
+    return render_template_string(_SIGNUP_PAGE_HTML, error=error, success=success)
+
+
+# ── SIGNUP MANAGEMENT API (admin only) ────────────────────────────────────────
+
+@app.route('/api/pending-signups', methods=['GET'])
+@login_required
+def api_pending_signups():
+    """List pending signups for admin approval."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    status_filter = request.args.get('status')
+    signups = auth.list_pending_signups(status_filter)
+    return jsonify({"signups": signups})
+
+
+@app.route('/api/approve-signup', methods=['POST'])
+@login_required
+def api_approve_signup():
+    """Approve a pending signup — creates customer account + signals.db."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    data = request.get_json(force=True)
+    signup_id = data.get('signup_id')
+    if not signup_id:
+        return jsonify({"error": "signup_id required"}), 400
+    try:
+        result = auth.approve_signup(int(signup_id), reviewed_by=session.get('customer_id', 'admin'))
+        from retail_database import get_customer_db
+        get_customer_db(result['customer_id'])
+        log.info(f"Admin approved signup #{signup_id} -> customer {result['customer_id']}")
+        return jsonify({"ok": True, **result})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        log.error(f"Approve signup error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/reject-signup', methods=['POST'])
+@login_required
+def api_reject_signup():
+    """Reject a pending signup."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    data = request.get_json(force=True)
+    signup_id = data.get('signup_id')
+    if not signup_id:
+        return jsonify({"error": "signup_id required"}), 400
+    try:
+        auth.reject_signup(int(signup_id), reviewed_by=session.get('customer_id', 'admin'))
+        return jsonify({"ok": True})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/api/generate-invite', methods=['POST'])
+@login_required
+def api_generate_invite():
+    """Generate a one-time invite code (admin only)."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    try:
+        code = auth.generate_invite_code(created_by=session.get('customer_id', 'admin'))
+        return jsonify({"ok": True, "code": code})
+    except Exception as e:
+        log.error(f"Generate invite error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/invite-codes', methods=['GET'])
+@login_required
+def api_invite_codes():
+    """List all invite codes (admin only)."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    codes = auth.list_invite_codes()
+    return jsonify({"codes": codes})
+
+
+
+# ── NOTIFICATION API ──────────────────────────────────────────────────────────
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def api_notifications():
+    """Fetch notifications for the current customer."""
+    db = _customer_db()
+    unread_only = request.args.get('unread_only') == '1'
+    category = request.args.get('category')
+    limit = min(int(request.args.get('limit', 50)), 200)
+    notifs = db.get_notifications(limit=limit, unread_only=unread_only, category=category)
+    return jsonify({"notifications": notifs})
+
+
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@login_required
+def api_notifications_unread_count():
+    """Lightweight unread count for badge polling."""
+    db = _customer_db()
+    count = db.get_unread_count()
+    return jsonify({"count": count})
+
+
+@app.route('/api/notifications/read', methods=['POST'])
+@login_required
+def api_notifications_read():
+    """Mark notification(s) as read."""
+    db = _customer_db()
+    data = request.get_json(force=True)
+    if data.get('all'):
+        category = data.get('category')
+        db.mark_all_notifications_read(category=category)
+        return jsonify({"ok": True})
+    notif_id = data.get('id')
+    if not notif_id:
+        return jsonify({"error": "id or all required"}), 400
+    db.mark_notification_read(int(notif_id))
+    return jsonify({"ok": True})
+
+
+@app.route('/api/notifications/send', methods=['POST'])
+@login_required
+def api_notifications_send():
+    """Send a notification to a specific customer. Admin only."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    data = request.get_json(force=True)
+    customer_id = data.get('customer_id')
+    category    = data.get('category', 'system')
+    title       = data.get('title', '')
+    body        = data.get('body', '')
+    meta        = data.get('meta')
+    if not customer_id or not title:
+        return jsonify({"error": "customer_id and title required"}), 400
+    from retail_database import get_customer_db
+    db = get_customer_db(customer_id)
+    nid = db.add_notification(category, title, body, meta)
+    return jsonify({"ok": True, "id": nid})
+
+
+@app.route('/api/notifications/broadcast', methods=['POST'])
+@login_required
+def api_notifications_broadcast():
+    """Send a system notification to ALL active customers. Admin only."""
+    if not is_admin():
+        return jsonify({"error": "admin only"}), 403
+    data = request.get_json(force=True)
+    category = data.get('category', 'system')
+    title    = data.get('title', '')
+    body     = data.get('body', '')
+    meta     = data.get('meta')
+    if not title:
+        return jsonify({"error": "title required"}), 400
+    from retail_database import get_customer_db
+    customers = auth.list_customers()
+    sent = 0
+    for c in customers:
+        if c.get('is_active'):
+            try:
+                db = get_customer_db(c['id'])
+                db.add_notification(category, title, body, meta)
+                sent += 1
+            except Exception as e:
+                log.warning(f"Broadcast skip {c['id']}: {e}")
+    log.info(f"Broadcast notification to {sent} customers: {title[:60]}")
+    return jsonify({"ok": True, "sent": sent})
+
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -1150,7 +1627,7 @@ _CHECK_EMAIL_HTML = """<!DOCTYPE html>
   <div class="icon">📬</div>
   <h2>Check your inbox</h2>
   <p>We've sent a setup link to your email address.<br>
-     Click the link to set your password and activate your account.</p>
+     Click the link to activate your account.</p>
   <p>The link expires in 48 hours.</p>
   <div class="note">
     Didn't receive it? Check your spam folder, or
@@ -1200,7 +1677,7 @@ _SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
   <div class="tagline">Algorithmic Trading Platform</div>
   <h2>Set your password</h2>
   <p>Choose a strong password to complete your account setup.
-     You'll use this to log in at portal.synth-cloud.com</p>
+     You'll use this to log in at synth-cloud.com</p>
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
   <form method="POST">
     <label>Password</label>
@@ -1368,10 +1845,60 @@ def setup_account(token):
     return render_template_string(_SETUP_ACCOUNT_HTML, error=None)
 
 
+# Email verification result pages
+_VERIFY_SUCCESS_HTML = (
+    '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<title>Email Verified</title>'
+    '<style>*{box-sizing:border-box;margin:0;padding:0}'
+    'body{min-height:100vh;background:#0a0c14;color:rgba(255,255,255,0.88);'
+    'font-family:Inter,sans-serif;display:flex;align-items:center;'
+    'justify-content:center;padding:2rem}'
+    '.card{max-width:400px;background:#111520;border:1px solid rgba(255,255,255,0.07);'
+    'border-radius:14px;padding:2.5rem;text-align:center}'
+    '.icon{font-size:48px;margin-bottom:1rem;color:#00f5d4}'
+    '.t{font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:#00f5d4}'
+    '.s{font-size:.85rem;color:rgba(255,255,255,0.5);line-height:1.6}'
+    '</style></head><body><div class="card">'
+    '<div class="icon">&#10003;</div>'
+    '<div class="t">Email Verified</div>'
+    '<div class="s">Your email has been confirmed. Your signup is pending admin review.</div>'
+    '</div></body></html>'
+)
+
+_VERIFY_ERROR_HTML = (
+    '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<title>Verification Failed</title>'
+    '<style>*{box-sizing:border-box;margin:0;padding:0}'
+    'body{min-height:100vh;background:#0a0c14;color:rgba(255,255,255,0.88);'
+    'font-family:Inter,sans-serif;display:flex;align-items:center;'
+    'justify-content:center;padding:2rem}'
+    '.card{max-width:400px;background:#111520;border:1px solid rgba(255,255,255,0.07);'
+    'border-radius:14px;padding:2.5rem;text-align:center}'
+    '.icon{font-size:48px;margin-bottom:1rem;color:#ff4b6e}'
+    '.t{font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:#ff4b6e}'
+    '.s{font-size:.85rem;color:rgba(255,255,255,0.5);line-height:1.6}'
+    '</style></head><body><div class="card">'
+    '<div class="icon">&#10007;</div>'
+    '<div class="t">Verification Failed</div>'
+    '<div class="s">ERROR_MSG</div>'
+    '</div></body></html>'
+)
+
+
 @app.route('/verify-email/<token>')
 def verify_email(token):
-    """Alias for /setup-account — handles older-format links."""
-    return redirect(f'/setup-account/{token}')
+    """Public route — verifies signup email from the link sent via Resend."""
+    try:
+        import auth as _auth
+        result = _auth.verify_signup_email(token)
+        return _VERIFY_SUCCESS_HTML
+    except ValueError as e:
+        # Not a signup verification token — try setup-account redirect (legacy)
+        return redirect(f'/setup-account/{token}')
+    except Exception as e:
+        return _VERIFY_ERROR_HTML.replace("ERROR_MSG", "An unexpected error occurred."), 500
 
 
 @app.route('/subscribe')
@@ -1644,7 +2171,7 @@ def sso_login():
     from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 
     SSO_SECRET   = os.environ.get('SSO_SECRET', '')
-    LOGIN_URL    = os.environ.get('LOGIN_SERVER_URL', 'https://portal.synth-cloud.com')
+    LOGIN_URL    = os.environ.get('LOGIN_SERVER_URL', 'https://synth-cloud.com')
     SSO_TOKEN_TTL = 900  # 15 minutes — must match login_server/app.py
 
     token = freq.args.get('t', '')
@@ -2217,25 +2744,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 /* ── HEADER ── */
 .header{
   position:sticky;top:0;z-index:100;
-  background:rgba(10,12,20,0.85);
-  backdrop-filter:blur(20px);
-  -webkit-backdrop-filter:blur(20px);
+  background:rgba(10,12,20,0.92);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   border-bottom:1px solid var(--border);
-  padding:0.45rem 1.5rem;
-  display:flex;align-items:center;gap:16px;
+  padding:0 1rem;height:40px;
+  display:flex;align-items:center;gap:10px;
 }
+.hdr-left{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.hdr-hamburger{
+  display:flex;flex-direction:column;justify-content:center;gap:3.5px;
+  background:none;border:none;cursor:pointer;padding:4px;opacity:0.45;
+  transition:opacity .15s;width:28px;height:28px;flex-shrink:0;
+}
+.hdr-hamburger:hover{opacity:1}
+.hdr-hamburger span{display:block;width:16px;height:1.5px;background:var(--text);border-radius:2px}
 .wordmark{
-  font-family:var(--mono);font-size:1rem;font-weight:600;
+  font-family:var(--mono);font-size:0.9rem;font-weight:600;
   letter-spacing:0.15em;color:var(--teal);
-  text-shadow:0 0 20px rgba(0,245,212,0.22);
-  flex-shrink:0;
+  text-shadow:0 0 20px rgba(0,245,212,0.22);flex-shrink:0;
 }
-.header-status{display:flex;align-items:center;gap:8px;flex:1}
 .status-pill{
   display:flex;align-items:center;gap:5px;
-  padding:4px 10px;border-radius:99px;
+  padding:3px 12px;border-radius:99px;
   font-size:11px;font-weight:600;letter-spacing:0.04em;
-  border:1px solid;
+  border:1px solid;white-space:nowrap;min-width:200px;
 }
 .sp-ok{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.14);color:var(--teal)}
 .sp-warn{background:rgba(245,166,35,0.08);border-color:rgba(245,166,35,0.25);color:var(--amber)}
@@ -2248,7 +2780,123 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .dot-dim{background:rgba(255,255,255,0.2)}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.4}}
 .dot-blink{animation:blink 2s infinite}
-.header-nav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.hdr-right{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
+/* Mode pill */
+.hdr-mode-pill{
+  padding:3px 10px;border-radius:99px;font-size:10px;font-weight:700;
+  letter-spacing:0.06em;cursor:pointer;
+  border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--muted);
+  font-family:var(--sans);transition:all 0.15s;white-space:nowrap;
+}
+.hdr-mode-pill:hover{background:var(--surface2);color:var(--text)}
+.hdr-mode-pill.mp-auto{
+  background:rgba(245,166,35,0.08);border-color:rgba(245,166,35,0.3);color:var(--amber);
+}
+/* Avatar */
+.hdr-avatar{
+  position:relative;width:28px;height:28px;border-radius:50%;
+  background:var(--surface2);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:border-color .15s;flex-shrink:0;
+}
+.hdr-avatar:hover{border-color:var(--teal);box-shadow:0 0 10px rgba(0,245,212,0.09)}
+.hdr-avatar svg{color:rgba(255,255,255,0.45);width:14px;height:14px}
+.avatar-drop{
+  display:none;position:absolute;top:calc(100% + 8px);right:0;
+  min-width:150px;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:10px;overflow:hidden;
+  box-shadow:0 20px 50px rgba(0,0,0,0.6),0 0 0 1px rgba(0,245,212,0.05);
+  z-index:300;
+}
+.avatar-drop.open{display:block}
+.avatar-drop-item{
+  display:block;width:100%;text-align:left;padding:10px 16px;
+  font-size:12px;font-weight:500;color:var(--text);background:none;border:none;
+  cursor:pointer;font-family:var(--sans);transition:background .12s;text-decoration:none;
+}
+.avatar-drop-item:hover{background:var(--surface2)}
+.avatar-drop-item.danger{color:var(--pink)}
+.avatar-drop-sep{height:1px;background:var(--border)}
+
+/* ── Notification Bell ── */
+.hdr-bell{
+  position:relative;width:28px;height:28px;border-radius:50%;
+  background:var(--surface2);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:border-color .15s;flex-shrink:0;
+}
+.hdr-bell:hover{border-color:var(--signal);box-shadow:0 0 10px rgba(245,166,35,0.09)}
+.hdr-bell svg{color:rgba(255,255,255,0.4);width:14px;height:14px;transition:color .15s}
+.hdr-bell:hover svg{color:rgba(255,255,255,0.7)}
+.bell-badge{
+  position:absolute;top:-3px;right:-3px;
+  min-width:16px;height:16px;border-radius:99px;
+  background:var(--signal);color:#000;
+  font-size:9px;font-weight:800;line-height:16px;text-align:center;
+  padding:0 4px;display:none;
+  box-shadow:0 0 8px rgba(245,166,35,0.4);
+}
+.bell-badge.show{display:block}
+.bell-drop{
+  display:none;position:absolute;top:calc(100% + 10px);right:-60px;
+  width:340px;max-height:440px;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:14px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,0.6),0 0 0 1px rgba(245,166,35,0.04);
+  z-index:300;display:none;flex-direction:column;
+}
+.bell-drop.open{display:flex}
+.bell-drop-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.bell-drop-title{font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--text)}
+.bell-mark-read{
+  font-size:10px;color:var(--muted);background:none;border:none;
+  cursor:pointer;font-family:var(--sans);transition:color .15s;
+}
+.bell-mark-read:hover{color:var(--teal)}
+.bell-tabs{
+  display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.bell-tab{
+  flex:1;padding:7px 0;font-size:10px;font-weight:600;text-align:center;
+  color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;
+  cursor:pointer;font-family:var(--sans);transition:all .15s;
+}
+.bell-tab:hover{color:var(--text)}
+.bell-tab.active{color:var(--signal);border-bottom-color:var(--signal)}
+.bell-list{flex:1;overflow-y:auto;max-height:340px}
+.bell-item{
+  display:flex;align-items:flex-start;gap:10px;padding:10px 14px;
+  border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s;
+}
+.bell-item:hover{background:rgba(255,255,255,0.02)}
+.bell-item:last-child{border-bottom:none}
+.bell-unread-dot{
+  width:6px;height:6px;border-radius:50%;background:var(--signal);
+  flex-shrink:0;margin-top:5px;
+  box-shadow:0 0 6px rgba(245,166,35,0.3);
+}
+.bell-unread-dot.read{background:transparent}
+.bell-item-body{flex:1;min-width:0}
+.bell-item-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bell-item-preview{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bell-item-meta{display:flex;align-items:center;gap:6px;margin-top:3px}
+.bell-item-time{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.bell-cat-pill{
+  font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;
+  padding:1px 6px;border-radius:99px;
+}
+.bell-cat-system{background:rgba(123,97,255,0.1);color:var(--violet)}
+.bell-cat-daily{background:rgba(0,245,212,0.08);color:var(--teal)}
+.bell-cat-account{background:rgba(245,166,35,0.08);color:var(--signal)}
+.bell-cat-trade{background:rgba(0,245,212,0.08);color:var(--teal)}
+.bell-cat-alert{background:rgba(255,75,110,0.08);color:var(--pink)}
+.bell-empty{text-align:center;padding:30px 14px;color:var(--dim);font-size:11px}
+
+/* ── Preserve .nav-btn for non-header uses (kill switch, command portal etc.) ── */
 .nav-btn{
   padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
   letter-spacing:0.04em;cursor:pointer;
@@ -2260,6 +2908,93 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .nav-btn.danger{border-color:rgba(255,75,110,0.18);color:var(--pink)}
 .nav-btn.danger:hover{background:var(--pink2)}
 .nav-btn.danger.engaged{background:var(--pink2);border-color:rgba(255,75,110,0.14);color:var(--pink)}
+
+/* ── LEFT SIDEBAR ── */
+.sidebar-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);
+  z-index:190;backdrop-filter:blur(2px);
+}
+.sidebar-overlay.open{display:block}
+.sidebar{
+  position:fixed;top:0;left:0;height:100%;width:240px;z-index:200;
+  background:rgba(10,12,20,0.98);border-right:1px solid var(--border2);
+  transform:translateX(-100%);transition:transform .25s cubic-bezier(.22,1,.36,1);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.sidebar.open{transform:translateX(0)}
+.sidebar-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 14px;height:40px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.sidebar-close{
+  background:none;border:none;cursor:pointer;color:var(--muted);
+  font-size:18px;padding:4px;transition:color .15s;line-height:1;
+}
+.sidebar-close:hover{color:var(--text)}
+.sidebar-nav{flex:1;padding:8px 0;overflow-y:auto}
+.sidebar-nav-btn{
+  display:block;width:100%;text-align:left;padding:11px 20px;
+  font-size:13px;font-weight:500;color:var(--muted);
+  background:none;border:none;cursor:pointer;font-family:var(--sans);
+  transition:all .15s;letter-spacing:0.01em;
+}
+.sidebar-nav-btn:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.sidebar-nav-btn.active{color:var(--teal);background:rgba(0,245,212,0.06)}
+.sidebar-nav-sep{height:1px;background:var(--border);margin:6px 16px}
+
+/* ── CONFIG PANEL (right slide-out) ── */
+.cfg-tab{
+  position:fixed;right:0;top:50%;transform:translateY(-50%);
+  z-index:150;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:18px 9px;
+  background:var(--surface);
+  border:1px solid var(--border2);border-right:none;
+  border-radius:10px 0 0 10px;
+  box-shadow:-4px 0 24px rgba(0,0,0,0.35);
+  transition:color .15s,background .15s,box-shadow .15s;
+}
+.cfg-tab:hover{background:var(--surface2);box-shadow:-4px 0 28px rgba(0,0,0,0.45)}
+.cfg-tab-icon{font-size:13px;color:var(--muted);transition:color .15s}
+.cfg-tab:hover .cfg-tab-icon{color:var(--teal)}
+.cfg-tab-label{
+  writing-mode:vertical-rl;text-orientation:mixed;
+  font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;
+  color:var(--muted);transition:color .15s;
+}
+.cfg-tab:hover .cfg-tab-label{color:var(--teal)}
+.cfg-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:155;
+}
+.cfg-overlay.open{display:block}
+.cfg-panel{
+  position:fixed;top:0;right:0;height:100%;width:340px;z-index:160;
+  background:rgba(10,12,20,0.98);border-left:1px solid var(--border2);
+  transform:translateX(100%);transition:transform .28s cubic-bezier(.22,1,.36,1);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.cfg-panel.open{transform:translateX(0)}
+.cfg-panel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;height:50px;border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.cfg-panel-title{
+  font-size:11px;font-weight:700;letter-spacing:0.08em;
+  text-transform:uppercase;color:var(--text);
+}
+.cfg-panel-close{
+  background:none;border:none;cursor:pointer;color:var(--muted);
+  font-size:18px;padding:4px;transition:color .15s;
+}
+.cfg-panel-close:hover{color:var(--text)}
+.cfg-panel-body{flex:1;overflow-y:auto;padding:18px}
+.cfg-section{
+  font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:10px;margin-top:20px;
+  display:flex;align-items:center;gap:8px;
+}
+.cfg-section:first-child{margin-top:0}
+.cfg-section::after{content:'';flex:1;height:1px;background:var(--border)}
 
 /* ── LAYOUT ── */
 .page{max-width:1200px;margin:0 auto;padding:20px 24px}
@@ -2922,7 +3657,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 @media(max-width:700px){.agent-grid{grid-template-columns:1fr}}
 /* ── RESPONSIVE ── */
 @media(max-width:640px){
-  .header{padding:0 14px}
+  .header{padding:0 10px}
+  .status-pill{min-width:160px}
   .page{padding:14px}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .intel-grid{grid-template-columns:1fr}
@@ -2933,30 +3669,205 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 <!-- HEADER -->
 <header class="header">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="header-status" id="header-status">
-    <div class="status-pill sp-dim" id="pill-market-clock">
-      <div class="status-dot dot-dim" id="clock-dot"></div>
-      <span id="clock-label">Market</span>
-      <span id="clock-countdown" style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:4px"></span>
-    </div>
+  <!-- Left: hamburger + wordmark -->
+  <div class="hdr-left">
+    <button class="hdr-hamburger" onclick="toggleSidebar()" aria-label="Open menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="wordmark">SYNTHOS</div>
   </div>
-  <div class="header-nav">
-    <button class="nav-btn active" onclick="showTab('dashboard')">Dashboard</button>
-    <button class="nav-btn" onclick="showTab('intel')">Intelligence</button>
-    <button class="nav-btn" onclick="showTab('news')">News</button>
-    <button class="nav-btn" onclick="showTab('screening')">Screening</button>
-    <button class="nav-btn" onclick="showTab('performance')">Performance</button>
-    <button class="nav-btn" onclick="showTab('risk')">Risk</button>
-    <button class="nav-btn" onclick="showTab('settings')">Settings</button>
-    <button class="nav-btn {% if operating_mode == 'AUTOMATIC' %}sp-warn{% endif %}"
+
+  <!-- Centre: market status pill -->
+  <div class="status-pill sp-dim" id="pill-market-clock">
+    <div class="status-dot dot-dim" id="clock-dot"></div>
+    <span id="clock-label">Market</span>
+    <span id="clock-countdown" style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:4px"></span>
+  </div>
+
+  <!-- Right: mode pill + avatar -->
+  <div class="hdr-right">
+    <button class="hdr-mode-pill {% if operating_mode == 'AUTOMATIC' %}mp-auto{% endif %}"
             id="mode-nav-btn" onclick="toggleMode()"
             title="{% if operating_mode == 'AUTOMATIC' %}Automatic — bot executes trades{% else %}Managed — you approve all trades{% endif %}">
-      {% if operating_mode == 'AUTOMATIC' %}Automatic{% else %}Managed{% endif %}
+      {% if operating_mode == 'AUTOMATIC' %}AUTO{% else %}MANAGED{% endif %}
     </button>
-    <a href="/logout" class="nav-btn" style="text-decoration:none;font-size:11px">Sign Out</a>
+    <div class="hdr-bell" id="hdr-bell" onclick="toggleBellDrop(event)" aria-label="Notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      <div class="bell-badge" id="bell-badge"></div>
+      <div class="bell-drop" id="bell-drop" onclick="event.stopPropagation()">
+        <div class="bell-drop-head">
+          <div class="bell-drop-title">Notifications</div>
+          <button class="bell-mark-read" onclick="markAllNotifRead()">Mark all read</button>
+        </div>
+        <div class="bell-tabs">
+          <button class="bell-tab active" data-cat="" onclick="switchBellTab(this)">All</button>
+          <button class="bell-tab" data-cat="system" onclick="switchBellTab(this)">System</button>
+          <button class="bell-tab" data-cat="daily" onclick="switchBellTab(this)">Daily</button>
+          <button class="bell-tab" data-cat="account" onclick="switchBellTab(this)">Account</button>
+        </div>
+        <div class="bell-list" id="bell-list">
+          <div class="bell-empty">No notifications</div>
+        </div>
+      </div>
+    </div>
+    <div class="hdr-avatar" id="hdr-avatar" onclick="toggleAvatarDrop(event)" aria-label="Account menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="4"/>
+        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+      </svg>
+      <div class="avatar-drop" id="avatar-drop" onclick="event.stopPropagation()">
+        <button class="avatar-drop-item" onclick="showTab('settings');closeAvatarDrop()">Settings</button>
+        <div class="avatar-drop-sep"></div>
+        <a href="/logout" class="avatar-drop-item danger">Sign Out</a>
+      </div>
+    </div>
   </div>
 </header>
+
+<!-- SIDEBAR OVERLAY -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+<!-- LEFT SIDEBAR (hamburger menu) -->
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-head">
+    <div class="wordmark">SYNTHOS</div>
+    <button class="sidebar-close" onclick="closeSidebar()">&#x2715;</button>
+  </div>
+  <div class="sidebar-nav">
+    <button class="sidebar-nav-btn active" id="snb-dashboard" onclick="showTab('dashboard');closeSidebar()">Dashboard</button>
+    <button class="sidebar-nav-btn" id="snb-intel"       onclick="showTab('intel');closeSidebar()">Intelligence</button>
+    <button class="sidebar-nav-btn" id="snb-news"        onclick="showTab('news');closeSidebar()">News</button>
+    <button class="sidebar-nav-btn" id="snb-screening"   onclick="showTab('screening');closeSidebar()">Screening</button>
+    <button class="sidebar-nav-btn" id="snb-performance" onclick="showTab('performance');closeSidebar()">Performance</button>
+    <button class="sidebar-nav-btn" id="snb-risk"        onclick="showTab('risk');closeSidebar()">Risk</button>
+    <div class="sidebar-nav-sep"></div>
+    <button class="sidebar-nav-btn" id="snb-settings"   onclick="showTab('settings');closeSidebar()">Settings</button>
+  </div>
+</div>
+
+<!-- CONFIG TAB (right edge) -->
+<div class="cfg-tab" id="cfg-tab" onclick="toggleConfigPanel()" title="Configure agent">
+  <span class="cfg-tab-icon">&#9881;</span>
+  <span class="cfg-tab-label">Configure</span>
+</div>
+
+<!-- CONFIG OVERLAY -->
+<div class="cfg-overlay" id="cfg-overlay" onclick="closeConfigPanel()"></div>
+
+<!-- CONFIG PANEL (slides in from right) -->
+<div class="cfg-panel" id="cfg-panel">
+  <div class="cfg-panel-head">
+    <div class="cfg-panel-title">Agent Configuration</div>
+    <button class="cfg-panel-close" onclick="closeConfigPanel()">&#x2715;</button>
+  </div>
+  <div class="cfg-panel-body">
+
+    <div class="cfg-section">Trading Parameters</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="setting-label">Min Confidence</div>
+        <div class="setting-desc">Minimum signal confidence the agent will trade on</div>
+        <select id="cfg-min-conf" class="glass-select" style="margin-top:6px;width:100%">
+          <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW — Trade aggressively</option>
+          <option value="MEDIUM" {% if settings.min_confidence != 'LOW' and settings.min_confidence != 'HIGH' %}selected{% endif %}>MEDIUM — Balanced</option>
+          <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH — High confidence only</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:100px">
+          <div class="setting-label">Max Position</div>
+          <div class="setting-desc">% of portfolio per position</div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+            <input id="cfg-max-pos" type="number" min="1" max="50" class="glass-input"
+                   value="{{ settings.max_position_pct }}" placeholder="10" style="width:60px">
+            <span style="font-size:11px;color:var(--muted)">%</span>
+          </div>
+        </div>
+        <div style="flex:1;min-width:100px">
+          <div class="setting-label">Max Trade</div>
+          <div class="setting-desc">Per-order cap (0 = none)</div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+            <span style="font-size:11px;color:var(--muted)">$</span>
+            <input id="cfg-max-trade-usd" type="number" min="0" class="glass-input"
+                   value="{{ settings.max_trade_usd }}" placeholder="0" style="width:80px">
+          </div>
+        </div>
+        <div style="flex:1;min-width:100px">
+          <div class="setting-label">Max Sector</div>
+          <div class="setting-desc">Max % in one sector</div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+            <input id="cfg-max-sector" type="number" min="1" max="100" class="glass-input"
+                   value="{{ settings.max_sector_pct }}" placeholder="40" style="width:60px">
+            <span style="font-size:11px;color:var(--muted)">%</span>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <div class="setting-label">Close Mode</div>
+          <div class="setting-desc">Aggressiveness at market close</div>
+          <select id="cfg-close-mode" class="glass-select" style="margin-top:6px;width:100%">
+            <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
+            <option value="moderate"     {% if settings.close_session_mode == 'moderate' %}selected{% endif %}>Moderate</option>
+            <option value="aggressive"   {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <div class="setting-label">Staleness</div>
+          <div class="setting-desc">Oldest filing to consider</div>
+          <select id="cfg-staleness" class="glass-select" style="margin-top:6px;width:100%">
+            <option value="Fresh"   {% if settings.max_staleness == 'Fresh' %}selected{% endif %}>Fresh ≤3 days</option>
+            <option value="Aging"   {% if settings.max_staleness == 'Aging' %}selected{% endif %}>Aging ≤7 days</option>
+            <option value="Stale"   {% if settings.max_staleness == 'Stale' %}selected{% endif %}>Stale ≤14 days</option>
+            <option value="Expired" {% if settings.max_staleness == 'Expired' %}selected{% endif %}>All ≤45 days</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <div class="setting-label">Spousal</div>
+          <div class="setting-desc">Weight for spousal trades</div>
+          <select id="cfg-spousal" class="glass-select" style="margin-top:6px;width:100%">
+            <option value="reduced" {% if settings.spousal_weight == 'reduced' %}selected{% endif %}>Reduced</option>
+            <option value="skip"    {% if settings.spousal_weight == 'skip' %}selected{% endif %}>Skip</option>
+            <option value="equal"   {% if settings.spousal_weight == 'equal' %}selected{% endif %}>Equal</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="save-btn" onclick="saveCfgPanel()">Save Parameters</button>
+    </div>
+
+    <div class="cfg-section" style="margin-top:24px">Agent Mode</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Trading Mode</div>
+          <div class="setting-desc">Automatic executes without approval; Managed requires your sign-off</div>
+        </div>
+      </div>
+      <button class="save-btn" onclick="toggleMode();closeConfigPanel()"
+              style="background:rgba(245,166,35,0.1);border-color:rgba(245,166,35,0.2);color:var(--amber)">
+        Toggle Automatic / Managed
+      </button>
+    </div>
+
+    <div class="cfg-section" style="margin-top:24px">Kill Switch</div>
+    <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">
+      Halt all trading immediately. Existing positions are held; no new orders will be placed.
+    </div>
+    <button class="save-btn" id="cfg-kill-btn"
+            onclick="cfgKillToggle()"
+            style="background:rgba(255,75,110,0.08);border-color:rgba(255,75,110,0.2);color:var(--pink)">
+      Engage Kill Switch
+    </button>
+
+  </div>
+</div>
 
 {% if grace_warning %}
 <!-- GRACE PERIOD WARNING BANNER -->
@@ -3020,6 +3931,21 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         Read full article ↗
       </a>
     </div>
+  </div>
+</div>
+
+<!-- NOTIFICATION MODAL -->
+<div class="sig-modal-overlay" id="notif-modal-overlay" onclick="closeNotifModal(event)" style="display:none">
+  <div class="sig-modal" id="notif-modal" style="max-width:520px;width:92vw">
+    <div class="sig-modal-head" style="gap:10px">
+      <div style="flex:1">
+        <span class="bell-cat-pill" id="nmo-cat"></span>
+        <div style="font-size:15px;font-weight:700;color:var(--text);line-height:1.45;margin-top:8px" id="nmo-title"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;font-family:var(--mono)" id="nmo-time"></div>
+      </div>
+      <span class="sig-modal-close" onclick="closeNotifModal()" style="flex-shrink:0">&#x2715;</span>
+    </div>
+    <div class="sig-modal-body" id="nmo-body" style="font-size:13px;line-height:1.7;color:var(--text)"></div>
   </div>
 </div>
 
@@ -3135,43 +4061,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div id="history-list"><div class="empty-state"><div class="empty-icon">&#x26A1;</div>Loading&#x2026;</div></div>
     </div>
 
-    <!-- TRUST SUMMARY -->
-    <div class="glass">
-      <div style="padding:10px 14px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--border)">
-        <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">System Trust</div>
-        <div class="trust-mode-pill {% if status.operating_mode == 'LIVE' %}tmp-live{% else %}tmp-paper{% endif %}">{{ status.operating_mode }}</div>
-      </div>
-      <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
-        <div class="trust-params">
-          <div class="tp-item">
-            <div class="tp-label">Min Confidence</div>
-            <div class="tp-val">{{ settings.min_confidence }}</div>
-          </div>
-          <div class="tp-item">
-            <div class="tp-label">Max Position</div>
-            <div class="tp-val">{{ settings.max_position_pct }}%</div>
-          </div>
-          <div class="tp-item">
-            <div class="tp-label">Max Trade</div>
-            <div class="tp-val">${{ settings.max_trade_usd or '∞' }}</div>
-          </div>
-          <div class="tp-item">
-            <div class="tp-label">Close Mode</div>
-            <div class="tp-val">{{ settings.close_session_mode | capitalize }}</div>
-          </div>
-          <div class="tp-item">
-            <div class="tp-label">Staleness</div>
-            <div class="tp-val">{{ settings.max_staleness }}</div>
-          </div>
-          <div class="tp-item">
-            <div class="tp-label">Spousal</div>
-            <div class="tp-val">{{ settings.spousal_weight | capitalize }}</div>
-          </div>
-        </div>
-        <button class="trust-action-btn" onclick="toggleMode()">Switch Mode</button>
-        <button class="trust-action-btn" onclick="showTab('settings')" style="color:var(--teal);border-color:rgba(0,245,212,0.12)">Configure Settings &#x2192;</button>
-      </div>
-    </div>
+
 
   </div>
 
@@ -3706,75 +4596,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   <div class="section-title">Trading Parameters</div>
   <div class="glass" style="margin-bottom:16px">
-    <div class="settings-section" style="display:flex;flex-direction:column;gap:10px">
-      <div>
-        <div class="setting-label">Min Confidence</div>
-        <div class="setting-desc">Minimum signal confidence the agent will trade on</div>
-        <select id="s-min-conf" class="glass-select" style="margin-top:6px;width:100%">
-          <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW — Trade aggressively</option>
-          <option value="MEDIUM" {% if settings.min_confidence != 'LOW' and settings.min_confidence != 'HIGH' %}selected{% endif %}>MEDIUM — Balanced</option>
-          <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH — High confidence only</option>
-        </select>
+    <div style="padding:24px;text-align:center">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+        Trading parameters are configured per-account in the Agent Configuration panel.
       </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px">
-          <div class="setting-label">Max Position Size</div>
-          <div class="setting-desc">% of portfolio per position</div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-            <input id="s-max-pos" type="number" min="1" max="50" class="glass-input" value="{{ settings.max_position_pct }}" placeholder="10" style="width:70px">
-            <span style="font-size:11px;color:var(--muted)">%</span>
-          </div>
-        </div>
-        <div style="flex:1;min-width:120px">
-          <div class="setting-label">Max Trade (USD)</div>
-          <div class="setting-desc">Per-order cap (0 = no limit)</div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-            <span style="font-size:11px;color:var(--muted)">$</span>
-            <input id="s-max-trade-usd" type="number" min="0" class="glass-input" value="{{ settings.max_trade_usd }}" placeholder="0" style="width:90px">
-          </div>
-        </div>
-        <div style="flex:1;min-width:120px">
-          <div class="setting-label">Max Sector Conc.</div>
-          <div class="setting-desc">Max % in any one sector</div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
-            <input id="s-max-sector" type="number" min="1" max="100" class="glass-input" value="{{ settings.max_sector_pct }}" placeholder="40" style="width:70px">
-            <span style="font-size:11px;color:var(--muted)">%</span>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:140px">
-          <div class="setting-label">Close Session Mode</div>
-          <div class="setting-desc">Aggressiveness at market close</div>
-          <select id="s-close-mode" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
-            <option value="moderate" {% if settings.close_session_mode == 'moderate' %}selected{% endif %}>Moderate</option>
-            <option value="aggressive" {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
-          </select>
-        </div>
-        <div style="flex:1;min-width:140px">
-          <div class="setting-label">Signal Staleness</div>
-          <div class="setting-desc">Oldest disclosure to consider</div>
-          <select id="s-staleness" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="Fresh" {% if settings.max_staleness == 'Fresh' %}selected{% endif %}>Fresh (≤3 days)</option>
-            <option value="Aging" {% if settings.max_staleness == 'Aging' %}selected{% endif %}>Aging (≤7 days)</option>
-            <option value="Stale" {% if settings.max_staleness == 'Stale' %}selected{% endif %}>Stale (≤14 days)</option>
-            <option value="Expired" {% if settings.max_staleness == 'Expired' %}selected{% endif %}>All (up to 45 days)</option>
-          </select>
-        </div>
-        <div style="flex:1;min-width:140px">
-          <div class="setting-label">Spousal Filings</div>
-          <div class="setting-desc">How to weight spousal trades</div>
-          <select id="s-spousal" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="reduced" {% if settings.spousal_weight == 'reduced' %}selected{% endif %}>Reduced confidence</option>
-            <option value="skip" {% if settings.spousal_weight == 'skip' %}selected{% endif %}>Skip spousal trades</option>
-            <option value="equal" {% if settings.spousal_weight == 'equal' %}selected{% endif %}>Equal weight</option>
-          </select>
-        </div>
-      </div>
-    </div>
-    <div style="padding:0 18px 16px">
-      <button class="save-btn" onclick="saveQuickSettings()">Save Parameters</button>
+      <button class="save-btn" onclick="toggleConfigPanel()" style="max-width:260px">
+        Open Agent Configuration &#x2192;
+      </button>
     </div>
   </div>
 
@@ -3918,15 +4746,229 @@ let killState = IS_KILL;
 let chartInst = null;
 let allSignals = [];
 
+// ── SIDEBAR ──
+function toggleSidebar(){
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-overlay').classList.toggle('open');
+}
+function closeSidebar(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
+// ── AVATAR DROPDOWN ──
+function toggleAvatarDrop(e){
+  e.stopPropagation();
+  document.getElementById('avatar-drop').classList.toggle('open');
+}
+function closeAvatarDrop(){
+  document.getElementById('avatar-drop').classList.remove('open');
+}
+document.addEventListener('click', function(e){
+  const d = document.getElementById('avatar-drop');
+  if (d) d.classList.remove('open');
+  // Close bell dropdown on outside click
+  const bell = document.getElementById('hdr-bell');
+  const bdrop = document.getElementById('bell-drop');
+  if (bell && bdrop && !bell.contains(e.target)) bdrop.classList.remove('open');
+});
+
+// ── NOTIFICATION BELL ──
+let _bellCategory = '';
+let _bellCache = [];
+
+function toggleBellDrop(e) {
+  e.stopPropagation();
+  const drop = document.getElementById('bell-drop');
+  const isOpen = drop.classList.toggle('open');
+  if (isOpen) loadBellNotifs();
+}
+function closeBellDrop() {
+  document.getElementById('bell-drop').classList.remove('open');
+}
+
+function switchBellTab(btn) {
+  document.querySelectorAll('.bell-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _bellCategory = btn.dataset.cat || '';
+  loadBellNotifs();
+}
+
+async function loadBellNotifs() {
+  try {
+    let url = '/api/notifications?limit=30';
+    if (_bellCategory) url += '&category=' + _bellCategory;
+    const r = await fetch(url);
+    const d = await r.json();
+    _bellCache = d.notifications || [];
+    const list = document.getElementById('bell-list');
+    if (!_bellCache.length) {
+      list.innerHTML = '<div class="bell-empty">No notifications</div>';
+      return;
+    }
+    list.innerHTML = _bellCache.map(function(n) {
+      var dotCls = n.is_read ? 'bell-unread-dot read' : 'bell-unread-dot';
+      var catCls = 'bell-cat-pill bell-cat-' + (n.category || 'system');
+      var ts = n.created_at ? _relTime(n.created_at) : '';
+      var preview = (n.body || '').substring(0, 60);
+      if (n.body && n.body.length > 60) preview += '...';
+      return '<div class="bell-item" onclick="openNotifModal(' + n.id + ')">' 
+        + '<div class="' + dotCls + '"></div>'
+        + '<div class="bell-item-body">'
+        + '<div class="bell-item-title">' + _esc(n.title) + '</div>'
+        + (preview ? '<div class="bell-item-preview">' + _esc(preview) + '</div>' : '')
+        + '<div class="bell-item-meta">'
+        + '<span class="' + catCls + '">' + (n.category || 'system') + '</span>'
+        + '<span class="bell-item-time">' + ts + '</span>'
+        + '</div></div></div>';
+    }).join('');
+  } catch(e) { console.warn('loadBellNotifs', e); }
+}
+
+function _esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function _relTime(iso) {
+  var d = new Date(iso + (iso.includes('Z') || iso.includes('+') ? '' : 'Z'));
+  var secs = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+  if (secs < 604800) return Math.floor(secs / 86400) + 'd ago';
+  return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+}
+
+async function pollUnreadCount() {
+  try {
+    var r = await fetch('/api/notifications/unread-count');
+    var d = await r.json();
+    var badge = document.getElementById('bell-badge');
+    if (d.count > 0) {
+      badge.textContent = d.count > 99 ? '99+' : d.count;
+      badge.classList.add('show');
+    } else {
+      badge.classList.remove('show');
+    }
+  } catch(e) {}
+}
+pollUnreadCount();
+setInterval(pollUnreadCount, 30000);
+
+async function markAllNotifRead() {
+  await fetch('/api/notifications/read', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({all: true, category: _bellCategory || undefined})
+  });
+  loadBellNotifs();
+  pollUnreadCount();
+}
+
+async function openNotifModal(id) {
+  var n = _bellCache.find(function(x) { return x.id === id; });
+  if (!n) return;
+  // Mark read
+  if (!n.is_read) {
+    fetch('/api/notifications/read', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: id})
+    }).then(function() { pollUnreadCount(); });
+    n.is_read = 1;
+  }
+  var catEl = document.getElementById('nmo-cat');
+  catEl.className = 'bell-cat-pill bell-cat-' + (n.category || 'system');
+  catEl.textContent = n.category || 'system';
+  document.getElementById('nmo-title').textContent = n.title;
+  document.getElementById('nmo-time').textContent = n.created_at || '';
+  document.getElementById('nmo-body').innerHTML = (n.body || '').replace(/\n/g, '<br>');
+  document.getElementById('notif-modal-overlay').style.display = 'flex';
+  closeBellDrop();
+  loadBellNotifs();
+}
+
+function closeNotifModal(e) {
+  if (!e || e.target === document.getElementById('notif-modal-overlay')) {
+    document.getElementById('notif-modal-overlay').style.display = 'none';
+  }
+}
+
+// ── CONFIG PANEL ──
+function toggleConfigPanel(){
+  const open = document.getElementById('cfg-panel').classList.toggle('open');
+  document.getElementById('cfg-overlay').classList.toggle('open', open);
+  const kb = document.getElementById('cfg-kill-btn');
+  if (kb) {
+    kb.textContent = killState ? 'Disengage Kill Switch' : 'Engage Kill Switch';
+  }
+}
+function closeConfigPanel(){
+  document.getElementById('cfg-panel').classList.remove('open');
+  document.getElementById('cfg-overlay').classList.remove('open');
+}
+
+async function loadCfgPanel() {
+  try {
+    const r = await fetch('/api/customer-settings');
+    const d = await r.json();
+    if (d.error) return;
+    const g = id => document.getElementById(id);
+    if (g('cfg-min-conf'))      g('cfg-min-conf').value = d.MIN_CONFIDENCE || 'LOW';
+    if (g('cfg-max-pos'))       g('cfg-max-pos').value = d.MAX_POSITION_PCT_DISPLAY || '10';
+    if (g('cfg-max-trade-usd')) g('cfg-max-trade-usd').value = d.MAX_TRADE_USD || '0';
+    if (g('cfg-max-sector'))    g('cfg-max-sector').value = d.MAX_SECTOR_PCT || '25';
+    if (g('cfg-close-mode'))    g('cfg-close-mode').value = d.CLOSE_SESSION_MODE || 'aggressive';
+    if (g('cfg-staleness'))     g('cfg-staleness').value = d.MAX_STALENESS || 'Aging';
+    if (g('cfg-spousal'))       g('cfg-spousal').value = d.SPOUSAL_WEIGHT || 'reduced';
+    // Kill switch state
+    var killBtn = g('cfg-kill-btn');
+    if (killBtn) {
+      var isKilled = d.KILL_SWITCH === '1';
+      killBtn.textContent = isKilled ? 'Disengage Kill Switch' : 'Engage Kill Switch';
+    }
+  } catch(e) { console.error('loadCfgPanel:', e); }
+}
+
+async function saveCfgPanel(){
+  const data = {
+    min_confidence:    document.getElementById('cfg-min-conf')?.value,
+    max_position_pct:  parseFloat(document.getElementById('cfg-max-pos')?.value)||10,
+    max_trade_usd:     parseFloat(document.getElementById('cfg-max-trade-usd')?.value)||0,
+    max_sector_pct:    parseFloat(document.getElementById('cfg-max-sector')?.value)||40,
+    close_session_mode:document.getElementById('cfg-close-mode')?.value,
+    max_staleness:     document.getElementById('cfg-staleness')?.value,
+    spousal_weight:    document.getElementById('cfg-spousal')?.value,
+  };
+  const mirror = {
+    // Mirror removed — settings tab uses config panel
+  };
+  Object.entries(mirror).forEach(([id,v])=>{ const el=document.getElementById(id); if(el) el.value=v; });
+  const r = await fetch('/api/settings', {
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)
+  });
+  const d = await r.json();
+  toast(d.ok ? 'Configuration saved' : 'Save failed', d.ok ? 'ok' : 'err');
+}
+async function cfgKillToggle(){
+  const btn = document.getElementById('cfg-kill-btn');
+  const engaged = btn.textContent.includes('Disengage');
+  const r = await fetch('/api/kill-switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engage:!engaged})});
+  const d = await r.json();
+  if (d.ok !== false) {
+    killState = !engaged;
+    btn.textContent = !engaged ? 'Disengage Kill Switch' : 'Engage Kill Switch';
+    toast(!engaged ? 'Kill switch ENGAGED' : 'Kill switch disengaged', !engaged ? 'err' : 'ok');
+  }
+}
+
 // ── TABS ──
 function showTab(t, e) {
   ['dashboard','intel','news','screening','performance','risk','settings'].forEach(id => {
     const el = document.getElementById('tab-'+id);
     if (el) el.style.display = id===t ? '' : 'none';
+    // Sidebar active state
+    const sb = document.getElementById('snb-'+id);
+    if (sb) sb.classList.toggle('active', id===t);
   });
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  const evtTarget = e ? e.target : (event && event.target);
-  if (evtTarget) evtTarget.classList.add('active');
   if (t === 'intel') loadIntel();
   if (t === 'news') loadNews('all');
   if (t === 'screening') loadScreening();
@@ -4158,8 +5200,8 @@ async function toggleMode() {
   if (d.ok) {
     const isAuto = next === 'AUTOMATIC';
     const navBtn = document.getElementById('mode-nav-btn');
-    navBtn.textContent = isAuto ? '⚡ Automatic' : '🎯 Managed';
-    navBtn.className   = 'nav-btn' + (isAuto ? ' sp-warn' : '');
+    navBtn.className   = 'hdr-mode-pill' + (isAuto ? ' mp-auto' : '');
+    navBtn.textContent = isAuto ? 'AUTO' : 'MANAGED';
     navBtn.title       = isAuto ? 'Automatic — bot executes trades' : 'Managed — you approve all trades';
     document.getElementById('mode-bar').className = 'kill-bar' + (isAuto ? '' : ' clear');
     document.getElementById('mode-bar-label').textContent = isAuto ? '⚡ Automatic Mode' : '● Managed Mode';
@@ -4908,7 +5950,7 @@ async function loadIntel() {
     document.getElementById('intel-count').textContent =
       freshCount + ' fresh' + (staleCount ? ' · ' + staleCount + ' archive' : '');
     renderIntelGrid(signals);
-  } catch(e) {}
+  } catch(e) { console.error('loadIntel error:', e); }
 }
 
 function filterIntel(type, btn) {
@@ -4949,7 +5991,7 @@ function renderIntelGrid(signals) {
     const as = agentScore(s); const ms = marketScore(s);
     const sent = sentiment(s);
     const col = colors[i%colors.length];
-    return `<div class="charm ${sent}" style="cursor:pointer" onclick="openSigModal(${JSON.stringify(s).replace(/'/g,'&#39;')})">
+    return `<div class="charm ${sent}" style="cursor:pointer" data-sig-idx="${i}" onclick="openSigModal(allSignals[this.dataset.sigIdx])">
       <div class="charm-top">
         <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
         <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
@@ -4975,6 +6017,65 @@ function renderIntelGrid(signals) {
       ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   }).join('');
+}
+
+
+function updateHeroCards(signals) {
+  if (!signals || !signals.length) return;
+  function _as(s) {
+    var base = s.confidence==='HIGH'?87:s.confidence==='MEDIUM'?63:s.confidence==='NOISE'?15:30;
+    var sent = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score)*20) : 0;
+    return Math.min(99, Math.max(5, base + sent));
+  }
+  function _ms(s) {
+    var a = _as(s);
+    var adj = s.is_stale ? -12 : (s.corroborated ? 8 : 0);
+    return Math.min(99, Math.max(5, a - 8 + adj));
+  }
+  var fresh = signals.filter(function(s){ return !s.is_stale; });
+  if (!fresh.length) fresh = signals;
+  var ranked = fresh.slice().sort(function(a,b){
+    return (_as(b)+(b.corroborated?10:0)) - (_as(a)+(a.corroborated?10:0));
+  });
+  var top = ranked[0];
+  var diverged = fresh.slice().sort(function(a,b){
+    return Math.abs(_as(b)-_ms(b)) - Math.abs(_as(a)-_ms(a));
+  });
+  var div = diverged[0];
+  if (div === top && diverged.length > 1) div = diverged[1];
+  var cards = document.querySelectorAll('.hero-card');
+  // Hero #1 Conviction
+  if (cards[0] && top) {
+    var a1=_as(top), m1=_ms(top);
+    var c1 = signals.filter(function(s){return s.ticker===top.ticker}).length;
+    cards[0].querySelector('.hero-icon').textContent = (top.ticker||'?').slice(0,4);
+    cards[0].querySelector('.hero-ticker').textContent = top.ticker||'??';
+    cards[0].querySelector('.hero-label').textContent = (top.headline||'').slice(0,40)||'Top Signal';
+    var cv=cards[0].querySelectorAll('.hero-conv');
+    if(cv[0]){cv[0].querySelector('.hero-conv-val').textContent=a1;cv[0].querySelector('.hero-conv-fill').style.width=a1+'%';}
+    if(cv[1]){cv[1].querySelector('.hero-conv-val').textContent=m1;cv[1].querySelector('.hero-conv-fill').style.width=m1+'%';}
+    var hm=cards[0].querySelectorAll('.hm-val');
+    if(hm[0])hm[0].textContent=(a1>m1?'+':'')+(a1-m1);
+    if(hm[1])hm[1].textContent=c1+' hit'+(c1!==1?'s':'');
+    if(hm[2])hm[2].textContent=top.corroborated?'Confirmed':'Pending';
+    var p=cards[0].querySelector('.hero-pending');if(p)p.style.display='none';
+  }
+  // Hero #2 Divergence
+  if (cards[1] && div) {
+    var a2=_as(div), m2=_ms(div), sp=a2-m2;
+    var c2 = signals.filter(function(s){return s.ticker===div.ticker}).length;
+    cards[1].querySelector('.hero-icon').textContent = (div.ticker||'?').slice(0,4);
+    cards[1].querySelector('.hero-ticker').textContent = div.ticker||'??';
+    cards[1].querySelector('.hero-label').textContent = (div.headline||'').slice(0,40)||'Agent Edge';
+    var cv2=cards[1].querySelectorAll('.hero-conv');
+    if(cv2[0]){cv2[0].querySelector('.hero-conv-val').textContent=a2;cv2[0].querySelector('.hero-conv-fill').style.width=a2+'%';}
+    if(cv2[1]){cv2[1].querySelector('.hero-conv-val').textContent=m2;cv2[1].querySelector('.hero-conv-fill').style.width=m2+'%';}
+    var hm2=cards[1].querySelectorAll('.hm-val');
+    if(hm2[0])hm2[0].textContent=(sp>=0?'+':'')+sp+' pts';
+    if(hm2[1])hm2[1].textContent=c2+' hit'+(c2!==1?'s':'');
+    if(hm2[2])hm2[2].textContent=div.corroborated?'Confirmed':'Pending';
+    var p2=cards[1].querySelector('.hero-pending');if(p2)p2.style.display='none';
+  }
 }
 
 function openSigModal(s) {
@@ -5142,11 +6243,27 @@ function updateMarketClock() {
   };
 
   const isWeekend = day === 0 || day === 6;
-  let status, dotCls, pillCls, nextLabel, minsToNext;
+  let status, dotCls, pillCls, nextLabel, minsToNext, nextOpenStr;
+
+  // Compute next market open date+time for display when closed/weekend
+  function getNextMarketOpen(etNow) {
+    const d = new Date(etNow);
+    const dow = d.getDay();
+    if (dow === 6) d.setDate(d.getDate() + 2);       // Sat → Mon
+    else if (dow === 0) d.setDate(d.getDate() + 1);   // Sun → Mon
+    else if (d.getHours() * 60 + d.getMinutes() >= 960) {
+      // After 4pm weekday → next business day
+      d.setDate(d.getDate() + (dow === 5 ? 3 : 1));   // Fri → Mon, else +1
+    }
+    d.setHours(9, 30, 0, 0);
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    return dayNames[d.getDay()] + ' ' + mon[d.getMonth()] + ' ' + d.getDate() + ' 9:30a ET';
+  }
 
   if (isWeekend) {
     status = 'CLOSED'; dotCls = 'dot-dim'; pillCls = 'sp-dim';
-    nextLabel = 'Opens Mon'; minsToNext = null;
+    nextOpenStr = getNextMarketOpen(et);
   } else if (mins < 240) {                   // < 4:00 AM
     status = 'CLOSED'; dotCls = 'dot-dim'; pillCls = 'sp-dim';
     nextLabel = 'Pre'; minsToNext = 240 - mins;
@@ -5159,15 +6276,19 @@ function updateMarketClock() {
   } else if (mins < 1200) {                  // 4:00 – 8:00 PM
     status = 'AFTER-HOURS'; dotCls = 'dot-warn'; pillCls = 'sp-warn';
     nextLabel = 'Closed'; minsToNext = 1200 - mins;
-  } else {
+  } else {                                    // 8pm+ weekday
     status = 'CLOSED'; dotCls = 'dot-dim'; pillCls = 'sp-dim';
-    nextLabel = 'Pre'; minsToNext = 1680 - mins; // next 4AM
+    nextOpenStr = getNextMarketOpen(et);
   }
 
   pill.className  = 'status-pill ' + pillCls;
   dot.className   = 'status-dot ' + dotCls;
   label.textContent = status;
-  cdown.textContent = minsToNext ? `· ${nextLabel} ${fmt(minsToNext)}` : '';
+  if (nextOpenStr) {
+    cdown.textContent = '· Opens ' + nextOpenStr;
+  } else {
+    cdown.textContent = minsToNext ? `· ${nextLabel} ${fmt(minsToNext)}` : '';
+  }
 }
 
 async function loadMarketIndices() {
@@ -5232,8 +6353,36 @@ async function loadTraderActivity() {
         </div>
       </div>`);
     });
+    // Add recent system_log entries (trade decisions, approvals, etc.)
+    (d.recent||[]).slice(0,12).forEach(r => {
+      const ev   = r.event||'EVENT';
+      const agent = r.agent||'';
+      const time = (r.timestamp||'').slice(11,16);
+      let det = '';
+      try { det = typeof r.details === 'string' ? r.details : JSON.stringify(r.details); } catch(e){ det=r.details||''; }
+      det = (det||'').slice(0,70);
+
+      const evColors = {
+        'TRADE_DECISION':'var(--teal)','TRADE_APPROVED':'#00f5d4',
+        'TRADE_PENDING_APPROVAL':'var(--amber)','TRADE_REJECTED':'var(--pink)',
+        'BIL_BUY':'var(--purple)','ORPHAN_POSITION':'var(--pink)',
+        'AGENT_COMPLETE':'var(--dim)'
+      };
+      const evColor = evColors[ev] || 'var(--muted)';
+      const evShort = ev.replace('TRADE_','').replace('_',' ');
+
+      items.push('<div class="agent-row" style="cursor:default">'
+        +'<div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);color:'+evColor+';font-size:8px;letter-spacing:0.02em">'+evShort.slice(0,4)+'</div>'
+        +'<div class="agent-row-body">'
+        +'<div class="agent-row-ticker" style="color:'+evColor+'">'+evShort+'<span style="font-size:9px;color:var(--dim);margin-left:6px">'+agent+'</span></div>'
+        +'<div class="agent-row-sub">'+det+'</div>'
+        +'</div>'
+        +'<div class="agent-row-right"><div class="agent-row-time">'+time+'</div></div>'
+        +'</div>');
+    });
+
     if (!items.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\u26a1</div>No recent trader scans</div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\u26a1</div>No recent activity</div>';
     } else {
       el.innerHTML = items.join('');
       if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
@@ -5375,6 +6524,7 @@ loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
+loadCfgPanel();
 loadNews('all');
 updateMarketClock();
 updateSessionTimeline();
@@ -5593,31 +6743,23 @@ def api_set_mode():
 
 
 @app.route('/api/kill-switch', methods=['POST'])
-@admin_required
+@login_required
 def api_kill_switch():
+    """Per-customer kill switch stored in customer_settings DB.
+    Global .kill_switch file remains as admin ALL-STOP override."""
     data   = request.get_json(silent=True) or {}
     engage = data.get('engage', True)
     try:
+        db = _customer_db()
+        db.set_setting('KILL_SWITCH', '1' if engage else '0')
         if engage:
-            with open(KILL_SWITCH_FILE, 'w') as f:
-                f.write(f"Kill switch engaged at {now_et()}\n")
-            log.warning("KILL SWITCH ENGAGED via portal")
-            try:
-                from retail_database import get_db
-                get_db().log_event("KILL_SWITCH_ENGAGED", agent="portal",
-                                   details=f"Engaged via web portal at {now_et()}")
-            except Exception:
-                pass
+            log.warning(f"KILL SWITCH ENGAGED for customer {session.get('customer_id','?')}")
+            db.log_event("KILL_SWITCH_ENGAGED", agent="portal",
+                         details=f"Per-customer kill switch engaged at {now_et()}")
         else:
-            if os.path.exists(KILL_SWITCH_FILE):
-                os.remove(KILL_SWITCH_FILE)
-            log.info("Kill switch cleared via portal")
-            try:
-                from retail_database import get_db
-                get_db().log_event("KILL_SWITCH_CLEARED", agent="portal",
-                                   details=f"Cleared via web portal at {now_et()}")
-            except Exception:
-                pass
+            log.info(f"Kill switch cleared for customer {session.get('customer_id','?')}")
+            db.log_event("KILL_SWITCH_CLEARED", agent="portal",
+                         details=f"Per-customer kill switch cleared at {now_et()}")
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"Kill switch error: {e}")
@@ -5865,37 +7007,89 @@ def api_change_email():
 @app.route('/api/settings', methods=['POST'])
 @login_required
 def api_settings():
-    """Save advanced settings to .env."""
+    """Save trading settings to per-customer DB (customer_settings table).
+    Falls through to global .env only for system-level keys."""
     data = request.get_json(silent=True) or {}
-    mapping = {
-        'max_sector_pct':     'MAX_SECTOR_PCT',
+
+    # Per-customer trading params → customer_settings table
+    customer_keys = {
         'min_confidence':     'MIN_CONFIDENCE',
-        'max_staleness':      'MAX_STALENESS',
+        'max_position_pct':   'MAX_POSITION_PCT',
+        'max_trade_usd':      'MAX_TRADE_USD',
+        'max_sector_pct':     'MAX_SECTOR_PCT',
         'close_session_mode': 'CLOSE_SESSION_MODE',
+        'max_staleness':      'MAX_STALENESS',
         'spousal_weight':     'SPOUSAL_WEIGHT',
+        'operating_mode':     'OPERATING_MODE',
     }
     try:
-        # MAX_POSITION_PCT: form sends integer percent (10), agent reads decimal (0.10)
-        if 'max_position_pct' in data:
-            decimal_val = round(float(data['max_position_pct']) / 100, 4)
-            update_env('MAX_POSITION_PCT', str(decimal_val))
-        if 'max_trade_usd' in data:
-            update_env('MAX_TRADE_USD', str(float(data['max_trade_usd'])))
-        for form_key, env_key in mapping.items():
+        db = _customer_db()
+        written = []
+        for form_key, env_key in customer_keys.items():
             if form_key in data:
-                update_env(env_key, str(data[form_key]))
-        log.info(f"Settings updated: {list(data.keys())}")
-        try:
-            from retail_database import get_db
-            get_db().log_event("SETTINGS_UPDATED", agent="portal",
-                               details=str(data))
-        except Exception:
-            pass
-        return jsonify({"ok": True})
+                val = data[form_key]
+                # MAX_POSITION_PCT: form sends integer percent (10), store as decimal (0.10)
+                if form_key == 'max_position_pct':
+                    val = str(round(float(val) / 100, 4))
+                elif form_key == 'max_trade_usd':
+                    val = str(float(val))
+                else:
+                    val = str(val)
+                db.set_setting(env_key, val)
+                written.append(env_key)
+
+        if written:
+            log.info(f"Customer settings saved: {written}")
+            db.log_event("SETTINGS_UPDATED", agent="portal",
+                         details=str({k: data[k] for k in data if k in customer_keys}))
+
+        return jsonify({"ok": True, "written": written})
     except Exception as e:
         log.error(f"Settings save error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+
+
+@app.route('/api/customer-settings')
+@login_required
+def api_customer_settings():
+    """Read per-customer settings with global .env fallback."""
+    try:
+        db = _customer_db()
+        customer = db.get_all_settings()
+
+        # Global defaults from .env
+        global_defaults = {
+            'OPERATING_MODE':     os.environ.get('OPERATING_MODE', 'SUPERVISED'),
+            'MIN_CONFIDENCE':     os.environ.get('MIN_CONFIDENCE', 'LOW'),
+            'MAX_POSITION_PCT':   os.environ.get('MAX_POSITION_PCT', '0.10'),
+            'MAX_TRADE_USD':      os.environ.get('MAX_TRADE_USD', '1000'),
+            'MAX_SECTOR_PCT':     os.environ.get('MAX_SECTOR_PCT', '25'),
+            'CLOSE_SESSION_MODE': os.environ.get('CLOSE_SESSION_MODE', 'aggressive'),
+            'MAX_STALENESS':      os.environ.get('MAX_STALENESS', 'Aging'),
+            'SPOUSAL_WEIGHT':     os.environ.get('SPOUSAL_WEIGHT', 'reduced'),
+            'KILL_SWITCH':        '1' if kill_switch_active() else '0',
+        }
+
+        # Merge: customer overrides global
+        merged = dict(global_defaults)
+        merged.update(customer)
+
+        # Convert MAX_POSITION_PCT from decimal to percent for display
+        try:
+            pct = float(merged.get('MAX_POSITION_PCT', '0.10'))
+            if pct < 1:  # stored as decimal
+                merged['MAX_POSITION_PCT_DISPLAY'] = str(int(pct * 100))
+            else:
+                merged['MAX_POSITION_PCT_DISPLAY'] = str(int(pct))
+        except (ValueError, TypeError):
+            merged['MAX_POSITION_PCT_DISPLAY'] = '10'
+
+        merged['_source'] = {k: 'customer' if k in customer else 'global' for k in merged}
+        return jsonify(merged)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status')
 def api_status():
@@ -6649,9 +7843,15 @@ def api_trader_activity():
             recent = c.execute("""
                 SELECT event, agent, details, timestamp
                 FROM system_log
-                WHERE event IN ('TRADE_EXECUTED','TRADE_QUEUED','SIGNAL_QUEUED',
-                                'NEWS_CLASSIFIED','AGENT_COMPLETE')
-                ORDER BY timestamp DESC LIMIT 20
+                WHERE event IN ('TRADE_DECISION','TRADE_APPROVED','TRADE_PENDING_APPROVAL',
+                                'TRADE_REJECTED','BIL_BUY','ORPHAN_POSITION',
+                                'AGENT_COMPLETE','AGENT_START')
+                ORDER BY
+                    CASE WHEN event LIKE 'TRADE%' THEN 0
+                         WHEN event IN ('BIL_BUY','ORPHAN_POSITION') THEN 1
+                         ELSE 2 END,
+                    timestamp DESC
+                LIMIT 30
             """).fetchall()
         return jsonify({
             'scans':  [dict(r) for r in scans],
