@@ -8317,10 +8317,13 @@ def api_agent_pulse():
         # Market regime from last sentiment
         regime = 'unknown'
         for e in events:
-            if e['agent'] == 'The Pulse' and e['event'] == 'AGENT_COMPLETE':
-                det = e.get('details', '')
-                if 'regime=' in det:
-                    regime = det.split('regime=')[1].split(' ')[0]
+            if e.get('agent') == 'The Pulse' and e.get('event') == 'AGENT_COMPLETE':
+                det = e.get('details') or ''
+                try:
+                    if 'regime=' in det:
+                        regime = det.split('regime=')[1].split(' ')[0].split(',')[0]
+                except (IndexError, AttributeError):
+                    pass
                 break
 
         return jsonify({

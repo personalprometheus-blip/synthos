@@ -96,6 +96,14 @@ def _db():
     return get_db()
 
 
+_OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+
+def _shared_db():
+    """Return the master/owner customer DB for shared data (signals, news, intel)."""
+    from retail_database import get_customer_db
+    return get_customer_db(_OWNER_CID)
+
+
 def _customer_email() -> str:
     """Resolve the notification email for this run.
 
@@ -1636,10 +1644,12 @@ def sync_bil_reserve(db, alpaca):
         account   = alpaca.get_account()
         if not account:
             return
+        equity    = float(account.get('equity', 0))
         free_cash = float(account.get('cash', 0))
         bil_pos   = alpaca.get_position_safe(C.BIL_TICKER)
         bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
-        total_liq = free_cash + bil_value
+        # Use equity (not cash + bil) to avoid margin-inflated totals
+        total_liq = equity
         target    = round(total_liq * C.IDLE_RESERVE_PCT, 2)
         delta     = round(target - bil_value, 2)
         log.info(f"[BIL] Liquid: ${total_liq:.2f} | Current: ${bil_value:.2f} | "
@@ -1647,7 +1657,16 @@ def sync_bil_reserve(db, alpaca):
         if abs(delta) < C.BIL_REBALANCE_THRESHOLD:
             return
         if delta > 0:
-            buy = min(delta, max(0.0, free_cash - 1.0))
+            # Safety: never buy more BIL than actual cash allows (prevent margin usage)
+            # Also preserve tradeable capital — don't lock more than target in BIL
+            max_bil = equity * C.IDLE_RESERVE_PCT
+            if free_cash < 0:
+                log.warning(f"[BIL] Negative cash (${free_cash:.2f}) — skipping buy")
+                return
+            # Never spend more than 50% of free cash on BIL in one go
+            buy = min(delta, max(0.0, free_cash * 0.5), max_bil - bil_value)
+            if buy < C.BIL_REBALANCE_THRESHOLD:
+                return
             if buy >= C.BIL_REBALANCE_THRESHOLD:
                 if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
                     db.log_event("BIL_BUY", agent="Trade Logic",
@@ -1672,7 +1691,8 @@ def reconcile_with_alpaca(db, alpaca):
     try:
         alpaca_positions = alpaca.get_positions()
         if alpaca_positions is None:
-            return True
+            log.warning("Alpaca positions API returned None — skipping reconciliation (unknown state)")
+            return None  # None = unknown, distinct from True (OK) and False (mismatch)
         account = alpaca.get_account()
         if account:
             alpaca_cash   = float(account.get('cash', 0))
@@ -1770,7 +1790,7 @@ def run(session="open"):
 
     # ── PRE-TRADE: Reconcile and BIL
     reconcile_ok = reconcile_with_alpaca(db, alpaca)
-    if reconcile_ok is not False:
+    if reconcile_ok is True:
         sync_bil_reserve(db, alpaca)
 
     # ── EXPIRE STALE APPROVALS
@@ -2004,7 +2024,7 @@ def run(session="open"):
         if not can_enter:
             log.info("Deployment/position cap reached — no new entries this session")
         else:
-            signals = db.get_queued_signals()
+            signals = _shared_db().get_queued_signals()
             log.info(f"Evaluating {len(signals)} queued signal(s)")
 
             for signal in signals:

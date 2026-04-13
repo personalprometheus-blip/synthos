@@ -573,8 +573,25 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
             (customer_id, now, reviewed_by, signup_id)
         )
 
-    # Create per-customer data directory
-    os.makedirs(os.path.join(CUSTOMERS_DIR, customer_id), exist_ok=True)
+    # Create per-customer data directory and initialize DB from default template
+    customer_dir = os.path.join(CUSTOMERS_DIR, customer_id)
+    os.makedirs(customer_dir, exist_ok=True)
+
+    # Copy default template DB to give new customer a clean schema + default settings
+    default_db = os.path.join(CUSTOMERS_DIR, 'default', 'signals.db')
+    customer_db = os.path.join(customer_dir, 'signals.db')
+    if os.path.exists(default_db) and not os.path.exists(customer_db):
+        import shutil
+        shutil.copy2(default_db, customer_db)
+        log.info(f"Customer DB initialized from default template: {customer_db}")
+    elif not os.path.exists(customer_db):
+        # Fallback: create DB via retail_database module
+        try:
+            from retail_database import get_customer_db
+            get_customer_db(customer_id)  # triggers schema creation
+            log.info(f"Customer DB created via schema bootstrap: {customer_db}")
+        except Exception as e:
+            log.warning(f"Could not initialize customer DB: {e}")
 
     log.info(f"Approved signup #{signup_id}: {email} -> customer {customer_id}")
     return {
