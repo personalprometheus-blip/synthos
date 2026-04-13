@@ -215,6 +215,8 @@ def _migrate_auth_db():
         ("pricing_locked_at",    "TEXT"),
         ("tos_accepted_at",      "TEXT"),
         ("tos_version",          "TEXT"),
+            ("state",              "ALTER TABLE customers ADD COLUMN state TEXT"),
+            ("zip_code",           "ALTER TABLE customers ADD COLUMN zip_code TEXT"),
         ("phone_enc",            "BLOB"),
     ]
     with _auth_conn() as c:
@@ -445,7 +447,7 @@ def list_customers() -> list:
 
 # ── SIGNUP MANAGEMENT ─────────────────────────────────────────────────────
 
-def create_pending_signup(name: str, email: str, phone: str, password: str) -> int:
+def create_pending_signup(name: str, email: str, phone: str, password: str, state: str = '', zip_code: str = '') -> int:
     """
     Create a pending signup. Stores password hash (not plaintext).
     Returns the signup row ID. Raises ValueError if email already registered or pending.
@@ -473,18 +475,18 @@ def create_pending_signup(name: str, email: str, phone: str, password: str) -> i
                 raise ValueError("This email has already been approved")
             # If REJECTED, allow re-signup by updating the row
             c.execute(
-                "UPDATE pending_signups SET name=?, phone=?, password_hash=?, "
+                "UPDATE pending_signups SET name=?, phone=?, password_hash=?, state=?, zip_code=?, "
                 "status='PENDING', created_at=?, reviewed_at=NULL, reviewed_by=NULL "
                 "WHERE id=?",
-                (name, phone, hash_password(password), now, existing_signup['id'])
+                (name, phone, hash_password(password), state, zip_code, now, existing_signup['id'])
             )
             log.info(f"Re-submitted rejected signup: {email}")
             return existing_signup['id']
 
         c.execute(
-            "INSERT INTO pending_signups (name, email, phone, password_hash, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (name, email, phone, hash_password(password), now)
+            "INSERT INTO pending_signups (name, email, phone, password_hash, state, zip_code, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, email, phone, hash_password(password), state, zip_code, now)
         )
         signup_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
@@ -542,8 +544,9 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
             """INSERT INTO customers
                (id, email_hash, email_enc, display_name_enc, phone_enc,
                 password_hash, role, email_verified, subscription_status,
-                pricing_tier, pricing_locked_at, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                pricing_tier, pricing_locked_at, created_at,
+                state, zip_code, tos_accepted_at, tos_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 customer_id,
                 email_hash,
@@ -557,6 +560,10 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
                 'early_adopter',        # trial users get early_adopter pricing
                 now,                    # pricing_locked_at
                 now,                    # created_at
+                row.get('state', ''),   # from signup form
+                row.get('zip_code', ''),# from signup form
+                now,                    # tos_accepted_at (auto-accept on approval)
+                '1.0',                  # tos_version
             )
         )
 
@@ -599,16 +606,11 @@ def generate_signup_verify_token(signup_id: int) -> str:
     """Generate a one-time email verification token for a pending signup."""
     import secrets
     token = secrets.token_urlsafe(32)
-    db = sqlite3.connect(AUTH_DB_PATH, timeout=10)
-    db.row_factory = sqlite3.Row
-    try:
-        db.execute(
+    with _auth_conn() as c:
+        c.execute(
             "UPDATE pending_signups SET email_verify_token=? WHERE id=?",
             (token, signup_id)
         )
-        db.commit()
-    finally:
-        db.close()
     return token
 
 
@@ -619,10 +621,8 @@ def verify_signup_email(token: str) -> dict:
     Raises ValueError on invalid/expired/already-used token.
     """
     from datetime import datetime, timedelta, timezone
-    db = sqlite3.connect(AUTH_DB_PATH, timeout=10)
-    db.row_factory = sqlite3.Row
-    try:
-        row = db.execute(
+    with _auth_conn() as c:
+        row = c.execute(
             "SELECT id, name, email, status, email_verified, created_at "
             "FROM pending_signups WHERE email_verify_token=?",
             (token,)
@@ -650,15 +650,12 @@ def verify_signup_email(token: str) -> dict:
             pass  # If date parsing fails, allow verification
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        db.execute(
+        c.execute(
             "UPDATE pending_signups SET email_verified=1, email_verified_at=?, "
             "email_verify_token=NULL WHERE id=?",
             (now_iso, signup_id)
         )
-        db.commit()
         return {"signup_id": signup_id, "name": name, "email": email}
-    finally:
-        db.close()
 
 
 

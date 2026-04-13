@@ -245,13 +245,21 @@ def _apply_customer_settings():
 
         # Map DB keys to Controls attributes with type conversion
         overrides = {
-            'MIN_CONFIDENCE':     ('MIN_CONFIDENCE_SCORE', lambda v: {'LOW': 0.30, 'MEDIUM': 0.55, 'HIGH': 0.75}.get(v, float(v))),
-            'MAX_POSITION_PCT':   ('MAX_POSITION_PCT',     float),
-            'MAX_TRADE_USD':      ('MAX_TRADE_USD',        float),
-            'MAX_SECTOR_PCT':     ('MAX_SECTOR_PCT',       lambda v: float(v) / 100 if float(v) > 1 else float(v)),
-            'CLOSE_SESSION_MODE': ('CLOSE_SESSION_MODE',   str),
-            'SPOUSAL_WEIGHT':     ('SPOUSAL_WEIGHT',       str),
-            'MAX_STALENESS':      ('MAX_STALENESS',        str),
+            'MIN_CONFIDENCE':       ('MIN_CONFIDENCE_SCORE',   lambda v: {'LOW': 0.30, 'MEDIUM': 0.55, 'HIGH': 0.75}[v] if v in ('LOW','MEDIUM','HIGH') else float(v)),
+            'MAX_POSITION_PCT':     ('MAX_POSITION_PCT',       float),
+            'MAX_TRADE_USD':        ('MAX_TRADE_USD',          float),
+            'MAX_POSITIONS':        ('MAX_POSITIONS',          int),
+            'MAX_DAILY_LOSS':       ('MAX_DAILY_LOSS',         lambda v: -abs(float(v))),
+            'MAX_SECTOR_PCT':       ('MAX_SECTOR_PCT',         lambda v: float(v) / 100 if float(v) > 1 else float(v)),
+            'CLOSE_SESSION_MODE':   ('CLOSE_SESSION_MODE',     str),
+            'MAX_STALENESS':        ('MAX_STALENESS',          str),
+            'MAX_DRAWDOWN_PCT':     ('MAX_DRAWDOWN_PCT',       lambda v: float(v) / 100 if float(v) > 1 else float(v)),
+            'MAX_HOLDING_DAYS':     ('MAX_HOLDING_DAYS',       int),
+            'MAX_GROSS_EXPOSURE':   ('MAX_GROSS_EXPOSURE',     lambda v: float(v) / 100 if float(v) > 1 else float(v)),
+            'PROFIT_TARGET_MULTIPLE':('PROFIT_TARGET_MULTIPLE', float),
+            'TRADING_MODE':         ('TRADING_MODE',           str),
+            'ENABLE_BIL_RESERVE':   ('ENABLE_BIL_RESERVE',     lambda v: v != '0'),
+            'IDLE_RESERVE_PCT':     ('IDLE_RESERVE_PCT',       lambda v: float(v) / 100 if float(v) > 1 else float(v)),
         }
 
         applied = []
@@ -606,7 +614,7 @@ class AlpacaClient:
                 headers=headers, timeout=20,
             )
             if r.status_code == 200:
-                return r.json().get("bars", [])
+                return r.json().get("bars") or []
         except Exception as e:
             log.warning(f"get_bars({ticker}): {e}")
         return []
@@ -636,6 +644,8 @@ class AlpacaClient:
 
     def get_volume_avg(self, ticker, days=30) -> int:
         bars = self.get_bars(ticker, days=days + 5)
+        if not bars:
+            return 0
         vols = [b["v"] for b in bars[-days:]]
         return int(sum(vols) / len(vols)) if vols else 0
 
@@ -714,10 +724,13 @@ def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bo
     }, "within market hours" if mtr["is_market_hours"] else "outside market hours (evaluation only)")
     # Non-fatal — agent runs 24/7, evaluates signals any time
 
-    # Kill switch
-    if kill_switch_active():
-        decision_log.gate("1_KILL_SWITCH", False, {}, "kill switch file present")
-        decision_log.decide("HALT", "Kill switch active")
+    # Kill switch — global file OR per-customer DB flag
+    _global_kill = kill_switch_active()
+    _customer_kill = getattr(C, '_customer_kill_switch', False)
+    if _global_kill or _customer_kill:
+        source = "global file" if _global_kill else "per-customer setting"
+        decision_log.gate("1_KILL_SWITCH", False, {"source": source}, f"kill switch active ({source})")
+        decision_log.decide("HALT", f"Kill switch active ({source})")
         return False
 
     # Portfolio drawdown limit
@@ -1615,6 +1628,10 @@ def send_protective_exit_email(ticker, reason, reasoning, entry_price,
 # ── BIL RESERVE (KEEP from v1.x — REVIEW: integrate into Gate 11) ────────────
 
 def sync_bil_reserve(db, alpaca):
+    # Check per-customer BIL setting
+    if not getattr(C, 'ENABLE_BIL_RESERVE', True):
+        log.info('[BIL] Treasury reserve disabled by customer setting')
+        return
     try:
         account   = alpaca.get_account()
         if not account:
@@ -1658,11 +1675,13 @@ def reconcile_with_alpaca(db, alpaca):
             return True
         account = alpaca.get_account()
         if account:
-            alpaca_cash = float(account.get('cash', 0))
+            alpaca_cash   = float(account.get('cash', 0))
+            alpaca_equity = float(account.get('equity', 0))
             if alpaca_cash > 0:
-                bil_pos   = alpaca.get_position_safe(C.BIL_TICKER)
-                bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
-                db.update_portfolio(cash=alpaca_cash + bil_value)
+                # Cash = Alpaca cash only. BIL is tracked as a position, not added to cash.
+                # Store equity separately for tier calculations.
+                db.update_portfolio(cash=alpaca_cash)
+                db.set_setting('_ALPACA_EQUITY', str(alpaca_equity))
         alpaca_tickers = {p['symbol'] for p in alpaca_positions}
         db_tickers     = db.get_open_tickers()
         orphans = alpaca_tickers - db_tickers
@@ -1762,7 +1781,8 @@ def run(session="open"):
 
     portfolio = db.get_portfolio()
     positions = db.get_open_positions()
-    tier      = get_portfolio_tier(portfolio['cash'])
+    _equity   = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
+    tier      = get_portfolio_tier(_equity)
 
     # ── GATE 10: Active trade management (every session — open positions)
     urgent_flags    = db.get_urgent_flags()
@@ -1815,7 +1835,7 @@ def run(session="open"):
             }, "CASCADE signal — protective exit triggered")
 
         # Stop loss hit (with benchmark-relative adjustment)
-        elif True:
+        elif not exit_reason:
             effective_stop = pos.get('trail_stop_amt', 0) or 0
             # Adjust stop based on SPY correlation
             corr = compute_spy_correlation(alpaca, pos['ticker'],
@@ -1965,15 +1985,15 @@ def run(session="open"):
     else:
         positions = db.get_open_positions()
         portfolio = db.get_portfolio()
-        equity    = portfolio['cash']
+        equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
         tier      = get_portfolio_tier(equity)
-        deployed  = sum(p['entry_price'] * p['shares'] for p in positions)
+        deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
         tradeable = equity * C.TRADEABLE_PCT
         deployed_pct = deployed / tradeable if tradeable > 0 else 0
 
         can_enter = (
             deployed_pct < tier["max_deployed"] and
-            len(positions) < tier["max_positions"]
+            len([p for p in positions if p['ticker'] != C.BIL_TICKER]) < tier["max_positions"]
         )
 
         if not can_enter:
@@ -1984,11 +2004,11 @@ def run(session="open"):
 
             for signal in signals:
                 positions = db.get_open_positions()
-                deployed  = sum(p['entry_price'] * p['shares'] for p in positions)
+                deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
                 deployed_pct = deployed / tradeable if tradeable > 0 else 0
 
                 if (deployed_pct >= tier["max_deployed"] or
-                        len(positions) >= tier["max_positions"]):
+                        len([p for p in positions if p['ticker'] != C.BIL_TICKER]) >= tier["max_positions"]):
                     log.info("Deployment cap reached mid-session — stopping")
                     break
 
@@ -2182,6 +2202,8 @@ if __name__ == '__main__':
             log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE}")
         except Exception as _e:
             log.warning(f"Could not load customer credentials from auth.db: {_e}")
+        # Apply per-customer trading parameters from customer_settings DB
+        _apply_customer_settings()
 
     if not ALPACA_API_KEY:
         log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")

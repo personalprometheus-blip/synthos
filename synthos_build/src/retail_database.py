@@ -448,6 +448,32 @@ CREATE INDEX IF NOT EXISTS idx_screen_req_type       ON screening_requests(reque
 CREATE INDEX IF NOT EXISTS idx_notif_unread          ON notifications(is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notif_category        ON notifications(category);
 
+
+CREATE TABLE IF NOT EXISTS support_tickets (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id       TEXT NOT NULL UNIQUE,
+    category        TEXT NOT NULL,
+    subject         TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'open',
+    priority        TEXT NOT NULL DEFAULT 'normal',
+    beta_test_id    TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    resolved_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_status ON support_tickets(status);
+CREATE INDEX IF NOT EXISTS idx_ticket_category ON support_tickets(category);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id       TEXT NOT NULL,
+    sender          TEXT NOT NULL,
+    message         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES support_tickets(ticket_id)
+);
+CREATE INDEX IF NOT EXISTS idx_msg_ticket ON support_messages(ticket_id, created_at);
+
 CREATE TABLE IF NOT EXISTS customer_settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
@@ -1079,6 +1105,109 @@ class DB:
         log.info(f"Signal {signal_id} acknowledged by trader")
 
 
+
+    # ── Support Tickets ───────────────────────────────────────────────────────
+
+    def create_ticket(self, category, subject, message, beta_test_id=None, priority='normal'):
+        """Create a support ticket with initial message. Returns ticket_id."""
+        import secrets
+        ticket_id = 'TKT-' + secrets.token_hex(4).upper()
+        now = self.now()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO support_tickets "
+                "(ticket_id, category, subject, status, priority, beta_test_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'open', ?, ?, ?, ?)",
+                (ticket_id, category, subject, priority, beta_test_id, now, now)
+            )
+            c.execute(
+                "INSERT INTO support_messages (ticket_id, sender, message, created_at) "
+                "VALUES (?, 'customer', ?, ?)",
+                (ticket_id, message, now)
+            )
+        self.log_event("SUPPORT_TICKET_CREATED", agent="portal",
+                       details=f"ticket={ticket_id} category={category}")
+        return ticket_id
+
+    def get_tickets(self, status=None, category=None, limit=50):
+        """Get support tickets with latest message preview."""
+        with self.conn() as c:
+            query = "SELECT * FROM support_tickets"
+            params = []
+            clauses = []
+            if status:
+                clauses.append("status=?")
+                params.append(status)
+            if category:
+                clauses.append("category=?")
+                params.append(category)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY updated_at DESC LIMIT ?"
+            params.append(limit)
+            tickets = [dict(r) for r in c.execute(query, params).fetchall()]
+            # Attach latest message preview
+            for t in tickets:
+                msg = c.execute(
+                    "SELECT sender, message, created_at FROM support_messages "
+                    "WHERE ticket_id=? ORDER BY created_at DESC LIMIT 1",
+                    (t['ticket_id'],)
+                ).fetchone()
+                t['last_message'] = dict(msg) if msg else None
+                t['message_count'] = c.execute(
+                    "SELECT COUNT(*) FROM support_messages WHERE ticket_id=?",
+                    (t['ticket_id'],)
+                ).fetchone()[0]
+            return tickets
+
+    def get_ticket_messages(self, ticket_id):
+        """Get all messages for a ticket in chronological order."""
+        with self.conn() as c:
+            ticket = c.execute(
+                "SELECT * FROM support_tickets WHERE ticket_id=?", (ticket_id,)
+            ).fetchone()
+            if not ticket:
+                return None, []
+            messages = c.execute(
+                "SELECT * FROM support_messages WHERE ticket_id=? ORDER BY created_at ASC",
+                (ticket_id,)
+            ).fetchall()
+            return dict(ticket), [dict(m) for m in messages]
+
+    def add_ticket_message(self, ticket_id, sender, message):
+        """Add a message to an existing ticket thread."""
+        now = self.now()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO support_messages (ticket_id, sender, message, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (ticket_id, sender, message, now)
+            )
+            c.execute(
+                "UPDATE support_tickets SET updated_at=? WHERE ticket_id=?",
+                (now, ticket_id)
+            )
+        return True
+
+    def update_ticket_status(self, ticket_id, status):
+        """Update ticket status (open/in_progress/resolved/closed)."""
+        now = self.now()
+        with self.conn() as c:
+            resolved_at = now if status in ('resolved', 'closed') else None
+            c.execute(
+                "UPDATE support_tickets SET status=?, updated_at=?, resolved_at=COALESCE(?, resolved_at) "
+                "WHERE ticket_id=?",
+                (status, now, resolved_at, ticket_id)
+            )
+        return True
+
+    def get_open_ticket_count(self):
+        """Count open tickets for badge display."""
+        with self.conn() as c:
+            return c.execute(
+                "SELECT COUNT(*) FROM support_tickets WHERE status IN ('open','in_progress')"
+            ).fetchone()[0]
+
     # ── Per-Customer Settings ─────────────────────────────────────────────────
 
     def get_setting(self, key, default=None):
@@ -1440,6 +1569,8 @@ class DB:
                     "is_spousal":   bool(meta.get("is_spousal")),
                     "source":       r.get("source") or "",
                     "is_stale":     meta.get("routing") == "STALE",
+                    "image":        meta.get("image_url") or meta.get("image"),
+                    "image_url":    meta.get("image_url") or meta.get("image"),
                 })
             return out
 

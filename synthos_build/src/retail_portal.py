@@ -120,6 +120,16 @@ app.config['SESSION_COOKIE_SAMESITE']   = 'Strict'      # blocks cross-site requ
 app.config['SESSION_COOKIE_NAME']        = 'synthos_s'  # non-default name
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 
+# ── SESSION ACTIVITY TRACKING ──────────────────────────────────────────────
+import threading as _threading
+from collections import deque as _deque
+
+_session_activity = {}           # {customer_id: {last_activity: datetime, ip: str}}
+_session_activity_lock = _threading.Lock()
+_CUSTOMER_TIMEOUT = timedelta(minutes=15)
+_session_hourly = _deque(maxlen=1440)   # (iso_minute, active_count) per-minute for 24h
+
+
 
 # ── SECURITY HEADERS ───────────────────────────────────────────────────────
 @app.after_request
@@ -245,33 +255,28 @@ def _send_setup_email(email: str, setup_link: str, display_name: str = '') -> bo
         return False
     name = display_name or 'there'
     try:
-        import urllib.request, json as _json
-        payload = _json.dumps({
-            "from":    f"Synthos <{ALERT_FROM}>",
-            "to":      [email],
-            "subject": "Your Synthos account is ready",
-            "text": (
-                f"Hi {name},\n\n"
-                f"Your Synthos account has been approved and is ready to use. "
-                f"Click the link below to activate your account:\n\n"
-                f"{setup_link}\n\n"
-                f"This link expires in 48 hours.\n\n"
-                f"Once activated, log in at synth-cloud.com\n\n"
-                f"— The Synthos Team"
-            ),
-        }).encode()
-        req = urllib.request.Request(
-            "https://api.resend.com/emails",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type":  "application/json",
-            },
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10)
-        log.info(f"Setup email sent to {email}")
-        return True
+        import requests as _req
+        r = _req.post("https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "from": f"Synthos <{ALERT_FROM}>",
+                "to": [email],
+                "subject": "Your Synthos account is ready",
+                "text": (
+                    f"Hi {name},\n\n"
+                    f"Your Synthos account has been approved and is ready to use.\n\n"
+                    f"Click the link below to activate your account:\n\n"
+                    f"{setup_link}\n\n"
+                    f"This link expires in 48 hours.\n\n"
+                    f"Once activated, log in at synth-cloud.com\n\n"
+                    f"\u2014 The Synthos Team"
+                ),
+            }, timeout=10)
+        if r.status_code in (200, 201):
+            log.info(f"Setup email sent to {email}")
+            return True
+        log.warning(f"Setup email: Resend returned {r.status_code}")
+        return False
     except Exception as e:
         log.error(f"Setup email failed for {email}: {e}")
         return False
@@ -282,51 +287,81 @@ def _send_setup_email(email: str, setup_link: str, display_name: str = '') -> bo
 def _send_verification_email(email, name, token):
     """Send email verification link to new signup via Resend."""
     if not RESEND_API_KEY:
-        print("[Portal] RESEND_API_KEY not set — skipping verification email")
+        log.warning("RESEND_API_KEY not set — skipping verification email")
         return False
 
     verify_url = f"https://synth-cloud.com/verify-email/{token}"
-    subject = "Verify your Synthos email"
-    body = (
-        f"Hi {name},\n\n"
-        f"Thank you for signing up for Synthos.\n\n"
-        f"Please click the link below to verify your email address:\n\n"
-        f"{verify_url}\n\n"
-        f"This link expires in 48 hours.\n\n"
-        f"If you did not create this account, you can ignore this email.\n\n"
-        f"— Synthos"
-    )
+    alert_from = os.getenv("ALERT_FROM", "Synth_Alerts@synth-cloud.com")
 
-    import urllib.request, json as _json
-    alert_from = os.getenv("ALERT_FROM", "alerts@synth-cloud.com")
-    payload = _json.dumps({
-        "from": f"Synthos <{alert_from}>",
-        "to": [email],
-        "subject": subject,
-        "text": body,
-    }).encode()
-
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-        }
-    )
+    import requests as _req
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status in (200, 201):
-                print(f"[Portal] Verification email sent to {email}")
-                return True
-            print(f"[Portal] Resend returned {resp.status} for verification email")
-            return False
+        r = _req.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": f"Synthos <{alert_from}>",
+                "to": [email],
+                "subject": "Verify your Synthos email",
+                "text": (
+                    f"Hi {name},\n\n"
+                    f"Thank you for signing up for Synthos.\n\n"
+                    f"Please click the link below to verify your email address:\n\n"
+                    f"{verify_url}\n\n"
+                    f"This link expires in 48 hours.\n\n"
+                    f"If you did not create this account, you can ignore this email.\n\n"
+                    f"— Synthos"
+                ),
+            },
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            log.info(f"Verification email sent to {email}")
+            return True
+        log.warning(f"Resend returned {r.status_code} for verification: {r.text[:100]}")
+        return False
     except Exception as e:
-        print(f"[Portal] Verification email failed: {e}")
+        log.warning(f"Verification email failed: {e}")
         return False
 
 # Custom Jinja filter for file timestamps
 @app.template_filter('timestamp_to_date')
+
+def _send_approval_email(email, name):
+    """Send account approval notification email via Resend."""
+    if not RESEND_API_KEY or not email:
+        return False
+    alert_from = os.getenv("ALERT_FROM", "Synth_Alerts@synth-cloud.com")
+    import requests as _req
+    try:
+        r = _req.post("https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "from": f"Synthos <{alert_from}>",
+                "to": [email],
+                "subject": "Your Synthos account has been approved",
+                "text": (
+                    f"Hi {name or 'there'},\n\n"
+                    f"Your Synthos account has been approved and is ready to use.\n\n"
+                    f"Log in at synth-cloud.com to get started.\n\n"
+                    f"Once logged in, follow the setup guide to connect your "
+                    f"trading account and configure your agent.\n\n"
+                    f"Welcome to Synthos!\n\n"
+                    f"\u2014 The Synthos Team"
+                ),
+            }, timeout=10)
+        if r.status_code in (200, 201):
+            log.info(f"Approval email sent to {email}")
+            return True
+        log.warning(f"Approval email: Resend returned {r.status_code}")
+        return False
+    except Exception as e:
+        log.warning(f"Approval email failed: {e}")
+        return False
+
+
 def timestamp_to_date(ts):
     from datetime import datetime
     try:
@@ -909,6 +944,24 @@ def check_auth():
     if not is_authenticated():
         return redirect('/login')
 
+    # ── Session activity tracking + non-admin auto-logout ──
+    _cid = session.get('customer_id')
+    if _cid:
+        _now = datetime.utcnow()
+        with _session_activity_lock:
+            _prev = _session_activity.get(_cid)
+            # Non-admin: auto-logout after 15 min inactivity
+            if _prev and session.get('role') != 'admin':
+                _elapsed = (_now - _prev['last_activity']).total_seconds()
+                if _elapsed > _CUSTOMER_TIMEOUT.total_seconds():
+                    _session_activity.pop(_cid, None)
+                    session.clear()
+                    return redirect('/login')
+            # Update activity timestamp
+            _session_activity[_cid] = {
+                'last_activity': _now,
+                'ip': request.remote_addr or '',
+            }
 
 
 # ── SIGNUP ────────────────────────────────────────────────────────────────────
@@ -1023,9 +1076,23 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
                value="{{ request.form.get('email', '') }}">
       </div>
       <div class="field">
-        <label>Phone</label>
-        <input type="tel" name="phone" placeholder="+1 (555) 000-0000" required
+        <label>Phone <span style="font-size:9px;color:rgba(255,255,255,0.3)">(optional)</span></label>
+        <input type="tel" name="phone" placeholder="+1 (555) 000-0000"
                value="{{ request.form.get('phone', '') }}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>State</label>
+          <select name="state" required style="width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:7px;color:rgba(255,255,255,0.88);font-family:inherit;font-size:0.82rem">
+            <option value="">Select state...</option>
+            <option value="GA" {{ 'selected' if request.form.get('state') == 'GA' else '' }}>Georgia</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Zip Code</label>
+          <input type="text" name="zip_code" placeholder="30301" required pattern="[0-9]{5}"
+                 maxlength="5" value="{{ request.form.get('zip_code', '') }}">
+        </div>
       </div>
       <div class="field-row">
         <div class="field">
@@ -1135,20 +1202,26 @@ def signup_page():
         name     = request.form.get('name', '').strip()
         email    = request.form.get('email', '').strip()
         phone    = request.form.get('phone', '').strip()
+        state    = request.form.get('state', '').strip().upper()
+        zip_code = request.form.get('zip_code', '').strip()
         password = request.form.get('password', '')
         confirm  = request.form.get('confirm_password', '')
 
         if not auth.verify_signup_access_code(code):
             error = "Invalid access code. Contact the operator for an invite code."
-        elif not name or not email or not phone:
-            error = "All fields are required."
+        elif not name or not email:
+            error = "Name and email are required."
+        elif state != 'GA':
+            error = "Synthos is currently available to Georgia residents only. More states coming soon."
+        elif not zip_code or len(zip_code) != 5 or not zip_code.isdigit():
+            error = "Please enter a valid 5-digit zip code."
         elif len(password) < 8:
             error = "Password must be at least 8 characters."
         elif password != confirm:
             error = "Passwords do not match."
         else:
             try:
-                _sid = auth.create_pending_signup(name, email, phone, password)
+                _sid = auth.create_pending_signup(name, email, phone, password, state=state, zip_code=zip_code)
                 # Send email verification link
                 try:
                     _vtoken = auth.generate_signup_verify_token(_sid)
@@ -1194,6 +1267,13 @@ def api_approve_signup():
         from retail_database import get_customer_db
         get_customer_db(result['customer_id'])
         log.info(f"Admin approved signup #{signup_id} -> customer {result['customer_id']}")
+
+        # Send approval email
+        try:
+            _send_approval_email(result.get('email', ''), result.get('name', ''))
+        except Exception as _ae:
+            log.warning(f"Approval email failed: {_ae}")
+
         return jsonify({"ok": True, **result})
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -2220,6 +2300,18 @@ def sso_login():
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
 
+
+
+# Master customer ID — shared agents write here; all customers read market data from this DB
+_MASTER_CUSTOMER_ID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+
+def _shared_db():
+    """Return the master customer's signals.db for shared market data (news, signals, screening).
+    All customers read intelligence from this single source."""
+    sys.path.insert(0, PROJECT_DIR)
+    from retail_database import get_customer_db
+    return get_customer_db(_MASTER_CUSTOMER_ID)
+
 def _customer_db():
     """Return the signals.db instance for the currently logged-in customer."""
     sys.path.insert(0, PROJECT_DIR)
@@ -2264,16 +2356,57 @@ def _get_customer_alpaca_creds():
                 return api_key, secret_key, alpaca_url
         except Exception as e:
             log.warning(f"Could not load Alpaca creds from auth.db for {customer_id}: {e}")
-    # Fallback: env (covers admin sessions and migration period)
-    return (
-        os.environ.get('ALPACA_API_KEY', ''),
-        os.environ.get('ALPACA_SECRET_KEY', ''),
-        alpaca_url,
+    # Fallback: env — ONLY for admin sessions (customers must set their own keys)
+    if not customer_id or customer_id == 'admin':
+        return (
+            os.environ.get('ALPACA_API_KEY', ''),
+            os.environ.get('ALPACA_SECRET_KEY', ''),
+            alpaca_url,
+        )
+    return ('', '', alpaca_url,
     )
 
 
 def _fetch_alpaca_positions():
-    """Fetch live positions from Alpaca for the current customer. Returns dict keyed by symbol."""
+    """Fetch live prices from shared live_prices table (updated by price poller).
+    Falls back to direct Alpaca API if no fresh data (>5 min stale)."""
+    import time as _time
+
+    # Try shared live_prices table first (fast, no Alpaca API call)
+    try:
+        shared = _shared_db()
+        with shared.conn() as c:
+            rows = c.execute("SELECT * FROM live_prices").fetchall()
+        if rows:
+            freshness = 999
+            try:
+                latest = max(r['updated_at'] for r in rows if r['updated_at'])
+                from datetime import datetime
+                age = (datetime.now() - datetime.fromisoformat(latest.replace('Z','+00:00').split('+')[0])).total_seconds()
+                freshness = age
+            except Exception:
+                pass
+            if freshness < 300:  # Fresh within 5 min
+                result = {}
+                for r in rows:
+                    result[r['ticker']] = {
+                        'symbol':                    r['ticker'],
+                        'current_price':             str(r['price']),
+                        'market_value':              '0',  # Will be calculated by _enrich_positions
+                        'unrealized_pl':             '0',
+                        'unrealized_plpc':           '0',
+                        'unrealized_intraday_pl':    str(r['day_change']),
+                        'unrealized_intraday_plpc':  str((r['day_change_pct'] or 0) / 100),
+                        'avg_entry_price':           '0',
+                        'lastday_price':             str(r['prev_close'] or 0),
+                        'qty':                       '0',
+                    }
+                log.debug(f"Prices from shared live_prices ({len(result)} tickers, {freshness:.0f}s old)")
+                return result
+    except Exception as e:
+        log.debug(f"live_prices read failed (OK — falling back to Alpaca): {e}")
+
+    # Fallback: direct Alpaca API call
     import requests as _req
     alpaca_key, alpaca_secret, alpaca_url = _get_customer_alpaca_creds()
     if not alpaca_key:
@@ -2309,17 +2442,26 @@ def _enrich_positions(db_positions, alpaca_pos_map):
         cost = round(entry * shares, 2)
         if ap:
             cur_price   = float(ap.get('current_price', entry) or entry)
-            mkt_value   = float(ap.get('market_value', cost) or cost)
+            avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
+            mkt_value   = round(cur_price * shares, 2) if cur_price else cost
+            # Calculate P&L from prices (works for both Alpaca API and live_prices table)
             unreal_pl   = float(ap.get('unrealized_pl', 0) or 0)
             unreal_plpc = float(ap.get('unrealized_plpc', 0) or 0)
+            if unreal_pl == 0.0 and cur_price and entry and cur_price != entry:
+                unreal_pl   = round((cur_price - entry) * shares, 2)
+                unreal_plpc = round((cur_price - entry) / entry, 4) if entry else 0.0
             day_pl      = float(ap.get('unrealized_intraday_pl', 0) or 0)
             day_plpc    = float(ap.get('unrealized_intraday_plpc', 0) or 0)
-            avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
+            if day_pl == 0.0 and cur_price:
+                prev_close = float(ap.get('lastday_price', 0) or 0)
+                if prev_close and prev_close != cur_price:
+                    day_pl   = round((cur_price - prev_close) * shares, 2)
+                    day_plpc = round((cur_price - prev_close) / prev_close, 4) if prev_close else 0.0
         else:
-            cur_price   = entry
-            mkt_value   = cost
-            unreal_pl   = 0.0
-            unreal_plpc = 0.0
+            cur_price   = float(p.get('current_price', 0) or 0) or entry
+            mkt_value   = round(cur_price * shares, 2) if cur_price else cost
+            unreal_pl   = round((cur_price - entry) * shares, 2) if cur_price and entry else 0.0
+            unreal_plpc = round((cur_price - entry) / entry, 4) if entry and cur_price else 0.0
             day_pl      = 0.0
             day_plpc    = 0.0
             avg_entry   = entry
@@ -2530,22 +2672,52 @@ def get_system_status():
     # Check for agent lock — return cached/skeleton if locked
     lock = agent_lock_status()
     if lock:
-        log.debug(f"Agent lock held by {lock['agent']} — portal backing off")
-        return {
-            "portfolio_value": 0,
-            "cash":            0,
-            "realized_gains":  0,
-            "open_positions":  0,
-            "positions":       [],
-            "orphan_positions": [],
-            "urgent_flags":    0,
-            "last_heartbeat":  "Agent running",
-            "kill_switch":     kill_switch_active(),
-            "operating_mode":  OPERATING_MODE,
-            "pi_id":           PI_ID,
-            "agent_running":   lock['agent'],
-            "agent_running_secs": lock['age_secs'],
-        }
+        # Agent running — skip Alpaca API calls but still show DB data
+        log.debug(f"Agent lock held by {lock['agent']} — using DB-only data (no Alpaca enrichment)")
+        try:
+            db = _customer_db()
+            portfolio = db.get_portfolio()
+            positions = db.get_open_positions()
+            last_hb   = db.get_last_heartbeat()
+            # Use DB prices (last known) without live Alpaca enrichment
+            basic_positions = []
+            for p in positions:
+                entry = float(p.get('entry_price', 0) or 0)
+                shares = float(p.get('shares', 0) or 0)
+                cur = float(p.get('current_price', 0) or 0) or entry
+                basic_positions.append({
+                    **p,
+                    'current_price': round(cur, 4),
+                    'market_value': round(cur * shares, 2),
+                    'unrealized_pl': round((cur - entry) * shares, 2),
+                    'unrealized_plpc': round(((cur - entry) / entry * 100) if entry else 0, 2),
+                    'day_pl': 0.0, 'day_plpc': 0.0,
+                    'avg_entry_price': round(entry, 4),
+                    'cost_basis': round(entry * shares, 2),
+                    'is_orphan': False,
+                })
+            mkt_total = sum(p['market_value'] for p in basic_positions)
+            return {
+                "portfolio_value": round(portfolio['cash'] + mkt_total, 2),
+                "cash":            round(portfolio['cash'], 2),
+                "realized_gains":  round(portfolio.get('realized_gains', 0), 2),
+                "open_positions":  len(basic_positions),
+                "orphan_count":    0,
+                "positions":       basic_positions,
+                "urgent_flags":    0,
+                "critical_flags":  0,
+                "flags_detail":    [],
+                "last_heartbeat":  last_hb['timestamp'] if last_hb else "Never",
+                "kill_switch":     db.get_setting('KILL_SWITCH') == '1' or kill_switch_active(),
+                "operating_mode":  db.get_setting('OPERATING_MODE') or OPERATING_MODE,
+                "trading_mode":    os.environ.get('TRADING_MODE', 'PAPER'),
+                "max_trade_usd":   float(os.environ.get('MAX_TRADE_USD', '0')),
+                "pi_id":           PI_ID,
+                "agent_running":   lock['agent'],
+                "agent_running_secs": lock['age_secs'],
+            }
+        except Exception as e:
+            log.warning(f"Lock-mode status read failed: {e}")
 
     for attempt in range(3):
         try:
@@ -2568,6 +2740,10 @@ def get_system_status():
             market_value_total = sum(p['market_value'] for p in all_positions)
             total = round(portfolio['cash'] + market_value_total, 2)
 
+            # Per-customer operating mode (fallback to global)
+            _cust_mode = db.get_setting('OPERATING_MODE') or OPERATING_MODE
+            _cust_kill = db.get_setting('KILL_SWITCH') == '1' or kill_switch_active()
+
             return {
                 "portfolio_value":  total,
                 "cash":             round(portfolio['cash'], 2),
@@ -2579,8 +2755,8 @@ def get_system_status():
                 "critical_flags":   critical_count,
                 "flags_detail":     enriched_flags,
                 "last_heartbeat":   last_hb['timestamp'] if last_hb else "Never",
-                "kill_switch":      kill_switch_active(),
-                "operating_mode":   OPERATING_MODE,
+                "kill_switch":      _cust_kill,
+                "operating_mode":   _cust_mode,
                 "trading_mode":     os.environ.get('TRADING_MODE', 'PAPER'),
                 "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":            PI_ID,
@@ -2788,7 +2964,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--muted);
   font-family:var(--sans);transition:all 0.15s;white-space:nowrap;
 }
-.hdr-mode-pill:hover{background:var(--surface2);color:var(--text)}
+.hdr-mode-pill:hover{}
 .hdr-mode-pill.mp-auto{
   background:rgba(245,166,35,0.08);border-color:rgba(245,166,35,0.3);color:var(--amber);
 }
@@ -2987,6 +3163,38 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   font-size:18px;padding:4px;transition:color .15s;
 }
 .cfg-panel-close:hover{color:var(--text)}
+
+.sup-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:400}
+.sup-overlay.open{display:block}
+.sup-panel{position:fixed;top:0;right:0;width:380px;max-width:90vw;height:100vh;background:var(--surface);
+  border-left:1px solid var(--border2);z-index:401;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;overflow:hidden}
+.sup-panel.open{transform:translateX(0)}
+.sup-head{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.sup-title{font-size:13px;font-weight:700;letter-spacing:0.03em;flex:1}
+.sup-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:4px}
+.sup-body{flex:1;overflow-y:auto;padding:18px}
+.sup-cats{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.sup-cat{padding:5px 12px;border-radius:99px;font-size:10px;font-weight:600;border:1px solid var(--border2);
+  background:transparent;color:var(--muted);cursor:pointer;font-family:var(--sans);transition:all .15s}
+.sup-cat.active{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.2);color:var(--teal)}
+.sup-input{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;
+  padding:8px 12px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none;margin-bottom:10px}
+.sup-input:focus{border-color:var(--teal)}
+.sup-textarea{min-height:100px;resize:vertical;font-family:var(--mono);font-size:11px;line-height:1.6}
+.sup-submit{width:100%;padding:10px;border:none;border-radius:8px;background:var(--teal);color:#000;
+  font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);margin-top:8px}
+.sup-submit:disabled{opacity:0.4;cursor:not-allowed}
+.sup-divider{height:1px;background:var(--border);margin:18px 0}
+.sup-ticket{padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}
+.sup-ticket:hover{border-color:var(--border2)}
+.sup-ticket-subj{font-size:12px;font-weight:600;margin-bottom:3px}
+.sup-ticket-meta{font-size:10px;color:var(--muted)}
+.sup-status{font-size:9px;font-weight:700;padding:2px 6px;border-radius:99px;text-transform:uppercase;letter-spacing:0.04em}
+.sup-status.open{background:rgba(245,166,35,0.1);color:var(--amber)}
+.sup-status.in_progress{background:rgba(123,97,255,0.1);color:var(--purple)}
+.sup-status.resolved{background:rgba(0,245,212,0.1);color:var(--teal)}
+
 .cfg-panel-body{flex:1;overflow-y:auto;padding:18px}
 .cfg-section{
   font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
@@ -3686,11 +3894,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   <!-- Right: mode pill + avatar -->
   <div class="hdr-right">
-    <button class="hdr-mode-pill {% if operating_mode == 'AUTOMATIC' %}mp-auto{% endif %}"
-            id="mode-nav-btn" onclick="toggleMode()"
+    <div class="hdr-mode-pill {% if operating_mode == 'AUTOMATIC' %}mp-auto{% endif %}"
+            id="mode-nav-btn" style="cursor:default"
             title="{% if operating_mode == 'AUTOMATIC' %}Automatic — bot executes trades{% else %}Managed — you approve all trades{% endif %}">
       {% if operating_mode == 'AUTOMATIC' %}AUTO{% else %}MANAGED{% endif %}
-    </button>
+    </div>
     <div class="hdr-bell" id="hdr-bell" onclick="toggleBellDrop(event)" aria-label="Notifications">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
            stroke-linecap="round" stroke-linejoin="round">
@@ -3746,7 +3954,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <button class="sidebar-nav-btn" id="snb-performance" onclick="showTab('performance');closeSidebar()">Performance</button>
     <button class="sidebar-nav-btn" id="snb-risk"        onclick="showTab('risk');closeSidebar()">Risk</button>
     <div class="sidebar-nav-sep"></div>
+    <button class="sidebar-nav-btn" id="snb-billing"    onclick="showTab('billing');closeSidebar()">Billing</button>
     <button class="sidebar-nav-btn" id="snb-settings"   onclick="showTab('settings');closeSidebar()">Settings</button>
+    <button class="sidebar-nav-btn" id="snb-messages"   onclick="showTab('messages');closeSidebar()">Messages</button>
+    <button class="sidebar-nav-btn" id="snb-support" onclick="toggleSupportPanel();closeSidebar()" style="color:var(--amber)">Support</button>
   </div>
 </div>
 
@@ -3767,74 +3978,144 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
   <div class="cfg-panel-body">
 
-    <div class="cfg-section">Trading Parameters</div>
-    <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="cfg-section">Trading Parameters</div>
+    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="preset-btn" data-preset="conservative" onclick="applyPreset('conservative',this)"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(0,245,212,0.15);background:rgba(0,245,212,0.06);color:var(--teal);cursor:pointer;font-family:var(--sans);transition:all .15s">Conservative</button>
+      <button class="preset-btn" data-preset="moderate" onclick="applyPreset('moderate',this)"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(123,97,255,0.15);background:rgba(123,97,255,0.06);color:var(--purple);cursor:pointer;font-family:var(--sans);transition:all .15s">Moderate</button>
+      <button class="preset-btn" data-preset="aggressive" onclick="applyPreset('aggressive',this)"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,75,110,0.15);background:rgba(255,75,110,0.06);color:var(--pink);cursor:pointer;font-family:var(--sans);transition:all .15s">Aggressive</button>
+      <button class="preset-btn" data-preset="custom" onclick="applyPreset('custom',this)"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);color:var(--muted);cursor:pointer;font-family:var(--sans);transition:all .15s">Custom</button>
+    </div>
+    <div id="cfg-controls-wrap" style="display:flex;flex-direction:column;gap:12px;opacity:0.35;pointer-events:none">
+
       <div>
-        <div class="setting-label">Min Confidence</div>
-        <div class="setting-desc">Minimum signal confidence the agent will trade on</div>
-        <select id="cfg-min-conf" class="glass-select" style="margin-top:6px;width:100%">
-          <option value="LOW" {% if settings.min_confidence == 'LOW' %}selected{% endif %}>LOW — Trade aggressively</option>
-          <option value="MEDIUM" {% if settings.min_confidence != 'LOW' and settings.min_confidence != 'HIGH' %}selected{% endif %}>MEDIUM — Balanced</option>
-          <option value="HIGH" {% if settings.min_confidence == 'HIGH' %}selected{% endif %}>HIGH — High confidence only</option>
+        <div class="setting-label">Trading Mode</div>
+        <div class="setting-desc">Paper mode simulates trades without real money</div>
+        <select id="cfg-trading-mode" class="glass-select" style="margin-top:6px;width:100%">
+          <option value="PAPER">PAPER — Simulated trades</option>
+          <option value="LIVE">LIVE — Real money</option>
         </select>
       </div>
+
+      <div>
+        <div class="setting-label">Min Confidence</div>
+        <div class="setting-desc">Minimum signal confidence to trade on</div>
+        <select id="cfg-min-conf" class="glass-select" style="margin-top:6px;width:100%">
+          <option value="LOW">LOW — Trade aggressively</option>
+          <option value="MEDIUM">MEDIUM — Balanced</option>
+          <option value="HIGH">HIGH — High confidence only</option>
+        </select>
+      </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <div style="flex:1;min-width:100px">
           <div class="setting-label">Max Position</div>
-          <div class="setting-desc">% of portfolio per position</div>
+          <div class="setting-desc">% of portfolio per trade</div>
           <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
-            <input id="cfg-max-pos" type="number" min="1" max="50" class="glass-input"
-                   value="{{ settings.max_position_pct }}" placeholder="10" style="width:60px">
+            <input id="cfg-max-pos" type="number" min="1" max="50" class="glass-input" placeholder="10" style="width:60px">
             <span style="font-size:11px;color:var(--muted)">%</span>
           </div>
         </div>
         <div style="flex:1;min-width:100px">
           <div class="setting-label">Max Trade</div>
-          <div class="setting-desc">Per-order cap (0 = none)</div>
+          <div class="setting-desc">Per-order dollar cap</div>
           <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
             <span style="font-size:11px;color:var(--muted)">$</span>
-            <input id="cfg-max-trade-usd" type="number" min="0" class="glass-input"
-                   value="{{ settings.max_trade_usd }}" placeholder="0" style="width:80px">
+            <input id="cfg-max-trade-usd" type="number" min="0" class="glass-input" placeholder="0" style="width:80px">
           </div>
         </div>
         <div style="flex:1;min-width:100px">
-          <div class="setting-label">Max Sector</div>
-          <div class="setting-desc">Max % in one sector</div>
+          <div class="setting-label">Max Positions</div>
+          <div class="setting-desc">Open at once</div>
           <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
-            <input id="cfg-max-sector" type="number" min="1" max="100" class="glass-input"
-                   value="{{ settings.max_sector_pct }}" placeholder="40" style="width:60px">
-            <span style="font-size:11px;color:var(--muted)">%</span>
+            <input id="cfg-max-positions" type="number" min="1" max="50" class="glass-input" placeholder="10" style="width:60px">
           </div>
         </div>
       </div>
+
       <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:100px">
+          <div class="setting-label">Daily Loss Limit</div>
+          <div class="setting-desc">Halt trading after this loss</div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+            <span style="font-size:11px;color:var(--muted)">$</span>
+            <input id="cfg-max-daily-loss" type="number" min="0" class="glass-input" placeholder="500" style="width:80px">
+          </div>
+        </div>
         <div style="flex:1;min-width:120px">
           <div class="setting-label">Close Mode</div>
-          <div class="setting-desc">Aggressiveness at market close</div>
+          <div class="setting-desc">End-of-day behavior</div>
           <select id="cfg-close-mode" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="conservative" {% if settings.close_session_mode == 'conservative' %}selected{% endif %}>Conservative</option>
-            <option value="moderate"     {% if settings.close_session_mode == 'moderate' %}selected{% endif %}>Moderate</option>
-            <option value="aggressive"   {% if settings.close_session_mode == 'aggressive' %}selected{% endif %}>Aggressive</option>
+            <option value="conservative">Conservative</option>
+            <option value="moderate">Moderate</option>
+            <option value="aggressive">Aggressive</option>
           </select>
         </div>
-        <div style="flex:1;min-width:120px">
-          <div class="setting-label">Staleness</div>
-          <div class="setting-desc">Oldest filing to consider</div>
-          <select id="cfg-staleness" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="Fresh"   {% if settings.max_staleness == 'Fresh' %}selected{% endif %}>Fresh ≤3 days</option>
-            <option value="Aging"   {% if settings.max_staleness == 'Aging' %}selected{% endif %}>Aging ≤7 days</option>
-            <option value="Stale"   {% if settings.max_staleness == 'Stale' %}selected{% endif %}>Stale ≤14 days</option>
-            <option value="Expired" {% if settings.max_staleness == 'Expired' %}selected{% endif %}>All ≤45 days</option>
-          </select>
+      </div>
+
+      <div style="margin-top:6px">
+        <button onclick="document.getElementById('cfg-advanced').style.display=document.getElementById('cfg-advanced').style.display==='none'?'block':'none'" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;font-family:var(--sans);padding:0">
+          ▶ Advanced Settings
+        </button>
+      </div>
+
+      <div id="cfg-advanced" style="display:none;border-top:1px solid var(--border);padding-top:12px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <div style="flex:1;min-width:100px">
+            <div class="setting-label">Max Drawdown</div>
+            <div class="setting-desc">Portfolio drawdown halt %</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+              <input id="cfg-max-drawdown" type="number" min="1" max="50" class="glass-input" placeholder="15" style="width:60px">
+              <span style="font-size:11px;color:var(--muted)">%</span>
+            </div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div class="setting-label">Max Sector</div>
+            <div class="setting-desc">Concentration limit %</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+              <input id="cfg-max-sector" type="number" min="1" max="100" class="glass-input" placeholder="25" style="width:60px">
+              <span style="font-size:11px;color:var(--muted)">%</span>
+            </div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div class="setting-label">Max Hold</div>
+            <div class="setting-desc">Days before forced exit</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+              <input id="cfg-max-hold-days" type="number" min="1" max="90" class="glass-input" placeholder="15" style="width:60px">
+              <span style="font-size:11px;color:var(--muted)">days</span>
+            </div>
+          </div>
         </div>
-        <div style="flex:1;min-width:120px">
-          <div class="setting-label">Spousal</div>
-          <div class="setting-desc">Weight for spousal trades</div>
-          <select id="cfg-spousal" class="glass-select" style="margin-top:6px;width:100%">
-            <option value="reduced" {% if settings.spousal_weight == 'reduced' %}selected{% endif %}>Reduced</option>
-            <option value="skip"    {% if settings.spousal_weight == 'skip' %}selected{% endif %}>Skip</option>
-            <option value="equal"   {% if settings.spousal_weight == 'equal' %}selected{% endif %}>Equal</option>
-          </select>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <div style="flex:1;min-width:100px">
+            <div class="setting-label">Max Exposure</div>
+            <div class="setting-desc">Portfolio % deployed</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+              <input id="cfg-max-exposure" type="number" min="10" max="100" class="glass-input" placeholder="80" style="width:60px">
+              <span style="font-size:11px;color:var(--muted)">%</span>
+            </div>
+          </div>
+          <div style="flex:1;min-width:100px">
+            <div class="setting-label">Profit Target</div>
+            <div class="setting-desc">Take profit ratio (Nx risk)</div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+              <input id="cfg-profit-target" type="number" min="1" max="10" step="0.5" class="glass-input" placeholder="2" style="width:60px">
+              <span style="font-size:11px;color:var(--muted)">x</span>
+            </div>
+          </div>
+          <div style="flex:1;min-width:120px">
+            <div class="setting-label">Signal Staleness</div>
+            <div class="setting-desc">Oldest signal to consider</div>
+            <select id="cfg-staleness" class="glass-select" style="margin-top:6px;width:100%">
+              <option value="Fresh">Fresh (≤3 days)</option>
+              <option value="Aging">Aging (≤7 days)</option>
+              <option value="Stale">Stale (≤14 days)</option>
+              <option value="Expired">All (≤45 days)</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
@@ -3854,6 +4135,25 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
               style="background:rgba(245,166,35,0.1);border-color:rgba(245,166,35,0.2);color:var(--amber)">
         Toggle Automatic / Managed
       </button>
+    </div>
+
+    <div class="cfg-section" style="margin-top:24px">Cash Management</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+      <div class="setting-row" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="setting-label">Treasury Reserve (BIL)</div>
+          <div class="setting-desc">Automatically park idle cash in short-term Treasury ETF (BIL) for yield while waiting for trade signals. Disable to keep all idle funds as cash.</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="cfg-bil-enabled" checked style="accent-color:var(--teal)">
+          <span style="font-size:11px;color:var(--muted)" id="cfg-bil-label">Enabled</span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="setting-label" style="margin:0">Reserve %</div>
+        <input id="cfg-bil-reserve" type="number" min="0" max="50" class="glass-input" placeholder="20" style="width:60px">
+        <span style="font-size:11px;color:var(--muted)">% of liquid capital</span>
+      </div>
     </div>
 
     <div class="cfg-section" style="margin-top:24px">Kill Switch</div>
@@ -3894,6 +4194,29 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </a>
 </div>
 {% endif %}
+
+
+<div class="sup-overlay" id="sup-overlay" onclick="closeSupportPanel()"></div>
+<div class="sup-panel" id="sup-panel">
+  <div class="sup-head">
+    <div class="sup-title">Contact Support</div>
+    <button class="sup-close" onclick="closeSupportPanel()">&#x2715;</button>
+  </div>
+  <div class="sup-body">
+    <div class="sup-cats">
+      <button class="sup-cat active" data-cat="portal" onclick="supSetCat(this)">Portal Issue</button>
+      <button class="sup-cat" data-cat="account" onclick="supSetCat(this)">Account Issue</button>
+      <button class="sup-cat" data-cat="suggestion" onclick="supSetCat(this)">Suggestion</button>
+    </div>
+    <input class="sup-input" id="sup-subject" placeholder="Subject" maxlength="120">
+    <textarea class="sup-input sup-textarea" id="sup-message" placeholder="Describe the issue or suggestion..."></textarea>
+    <button class="sup-submit" id="sup-submit" onclick="supSubmitTicket()">Submit</button>
+
+    <div class="sup-divider"></div>
+    <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">My Tickets</div>
+    <div id="sup-tickets-list"><div style="font-size:11px;color:var(--dim);padding:12px 0;text-align:center">Loading...</div></div>
+  </div>
+</div>
 
 <!-- SIGNAL MODAL -->
 <div class="sig-modal-overlay" id="sig-modal-overlay" onclick="closeSigModal(event)">
@@ -3946,6 +4269,24 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <span class="sig-modal-close" onclick="closeNotifModal()" style="flex-shrink:0">&#x2715;</span>
     </div>
     <div class="sig-modal-body" id="nmo-body" style="font-size:13px;line-height:1.7;color:var(--text)"></div>
+    <div id="nmo-beta-response" style="display:none;padding:0 20px 20px">
+      <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Beta Test Response</div>
+      <div style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:12px">
+        Test the issue described above and report your findings below.<br>
+        Select whether the issue is resolved, then provide a brief description for the backend team.
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text)">
+          <input type="radio" name="nmo-verdict" value="yes" onchange="nmoVerdictChanged()" style="accent-color:var(--teal)"> Yes, working correctly
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text)">
+          <input type="radio" name="nmo-verdict" value="no" onchange="nmoVerdictChanged()" style="accent-color:var(--pink)"> No, still broken
+        </label>
+      </div>
+      <textarea id="nmo-beta-comment" style="width:100%;min-height:70px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:11px;line-height:1.5;resize:vertical;outline:none" placeholder="Please add a brief response for the backend team..."></textarea>
+      <button id="nmo-beta-submit" onclick="nmoSubmitBeta()" disabled style="width:100%;padding:10px;border:none;border-radius:8px;background:var(--teal);color:#000;font-size:12px;font-weight:700;cursor:pointer;margin-top:8px;opacity:0.4">Submit Response</button>
+    </div>
   </div>
 </div>
 
@@ -3954,6 +4295,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
+
+<!-- NEW ACCOUNT BANNER -->
+<div id="new-account-banner" style="display:none;background:linear-gradient(90deg,rgba(245,166,35,0.12),rgba(245,166,35,0.04));border-bottom:2px solid var(--amber);padding:10px 24px;display:none;align-items:center;gap:10px">
+  <span style="font-size:16px">&#x26A0;</span>
+  <div style="flex:1">
+    <span style="font-size:12px;font-weight:700;color:var(--amber)">New Account</span>
+    <span style="font-size:11px;color:var(--muted);margin-left:8px">Dashboard values are defaults until the trading agent runs for the first time. Your account will update automatically.</span>
+  </div>
+</div>
+
 
   <!-- hidden compat elements JS writes to -->
   <span id="stat-mode" style="display:none">{{ status.operating_mode }}</span>
@@ -4487,8 +4838,194 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 </div>
 
+
+
+<!-- ══════════════ SETUP GUIDE TAB ══════════════ -->
+<div class="page" id="tab-guide" style="display:none">
+
+  <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text);margin-bottom:4px">
+    Getting <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Started</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Complete these steps to activate your trading agent</div>
+
+  <!-- STEP 1: 2FA -->
+  <div class="glass" style="padding:20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(0,245,212,0.1);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">1</div>
+      <div style="font-size:15px;font-weight:700">Set Up Two-Factor Authentication</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+      Protect your account with an authenticator app. We recommend <strong>Microsoft Authenticator</strong> — it works with Synthos and your Alpaca trading account.
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <a href="https://apps.apple.com/us/app/microsoft-authenticator/id983156458" target="_blank" rel="noopener"
+         style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:var(--text);font-size:11px;font-weight:600;text-decoration:none">
+        &#xF8FF; iPhone (App Store)
+      </a>
+      <a href="https://play.google.com/store/apps/details?id=com.azure.authenticator" target="_blank" rel="noopener"
+         style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);color:var(--text);font-size:11px;font-weight:600;text-decoration:none">
+        &#x25B6; Android (Google Play)
+      </a>
+    </div>
+    <div style="font-size:11px;color:var(--dim);line-height:1.6">
+      After installing, open the app and add your Alpaca account using the QR code from Alpaca's security settings.
+    </div>
+  </div>
+
+  <!-- STEP 2: Alpaca Account -->
+  <div class="glass" style="padding:20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(123,97,255,0.1);color:var(--purple);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">2</div>
+      <div style="font-size:15px;font-weight:700">Create Your Alpaca Trading Account</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+      Alpaca is the brokerage that executes your trades. Synthos connects to Alpaca through their API — a secure key that gives the trading agent permission to place orders on your behalf. <strong>You maintain full control of your Alpaca account at all times.</strong>
+    </div>
+    <a href="https://alpaca.markets" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;background:rgba(123,97,255,0.08);border:1px solid rgba(123,97,255,0.2);color:var(--purple);font-size:11px;font-weight:600;text-decoration:none;margin-bottom:12px">
+      Visit alpaca.markets &rarr;
+    </a>
+    <div style="font-size:11px;color:var(--dim);line-height:1.6">
+      Sign up for a free account. Start with <strong>Paper Trading</strong> (simulated) to test the system before using real money.
+    </div>
+  </div>
+
+  <!-- STEP 3: Get API Keys -->
+  <div class="glass" style="padding:20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(245,166,35,0.1);color:var(--amber);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">3</div>
+      <div style="font-size:15px;font-weight:700">Find Your Alpaca API Keys</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:14px">
+      API keys are like a password that lets Synthos communicate with your Alpaca account. You need two keys: an <strong>API Key</strong> and a <strong>Secret Key</strong>.
+    </div>
+    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.06em">How to find your keys:</div>
+      <ol style="font-size:12px;color:var(--text);line-height:1.8;padding-left:18px;margin:0">
+        <li>Log in to your Alpaca account at <a href="https://app.alpaca.markets" target="_blank" style="color:var(--teal)">app.alpaca.markets</a></li>
+        <li>Click your profile icon (top right) &rarr; select <strong>API Keys</strong></li>
+        <li>Click <strong>Generate New Key</strong> (or <strong>Regenerate</strong> if you already have one)</li>
+        <li>Copy both the <strong>API Key ID</strong> (starts with PK...) and the <strong>Secret Key</strong></li>
+        <li><span style="color:var(--pink)">Important:</span> The Secret Key is only shown once. Save it securely.</li>
+      </ol>
+    </div>
+    <div style="font-size:11px;color:var(--dim);line-height:1.6">
+      Make sure you are generating keys for <strong>Paper Trading</strong> (not Live) until you are ready to trade with real money.
+    </div>
+  </div>
+
+  <!-- STEP 4: Enter Keys -->
+  <div class="glass" style="padding:20px;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(255,75,110,0.1);color:var(--pink);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">4</div>
+      <div style="font-size:15px;font-weight:700">Connect Your Keys to Synthos</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:14px">
+      Paste your API keys into the Settings page. Synthos encrypts and stores them securely — they never leave this system.
+    </div>
+    <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:14px;margin-bottom:12px">
+      <ol style="font-size:12px;color:var(--text);line-height:1.8;padding-left:18px;margin:0">
+        <li>Go to <a href="#" onclick="showTab('settings');return false" style="color:var(--teal)">Settings</a> in the sidebar</li>
+        <li>Find the <strong>API Keys</strong> section</li>
+        <li>Paste your <strong>Alpaca API Key</strong> and click Update</li>
+        <li>Paste your <strong>Alpaca Secret Key</strong> and click Update</li>
+        <li>Click the <strong style="color:var(--purple)">Test</strong> button to verify the connection</li>
+      </ol>
+    </div>
+    <button class="save-btn" onclick="showTab('settings')" style="margin-top:4px">
+      Go to Settings &rarr;
+    </button>
+  </div>
+
+  <!-- STEP 5: Configure -->
+  <div class="glass" style="padding:20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div style="width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,0.06);color:var(--text);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">5</div>
+      <div style="font-size:15px;font-weight:700">Choose Your Trading Style</div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.7;margin-bottom:12px">
+      Open the <strong>Agent Configuration</strong> panel (gear icon on the right edge of the screen) and select a preset: <strong style="color:var(--teal)">Conservative</strong>, <strong style="color:var(--purple)">Moderate</strong>, or <strong style="color:var(--pink)">Aggressive</strong>. You can customize individual parameters later.
+    </div>
+    <div style="font-size:11px;color:var(--dim);line-height:1.6">
+      The agent starts in <strong>Paper Trading</strong> mode by default. It will simulate trades using real market data without risking real money. Switch to <strong>Live</strong> only when you are confident in the system.
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:20px 0">
+    <button class="save-btn" onclick="markSetupComplete()" style="padding:10px 24px;font-size:13px">
+      I've completed setup &mdash; don't show this again
+    </button>
+  </div>
+
+</div>
+
+
+<!-- ══════════════ MESSAGES TAB ══════════════ -->
+<div class="page" id="tab-messages" style="display:none">
+
+  <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text);margin-bottom:4px">
+    <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Messages</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:20px">Direct messages from the Synthos team</div>
+
+  <div id="msg-list"><div style="text-align:center;padding:40px 0;color:var(--dim);font-size:12px">Loading...</div></div>
+  <div id="msg-detail"></div>
+</div>
+
+<!-- ══════════════ BILLING TAB ══════════════ -->
+<div class="page" id="tab-billing" style="display:none">
+
+  <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text);margin-bottom:4px">
+    <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Billing</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:24px">Subscription status, payment history, and invoices</div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px">
+    <div class="glass" style="padding:20px;text-align:center">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Subscription</div>
+      <div style="font-size:18px;font-weight:700;color:var(--teal)" id="bill-status">—</div>
+      <div style="font-size:10px;color:var(--dim);margin-top:4px" id="bill-plan">Module pending</div>
+    </div>
+    <div class="glass" style="padding:20px;text-align:center">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Next Billing</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text)" id="bill-next">—</div>
+      <div style="font-size:10px;color:var(--dim);margin-top:4px">Module pending</div>
+    </div>
+    <div class="glass" style="padding:20px;text-align:center">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px">Pricing Tier</div>
+      <div style="font-size:18px;font-weight:700;color:var(--amber)" id="bill-tier">—</div>
+      <div style="font-size:10px;color:var(--dim);margin-top:4px">Module pending</div>
+    </div>
+  </div>
+
+  <div class="glass" style="padding:20px;margin-bottom:16px">
+    <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">Payment History</div>
+    <div style="text-align:center;padding:30px 0;color:var(--dim);font-size:12px">
+      Payment history will appear here once Stripe integration is active.
+    </div>
+  </div>
+
+  <div class="glass" style="padding:20px">
+    <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px">Manage Subscription</div>
+    <div style="text-align:center;padding:20px 0;color:var(--dim);font-size:12px">
+      Subscription management coming soon.
+    </div>
+  </div>
+
+</div>
+
 <!-- ══════════════ SETTINGS TAB ══════════════ -->
 <div class="page" id="tab-settings" style="display:none">
+
+
+  <div style="padding:14px 16px;background:rgba(0,245,212,0.04);border:1px solid rgba(0,245,212,0.12);border-radius:10px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+    <div style="font-size:24px">&#x1F6E0;</div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700;color:var(--teal)">New to Synthos?</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Follow the setup guide to connect your trading account and secure your login.</div>
+    </div>
+    <button class="save-btn" onclick="showTab('guide')" style="white-space:nowrap;padding:6px 14px;font-size:11px">Setup Guide &rarr;</button>
+  </div>
 
   <div class="section-title">API Keys</div>
   <div class="glass" style="margin-bottom:16px">
@@ -4498,30 +5035,35 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       </div>
 
       <!-- Alpaca API Key -->
-      <div class="setting-row" style="align-items:flex-start;gap:10px">
-        <div style="flex:1">
-          <div class="setting-label">Alpaca API Key</div>
-          <div class="setting-desc">Paper or live trading account</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-key">Loading&#x2026;</div>
+      <div style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <div class="setting-label" style="margin:0">Alpaca API Key</div>
+          <span id="alpaca-key-check" style="display:none;color:#00f5d4;font-size:14px">&#10003;</span>
         </div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--dim);margin-bottom:6px;min-height:14px" id="obs-alpaca-key"></div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-alpaca-key" placeholder="PK&#x2026;" style="width:140px">
-          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_API_KEY','k-alpaca-key','obs-alpaca-key')">Update</button>
+          <input class="glass-input" type="text" id="k-alpaca-key" placeholder="Paste API Key here" autocomplete="off" style="width:100%;font-family:var(--mono);font-size:11px">
+          <button type="button" class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_API_KEY','k-alpaca-key','obs-alpaca-key')">Update</button>
         </div>
       </div>
 
       <!-- Alpaca Secret Key -->
-      <div class="setting-row" style="align-items:flex-start;gap:10px">
-        <div style="flex:1">
-          <div class="setting-label">Alpaca Secret Key</div>
-          <div class="setting-desc">Keep this private</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-alpaca-secret">Loading&#x2026;</div>
+      <div style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <div class="setting-label" style="margin:0">Alpaca Secret Key</div>
+          <span id="alpaca-secret-check" style="display:none;color:#00f5d4;font-size:14px">&#10003;</span>
         </div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--dim);margin-bottom:6px;min-height:14px" id="obs-alpaca-secret"></div>
         <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-alpaca-secret" placeholder="Secret&#x2026;" style="width:140px">
-          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_SECRET_KEY','k-alpaca-secret','obs-alpaca-secret')">Update</button>
+          <input class="glass-input" type="text" id="k-alpaca-secret" placeholder="Paste Secret Key here" autocomplete="off" style="width:100%;font-family:var(--mono);font-size:11px">
+          <button type="button" class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('ALPACA_SECRET_KEY','k-alpaca-secret','obs-alpaca-secret')">Update</button>
         </div>
       </div>
+
+      <div style="margin-bottom:8px">
+        <button type="button" class="save-btn" style="padding:8px 16px;font-size:11px;width:100%;background:rgba(123,97,255,0.08);border-color:rgba(123,97,255,0.2);color:var(--purple)" onclick="testAlpacaKeys()">&#x1F50D; Test Alpaca Connection</button>
+      </div>
+      <div id="alpaca-test-result" style="display:none;padding:8px 12px;border-radius:8px;font-size:11px;margin-top:-4px;margin-bottom:8px"></div>
 
       <!-- Trading Mode -->
       <div class="setting-row" style="align-items:flex-start;gap:10px">
@@ -4535,32 +5077,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
             <option value="live" id="k-live-option" disabled>Live Trading</option>
           </select>
           <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateTradingMode()">Update</button>
-        </div>
-      </div>
-
-      <!-- Resend API Key -->
-      <div class="setting-row" style="align-items:flex-start;gap:10px">
-        <div style="flex:1">
-          <div class="setting-label">Resend API Key</div>
-          <div class="setting-desc">For trade alerts and account emails</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-resend">Loading&#x2026;</div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-resend" placeholder="re_&#x2026;" style="width:140px">
-          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('RESEND_API_KEY','k-resend','obs-resend')">Update</button>
-        </div>
-      </div>
-
-      <!-- License Key -->
-      <div class="setting-row" style="align-items:flex-start;gap:10px">
-        <div style="flex:1">
-          <div class="setting-label">License Key</div>
-          <div class="setting-desc">Synthos license (restore from backup)</div>
-          <div style="font-size:9px;font-family:var(--mono);color:var(--dim);margin-top:3px" id="obs-license">Loading&#x2026;</div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input class="glass-input" type="password" id="k-license" placeholder="SYN-&#x2026;" style="width:140px">
-          <button class="save-btn" style="padding:5px 10px;font-size:10px;white-space:nowrap" onclick="updateKey('LICENSE_KEY','k-license','obs-license')">Update</button>
         </div>
       </div>
 
@@ -4881,9 +5397,61 @@ async function openNotifModal(id) {
   document.getElementById('nmo-title').textContent = n.title;
   document.getElementById('nmo-time').textContent = n.created_at || '';
   document.getElementById('nmo-body').innerHTML = (n.body || '').replace(/\n/g, '<br>');
+  // Show beta test response section if this is a beta test notification
+  var betaPanel = document.getElementById('nmo-beta-response');
+  var meta = {};
+  try { meta = typeof n.meta === 'string' ? JSON.parse(n.meta) : (n.meta || {}); } catch(e) {}
+  if (meta.type === 'beta_test' || (n.category === 'system' && n.title && n.title.indexOf('Beta Test') === 0)) {
+    betaPanel.style.display = 'block';
+    betaPanel.dataset.betaTestId = meta.beta_test_id || '';
+    betaPanel.dataset.testTitle = n.title || '';
+    document.getElementById('nmo-beta-comment').value = '';
+    document.getElementById('nmo-beta-submit').disabled = true;
+    document.getElementById('nmo-beta-submit').style.opacity = '0.4';
+    var radios = document.querySelectorAll('input[name="nmo-verdict"]');
+    radios.forEach(function(r) { r.checked = false; });
+  } else {
+    betaPanel.style.display = 'none';
+  }
   document.getElementById('notif-modal-overlay').style.display = 'flex';
   closeBellDrop();
   loadBellNotifs();
+}
+
+
+function nmoVerdictChanged() {
+  var radios = document.querySelectorAll('input[name="nmo-verdict"]');
+  var selected = false;
+  radios.forEach(function(r) { if (r.checked) selected = true; });
+  var btn = document.getElementById('nmo-beta-submit');
+  btn.disabled = !selected;
+  btn.style.opacity = selected ? '1' : '0.4';
+}
+
+async function nmoSubmitBeta() {
+  var panel = document.getElementById('nmo-beta-response');
+  var testId = panel.dataset.betaTestId;
+  var testTitle = panel.dataset.testTitle;
+  var verdict = '';
+  document.querySelectorAll('input[name="nmo-verdict"]').forEach(function(r) { if (r.checked) verdict = r.value; });
+  var comment = document.getElementById('nmo-beta-comment').value.trim();
+  if (!verdict) { alert('Please select Yes or No'); return; }
+  if (!comment) { alert('Please provide a brief response for the backend team'); return; }
+  var fullMsg = 'Verdict: ' + (verdict === 'yes' ? 'WORKING' : 'STILL BROKEN') + '\n\n' + comment;
+  var btn = document.getElementById('nmo-beta-submit');
+  btn.disabled = true; btn.textContent = 'Submitting...';
+  try {
+    var r = await fetch('/api/support/beta-response', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({beta_test_id: testId, message: fullMsg})
+    });
+    var d = await r.json();
+    if (d.ok) {
+      toast('Response submitted \u2014 thank you!', 'ok');
+      closeNotifModal();
+    } else { toast(d.error || 'Failed to submit', 'err'); }
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Submit Response';
 }
 
 function closeNotifModal(e) {
@@ -4917,8 +5485,44 @@ async function loadCfgPanel() {
     if (g('cfg-max-trade-usd')) g('cfg-max-trade-usd').value = d.MAX_TRADE_USD || '0';
     if (g('cfg-max-sector'))    g('cfg-max-sector').value = d.MAX_SECTOR_PCT || '25';
     if (g('cfg-close-mode'))    g('cfg-close-mode').value = d.CLOSE_SESSION_MODE || 'aggressive';
-    if (g('cfg-staleness'))     g('cfg-staleness').value = d.MAX_STALENESS || 'Aging';
-    if (g('cfg-spousal'))       g('cfg-spousal').value = d.SPOUSAL_WEIGHT || 'reduced';
+    if (g('cfg-staleness'))      g('cfg-staleness').value = d.MAX_STALENESS || 'Aging';
+    if (g('cfg-max-positions')) g('cfg-max-positions').value = d.MAX_POSITIONS || '10';
+    if (g('cfg-max-daily-loss'))g('cfg-max-daily-loss').value = Math.abs(parseFloat(d.MAX_DAILY_LOSS||'500'));
+    if (g('cfg-max-drawdown'))  g('cfg-max-drawdown').value = parseFloat(d.MAX_DRAWDOWN_PCT||'15');
+    if (g('cfg-max-hold-days')) g('cfg-max-hold-days').value = d.MAX_HOLDING_DAYS || '15';
+    if (g('cfg-max-exposure'))  g('cfg-max-exposure').value = parseFloat(d.MAX_GROSS_EXPOSURE||'80');
+    if (g('cfg-profit-target')) g('cfg-profit-target').value = d.PROFIT_TARGET_MULTIPLE || '2';
+    if (g('cfg-trading-mode'))  g('cfg-trading-mode').value = d.TRADING_MODE || 'PAPER';
+    if (g('cfg-bil-enabled'))   g('cfg-bil-enabled').checked = d.ENABLE_BIL_RESERVE !== '0';
+    if (g('cfg-bil-reserve'))   g('cfg-bil-reserve').value = d.IDLE_RESERVE_PCT || '20';
+    if (g('cfg-bil-label'))     g('cfg-bil-label').textContent = (d.ENABLE_BIL_RESERVE !== '0') ? 'Enabled' : 'Disabled';
+    // Restore saved preset from DB (not guessed from values)
+    var wrap = document.getElementById('cfg-controls-wrap');
+    var matched = d.PRESET_NAME || 'custom';
+    _currentPreset = matched;
+    // Reset all preset buttons to default state first
+    document.querySelectorAll('.preset-btn').forEach(function(b){
+      b.style.borderColor = 'rgba(255,255,255,0.1)';
+      b.style.background = 'rgba(255,255,255,0.03)';
+      b.style.color = 'rgba(255,255,255,0.35)';
+    });
+    if (matched && matched !== 'custom') {
+      if (wrap) { wrap.style.opacity = '0.35'; wrap.style.pointerEvents = 'none'; }
+      document.getElementById('cfg-advanced').style.display = 'none';
+    } else {
+      matched = 'custom';
+      _currentPreset = 'custom';
+      if (wrap) { wrap.style.opacity = '1'; wrap.style.pointerEvents = 'auto'; }
+    }
+    // Highlight the saved preset button
+    document.querySelectorAll('.preset-btn').forEach(function(b){
+      if (b.dataset.preset === matched) {
+        var colors = {conservative:'rgba(0,245,212,',moderate:'rgba(123,97,255,',aggressive:'rgba(255,75,110,',custom:'rgba(255,255,255,'};
+        var c = colors[matched] || colors.custom;
+        b.style.borderColor = c + '0.3)'; b.style.background = c + '0.1)';
+        b.style.color = matched==='conservative'?'var(--teal)':matched==='moderate'?'var(--purple)':matched==='aggressive'?'var(--pink)':'var(--text)';
+      }
+    });
     // Kill switch state
     var killBtn = g('cfg-kill-btn');
     if (killBtn) {
@@ -4928,15 +5532,98 @@ async function loadCfgPanel() {
   } catch(e) { console.error('loadCfgPanel:', e); }
 }
 
+
+var PRESETS = {
+  conservative: {
+    'cfg-min-conf': 'HIGH', 'cfg-max-pos': '5', 'cfg-max-trade-usd': '500',
+    'cfg-max-positions': '5', 'cfg-max-daily-loss': '200', 'cfg-close-mode': 'conservative',
+    'cfg-max-drawdown': '8', 'cfg-max-sector': '20', 'cfg-max-hold-days': '10',
+    'cfg-max-exposure': '60', 'cfg-profit-target': '2.5', 'cfg-staleness': 'Fresh',
+    'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '30', 'cfg-bil-enabled': true
+  },
+  moderate: {
+    'cfg-min-conf': 'MEDIUM', 'cfg-max-pos': '10', 'cfg-max-trade-usd': '2000',
+    'cfg-max-positions': '10', 'cfg-max-daily-loss': '500', 'cfg-close-mode': 'moderate',
+    'cfg-max-drawdown': '15', 'cfg-max-sector': '30', 'cfg-max-hold-days': '15',
+    'cfg-max-exposure': '80', 'cfg-profit-target': '2', 'cfg-staleness': 'Aging',
+    'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '20', 'cfg-bil-enabled': true
+  },
+  aggressive: {
+    'cfg-min-conf': 'LOW', 'cfg-max-pos': '20', 'cfg-max-trade-usd': '5000',
+    'cfg-max-positions': '20', 'cfg-max-daily-loss': '1000', 'cfg-close-mode': 'aggressive',
+    'cfg-max-drawdown': '25', 'cfg-max-sector': '50', 'cfg-max-hold-days': '30',
+    'cfg-max-exposure': '95', 'cfg-profit-target': '1.5', 'cfg-staleness': 'Stale',
+    'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '10', 'cfg-bil-enabled': true
+  }
+};
+
+function applyPreset(name, btn) {
+  _currentPreset = name;
+  document.querySelectorAll('.preset-btn').forEach(function(b){
+    b.style.borderColor = 'rgba(255,255,255,0.1)';
+    b.style.background = 'rgba(255,255,255,0.03)';
+    b.style.color = 'rgba(255,255,255,0.35)';
+  });
+  var wrap = document.getElementById('cfg-controls-wrap');
+  if (name !== 'custom') {
+    var preset = PRESETS[name];
+    for (var id in preset) {
+      var el = document.getElementById(id);
+      if (!el) continue;
+      if (el.type === 'checkbox') {
+        el.checked = preset[id];
+      } else {
+        el.value = preset[id];
+      }
+    }
+    // Hide advanced, grey out controls (preset handles values)
+    document.getElementById('cfg-advanced').style.display = 'none';
+    if (wrap) { wrap.style.opacity = '0.35'; wrap.style.pointerEvents = 'none'; }
+  } else {
+    // Custom — enable all controls, show advanced
+    document.getElementById('cfg-advanced').style.display = 'block';
+    if (wrap) { wrap.style.opacity = '1'; wrap.style.pointerEvents = 'auto'; }
+  }
+  // Highlight selected
+  var colors = {conservative:'rgba(0,245,212,',moderate:'rgba(123,97,255,',aggressive:'rgba(255,75,110,',custom:'rgba(255,255,255,'};
+  var c = colors[name] || colors.custom;
+  btn.style.borderColor = c + '0.3)';
+  btn.style.background = c + '0.1)';
+  btn.style.color = name==='conservative'?'var(--teal)':name==='moderate'?'var(--purple)':name==='aggressive'?'var(--pink)':'var(--text)';
+  // Update BIL label
+  var bilCb = document.getElementById('cfg-bil-enabled');
+  var bilLbl = document.getElementById('cfg-bil-label');
+  if (bilCb && bilLbl) bilLbl.textContent = bilCb.checked ? 'Enabled' : 'Disabled';
+}
+
+// BIL checkbox label update
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.id === 'cfg-bil-enabled') {
+    var lbl = document.getElementById('cfg-bil-label');
+    if (lbl) lbl.textContent = e.target.checked ? 'Enabled' : 'Disabled';
+  }
+});
+
+var _currentPreset = 'custom';
+
 async function saveCfgPanel(){
   const data = {
-    min_confidence:    document.getElementById('cfg-min-conf')?.value,
-    max_position_pct:  parseFloat(document.getElementById('cfg-max-pos')?.value)||10,
-    max_trade_usd:     parseFloat(document.getElementById('cfg-max-trade-usd')?.value)||0,
-    max_sector_pct:    parseFloat(document.getElementById('cfg-max-sector')?.value)||40,
-    close_session_mode:document.getElementById('cfg-close-mode')?.value,
-    max_staleness:     document.getElementById('cfg-staleness')?.value,
-    spousal_weight:    document.getElementById('cfg-spousal')?.value,
+    min_confidence:      document.getElementById('cfg-min-conf')?.value,
+    max_position_pct:    parseFloat(document.getElementById('cfg-max-pos')?.value)||10,
+    max_trade_usd:       parseFloat(document.getElementById('cfg-max-trade-usd')?.value)||0,
+    max_positions:       parseInt(document.getElementById('cfg-max-positions')?.value)||10,
+    max_daily_loss:      parseFloat(document.getElementById('cfg-max-daily-loss')?.value)||500,
+    max_sector_pct:      parseFloat(document.getElementById('cfg-max-sector')?.value)||25,
+    close_session_mode:  document.getElementById('cfg-close-mode')?.value,
+    max_staleness:       document.getElementById('cfg-staleness')?.value,
+    max_drawdown_pct:    parseFloat(document.getElementById('cfg-max-drawdown')?.value)||15,
+    max_holding_days:    parseInt(document.getElementById('cfg-max-hold-days')?.value)||15,
+    max_gross_exposure:  parseFloat(document.getElementById('cfg-max-exposure')?.value)||80,
+    profit_target:       parseFloat(document.getElementById('cfg-profit-target')?.value)||2,
+    trading_mode:        document.getElementById('cfg-trading-mode')?.value,
+    enable_bil_reserve:  document.getElementById('cfg-bil-enabled')?.checked ? '1' : '0',
+    idle_reserve_pct:    parseFloat(document.getElementById('cfg-bil-reserve')?.value)||20,
+    preset_name:         _currentPreset,
   };
   const mirror = {
     // Mirror removed — settings tab uses config panel
@@ -4960,9 +5647,272 @@ async function cfgKillToggle(){
   }
 }
 
+
+
+async function loadBilling() {
+  try {
+    var r = await fetch('/api/billing');
+    var d = await r.json();
+    if (d.error) return;
+    var statusEl = document.getElementById('bill-status');
+    var planEl = document.getElementById('bill-plan');
+    var nextEl = document.getElementById('bill-next');
+    var tierEl = document.getElementById('bill-tier');
+    if (statusEl) {
+      var st = d.subscription_status || 'inactive';
+      var colors = {active:'#00f5d4',trialing:'#7b61ff',past_due:'#f5a623',cancelled:'#ff4b6e',inactive:'rgba(255,255,255,0.35)'};
+      statusEl.textContent = st.charAt(0).toUpperCase() + st.slice(1);
+      statusEl.style.color = colors[st] || colors.inactive;
+      planEl.textContent = d.has_stripe ? 'Stripe connected' : 'Payment not configured';
+    }
+    if (nextEl) {
+      nextEl.textContent = d.subscription_ends_at ? new Date(d.subscription_ends_at).toLocaleDateString() : 'N/A';
+    }
+    if (tierEl) {
+      var tier = d.pricing_tier || 'standard';
+      tierEl.textContent = tier === 'early_adopter' ? 'Early Adopter' : 'Standard';
+    }
+  } catch(e) {}
+}
+
+
+
+async function markSetupComplete() {
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({setup_complete: '1'})
+    });
+    showTab('dashboard');
+    toast('Setup guide dismissed', 'ok');
+  } catch(e) {
+    toast('Error saving', 'err');
+  }
+}
+
+async function testAlpacaKeys() {
+  var el = document.getElementById('alpaca-test-result');
+  if (!el) { alert('Test result element not found'); return; }
+  el.style.display = 'block';
+  el.style.background = 'rgba(255,255,255,0.04)';
+  el.style.border = '1px solid rgba(255,255,255,0.08)';
+  el.style.color = 'var(--muted)';
+  el.textContent = 'Testing Alpaca connection...';
+  try {
+    var r = await fetch('/api/test-alpaca-keys', {method: 'GET', credentials: 'same-origin'});
+    if (!r.ok) {
+      el.style.background = 'rgba(255,75,110,0.06)';
+      el.style.border = '1px solid rgba(255,75,110,0.15)';
+      el.style.color = 'var(--pink)';
+      el.textContent = 'Server error: HTTP ' + r.status;
+      return;
+    }
+    var d = await r.json();
+    if (d.ok) {
+      el.style.background = 'rgba(0,245,212,0.06)';
+      el.style.border = '1px solid rgba(0,245,212,0.15)';
+      el.style.color = 'var(--teal)';
+      var mode = d.paper ? 'Paper' : 'Live';
+      // Show green checks on both keys
+      var kc = document.getElementById('alpaca-key-check');
+      var sc = document.getElementById('alpaca-secret-check');
+      if (kc) kc.style.display = 'inline';
+      if (sc) sc.style.display = 'inline';
+      el.innerHTML = '&#10003; Connected — ' + mode + ' Account: ' + (d.account_id||'') + ' | Status: ' + (d.status||'') + ' | Cash: $' + (d.cash||'0');
+    } else {
+      el.style.background = 'rgba(255,75,110,0.06)';
+      el.style.border = '1px solid rgba(255,75,110,0.15)';
+      el.style.color = 'var(--pink)';
+      el.textContent = '\u2717 ' + (d.error || 'Connection failed — check your API keys');
+    }
+  } catch(e) {
+    el.style.background = 'rgba(255,75,110,0.06)';
+    el.style.border = '1px solid rgba(255,75,110,0.15)';
+    el.style.color = 'var(--pink)';
+    el.textContent = '\u2717 Could not reach server — try refreshing the page';
+    console.error('testAlpacaKeys error:', e);
+  }
+}
+
+
+// ── MESSAGES TAB ──
+async function loadMessages() {
+  var el = document.getElementById('msg-list');
+  try {
+    var r = await fetch('/api/support/tickets?category=direct_message');
+    var d = await r.json();
+    var tickets = d.tickets || [];
+    if (!tickets.length) {
+      el.innerHTML = '<div style="text-align:center;padding:40px 0;color:var(--dim);font-size:12px"><div style="font-size:28px;margin-bottom:8px">&#x1F4AC;</div>No messages yet</div>';
+      return;
+    }
+    el.innerHTML = tickets.map(function(t) {
+      var last = t.last_message ? t.last_message.message.slice(0,80) : '';
+      var sender = t.last_message ? t.last_message.sender : '';
+      var age = t.updated_at ? t.updated_at.slice(0,16).replace('T',' ') : '';
+      var unread = (sender === 'admin' && t.status === 'open') ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--teal);display:inline-block;margin-right:6px"></span>' : '';
+      return '<div style="padding:12px 14px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:border-color .15s" data-tid="' + t.ticket_id + '" onclick="viewMessage(this.dataset.tid)" onmouseover="this.style.borderColor=&#39;rgba(255,255,255,0.15)&#39;" onmouseout="this.style.borderColor=&#39;var(--border)&#39;">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+        + '<div style="font-size:13px;font-weight:600">' + unread + t.subject + '</div>'
+        + '<span style="font-size:9px;color:var(--dim)">' + age + '</span></div>'
+        + '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + last + '</div>'
+        + '<div style="font-size:10px;color:var(--dim);margin-top:3px">' + t.message_count + ' message' + (t.message_count!==1?'s':'') + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) { el.innerHTML = '<div style="color:var(--pink);padding:20px;text-align:center">Error loading messages</div>'; }
+}
+
+async function viewMessage(ticketId) {
+  var el = document.getElementById('msg-detail');
+  try {
+    var r = await fetch('/api/support/tickets/' + ticketId);
+    var d = await r.json();
+    if (!d.ticket) return;
+    var msgs = d.messages || [];
+    var html = '<div style="margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:10px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+    html += '<div style="font-size:14px;font-weight:700">' + d.ticket.subject + '</div>';
+    html += '<button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px" onclick="document.getElementById(&#39;msg-detail&#39;).innerHTML=&#39;&#39;">Close</button></div>';
+    msgs.forEach(function(m) {
+      var isAdmin = m.sender === 'admin';
+      html += '<div style="padding:8px 10px;border-radius:8px;margin-bottom:6px;background:' + (isAdmin ? 'rgba(123,97,255,0.06)' : 'rgba(0,245,212,0.04)') + ';border:1px solid ' + (isAdmin ? 'rgba(123,97,255,0.12)' : 'rgba(0,245,212,0.1)') + '">';
+      html += '<div style="font-size:9px;color:var(--muted);margin-bottom:3px">' + (isAdmin ? 'Synthos Team' : 'You') + ' \u00b7 ' + (m.created_at||'').slice(0,16).replace('T',' ') + '</div>';
+      html += '<div style="font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap">' + m.message + '</div></div>';
+    });
+    html += '<textarea id="msg-reply-box" style="width:100%;min-height:60px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;color:var(--text);font-family:var(--sans);font-size:12px;resize:vertical;outline:none;margin-top:8px" placeholder="Write a reply..."></textarea>';
+    html += '<button type="button" data-tid="' + ticketId + '" onclick="sendMessageReply(this.dataset.tid)" style="width:100%;padding:8px;border:none;border-radius:8px;background:var(--teal);color:#000;font-size:12px;font-weight:700;cursor:pointer;margin-top:6px">Reply</button>';
+    html += '</div>';
+    el.innerHTML = html;
+    el.scrollIntoView({behavior:'smooth'});
+  } catch(e) { console.error(e); }
+}
+
+async function sendMessageReply(ticketId) {
+  var msg = document.getElementById('msg-reply-box').value.trim();
+  if (!msg) return;
+  await fetch('/api/support/tickets/' + ticketId + '/reply', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message: msg, sender: 'customer'})
+  });
+  viewMessage(ticketId);
+  toast('Reply sent', 'ok');
+}
+
+
+// New account banner — show until trade agent has run at least once
+async function checkNewAccountBanner() {
+  try {
+    var r = await fetch('/api/trader-activity');
+    var d = await r.json();
+    var hasRun = (d.recent && d.recent.length > 0) || (d.scans && d.scans.length > 0);
+    var banner = document.getElementById('new-account-banner');
+    if (banner) {
+      banner.style.display = hasRun ? 'none' : 'flex';
+    }
+  } catch(e) {}
+}
+
+// ── SUPPORT PANEL ──
+var _supCat = 'portal';
+function toggleSupportPanel() {
+  var open = document.getElementById('sup-panel').classList.toggle('open');
+  document.getElementById('sup-overlay').classList.toggle('open', open);
+  if (open) supLoadTickets();
+}
+function closeSupportPanel() {
+  document.getElementById('sup-panel').classList.remove('open');
+  document.getElementById('sup-overlay').classList.remove('open');
+}
+function supSetCat(btn) {
+  document.querySelectorAll('.sup-cat').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+  _supCat = btn.dataset.cat;
+}
+async function supSubmitTicket() {
+  var subj = document.getElementById('sup-subject').value.trim();
+  var msg = document.getElementById('sup-message').value.trim();
+  if (!subj || !msg) { alert('Subject and message are required'); return; }
+  var btn = document.getElementById('sup-submit');
+  btn.disabled = true; btn.textContent = 'Sending...';
+  try {
+    var r = await fetch('/api/support/tickets', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({category: _supCat, subject: subj, message: msg})
+    });
+    var d = await r.json();
+    if (d.ok) {
+      document.getElementById('sup-subject').value = '';
+      document.getElementById('sup-message').value = '';
+      toast('Ticket submitted: ' + d.ticket_id, 'ok');
+      supLoadTickets();
+    } else { toast(d.error || 'Failed', 'err'); }
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Submit';
+}
+function supOpenBetaResponse(testId, title) {
+  toggleSupportPanel();
+  _supCat = 'beta_test';
+  document.getElementById('sup-subject').value = 'Beta Test: ' + title;
+  document.getElementById('sup-message').placeholder = 'Describe your test results...';
+  document.getElementById('sup-message').focus();
+  document.getElementById('sup-message').dataset.betaTestId = testId;
+}
+async function supLoadTickets() {
+  var el = document.getElementById('sup-tickets-list');
+  try {
+    var r = await fetch('/api/support/tickets');
+    var d = await r.json();
+    var tickets = d.tickets || [];
+    if (!tickets.length) { el.innerHTML = '<div style="font-size:11px;color:var(--dim);text-align:center;padding:12px 0">No tickets yet</div>'; return; }
+    el.innerHTML = tickets.map(function(t) {
+      var stCls = t.status.replace(' ','_');
+      var last = t.last_message ? t.last_message.message.slice(0,60) : '';
+      var age = t.updated_at ? t.updated_at.slice(0,10) : '';
+      return '<div class="sup-ticket" data-tid="' + t.ticket_id + '" onclick="supViewTicket(this.dataset.tid)">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+        + '<div class="sup-ticket-subj">' + t.subject + '</div>'
+        + '<span class="sup-status ' + stCls + '">' + t.status + '</span></div>'
+        + '<div class="sup-ticket-meta">' + t.category + ' \u00b7 ' + age + ' \u00b7 ' + t.message_count + ' messages</div>'
+        + (last ? '<div style="font-size:10px;color:var(--dim);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + last + '</div>' : '')
+        + '</div>';
+    }).join('');
+  } catch(e) { el.innerHTML = '<div style="color:var(--pink);font-size:11px">Error loading tickets</div>'; }
+}
+async function supViewTicket(ticketId) {
+  try {
+    var r = await fetch('/api/support/tickets/' + ticketId);
+    var d = await r.json();
+    if (!d.ticket) return;
+    var msgs = d.messages || [];
+    var html = '<div style="margin-bottom:12px"><button class="sup-cat active" onclick="supLoadTickets();this.parentElement.parentElement.innerHTML=&#39;&#39;;" style="font-size:10px">&larr; Back</button></div>';
+    html += '<div style="font-size:13px;font-weight:700;margin-bottom:4px">' + d.ticket.subject + '</div>';
+    html += '<div style="font-size:10px;color:var(--muted);margin-bottom:12px">' + d.ticket.category + ' \u00b7 ' + d.ticket.status + '</div>';
+    msgs.forEach(function(m) {
+      var isAdmin = m.sender === 'admin';
+      html += '<div style="padding:8px 10px;border-radius:8px;margin-bottom:6px;background:' + (isAdmin ? 'rgba(123,97,255,0.06)' : 'rgba(255,255,255,0.03)') + ';border:1px solid ' + (isAdmin ? 'rgba(123,97,255,0.12)' : 'var(--border)') + '">';
+      html += '<div style="font-size:9px;color:var(--muted);margin-bottom:3px">' + (isAdmin ? 'Support Team' : 'You') + ' \u00b7 ' + (m.created_at||'').slice(0,16) + '</div>';
+      html += '<div style="font-size:12px;color:var(--text);line-height:1.5;white-space:pre-wrap">' + m.message + '</div>';
+      html += '</div>';
+    });
+    html += '<textarea class="sup-input sup-textarea" id="sup-reply-msg" placeholder="Write a reply..." style="margin-top:8px"></textarea>';
+    html += '<button class="sup-submit" data-tid="' + ticketId + '" onclick="supReplyTicket(this.dataset.tid)">Reply</button>';
+    document.getElementById('sup-tickets-list').innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+async function supReplyTicket(ticketId) {
+  var msg = document.getElementById('sup-reply-msg').value.trim();
+  if (!msg) return;
+  await fetch('/api/support/tickets/' + ticketId + '/reply', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({message: msg, sender: 'customer'})
+  });
+  supViewTicket(ticketId);
+}
+
 // ── TABS ──
 function showTab(t, e) {
-  ['dashboard','intel','news','screening','performance','risk','settings'].forEach(id => {
+  ['dashboard','intel','news','screening','performance','risk','billing','settings','guide','messages'].forEach(id => {
     const el = document.getElementById('tab-'+id);
     if (el) el.style.display = id===t ? '' : 'none';
     // Sidebar active state
@@ -4974,6 +5924,8 @@ function showTab(t, e) {
   if (t === 'screening') loadScreening();
   if (t === 'performance') loadPerformance();
   if (t === 'risk') loadRisk();
+  if (t === 'messages') loadMessages();
+  if (t === 'billing') loadBilling();
 }
 
 // ── POSITION DRAWER ──
@@ -5253,9 +6205,13 @@ async function loadKeyValues() {
     _keyCurrentValues = d;
     const set = (obsId, val) => { const el = document.getElementById(obsId); if (el) el.textContent = val || 'Not set'; };
     set('obs-alpaca-key',    d.ALPACA_API_KEY);
+    // Show green checks if keys are set
+    var keyCheck = document.getElementById('alpaca-key-check');
+    var secCheck = document.getElementById('alpaca-secret-check');
+    if (keyCheck) keyCheck.style.display = (d.ALPACA_API_KEY && d.ALPACA_API_KEY !== 'Not set') ? 'inline' : 'none';
+    if (secCheck) secCheck.style.display = (d.ALPACA_SECRET_KEY && d.ALPACA_SECRET_KEY !== 'Not set') ? 'inline' : 'none';
     set('obs-alpaca-secret', d.ALPACA_SECRET_KEY);
-    set('obs-resend',        d.RESEND_API_KEY);
-    set('obs-license',       d.LICENSE_KEY);
+    // resend + license removed from customer settings
     set('obs-alert-to',      d.ALERT_TO);
     const modeEl = document.getElementById('k-trading-mode');
     const liveOpt = document.getElementById('k-live-option');
@@ -5568,10 +6524,17 @@ function renderPositions(positions) {
     </div>`;
   };
 
-  el.innerHTML = [
+  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
+    + '<div></div><div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Position</div>'
+    + '<div style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
+    + '<div style="text-align:right;min-width:72px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
+    + '<div style="text-align:right;min-width:68px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
+    + '</div>';
+  const rows = [
     ...tracked.map((p,i) => renderRow(p, i, false)),
     ...orphans.map((p,i) => renderRow(p, i, true)),
-  ].join('') || '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
+  ];
+  el.innerHTML = rows.length ? (headerRow + rows.join('')) : '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
 }
 
 function renderApprovals(approvals) {
@@ -6328,7 +7291,8 @@ async function loadTraderActivity() {
     if (!el) return;
     const items = [];
     (d.scans||[]).slice(0,8).forEach(s => {
-      const tier    = (s.tier||'LOW').toUpperCase();
+      const _tierMap = {'1':'HIGH','2':'MEDIUM','3':'LOW','4':'QUIET'};
+      const tier    = (_tierMap[String(s.tier)] || String(s.tier||'LOW')).toUpperCase();
       const tierCls = tier==='HIGH'?'conf-high':tier==='MEDIUM'?'conf-med':'conf-low';
       const cascade = s.cascade_detected ? '<span style="color:var(--pink);font-size:8px;margin-left:4px">CASCADE</span>' : '';
       const summary = (s.event_summary||'Scanned').slice(0,60);
@@ -6524,7 +7488,14 @@ loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
+checkNewAccountBanner();
 loadCfgPanel();
+// First-time setup guide check
+fetch('/api/customer-settings').then(r=>r.json()).then(function(d){
+  if (d.SETUP_COMPLETE !== '1') {
+    showTab('guide');
+  }
+});
 loadNews('all');
 updateMarketClock();
 updateSessionTimeline();
@@ -6693,7 +7664,7 @@ def index():
 
     # Per-customer operating mode from auth.db (falls back to env for legacy admin)
     customer_id    = session.get('customer_id', 'admin')
-    operating_mode = auth.get_operating_mode(customer_id) if customer_id != 'admin' else OPERATING_MODE
+    operating_mode = _customer_db().get_setting('OPERATING_MODE') or (auth.get_operating_mode(customer_id) if customer_id != 'admin' else OPERATING_MODE)
 
     # Safe skeleton status — JS will overwrite with live data
     skeleton_status = {
@@ -6945,6 +7916,11 @@ def api_get_keys():
         alpaca_key, alpaca_secret = auth.get_alpaca_credentials(customer_id)
     except Exception:
         pass
+    # Fallback to env vars — ONLY for admin sessions (not regular customers)
+    if not alpaca_key and customer_id == 'admin':
+        alpaca_key = os.environ.get('ALPACA_API_KEY', '')
+    if not alpaca_secret and customer_id == 'admin':
+        alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
     base_url = os.environ.get('ALPACA_BASE_URL', '')
     trading_mode = 'live' if (base_url and 'paper' not in base_url.lower()) else 'paper'
     live_enabled = os.environ.get('LIVE_TRADING_ENABLED', 'false').lower() == 'true'
@@ -7016,11 +7992,21 @@ def api_settings():
         'min_confidence':     'MIN_CONFIDENCE',
         'max_position_pct':   'MAX_POSITION_PCT',
         'max_trade_usd':      'MAX_TRADE_USD',
+        'max_positions':      'MAX_POSITIONS',
+        'max_daily_loss':     'MAX_DAILY_LOSS',
         'max_sector_pct':     'MAX_SECTOR_PCT',
         'close_session_mode': 'CLOSE_SESSION_MODE',
         'max_staleness':      'MAX_STALENESS',
-        'spousal_weight':     'SPOUSAL_WEIGHT',
+        'max_drawdown_pct':   'MAX_DRAWDOWN_PCT',
+        'max_holding_days':   'MAX_HOLDING_DAYS',
+        'max_gross_exposure':  'MAX_GROSS_EXPOSURE',
+        'profit_target':      'PROFIT_TARGET_MULTIPLE',
+        'trading_mode':       'TRADING_MODE',
+        'enable_bil_reserve': 'ENABLE_BIL_RESERVE',
+        'setup_complete':     'SETUP_COMPLETE',
+        'idle_reserve_pct':   'IDLE_RESERVE_PCT',
         'operating_mode':     'OPERATING_MODE',
+        'preset_name':        'PRESET_NAME',
     }
     try:
         db = _customer_db()
@@ -7065,10 +8051,19 @@ def api_customer_settings():
             'MIN_CONFIDENCE':     os.environ.get('MIN_CONFIDENCE', 'LOW'),
             'MAX_POSITION_PCT':   os.environ.get('MAX_POSITION_PCT', '0.10'),
             'MAX_TRADE_USD':      os.environ.get('MAX_TRADE_USD', '1000'),
+            'MAX_POSITIONS':      os.environ.get('MAX_POSITIONS', '10'),
+            'MAX_DAILY_LOSS':     os.environ.get('MAX_DAILY_LOSS', '500'),
             'MAX_SECTOR_PCT':     os.environ.get('MAX_SECTOR_PCT', '25'),
             'CLOSE_SESSION_MODE': os.environ.get('CLOSE_SESSION_MODE', 'aggressive'),
             'MAX_STALENESS':      os.environ.get('MAX_STALENESS', 'Aging'),
-            'SPOUSAL_WEIGHT':     os.environ.get('SPOUSAL_WEIGHT', 'reduced'),
+            'MAX_DRAWDOWN_PCT':   os.environ.get('MAX_DRAWDOWN_PCT', '15'),
+            'MAX_HOLDING_DAYS':   os.environ.get('MAX_HOLDING_DAYS', '15'),
+            'MAX_GROSS_EXPOSURE': os.environ.get('MAX_GROSS_EXPOSURE', '80'),
+            'PROFIT_TARGET_MULTIPLE': os.environ.get('PROFIT_TARGET_MULTIPLE', '2'),
+            'TRADING_MODE':       os.environ.get('TRADING_MODE', 'PAPER'),
+            'ENABLE_BIL_RESERVE': os.environ.get('ENABLE_BIL_RESERVE', '1'),
+            'SETUP_COMPLETE':     '0',
+            'IDLE_RESERVE_PCT':   os.environ.get('IDLE_RESERVE_PCT', '20'),
             'KILL_SWITCH':        '1' if kill_switch_active() else '0',
         }
 
@@ -7212,26 +8207,29 @@ def api_performance_summary():
                         'trades': [], 'error': str(e)})
 
 
+@login_required
 @app.route('/api/watchlist')
 def api_watchlist():
-    """Signals Claude is watching but has not acted on yet."""
+    """Signals from shared intelligence — all customers see the same market data."""
     try:
-        signals = _customer_db().get_watching_signals(limit=10)
+        signals = _shared_db().get_watching_signals(limit=10)
         return jsonify({'signals': signals})
     except Exception as e:
         return jsonify({'signals': [], 'error': str(e)})
 
 
+@login_required
 @app.route('/api/screening')
 def api_screening():
-    """Latest sector screening run — candidates with news, sentiment, and congressional signals."""
+    """Latest sector screening — shared across all customers."""
     try:
-        candidates = _customer_db().get_latest_screening_run()
+        candidates = _shared_db().get_latest_screening_run()
         return jsonify({'candidates': candidates})
     except Exception as e:
         return jsonify({'candidates': [], 'error': str(e)})
 
 
+@login_required
 @app.route('/api/market-indices')
 def api_market_indices():
     """Fetch intraday quote for SPY (S&P 500), QQQ (Nasdaq), DIA (Dow)."""
@@ -7861,6 +8859,280 @@ def api_trader_activity():
         return jsonify({'scans': [], 'recent': [], 'error': str(e)})
 
 
+
+
+
+
+
+
+
+@app.route('/api/test-alpaca-keys')
+@login_required
+def api_test_alpaca_keys():
+    try:
+        alpaca_key, alpaca_secret, alpaca_url = _get_customer_alpaca_creds()
+        if not alpaca_key or not alpaca_secret:
+            return jsonify({'ok': False, 'error': 'No API keys configured. Add them in Settings.'})
+        import requests as _req
+        r = _req.get(
+            f"{alpaca_url}/v2/account",
+            headers={
+                'APCA-API-KEY-ID': alpaca_key,
+                'APCA-API-SECRET-KEY': alpaca_secret,
+            },
+            timeout=10,
+        )
+        if r.status_code == 200:
+            acct = r.json()
+            cash = f"{float(acct.get('cash', 0)):,.2f}"
+            return jsonify({
+                'ok': True,
+                'account_id': acct.get('account_number', acct.get('id', ''))[:12],
+                'status': acct.get('status', 'unknown'),
+                'cash': cash,
+                'paper': 'paper' in alpaca_url.lower(),
+            })
+        elif r.status_code == 401:
+            return jsonify({'ok': False, 'error': 'Invalid API keys'})
+        elif r.status_code == 403:
+            return jsonify({'ok': False, 'error': 'Keys disabled or restricted'})
+        else:
+            return jsonify({'ok': False, 'error': f'Alpaca HTTP {r.status_code}'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:100]})
+
+@app.route('/api/billing')
+@login_required
+def api_billing():
+    customer_id = session.get('customer_id')
+    if not customer_id or customer_id == 'admin':
+        return jsonify({'error': 'no customer context'}), 400
+    try:
+        import auth as _auth
+        with _auth._auth_conn() as c:
+            row = c.execute(
+                "SELECT subscription_status, subscription_ends_at, grace_period_ends_at, "
+                "pricing_tier, created_at, stripe_customer_id "
+                "FROM customers WHERE id=?", (customer_id,)
+            ).fetchone()
+        if not row:
+            return jsonify({'error': 'customer not found'}), 404
+        return jsonify({
+            'subscription_status': row['subscription_status'] or 'inactive',
+            'subscription_ends_at': row['subscription_ends_at'],
+            'grace_period_ends_at': row['grace_period_ends_at'],
+            'pricing_tier': row['pricing_tier'] or 'standard',
+            'created_at': row['created_at'],
+            'stripe_customer_id': row['stripe_customer_id'],
+            'has_stripe': bool(row['stripe_customer_id']),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/billing/all-customers')
+def api_billing_all_customers():
+    token = request.headers.get('X-Service-Token', '')
+    svc_token = os.environ.get('PORTAL_SERVICE_TOKEN', '')
+    is_service = svc_token and token == svc_token
+    if not is_service:
+        if not is_authenticated() or not is_admin():
+            return jsonify({'error': 'unauthorized'}), 401
+    try:
+        import auth as _auth
+        customers = _auth.list_customers()
+        summary = {'active': 0, 'trialing': 0, 'past_due': 0, 'cancelled': 0, 'inactive': 0}
+        for c in customers:
+            st = c.get('subscription_status', 'inactive') or 'inactive'
+            if st in summary:
+                summary[st] += 1
+            else:
+                summary['inactive'] += 1
+        return jsonify({
+            'customers': [{
+                'id': c['id'],
+                'name': c.get('display_name', ''),
+                'email': c.get('email', ''),
+                'subscription_status': c.get('subscription_status', 'inactive') or 'inactive',
+                'pricing_tier': c.get('pricing_tier', 'standard'),
+                'created_at': c.get('created_at', ''),
+                'has_alpaca': c.get('has_alpaca', False),
+            } for c in customers],
+            'summary': summary,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ── SUPPORT TICKET API ────────────────────────────────────────────────────────
+
+@app.route('/api/support/tickets', methods=['GET'])
+@login_required
+def api_support_tickets():
+    status = request.args.get('status')
+    category = request.args.get('category')
+    db = _customer_db()
+    tickets = db.get_tickets(status=status, category=category)
+    return jsonify({'tickets': tickets})
+
+
+@app.route('/api/support/tickets', methods=['POST'])
+@login_required
+def api_support_create_ticket():
+    data = request.get_json(force=True)
+    category = data.get('category', 'portal')
+    subject = data.get('subject', '').strip()
+    message = data.get('message', '').strip()
+    beta_test_id = data.get('beta_test_id')
+    if not subject or not message:
+        return jsonify({'error': 'Subject and message are required'}), 400
+    db = _customer_db()
+    ticket_id = db.create_ticket(category, subject, message, beta_test_id=beta_test_id)
+    return jsonify({'ok': True, 'ticket_id': ticket_id})
+
+
+@app.route('/api/support/tickets/<ticket_id>', methods=['GET'])
+@login_required
+def api_support_ticket_detail(ticket_id):
+    target_customer = request.args.get('customer_id')
+    if target_customer and is_admin():
+        from retail_database import get_customer_db
+        db = get_customer_db(target_customer)
+    else:
+        db = _customer_db()
+    ticket, messages = db.get_ticket_messages(ticket_id)
+    if not ticket:
+        return jsonify({'error': 'Ticket not found'}), 404
+    return jsonify({'ticket': ticket, 'messages': messages})
+
+
+@app.route('/api/support/tickets/<ticket_id>/reply', methods=['POST'])
+@login_required
+def api_support_ticket_reply(ticket_id):
+    data = request.get_json(force=True)
+    message = data.get('message', '').strip()
+    sender = data.get('sender', 'customer')
+    target_customer = data.get('customer_id')
+    if not message:
+        return jsonify({'error': 'Message is required'}), 400
+    # If admin is replying to a specific customer's ticket, use their DB
+    if target_customer and is_admin():
+        from retail_database import get_customer_db
+        db = get_customer_db(target_customer)
+    else:
+        db = _customer_db()
+    db.add_ticket_message(ticket_id, sender, message)
+    # If admin replied, send notification to customer
+    if sender == 'admin':
+        db.add_notification('account', 'Support Reply',
+                           f'New reply on ticket {ticket_id}',
+                           meta={'ticket_id': ticket_id})
+    return jsonify({'ok': True})
+
+
+@app.route('/api/support/tickets/<ticket_id>/status', methods=['POST'])
+@login_required
+def api_support_ticket_status(ticket_id):
+    data = request.get_json(force=True)
+    status = data.get('status', '')
+    target_customer = data.get('customer_id')
+    if status not in ('open', 'in_progress', 'resolved', 'closed'):
+        return jsonify({'error': 'Invalid status'}), 400
+    if target_customer and is_admin():
+        from retail_database import get_customer_db
+        db = get_customer_db(target_customer)
+    else:
+        db = _customer_db()
+    db.update_ticket_status(ticket_id, status)
+    if status in ('resolved', 'closed'):
+        db.add_notification('account', f'Ticket {status.title()}',
+                           f'Your support ticket {ticket_id} has been {status}.',
+                           meta={'ticket_id': ticket_id})
+    return jsonify({'ok': True})
+
+
+@app.route('/api/support/beta-response', methods=['POST'])
+@login_required
+def api_support_beta_response():
+    data = request.get_json(force=True)
+    beta_test_id = data.get('beta_test_id', '')
+    message = data.get('message', '').strip()
+    if not beta_test_id or not message:
+        return jsonify({'error': 'beta_test_id and message required'}), 400
+    db = _customer_db()
+    ticket_id = db.create_ticket(
+        category='beta_test',
+        subject=f'Beta Test Response: {beta_test_id}',
+        message=message,
+        beta_test_id=beta_test_id
+    )
+    return jsonify({'ok': True, 'ticket_id': ticket_id})
+
+
+
+
+@app.route('/api/support/direct-message', methods=['POST'])
+@login_required
+def api_support_direct_message():
+    if not is_admin():
+        return jsonify({'error': 'admin only'}), 403
+    data = request.get_json(force=True)
+    customer_id = data.get('customer_id')
+    title = data.get('title', '').strip()
+    message = data.get('message', '').strip()
+    if not customer_id or not title or not message:
+        return jsonify({'error': 'customer_id, title, and message required'}), 400
+    from retail_database import get_customer_db
+    db = get_customer_db(customer_id)
+    # Create ticket with admin as first sender
+    import secrets
+    ticket_id = 'DM-' + secrets.token_hex(4).upper()
+    now = db.now()
+    with db.conn() as c:
+        c.execute(
+            "INSERT INTO support_tickets "
+            "(ticket_id, category, subject, status, priority, created_at, updated_at) "
+            "VALUES (?, 'direct_message', ?, 'open', 'normal', ?, ?)",
+            (ticket_id, title, now, now)
+        )
+        c.execute(
+            "INSERT INTO support_messages (ticket_id, sender, message, created_at) "
+            "VALUES (?, 'admin', ?, ?)",
+            (ticket_id, message, now)
+        )
+    # Also send notification so they see it in the bell
+    db.add_notification('account', title, message[:100] + ('...' if len(message) > 100 else ''),
+                        meta={'type': 'direct_message', 'ticket_id': ticket_id})
+    return jsonify({'ok': True, 'ticket_id': ticket_id})
+
+@app.route('/api/support/all-tickets', methods=['GET'])
+def api_support_all_tickets():
+    "Admin endpoint: get tickets across ALL customers."
+    token = request.headers.get('X-Service-Token', '')
+    svc_token = os.environ.get('PORTAL_SERVICE_TOKEN', '')
+    is_service = svc_token and token == svc_token
+    if not is_service:
+        if not is_authenticated() or not is_admin():
+            return jsonify({'error': 'unauthorized'}), 401
+    import auth as _auth
+    customers = _auth.list_customers()
+    from retail_database import get_customer_db
+    all_tickets = []
+    for cust in customers:
+        try:
+            cdb = get_customer_db(cust['id'])
+            tickets = cdb.get_tickets(
+                status=request.args.get('status'),
+                category=request.args.get('category')
+            )
+            for t in tickets:
+                t['customer_id'] = cust['id']
+                t['customer_name'] = cust.get('display_name', '')
+                t['customer_email'] = cust.get('email', '')
+            all_tickets.extend(tickets)
+        except Exception:
+            pass
+    all_tickets.sort(key=lambda t: t.get('updated_at', ''), reverse=True)
+    return jsonify({'tickets': all_tickets})
 
 @app.route('/api/logs-audit')
 def api_logs_audit():
@@ -8583,9 +9855,9 @@ async function uploadFiles(files) {
 # ── NEWS FEED ──────────────────────────────────────────────────────────────
 
 def get_news_feed_data(limit=100):
-    """Fetch recent news feed entries from the customer's database."""
+    """Fetch recent news feed entries from the shared intelligence database."""
     try:
-        return _customer_db().get_news_feed(limit=limit)
+        return _shared_db().get_news_feed(limit=limit)
     except Exception as e:
         log.warning(f"get_news_feed_data error: {e}")
         return []
@@ -8726,11 +9998,11 @@ def api_article_meta():
 @app.route('/api/news-headlines')
 @login_required
 def api_news_headlines():
-    """Display-only news headlines from MarketWatch RSS (source='NEWS')."""
+    """Display-only news headlines — shared across all customers."""
     category = request.args.get('category')
     if category == 'all':
         category = None
-    db = _customer_db()
+    db = _shared_db()
     articles = db.get_news_headlines(category=category, limit=100, min_floor=30)
     return jsonify({'articles': articles, 'count': len(articles)})
 
@@ -9485,6 +10757,95 @@ def api_admin_processes():
     return jsonify({'processes': results})
 
 
+
+
+# ── MARKET ACTIVITY API (for monitor chart) ─────────────────────────────────
+@app.route('/api/admin/market-activity')
+@admin_required
+def api_admin_market_activity():
+    """Aggregate buy/sell activity across ALL customers for the monitor chart."""
+    from datetime import datetime, timedelta
+    import auth as _auth
+
+    hours = int(request.args.get('hours', 24))
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+
+    # Build hourly bins
+    now = datetime.utcnow()
+    bins = {}
+    for i in range(hours):
+        h = (now - timedelta(hours=hours - 1 - i))
+        key = h.strftime('%Y-%m-%dT%H:00')
+        bins[key] = {'buys': 0.0, 'sells': 0.0, 'buy_count': 0, 'sell_count': 0}
+
+    # Aggregate across all customer DBs
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    for cid in os.listdir(customers_dir):
+        if cid == 'default':
+            continue
+        db_path = os.path.join(customers_dir, cid, 'signals.db')
+        if not os.path.exists(db_path):
+            continue
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            # Buys
+            for r in conn.execute(
+                "SELECT opened_at, entry_price * shares AS amt FROM positions WHERE opened_at >= ?",
+                (cutoff,)
+            ).fetchall():
+                ts = (r['opened_at'] or '')[:13] + ':00'
+                if ts in bins:
+                    bins[ts]['buys'] += float(r['amt'] or 0)
+                    bins[ts]['buy_count'] += 1
+            # Sells
+            for r in conn.execute(
+                "SELECT closed_at, entry_price * shares AS amt FROM positions WHERE closed_at IS NOT NULL AND closed_at >= ?",
+                (cutoff,)
+            ).fetchall():
+                ts = (r['closed_at'] or '')[:13] + ':00'
+                if ts in bins:
+                    bins[ts]['sells'] += float(r['amt'] or 0)
+                    bins[ts]['sell_count'] += 1
+            conn.close()
+        except Exception as e:
+            log.warning(f"market-activity scan for {cid[:8]}: {e}")
+
+    # Session history from ring buffer
+    session_bins = {k: 0 for k in bins}
+    with _session_activity_lock:
+        for ts, count in _session_hourly:
+            # Map minute-level snapshots to hour bins
+            hour_key = ts[:13] + ':00'
+            if hour_key in session_bins:
+                session_bins[hour_key] = max(session_bins[hour_key], count)
+        # Current active count
+        active_now = sum(1 for v in _session_activity.values()
+                        if (datetime.utcnow() - v['last_activity']).total_seconds() < 900)
+
+    hours_list = sorted(bins.keys())
+    total_buys = sum(bins[h]['buys'] for h in hours_list)
+    total_sells = sum(bins[h]['sells'] for h in hours_list)
+    sessions_list = [session_bins.get(h, 0) for h in hours_list]
+    peak = max(sessions_list) if sessions_list else 0
+
+    return jsonify({
+        'hours':    hours_list,
+        'buys':     [round(bins[h]['buys'], 2) for h in hours_list],
+        'sells':    [round(bins[h]['sells'], 2) for h in hours_list],
+        'sessions': sessions_list,
+        'summary': {
+            'total_buys':    round(total_buys, 2),
+            'total_sells':   round(total_sells, 2),
+            'net_flow':      round(total_buys - total_sells, 2),
+            'buy_count':     sum(bins[h]['buy_count'] for h in hours_list),
+            'sell_count':    sum(bins[h]['sell_count'] for h in hours_list),
+            'active_now':    active_now,
+            'peak_sessions': max(peak, active_now),
+        },
+    })
+
 @app.route('/api/admin/scheduler-history')
 @admin_required
 def api_admin_scheduler_history():
@@ -9501,6 +10862,27 @@ def api_admin_scheduler_history():
 
 
 # ── START ──────────────────────────────────────────────────────────────────
+
+
+# ── SESSION SNAPSHOT BACKGROUND THREAD ──────────────────────────────────────
+def _session_snapshot_loop():
+    """Record active session count every 60 seconds for the market activity chart."""
+    import time as _t
+    while True:
+        _t.sleep(60)
+        try:
+            now = datetime.utcnow()
+            ts = now.strftime('%Y-%m-%dT%H:%M')
+            with _session_activity_lock:
+                active = sum(1 for v in _session_activity.values()
+                           if (now - v['last_activity']).total_seconds() < 900)
+            _session_hourly.append((ts, active))
+        except Exception:
+            pass
+
+_snap_thread = _threading.Thread(target=_session_snapshot_loop, daemon=True)
+_snap_thread.start()
+
 if __name__ == '__main__':
     auth.init_auth_db()
     auth.ensure_admin_account()

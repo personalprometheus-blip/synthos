@@ -56,10 +56,17 @@ ALPACA_DATA_URL      = "https://data.alpaca.markets"
 _CUSTOMER_ID: 'str | None' = None
 
 def _db():
-    """Return per-customer signals.db if --customer-id was given, else the shared system DB."""
+    """Return per-customer signals.db if --customer-id was given, else the master customer DB.
+    Shared agents (news/sentiment/screener) write to the master customer's DB
+    so all customers can read from a single intelligence source."""
     if _CUSTOMER_ID:
         from retail_database import get_customer_db
         return get_customer_db(_CUSTOMER_ID)
+    # Default to master customer DB (OWNER_CUSTOMER_ID) for shared intelligence
+    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+    if owner_id:
+        from retail_database import get_customer_db
+        return get_customer_db(owner_id)
     return get_db()
 ET                   = ZoneInfo("America/New_York")
 MAX_RETRIES          = 3
@@ -71,7 +78,7 @@ MONITOR_TOKEN        = os.environ.get('MONITOR_TOKEN', '')
 
 MIN_SIGNAL_THRESHOLD  = float(os.environ.get('MIN_SIGNAL_THRESHOLD', '0.1'))
 INTERROGATION_PORT    = 5556
-INTERROGATION_TIMEOUT = 30
+INTERROGATION_TIMEOUT = 5
 
 logging.basicConfig(
     level=logging.INFO,
@@ -2550,6 +2557,12 @@ def run(session="market"):
     db.log_event("AGENT_START", agent="News", details=f"session={session}")
     db.log_heartbeat("news_agent", "RUNNING")
 
+    # Fulfill screening requests FIRST (before main pipeline which may take a while)
+    try:
+        _handle_screening_requests(db)
+    except Exception as e:
+        log.warning(f"Screening request enrichment failed: {e}")
+
     # ── Gate 2: Benchmark regime (session-level, once per run) ────────────
     regime = gate2_benchmark(ctrl)
 
@@ -2862,11 +2875,15 @@ def run(session="market"):
         except Exception as e:
             log.warning(f"Signal annotation failed (non-fatal): {e}")
 
-        # ── Interrogation broadcast ───────────────────────────────────────
-        price_summary_for_announce = dict(price_summary) if price_summary else {}
-        validated = announce_for_interrogation(sig_id, ticker, price_summary_for_announce)
-        interrogation_status = "VALIDATED" if validated else "UNVALIDATED"
-        del price_summary, price_summary_for_announce
+        # ── Interrogation broadcast (only for trade candidates, not WATCH) ─
+        if routing == "QUEUE":
+            price_summary_for_announce = dict(price_summary) if price_summary else {}
+            validated = announce_for_interrogation(sig_id, ticker, price_summary_for_announce)
+            interrogation_status = "VALIDATED" if validated else "UNVALIDATED"
+            del price_summary_for_announce
+        else:
+            interrogation_status = "SKIPPED"
+        del price_summary
 
         try:
             with db.conn() as c:

@@ -34,7 +34,13 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db
+from retail_database import get_db, get_customer_db
+
+def _master_db():
+    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+    if owner_id:
+        return get_customer_db(owner_id)
+    return get_db()
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY  = os.environ.get('ALPACA_API_KEY', '')
@@ -327,7 +333,7 @@ def run(sector="Energy"):
     # Step 3: Check congressional signals (supplemental)
     tickers = [cd['ticker'] for cd in scored_candidates]
     log.info("Checking congressional signals for all candidates...")
-    congressional_flags = check_congressional_signals(get_db(), tickers)
+    congressional_flags = check_congressional_signals(_master_db(), tickers)
     flagged = [t for t, f in congressional_flags.items() if f != 'none']
     if flagged:
         log.info(f"Congressional activity found: {flagged}")
@@ -336,7 +342,7 @@ def run(sector="Energy"):
 
     # Step 4: Write to DB
     log.info("Writing candidates to sector_screening table...")
-    db = get_db()
+    db = _master_db()
     db.write_screening_run(run_id, sector, etf, etf_5yr_return, scored_candidates)
 
     # Step 5: Write congressional flags

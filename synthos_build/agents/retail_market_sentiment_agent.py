@@ -45,7 +45,13 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+
+def _master_db():
+    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+    if owner_id:
+        return get_customer_db(owner_id)
+    return get_db()
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET                = ZoneInfo("America/New_York")
@@ -72,6 +78,8 @@ log = logging.getLogger('market_sentiment_agent')
 
 
 # ── RETRY HELPERS ─────────────────────────────────────────────────────────
+
+_yahoo_blocked = False  # circuit breaker — skip Yahoo after first 429
 
 def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
     """Fetch URL with exponential backoff. Returns response or None."""
@@ -193,15 +201,12 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
         return {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
 
 
-def fetch_volume_profile(ticker):
+def fetch_volume_profile(ticker, is_position=False):
     """
-    Fetch volume data from Yahoo Finance RSS and Finviz.
+    Fetch volume data from Finviz, SEC EDGAR, and Yahoo Finance (last).
+    Yahoo only checked for positions or tickers showing elevated Finviz volume.
     Returns dict with today_vs_avg, seller_dominance estimate.
     """
-    # Yahoo Finance RSS for recent news and volume context
-    url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
-    r = fetch_with_retry(url)
-
     volume_data = {
         "today_vs_avg": "+0%",
         "seller_dominance": "50%",
@@ -209,18 +214,8 @@ def fetch_volume_profile(ticker):
         "available": False,
     }
 
-    if r:
-        try:
-            feed = feedparser.parse(r.text)
-            # News volume as a proxy for market attention
-            recent_articles = len([e for e in feed.entries if e.get("title")])
-            if recent_articles > 5:
-                volume_data["available"] = True
-                log.info(f"Yahoo Finance {ticker}: {recent_articles} recent news items")
-        except Exception as e:
-            log.warning(f"Yahoo Finance RSS error ({ticker}): {e}")
-
-    # Finviz for price action data
+    # ── FINVIZ FIRST (reliable, fast) ──
+    rel_vol = None
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     fv_url  = f"https://finviz.com/quote.ashx?t={ticker}"
     fv_r    = fetch_with_retry(fv_url, headers=headers)
@@ -228,7 +223,6 @@ def fetch_volume_profile(ticker):
     if fv_r:
         try:
             text = fv_r.text
-            # Extract volume ratio from Finviz
             vol_match = re.search(r'Rel Volume.*?(\d+\.\d+)', text, re.DOTALL)
             if vol_match:
                 rel_vol = float(vol_match.group(1))
@@ -236,11 +230,9 @@ def fetch_volume_profile(ticker):
                 volume_data["today_vs_avg"] = pct_change
                 volume_data["available"] = True
 
-                # Price change as proxy for seller dominance
                 price_match = re.search(r'Change.*?(-?\d+\.\d+)%', text, re.DOTALL)
                 if price_match:
                     price_change = float(price_match.group(1))
-                    # Negative price change with high volume = seller dominance
                     if price_change < 0 and rel_vol > 1.5:
                         dom = min(50 + abs(price_change) * 5, 90)
                         volume_data["seller_dominance"] = f"{dom:.0f}%"
@@ -250,6 +242,25 @@ def fetch_volume_profile(ticker):
             log.info(f"Finviz {ticker}: rel_vol={volume_data['today_vs_avg']} sellers={volume_data['seller_dominance']}")
         except Exception as e:
             log.warning(f"Finviz parse error ({ticker}): {e}")
+
+    # ── YAHOO LAST (only for positions or elevated volume tickers) ──
+    global _yahoo_blocked
+    elevated = rel_vol is not None and rel_vol > 1.5
+    if not _yahoo_blocked and (is_position or elevated):
+        url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
+        r = fetch_with_retry(url)
+        if r is None:
+            _yahoo_blocked = True
+            log.info("Yahoo Finance rate-limited — skipping Yahoo for remaining tickers")
+        elif r:
+            try:
+                feed = feedparser.parse(r.text)
+                recent_articles = len([e for e in feed.entries if e.get("title")])
+                if recent_articles > 5:
+                    volume_data["available"] = True
+                    log.info(f"Yahoo Finance {ticker}: {recent_articles} recent news items")
+            except Exception as e:
+                log.warning(f"Yahoo Finance RSS error ({ticker}): {e}")
 
     return volume_data
 
@@ -2514,13 +2525,19 @@ def _handle_screening_requests(db):
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
 
 def run():
-    db   = get_db()
+    db   = _master_db()
     ctrl = SentimentControls()
     now  = datetime.now(ET)
     log.info(f"The Pulse starting — {now.strftime('%H:%M ET')}")
 
     db.log_event("AGENT_START", agent="The Pulse")
     db.log_heartbeat("market_sentiment_agent", "RUNNING")
+
+    # Fulfill screening requests FIRST (before general scan which may timeout)
+    try:
+        _handle_screening_requests(db)
+    except Exception as e:
+        log.warning(f"Screening request enrichment failed: {e}")
 
     # ── Phase 1: 27-gate Market Sentiment Spine ───────────────────────────
     sdl   = SentimentDecisionLog()
@@ -2658,7 +2675,7 @@ def run():
             # Fetch all three signals
             pos_put_call, pos_put_call_avg = fetch_put_call_ratio(ticker)
             insider_data                   = fetch_sec_insider_transactions(ticker)
-            volume_data                    = fetch_volume_profile(ticker)
+            volume_data                    = fetch_volume_profile(ticker, is_position=True)
 
             # Small delay between tickers to avoid rate limiting
             time.sleep(2)

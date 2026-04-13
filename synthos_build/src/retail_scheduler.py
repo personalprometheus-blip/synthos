@@ -79,17 +79,17 @@ log = logging.getLogger('scheduler')
 
 # Agents that need per-customer execution (separate run per active customer).
 # Everything else is "shared" — runs once, output visible to all customers.
-_PER_CUSTOMER_AGENTS = {'retail_trade_logic_agent.py'}
+_PER_CUSTOMER_AGENTS = {'retail_trade_logic_agent.py'}  # Only trade logic runs per-customer; news/sentiment/screener run once and write to shared DB
 
 SESSION_PIPELINES = {
     'open': [
         ('retail_sector_screener.py',        ['--sector=Energy'],  180),
-        ('retail_market_sentiment_agent.py', [],                   240),
+        ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_news_agent.py',             ['--session=market'], 420),
         ('retail_trade_logic_agent.py',      ['--session=open'],   300),
     ],
     'midday': [
-        ('retail_market_sentiment_agent.py', [],                   240),
+        ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_trade_logic_agent.py',      ['--session=midday'], 300),
     ],
     'close': [
@@ -100,7 +100,7 @@ SESSION_PIPELINES = {
         ('retail_news_agent.py',             None,                 420),
     ],
     'sentiment': [
-        ('retail_market_sentiment_agent.py', [],                   240),
+        ('retail_market_sentiment_agent.py', [],                   600),
     ],
     'overnight': [
         ('retail_news_agent.py',             ['--session=overnight'], 420),
@@ -110,7 +110,7 @@ SESSION_PIPELINES = {
         # Screener picks top sector + candidates, news scores them, sentiment sets baseline
         ('retail_sector_screener.py',        [],                     300),
         ('retail_news_agent.py',             ['--session=overnight'], 420),
-        ('retail_market_sentiment_agent.py', [],                     240),
+        ('retail_market_sentiment_agent.py', [],                     600),
     ],
     'trade': [
         # Hourly trader evaluation + execution.
