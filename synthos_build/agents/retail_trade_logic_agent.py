@@ -1795,9 +1795,14 @@ def run(session="open"):
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
         current_price = pos.get('current_price') or pos['entry_price']
-        holding_days  = (now - datetime.fromisoformat(
-            pos.get('opened_at', now.isoformat()).replace('Z', '+00:00')
-        )).days if pos.get('opened_at') else 0
+        try:
+            _opened = datetime.fromisoformat(
+                pos.get('opened_at', now.isoformat()).replace('Z', '+00:00'))
+            if _opened.tzinfo is None:
+                _opened = _opened.replace(tzinfo=timezone.utc)
+            holding_days = (now - _opened).days
+        except Exception:
+            holding_days = 0
 
         exit_reason = None
 

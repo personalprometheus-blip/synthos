@@ -4361,22 +4361,175 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       </div>
     </div>
 
-    <!-- PORTFOLIO GROWTH -->
-    <div class="glass">
+    <!-- AGENT STATUS -->
+    <div class="glass" style="overflow:hidden">
       <div class="dash-panel-head">
-        <div class="dash-panel-title">Portfolio vs Benchmarks</div>
-        <div class="dash-panel-sub" id="chart-period">36h</div>
-        <div class="dash-panel-right">
-          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=12;loadMarketChart()">12h</button>
-          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=36;loadMarketChart()">36h</button>
-          <button class="graph-tab" style="font-size:8px;padding:1px 6px" onclick="_chartHours=168;loadMarketChart()">7d</button>
+        <div class="dash-panel-title">Agent Status</div>
+        <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">IDLE</div>
+      </div>
+      <!-- SINE WAVE CANVAS -->
+      <div style="position:relative;height:100px;overflow:hidden">
+        <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
+      </div>
+      <!-- STATUS DETAILS -->
+      <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div style="text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
+          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-decisions">0</div>
+          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:14px;font-weight:700;font-family:var(--mono)" id="ap-regime" style="color:var(--teal)">—</div>
+          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Regime</div>
         </div>
       </div>
-      <div style="padding:8px 10px;position:relative;height:200px">
-        <canvas id="market-chart" style="width:100%;height:100%"></canvas>
-        <div id="market-chart-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted)">Loading chart...</div>
+      <!-- LAST ACTIVITY -->
+      <div style="padding:0 14px 12px">
+        <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
       </div>
     </div>
+    <script>
+    // ── AGENT PULSE WAVE (isolated script — runs independently of main JS) ──
+    // ── AGENT PULSE WAVE ──
+var _apRunning = null;
+var _apFrame = 0;
+var _apWaveId = null;
+
+var _apColors = {
+  teal:   {r:0,   g:245, b:212},
+  purple: {r:123, g:97,  b:255},
+  amber:  {r:255, g:179, b:71},
+  pink:   {r:255, g:75,  b:110},
+  idle:   {r:255, g:255, b:255},
+};
+
+function _apDrawWave() {
+  var canvas = document.getElementById('ap-wave');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var w = canvas.clientWidth;
+  var h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  var active = !!_apRunning;
+  var colorKey = active ? (_apRunning.color || 'teal') : 'teal';
+  var c = _apColors[colorKey] || _apColors.teal;
+  var t = _apFrame * 0.015;
+  // Idle: slow heartbeat pulse — amplitude breathes between 4 and 18
+  var heartbeat = Math.sin(t * 0.4) * 0.5 + 0.5;  // 0→1 slow cycle
+  var baseAmp = active ? 30 : (4 + heartbeat * 14);
+  var numWaves = active ? 7 : 4;
+  var speed = active ? 1.2 : (0.15 + heartbeat * 0.15);
+  var midY = h / 2;
+
+  for (var i = 0; i < numWaves; i++) {
+    var alpha = active ? (0.12 + (i / numWaves) * 0.25) : (0.06 + heartbeat * 0.04 + (i / numWaves) * 0.12);
+    var amp = baseAmp * (0.4 + (i / numWaves) * 0.6);
+    var freq = 0.008 + i * 0.003;
+    var phase = t * speed + i * 0.8;
+
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    for (var x = 0; x <= w; x += 2) {
+      var y = midY + Math.sin(x * freq + phase) * amp
+                    + Math.sin(x * freq * 1.5 + phase * 0.7) * amp * 0.3;
+      ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + alpha + ')';
+    ctx.lineWidth = active ? 1.8 : 1.2;
+    ctx.stroke();
+
+    // Fill below the wave with subtle gradient
+    if (i === numWaves - 1) {
+      ctx.lineTo(w, h);
+      ctx.lineTo(0, h);
+      ctx.closePath();
+      var grad = ctx.createLinearGradient(0, midY, 0, h);
+      grad.addColorStop(0, 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0.06)');
+      grad.addColorStop(1, 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0)');
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+  }
+
+  // Agent label
+  ctx.font = '700 10px "Inter", sans-serif';
+  ctx.textAlign = 'center';
+  if (active && _apRunning.agent) {
+    ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0.7)';
+    ctx.fillText(_apRunning.agent.toUpperCase() + '  •  SCANNING', w/2, h - 8);
+  } else {
+    ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (0.15 + heartbeat * 0.1) + ')';
+    ctx.fillText('MONITORING', w/2, h - 8);
+  }
+
+  _apFrame++;
+  _apWaveId = requestAnimationFrame(_apDrawWave);
+}
+
+async function loadAgentPulse() {
+  try {
+    var r = await fetch('/api/agent-pulse');
+    var d = await r.json();
+    _apRunning = d.running;
+
+    // Status pill
+    var pill = document.getElementById('ap-status-pill');
+    if (pill) {
+      if (d.running) {
+        pill.textContent = d.running.agent;
+        var pc = d.running.color || 'teal';
+        var pcMap = {teal:'var(--teal)',purple:'var(--purple)',amber:'var(--amber)',pink:'var(--pink)'};
+        pill.style.color = pcMap[pc] || 'var(--teal)';
+        pill.style.borderColor = pcMap[pc] || 'var(--teal)';
+        pill.style.background = 'rgba(' + (_apColors[pc]||_apColors.teal).r + ',' + (_apColors[pc]||_apColors.teal).g + ',' + (_apColors[pc]||_apColors.teal).b + ',0.08)';
+      } else {
+        pill.textContent = 'IDLE';
+        pill.style.color = 'var(--dim)';
+        pill.style.borderColor = 'var(--border)';
+        pill.style.background = 'transparent';
+      }
+    }
+
+    // Stats
+    var sv = function(id, v) { var el = document.getElementById(id); if(el) el.textContent = v; };
+    sv('ap-queued', d.queued_signals || 0);
+    sv('ap-decisions', d.decisions_today || 0);
+    var regEl = document.getElementById('ap-regime');
+    if (regEl) {
+      var regime = (d.regime || 'unknown').replace(/_/g, ' ');
+      regEl.textContent = regime;
+      regEl.style.color = regime.includes('risk_on') || regime.includes('healthy') ? 'var(--teal)' : regime.includes('defensive') ? 'var(--amber)' : 'var(--muted)';
+    }
+
+    // Events
+    var evEl = document.getElementById('ap-events');
+    if (evEl && d.events) {
+      evEl.innerHTML = d.events.slice(0, 4).map(function(e) {
+        var time = (e.timestamp || '').slice(11, 16);
+        var isComplete = e.event === 'AGENT_COMPLETE';
+        var isDec = e.event === 'TRADE_DECISION';
+        var icon = isComplete ? '<span style="color:var(--teal)">&#x2713;</span>' : isDec ? '<span style="color:var(--amber)">&#x25C6;</span>' : '<span style="color:var(--purple)">&#x25B6;</span>';
+        var label = isDec ? 'Decision' : isComplete ? (e.agent || '') + ' done' : (e.agent || '') + ' started';
+        var det = (e.details || '').slice(0, 40);
+        return '<div>' + time + ' ' + icon + ' ' + label + (det ? ' <span style="color:var(--dim)">' + det + '</span>' : '') + '</div>';
+      }).join('');
+    }
+  } catch(e) { console.error('agentPulse:', e); }
+}
+
+// Start wave animation after layout computes
+setTimeout(function() { _apDrawWave(); }, 500);
+loadAgentPulse();
+setInterval(loadAgentPulse, 10000);
+    </script>
 
   </div>
 
@@ -6177,7 +6330,11 @@ async function actionTrade(id, status) {
   if (d.ok) {
     const msgs = {'APPROVED': '✓ Trade approved', 'REJECTED': '✗ Trade rejected', 'PENDING_APPROVAL': '↩ Decision revoked'};
     toast(msgs[status] || status, status === 'APPROVED' ? 'ok' : status === 'PENDING_APPROVAL' ? 'ok' : 'err');
-    loadLiveStatus();
+    
+// Wave code moved to inline script in Agent Status card
+
+
+loadLiveStatus();
   }
 }
 
@@ -8096,6 +8253,88 @@ def api_approvals():
     data = load_pending_approvals()
     log.info(f'[DEBUG] api_approvals returning {len(data)} items, customer_id={session.get("customer_id", "MISSING")}')
     return jsonify(data)
+
+
+
+@app.route('/api/agent-pulse')
+@login_required
+def api_agent_pulse():
+    """Real-time agent status for the dashboard wave card."""
+    try:
+        db = _customer_db()
+        shared = _shared_db()
+        lock = agent_lock_status()
+
+        # Signal queue from shared DB (all customers see same intel)
+        with shared.conn() as c:
+            queued = c.execute("SELECT COUNT(*) FROM signals WHERE status='QUEUED'").fetchone()[0]
+            watching = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','WATCHING')").fetchone()[0]
+
+        # Last 8 agent events from customer DB
+        with db.conn() as c:
+            events = [dict(r) for r in c.execute(
+                "SELECT event, agent, details, timestamp FROM system_log "
+                "WHERE event IN ('AGENT_START','AGENT_COMPLETE','TRADE_DECISION') "
+                "ORDER BY timestamp DESC LIMIT 8"
+            ).fetchall()]
+
+        # Last complete scan summary
+        last_scan = None
+        for e in events:
+            if e['event'] == 'AGENT_COMPLETE' and e['agent'] in ('Trade Logic', 'News', 'The Pulse'):
+                last_scan = {
+                    'agent': e['agent'],
+                    'time': e['timestamp'],
+                    'details': e.get('details', ''),
+                }
+                break
+
+        # Count today's decisions
+        with db.conn() as c:
+            from datetime import datetime
+            today = datetime.utcnow().strftime('%Y-%m-%d')
+            decisions = c.execute(
+                "SELECT COUNT(*) FROM system_log WHERE event='TRADE_DECISION' AND timestamp >= ?",
+                (today,)).fetchone()[0]
+
+        # Agent color mapping
+        agent_colors = {
+            'Trade Logic': 'teal', 'retail_trade_logic_agent.py': 'teal',
+            'News': 'purple', 'retail_news_agent.py': 'purple',
+            'The Pulse': 'amber', 'retail_market_sentiment_agent.py': 'amber',
+            'Screener': 'pink', 'retail_sector_screener.py': 'pink',
+        }
+
+        running = None
+        if lock:
+            agent_name = lock['agent']
+            running = {
+                'agent': agent_name,
+                'age_secs': lock['age_secs'],
+                'color': agent_colors.get(agent_name, 'teal'),
+            }
+
+        # Market regime from last sentiment
+        regime = 'unknown'
+        for e in events:
+            if e['agent'] == 'The Pulse' and e['event'] == 'AGENT_COMPLETE':
+                det = e.get('details', '')
+                if 'regime=' in det:
+                    regime = det.split('regime=')[1].split(' ')[0]
+                break
+
+        return jsonify({
+            'running': running,
+            'queued_signals': queued,
+            'watching': watching,
+            'decisions_today': decisions,
+            'regime': regime,
+            'last_scan': last_scan,
+            'events': events[:6],
+        })
+    except Exception as e:
+        return jsonify({'running': None, 'queued_signals': 0, 'watching': 0,
+                        'decisions_today': 0, 'regime': 'unknown', 'events': [], 'error': str(e)})
 
 
 @app.route('/api/portfolio-history')
@@ -10760,25 +10999,62 @@ def api_admin_processes():
 
 
 # ── MARKET ACTIVITY API (for monitor chart) ─────────────────────────────────
+def _get_customer_trading_modes():
+    """Count customers by trading mode from their customer_settings."""
+    import sqlite3 as _sql
+    counts = {'PAPER': 0, 'LIVE': 0, 'total': 0}
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    for cid in os.listdir(customers_dir):
+        if cid == 'default':
+            continue
+        db_path = os.path.join(customers_dir, cid, 'signals.db')
+        if not os.path.exists(db_path):
+            continue
+        try:
+            conn = _sql.connect(db_path, timeout=5)
+            row = conn.execute("SELECT value FROM customer_settings WHERE key='TRADING_MODE'").fetchone()
+            mode = (row[0] if row else 'PAPER').upper()
+            conn.close()
+            counts[mode] = counts.get(mode, 0) + 1
+            counts['total'] += 1
+        except Exception:
+            pass
+    return counts
+
+
 @app.route('/api/admin/market-activity')
 @admin_required
 def api_admin_market_activity():
-    """Aggregate buy/sell activity across ALL customers for the monitor chart."""
+    """Aggregate buy/sell activity per-customer for the monitor chart."""
     from datetime import datetime, timedelta
     import auth as _auth
 
     hours = int(request.args.get('hours', 24))
     cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    now = datetime.utcnow()
 
     # Build hourly bins
-    now = datetime.utcnow()
-    bins = {}
+    hour_keys = []
     for i in range(hours):
         h = (now - timedelta(hours=hours - 1 - i))
-        key = h.strftime('%Y-%m-%dT%H:00')
-        bins[key] = {'buys': 0.0, 'sells': 0.0, 'buy_count': 0, 'sell_count': 0}
+        hour_keys.append(h.strftime('%Y-%m-%dT%H:00'))
 
-    # Aggregate across all customer DBs
+    # Get customer names from auth.db
+    customer_names = {}
+    try:
+        with _auth._auth_conn() as c:
+            for row in c.execute("SELECT id, display_name_enc FROM customers").fetchall():
+                try:
+                    customer_names[row['id']] = _auth.decrypt_field(row['display_name_enc']) or row['id'][:8]
+                except Exception:
+                    customer_names[row['id']] = row['id'][:8]
+    except Exception:
+        pass
+
+    # Per-customer hourly data
+    customers_data = {}  # {cid: {name, buys: [per hour], sells: [per hour]}}
+    total_bins = {k: {'buys': 0.0, 'sells': 0.0, 'buy_count': 0, 'sell_count': 0} for k in hour_keys}
+
     customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
     for cid in os.listdir(customers_dir):
         if cid == 'default':
@@ -10790,30 +11066,45 @@ def api_admin_market_activity():
             import sqlite3
             conn = sqlite3.connect(db_path, timeout=5)
             conn.row_factory = sqlite3.Row
+            cust_buys = {k: 0.0 for k in hour_keys}
+            cust_sells = {k: 0.0 for k in hour_keys}
+            has_activity = False
             # Buys
             for r in conn.execute(
-                "SELECT opened_at, entry_price * shares AS amt FROM positions WHERE opened_at >= ?",
+                "SELECT opened_at, entry_price * shares AS amt, ticker FROM positions WHERE opened_at >= ?",
                 (cutoff,)
             ).fetchall():
                 ts = (r['opened_at'] or '')[:13] + ':00'
-                if ts in bins:
-                    bins[ts]['buys'] += float(r['amt'] or 0)
-                    bins[ts]['buy_count'] += 1
+                amt = float(r['amt'] or 0)
+                if ts in cust_buys:
+                    cust_buys[ts] += amt
+                    total_bins[ts]['buys'] += amt
+                    total_bins[ts]['buy_count'] += 1
+                    has_activity = True
             # Sells
             for r in conn.execute(
-                "SELECT closed_at, entry_price * shares AS amt FROM positions WHERE closed_at IS NOT NULL AND closed_at >= ?",
+                "SELECT closed_at, entry_price * shares AS amt, ticker FROM positions WHERE closed_at IS NOT NULL AND closed_at >= ?",
                 (cutoff,)
             ).fetchall():
                 ts = (r['closed_at'] or '')[:13] + ':00'
-                if ts in bins:
-                    bins[ts]['sells'] += float(r['amt'] or 0)
-                    bins[ts]['sell_count'] += 1
+                amt = float(r['amt'] or 0)
+                if ts in cust_sells:
+                    cust_sells[ts] += amt
+                    total_bins[ts]['sells'] += amt
+                    total_bins[ts]['sell_count'] += 1
+                    has_activity = True
             conn.close()
+            if has_activity:
+                customers_data[cid] = {
+                    'name': customer_names.get(cid, cid[:8]),
+                    'buys': [round(cust_buys[h], 2) for h in hour_keys],
+                    'sells': [round(cust_sells[h], 2) for h in hour_keys],
+                }
         except Exception as e:
             log.warning(f"market-activity scan for {cid[:8]}: {e}")
 
     # Session history from ring buffer
-    session_bins = {k: 0 for k in bins}
+    session_bins = {k: 0 for k in hour_keys}
     with _session_activity_lock:
         for ts, count in _session_hourly:
             # Map minute-level snapshots to hour bins
@@ -10824,26 +11115,28 @@ def api_admin_market_activity():
         active_now = sum(1 for v in _session_activity.values()
                         if (datetime.utcnow() - v['last_activity']).total_seconds() < 900)
 
-    hours_list = sorted(bins.keys())
-    total_buys = sum(bins[h]['buys'] for h in hours_list)
-    total_sells = sum(bins[h]['sells'] for h in hours_list)
+    hours_list = sorted(total_bins.keys())
+    total_buys = sum(total_bins[h]['buys'] for h in hours_list)
+    total_sells = sum(total_bins[h]['sells'] for h in hours_list)
     sessions_list = [session_bins.get(h, 0) for h in hours_list]
     peak = max(sessions_list) if sessions_list else 0
 
     return jsonify({
         'hours':    hours_list,
-        'buys':     [round(bins[h]['buys'], 2) for h in hours_list],
-        'sells':    [round(bins[h]['sells'], 2) for h in hours_list],
+        'buys':     [round(total_bins[h]['buys'], 2) for h in hours_list],
+        'sells':    [round(total_bins[h]['sells'], 2) for h in hours_list],
+        'customers': customers_data,
         'sessions': sessions_list,
         'summary': {
             'total_buys':    round(total_buys, 2),
             'total_sells':   round(total_sells, 2),
             'net_flow':      round(total_buys - total_sells, 2),
-            'buy_count':     sum(bins[h]['buy_count'] for h in hours_list),
-            'sell_count':    sum(bins[h]['sell_count'] for h in hours_list),
+            'buy_count':     sum(total_bins[h]['buy_count'] for h in hours_list),
+            'sell_count':    sum(total_bins[h]['sell_count'] for h in hours_list),
             'active_now':    active_now,
             'peak_sessions': max(peak, active_now),
         },
+        'trading_modes': _get_customer_trading_modes(),
     })
 
 @app.route('/api/admin/scheduler-history')
