@@ -2362,17 +2362,29 @@ def kill_switch_active():
     return os.path.exists(KILL_SWITCH_FILE)
 
 def agent_lock_status():
-    """Check if an agent currently holds the DB lock."""
-    lock_file = os.path.join(_ROOT_DIR, '.agent_lock')
-    if not os.path.exists(lock_file):
+    """Check if an agent session is currently running (scheduler writes .agent_running)."""
+    import json as _json
+    status_file = os.path.join(_ROOT_DIR, '.agent_running')
+    if not os.path.exists(status_file):
         return None
     try:
-        import time as _t
-        parts = open(lock_file).read().strip().split('\n')
-        agent = parts[0] if parts else 'unknown'
-        lock_time = float(parts[2]) if len(parts) > 2 else 0
-        age = int(_t.time() - lock_time)
-        if age > 900:  # stale
+        data = _json.loads(open(status_file).read())
+        agent = data.get('agent', 'unknown')
+        started = data.get('started', '')
+        # Calculate age
+        from datetime import datetime
+        age = 0
+        if started:
+            try:
+                st = datetime.fromisoformat(started)
+                age = int((datetime.now(st.tzinfo) - st).total_seconds())
+            except Exception:
+                pass
+        if age > 900:  # stale — agent probably crashed
+            try:
+                os.remove(status_file)
+            except Exception:
+                pass
             return None
         return {'agent': agent, 'age_secs': age}
     except Exception:
