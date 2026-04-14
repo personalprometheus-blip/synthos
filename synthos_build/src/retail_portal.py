@@ -2362,8 +2362,25 @@ def kill_switch_active():
     return os.path.exists(KILL_SWITCH_FILE)
 
 def agent_lock_status():
-    """Check if an agent session is currently running (scheduler writes .agent_running)."""
+    """Check if an agent session is currently running, or if admin has overridden the wave."""
     import json as _json
+
+    # Check admin wave override first (from command portal)
+    override_file = os.path.join(_ROOT_DIR, '.wave_override')
+    if os.path.exists(override_file):
+        try:
+            data = _json.loads(open(override_file).read())
+            if data.get('override'):
+                return {
+                    'agent': 'Override',
+                    'age_secs': 0,
+                    'color': data.get('color', 'teal'),
+                    'amplitude': data.get('amplitude', 30),
+                }
+        except Exception:
+            pass
+
+    # Check scheduler status file
     status_file = os.path.join(_ROOT_DIR, '.agent_running')
     if not os.path.exists(status_file):
         return None
@@ -4471,7 +4488,8 @@ function _apDrawWave() {
   var t = _apFrame * 0.015;
   // Idle: slow heartbeat pulse — amplitude breathes between 4 and 18
   var heartbeat = Math.sin(t * 0.4) * 0.5 + 0.5;  // 0→1 slow cycle
-  var baseAmp = active ? 30 : (4 + heartbeat * 14);
+  var ampOverride = (active && _apRunning && _apRunning.amplitude) ? _apRunning.amplitude : null;
+  var baseAmp = ampOverride ? ampOverride : (active ? 30 : (4 + heartbeat * 14));
   var numWaves = active ? 7 : 4;
   var speed = active ? 1.0 : 0.2;
   var midY = h / 2;
@@ -8372,8 +8390,9 @@ def api_agent_pulse():
             agent_name = lock['agent']
             running = {
                 'agent': agent_name,
-                'age_secs': lock['age_secs'],
-                'color': agent_colors.get(agent_name, 'teal'),
+                'age_secs': lock.get('age_secs', 0),
+                'color': lock.get('color') or agent_colors.get(agent_name, 'teal'),
+                'amplitude': lock.get('amplitude'),
             }
 
         # Market regime from last sentiment
