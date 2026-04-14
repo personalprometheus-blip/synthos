@@ -11234,8 +11234,30 @@ def api_admin_scheduler_history():
 
 # ── SESSION SNAPSHOT BACKGROUND THREAD ──────────────────────────────────────
 def _session_snapshot_loop():
-    """Record active session count + names every 60 seconds for the market activity chart."""
+    """Record active session count + names every 60 seconds. Persists to shared DB."""
     import time as _t
+    import json as _json
+
+    # Load persisted history on startup
+    try:
+        shared = _shared_db()
+        with shared.conn() as c:
+            c.execute("""CREATE TABLE IF NOT EXISTS session_history (
+                ts TEXT PRIMARY KEY, count INTEGER, names TEXT)""")
+            rows = c.execute(
+                "SELECT ts, count, names FROM session_history ORDER BY ts DESC LIMIT 1440"
+            ).fetchall()
+            for r in reversed(rows):
+                try:
+                    names = _json.loads(r['names']) if r['names'] else []
+                except Exception:
+                    names = []
+                _session_hourly.append((r['ts'], r['count'], names))
+        if rows:
+            log.info(f"Loaded {len(rows)} session history snapshots from DB")
+    except Exception as e:
+        log.debug(f"Session history load: {e}")
+
     while True:
         _t.sleep(60)
         try:
@@ -11251,6 +11273,22 @@ def _session_snapshot_loop():
                             name = cid[:8]
                         active_names.append(name)
             _session_hourly.append((ts, len(active_names), active_names))
+
+            # Persist to shared DB
+            try:
+                shared = _shared_db()
+                with shared.conn() as c:
+                    c.execute("""CREATE TABLE IF NOT EXISTS session_history (
+                        ts TEXT PRIMARY KEY, count INTEGER, names TEXT)""")
+                    c.execute(
+                        "INSERT OR REPLACE INTO session_history (ts, count, names) VALUES (?, ?, ?)",
+                        (ts, len(active_names), _json.dumps(active_names)))
+                    # Keep only last 1440 rows (24h at 1/min)
+                    c.execute(
+                        "DELETE FROM session_history WHERE ts NOT IN "
+                        "(SELECT ts FROM session_history ORDER BY ts DESC LIMIT 1440)")
+            except Exception:
+                pass
         except Exception:
             pass
 
