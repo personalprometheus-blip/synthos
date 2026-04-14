@@ -2361,26 +2361,9 @@ def now_et():
 def kill_switch_active():
     return os.path.exists(KILL_SWITCH_FILE)
 
-def agent_lock_status():
-    """Check if an agent session is currently running, or if admin has overridden the wave."""
+def _read_agent_running():
+    """Check if scheduler has an agent session running (.agent_running file)."""
     import json as _json
-
-    # Check admin wave override first (from command portal)
-    override_file = os.path.join(_ROOT_DIR, '.wave_override')
-    if os.path.exists(override_file):
-        try:
-            data = _json.loads(open(override_file).read())
-            if data.get('override'):
-                return {
-                    'agent': 'Override',
-                    'age_secs': 0,
-                    'color': data.get('color', 'teal'),
-                    'amplitude': data.get('amplitude', 30),
-                }
-        except Exception:
-            pass
-
-    # Check scheduler status file
     status_file = os.path.join(_ROOT_DIR, '.agent_running')
     if not os.path.exists(status_file):
         return None
@@ -2388,7 +2371,6 @@ def agent_lock_status():
         data = _json.loads(open(status_file).read())
         agent = data.get('agent', 'unknown')
         started = data.get('started', '')
-        # Calculate age
         from datetime import datetime
         age = 0
         if started:
@@ -2403,9 +2385,34 @@ def agent_lock_status():
             except Exception:
                 pass
             return None
-        return {'agent': agent, 'age_secs': age}
+        return {'agent': agent, 'age_secs': age, 'session': data.get('session', '')}
     except Exception:
         return None
+
+
+def get_wave_status():
+    """Return wave animation state — checks override first, then agent running status."""
+    import json as _json
+    # Check admin wave override (from command portal)
+    override_file = os.path.join(_ROOT_DIR, '.wave_override')
+    if os.path.exists(override_file):
+        try:
+            data = _json.loads(open(override_file).read())
+            if data.get('override'):
+                return {
+                    'agent': 'Override',
+                    'age_secs': 0,
+                    'color': data.get('color', 'teal'),
+                    'amplitude': data.get('amplitude', 30),
+                    'is_override': True,
+                }
+        except Exception:
+            pass
+    # Fall back to scheduler status
+    running = _read_agent_running()
+    if running:
+        return running
+    return None
 
 
 def _get_customer_alpaca_creds():
@@ -2733,11 +2740,10 @@ def get_system_status():
     """Read live status from database, enriched with Alpaca real-time prices."""
     import time as _time
 
-    # Check for agent lock — return cached/skeleton if locked
-    lock = agent_lock_status()
-    if lock:
-        # Agent running — skip Alpaca API calls but still show DB data
-        log.debug(f"Agent lock held by {lock['agent']} — using DB-only data (no Alpaca enrichment)")
+    # Check if agent is actually running (skip Alpaca to avoid contention)
+    _agent_running = _read_agent_running()
+    if _agent_running:
+        log.debug(f"Agent running: {_agent_running['agent']} — using DB-only data (no Alpaca enrichment)")
         try:
             db = _customer_db()
             portfolio = db.get_portfolio()
@@ -2777,8 +2783,8 @@ def get_system_status():
                 "trading_mode":    os.environ.get('TRADING_MODE', 'PAPER'),
                 "max_trade_usd":   float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":           PI_ID,
-                "agent_running":   lock['agent'],
-                "agent_running_secs": lock['age_secs'],
+                "agent_running":   _agent_running['agent'],
+                "agent_running_secs": _agent_running.get('age_secs', 0),
             }
         except Exception as e:
             log.warning(f"Lock-mode status read failed: {e}")
@@ -8343,7 +8349,7 @@ def api_agent_pulse():
     try:
         db = _customer_db()
         shared = _shared_db()
-        lock = agent_lock_status()
+        lock = get_wave_status()
 
         # Signal queue from shared DB (all customers see same intel)
         with shared.conn() as c:
