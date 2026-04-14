@@ -572,6 +572,30 @@ class DB:
             "ALTER TABLE positions ADD COLUMN interrogation_status TEXT",
             # v1.3 — profit tier tracking for idempotent partial sells
             "ALTER TABLE positions ADD COLUMN last_profit_tier REAL DEFAULT 0.0",
+            # v2.0 — customer settings, support, notifications (table creation)
+            """CREATE TABLE IF NOT EXISTS customer_settings (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""",
+            """CREATE TABLE IF NOT EXISTS support_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id TEXT NOT NULL UNIQUE, category TEXT NOT NULL,
+                subject TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+                priority TEXT NOT NULL DEFAULT 'normal', beta_test_id TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT)""",
+            """CREATE TABLE IF NOT EXISTS support_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticket_id TEXT NOT NULL, sender TEXT NOT NULL,
+                message TEXT NOT NULL, created_at TEXT NOT NULL,
+                FOREIGN KEY (ticket_id) REFERENCES support_tickets(ticket_id))""",
+            """CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id TEXT, type TEXT NOT NULL DEFAULT 'info',
+                title TEXT NOT NULL, message TEXT, category TEXT DEFAULT 'system',
+                meta TEXT, read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""",
+            # v2.1 — session history for market activity chart
+            """CREATE TABLE IF NOT EXISTS session_history (
+                ts TEXT PRIMARY KEY, count INTEGER, names TEXT)""",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
