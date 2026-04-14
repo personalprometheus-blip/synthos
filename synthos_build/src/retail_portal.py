@@ -2363,7 +2363,7 @@ def kill_switch_active():
 
 def agent_lock_status():
     """Check if an agent currently holds the DB lock."""
-    lock_file = os.path.join(PROJECT_DIR, '.agent_lock')
+    lock_file = os.path.join(_ROOT_DIR, '.agent_lock')
     if not os.path.exists(lock_file):
         return None
     try:
