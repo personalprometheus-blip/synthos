@@ -2416,6 +2416,9 @@ def get_wave_status():
                     'age_secs': 0,
                     'color': data.get('color', 'teal'),
                     'amplitude': data.get('amplitude', 30),
+                    'speed': data.get('speed'),
+                    'frequency': data.get('frequency'),
+                    'direction': data.get('direction'),
                     'is_override': True,
                 }
         except Exception:
@@ -4509,14 +4512,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
         </div>
       </div>
-      <!-- WAVE CONTROLS -->
-      <div style="padding:4px 14px 8px;display:flex;align-items:center;gap:12px;border-top:1px solid var(--border)">
-        <span style="font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim)">Speed</span>
-        <input type="range" id="ap-freq" min="3" max="30" value="10" style="flex:1;height:3px;accent-color:var(--teal);cursor:pointer"
-               oninput="_apFreqMult=this.value/10">
-        <button id="ap-dir-btn" style="padding:2px 8px;border-radius:6px;font-size:9px;font-weight:700;border:1px solid var(--border);background:transparent;color:var(--dim);cursor:pointer;font-family:var(--mono)"
-                onclick="_apFlowDir*=-1;this.textContent=_apFlowDir>0?'&#x25B6;':'&#x25C0;'">&#x25B6;</button>
-      </div>
       <!-- LAST ACTIVITY -->
       <div style="padding:0 14px 12px">
         <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
@@ -4561,7 +4556,10 @@ function _apDrawWave() {
   _apCurrentColor.g += (_apTargetColor.g - _apCurrentColor.g) * _apColorLerp;
   _apCurrentColor.b += (_apTargetColor.b - _apCurrentColor.b) * _apColorLerp;
   var c = {r:Math.round(_apCurrentColor.r), g:Math.round(_apCurrentColor.g), b:Math.round(_apCurrentColor.b)};
-  var t = _apFrame * 0.015 * _apFlowDir * _apFreqMult;
+  // Override controls from command portal wave panel
+  var ovSpeed = (active && _apRunning.speed) ? _apRunning.speed : _apFreqMult;
+  var ovDir = (active && _apRunning.direction) ? _apRunning.direction : _apFlowDir;
+  var t = _apFrame * 0.015 * ovDir * ovSpeed;
   // Idle: slow heartbeat pulse — amplitude breathes between 4 and 18
   var heartbeat = Math.sin(t * 0.4) * 0.5 + 0.5;  // 0→1 slow cycle
   var ampOverride = (active && _apRunning && _apRunning.amplitude) ? _apRunning.amplitude : null;
@@ -4573,7 +4571,8 @@ function _apDrawWave() {
   for (var i = 0; i < numWaves; i++) {
     var alpha = active ? (0.12 + (i / numWaves) * 0.25) : (0.06 + heartbeat * 0.04 + (i / numWaves) * 0.12);
     var amp = baseAmp * (0.4 + (i / numWaves) * 0.6);
-    var freq = 0.008 + i * 0.003;
+    var freqMult = (active && _apRunning && _apRunning.frequency) ? _apRunning.frequency : 1.0;
+    var freq = (0.008 + i * 0.003) * freqMult;
     var phase = t * speed + i * 0.8;
 
     ctx.beginPath();
@@ -8618,6 +8617,9 @@ def api_agent_pulse():
                 'age_secs': lock.get('age_secs', 0),
                 'color': lock.get('color') or agent_colors.get(agent_name, 'teal'),
                 'amplitude': lock.get('amplitude'),
+                'speed': lock.get('speed'),
+                'frequency': lock.get('frequency'),
+                'direction': lock.get('direction'),
             }
 
         # Market regime from shared DB (Pulse is a shared agent)
