@@ -7706,28 +7706,55 @@ function hideIntelTooltip() {
 // ── LOGIC MODAL ──
 function openLogicModal(el) {
   hideIntelTooltip();
-  const overlay = document.getElementById('logic-overlay');
-  if (!overlay) return;
   const ticker  = el.dataset.ticker  || '?';
   const conf    = el.dataset.conf    || 'LOW';
   const summary = el.dataset.summary || '';
   const type    = el.dataset.type    || 'SIGNAL';
-  const confCls = conf==='HIGH'?'conf-high':conf==='MEDIUM'?'conf-med':'conf-low';
-  const t = document.getElementById('logic-modal-title');
-  const c = document.getElementById('logic-modal-conf');
-  const b = document.getElementById('logic-modal-body');
-  if (t) t.textContent = ticker + ' \u2014 Agent Logic Breakdown';
-  if (c) c.innerHTML = '<div class="conf-chip ' + confCls + '">' + conf + '</div>';
-  if (b) b.innerHTML =
-    '<div style="margin-bottom:16px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid var(--border)">'
-    + '<div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Signal Summary</div>'
-    + '<div style="font-size:12px;color:var(--text)">' + ticker + ' \u00b7 ' + type + ' \u00b7 Confidence: ' + conf + '</div>'
-    + (summary ? '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + summary + '</div>' : '')
-    + '</div>'
-    + '<div class="logic-placeholder"><div class="logic-placeholder-icon">\U0001f9e0</div>'
-    + '<div class="logic-placeholder-title">Full Logic Breakdown Coming Soon</div>'
-    + '<div class="logic-placeholder-sub">Gate-by-gate analysis and agent reasoning<br>will appear here in the next update.</div></div>';
-  overlay.classList.add('open');
+
+  // Reuse position drawer in signal mode
+  const confColor = conf==='HIGH'?'var(--teal)':conf==='MEDIUM'?'var(--amber)':'var(--muted)';
+  document.getElementById('drawer-icon').textContent = ticker.slice(0,4);
+  document.getElementById('drawer-icon').style.cssText =
+    'width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.15);color:var(--teal)';
+  document.getElementById('drawer-ticker').textContent = ticker;
+  document.getElementById('drawer-sub').textContent = type + ' signal';
+
+  // Position section — show signal data instead
+  var sv = function(id, v) { var el = document.getElementById(id); if(el) el.textContent = v; };
+  sv('dr-mktval',  '—');
+  sv('dr-shares',  '—');
+  sv('dr-entry',   '—');
+  sv('dr-price',   '—');
+  sv('dr-basis',   '—');
+  sv('dr-unreal',  '—');
+  sv('dr-unreal-pct', '—');
+  sv('dr-day-pl',  '—');
+  sv('dr-day-pct', '—');
+
+  // Rename position section header temporarily
+  var posHeaders = document.querySelectorAll('.drawer-section-title');
+  if (posHeaders[0]) posHeaders[0].textContent = 'Signal Details';
+  sv('dr-mktval',  conf);
+  sv('dr-shares',  type);
+  sv('dr-entry',   '—');
+  sv('dr-price',   'Pending');
+  sv('dr-basis',   '—');
+
+  // Signal source
+  var srcEl = document.getElementById('dr-signal-source');
+  if (srcEl) {
+    srcEl.innerHTML = '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + summary + '</div>'
+      + '<div style="font-size:10px;color:var(--muted)">Confidence: <span style="color:' + confColor + '">' + conf + '</span> \u00b7 Status: ' + type + '</div>';
+  }
+
+  // Trade info
+  var infoEl = document.getElementById('dr-trade-info');
+  if (infoEl) {
+    infoEl.innerHTML = '<div style="color:var(--dim);font-size:10px">Signal under watch \u2014 not yet traded</div>';
+  }
+
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.getElementById('pos-drawer').classList.add('open');
 }
 function closeLogicModal(e) {
   if (e && e.target !== document.getElementById('logic-overlay')) return;
