@@ -2540,6 +2540,7 @@ def _enrich_positions(db_positions, alpaca_pos_map):
         _sig_headline = None
         _sig_source = None
         _sig_confidence = None
+        _sig_image_url = None
         _sig_id = p.get('signal_id')
         if _sig_id:
             try:
@@ -2550,6 +2551,7 @@ def _enrich_positions(db_positions, alpaca_pos_map):
                         _sig_headline = _sig['headline']
                         _sig_source = _sig['source']
                         _sig_confidence = _sig['confidence']
+                        _sig_image_url = _sig.get('image_url')
             except Exception:
                 pass
 
@@ -2567,6 +2569,7 @@ def _enrich_positions(db_positions, alpaca_pos_map):
             'signal_headline':  _sig_headline,
             'signal_source':    _sig_source,
             'signal_confidence': _sig_confidence,
+            'signal_image_url': _sig_image_url,
         })
 
     orphans = []
@@ -6206,8 +6209,9 @@ function openPositionDrawer(p) {
     if (p.ticker === 'BIL') {
       srcEl.innerHTML = '<div style="font-size:11px;color:var(--amber)">&#x1F3E6; Treasury Reserve — auto-managed by BIL reserve system</div>';
     } else if (p.signal_headline) {
+      var imgHtml = p.signal_image_url ? '<img src="' + p.signal_image_url + '" style="width:100%;height:80px;object-fit:cover;border-radius:6px;margin-bottom:8px;opacity:0.85" onerror="this.style.display=\'none\'">' : '';
       var confColor = p.signal_confidence === 'HIGH' ? 'var(--teal)' : p.signal_confidence === 'MEDIUM' ? 'var(--amber)' : 'var(--muted)';
-      srcEl.innerHTML = '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + p.signal_headline + '</div>'
+      srcEl.innerHTML = imgHtml + '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + p.signal_headline + '</div>'
         + '<div style="font-size:10px;color:var(--muted)">' + (p.signal_source||'News') + ' · <span style="color:' + confColor + '">' + (p.signal_confidence||'—') + '</span></div>';
     } else {
       srcEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No signal source linked</div>';

@@ -2858,6 +2858,7 @@ def run(session="market"):
             corroboration_note = output.get("explanation"),
             is_amended    = is_amended,
             is_spousal    = is_spousal,
+            image_url     = item.get("image_url"),
         )
         if not sig_id:
             continue
