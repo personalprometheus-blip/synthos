@@ -4481,8 +4481,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:11px;font-weight:700;font-family:var(--mono);cursor:help;color:var(--teal)" id="ap-regime" title="Market regime">—</div>
-          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Regime</div>
+          <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
+          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
         </div>
       </div>
       <!-- LAST ACTIVITY -->
@@ -4606,15 +4606,14 @@ async function loadAgentPulse() {
     if (regEl) {
       var rawRegime = d.regime || 'unknown';
       var regimeMap = {
-        'healthy_risk_on': {short: 'RISK ON', color: 'var(--teal)', tip: 'Market healthy — agent is actively seeking opportunities'},
-        'defensive_risk_off': {short: 'DEFENSIVE', color: 'var(--amber)', tip: 'Market stressed — agent is cautious, avoiding new positions'},
-        'neutral': {short: 'NEUTRAL', color: 'var(--muted)', tip: 'Mixed signals — agent is selective, only high-confidence entries'},
-        'unknown': {short: '—', color: 'var(--dim)', tip: 'Regime not yet determined — waiting for sentiment analysis'}
+        'healthy_risk_on': {short: 'HEALTHY', color: 'var(--teal)'},
+        'defensive_risk_off': {short: 'DEFENSIVE', color: 'var(--amber)'},
+        'neutral': {short: 'NEUTRAL', color: 'var(--muted)'},
+        'unknown': {short: '—', color: 'var(--dim)'}
       };
-      var reg = regimeMap[rawRegime] || {short: rawRegime.replace(/_/g,' ').toUpperCase(), color: 'var(--muted)', tip: rawRegime};
+      var reg = regimeMap[rawRegime] || {short: rawRegime.replace(/_/g,' ').toUpperCase(), color: 'var(--muted)'};
       regEl.textContent = reg.short;
       regEl.style.color = reg.color;
-      regEl.title = reg.tip;
     }
 
     // Events
