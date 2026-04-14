@@ -4806,19 +4806,19 @@ setInterval(loadAgentPulse, 10000);
       <div class="stat-sub">per trade</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Sharpe Ratio</div>
-      <div class="stat-val" id="perf-sharpe">—</div>
-      <div class="stat-sub">risk-adjusted</div>
+      <div class="stat-label">Best Trade</div>
+      <div class="stat-val" id="perf-best" style="color:var(--teal)">—</div>
+      <div class="stat-sub" id="perf-best-sub">top P&L</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Max Drawdown</div>
       <div class="stat-val" id="perf-max-dd">—</div>
       <div class="stat-sub">from ATH</div>
     </div>
-    <div class="stat-card teal">
-      <div class="stat-label">vs S&P 500</div>
-      <div class="stat-val" id="perf-vs-sp">—</div>
-      <div class="stat-sub">alpha this month</div>
+    <div class="stat-card">
+      <div class="stat-label">Worst Trade</div>
+      <div class="stat-val" id="perf-worst" style="color:var(--pink)">—</div>
+      <div class="stat-sub" id="perf-worst-sub">largest loss</div>
     </div>
   </div>
 
@@ -6222,6 +6222,21 @@ async function loadPerformance() {
 
     const holdEl = document.getElementById('perf-avg-hold');
     if (holdEl) holdEl.textContent = d.avg_hold || '--';
+
+    const bestEl = document.getElementById('perf-best');
+    const bestSub = document.getElementById('perf-best-sub');
+    if (bestEl && d.best_trade) {
+      bestEl.textContent = '+$' + Math.abs(d.best_trade.pnl).toFixed(2);
+      bestEl.style.color = d.best_trade.pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
+      if (bestSub) bestSub.textContent = d.best_trade.ticker + ' (' + d.best_trade.ret_pct + '%)';
+    }
+    const worstEl = document.getElementById('perf-worst');
+    const worstSub = document.getElementById('perf-worst-sub');
+    if (worstEl && d.worst_trade) {
+      worstEl.textContent = '-$' + Math.abs(d.worst_trade.pnl).toFixed(2);
+      worstEl.style.color = 'var(--pink)';
+      if (worstSub) worstSub.textContent = d.worst_trade.ticker + ' (' + d.worst_trade.ret_pct + '%)';
+    }
 
     const stEl = document.getElementById('tax-st');
     const ltEl = document.getElementById('tax-lt');
@@ -8467,6 +8482,10 @@ def api_performance_summary():
         month_start   = port.get('month_start') or port.get('cash') or 1
         total_ret_pct = round(total_pnl / month_start * 100, 2) if month_start else 0.0
 
+        # Best and worst trades
+        best_trade = max(rows, key=lambda x: x['pnl']) if rows else None
+        worst_trade = min(rows, key=lambda x: x['pnl']) if rows else None
+
         return jsonify({
             'total_pnl':      round(total_pnl, 2),
             'total_ret_pct':  total_ret_pct,
@@ -8478,6 +8497,8 @@ def api_performance_summary():
             'tax_lt':          round(tax_lt, 2),
             'sector_pnl':      sector_pnl,
             'trades':          rows,
+            'best_trade':      best_trade,
+            'worst_trade':     worst_trade,
         })
     except Exception as e:
         return jsonify({'total_pnl': 0, 'win_rate': 0, 'total_trades': 0,
