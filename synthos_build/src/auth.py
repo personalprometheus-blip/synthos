@@ -333,6 +333,18 @@ def mark_tos_accepted(customer_id: str, version: str) -> None:
         )
 
 
+def get_display_name_by_id(customer_id: str) -> str:
+    """Look up and decrypt display name for a customer ID."""
+    try:
+        with _auth_conn() as c:
+            row = c.execute("SELECT display_name_enc FROM customers WHERE id=?", (customer_id,)).fetchone()
+            if row and row['display_name_enc']:
+                return decrypt_field(row['display_name_enc']) or customer_id[:8]
+    except Exception:
+        pass
+    return customer_id[:8]
+
+
 def get_display_name(customer) -> str:
     """Decrypt and return display name from a customer Row. Falls back to 'Customer'."""
     try:

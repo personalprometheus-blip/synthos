@@ -127,7 +127,7 @@ from collections import deque as _deque
 _session_activity = {}           # {customer_id: {last_activity: datetime, ip: str}}
 _session_activity_lock = _threading.Lock()
 _CUSTOMER_TIMEOUT = timedelta(minutes=15)
-_session_hourly = _deque(maxlen=1440)   # (iso_minute, active_count) per-minute for 24h
+_session_hourly = _deque(maxlen=1440)   # (iso_minute, active_count, [customer_names]) per-minute for 24h
 
 
 
@@ -948,20 +948,33 @@ def check_auth():
     _cid = session.get('customer_id')
     if _cid:
         _now = datetime.utcnow()
+
+        # Auto-polling endpoints don't count as user activity
+        _passive_paths = {'/api/status', '/api/approvals', '/api/agent-pulse',
+                          '/api/portfolio-history', '/api/customer-settings'}
+        _is_active_request = request.path not in _passive_paths
+
         with _session_activity_lock:
             _prev = _session_activity.get(_cid)
-            # Non-admin: auto-logout after 15 min inactivity
+            # Non-admin: auto-logout after 15 min of no ACTIVE requests
             if _prev and session.get('role') != 'admin':
                 _elapsed = (_now - _prev['last_activity']).total_seconds()
                 if _elapsed > _CUSTOMER_TIMEOUT.total_seconds():
                     _session_activity.pop(_cid, None)
                     session.clear()
                     return redirect('/login')
-            # Update activity timestamp
-            _session_activity[_cid] = {
-                'last_activity': _now,
-                'ip': request.remote_addr or '',
-            }
+            # Only update activity timestamp on real user interaction
+            if _is_active_request:
+                _session_activity[_cid] = {
+                    'last_activity': _now,
+                    'ip': request.remote_addr or '',
+                }
+            elif _cid not in _session_activity:
+                # First request — initialize even if passive
+                _session_activity[_cid] = {
+                    'last_activity': _now,
+                    'ip': request.remote_addr or '',
+                }
 
 
 # ── SIGNUP ────────────────────────────────────────────────────────────────────
@@ -4448,7 +4461,7 @@ function _apDrawWave() {
   var heartbeat = Math.sin(t * 0.4) * 0.5 + 0.5;  // 0→1 slow cycle
   var baseAmp = active ? 30 : (4 + heartbeat * 14);
   var numWaves = active ? 7 : 4;
-  var speed = active ? 1.2 : (0.15 + heartbeat * 0.15);
+  var speed = active ? 1.0 : 0.2;
   var midY = h / 2;
 
   for (var i = 0; i < numWaves; i++) {
@@ -4460,8 +4473,8 @@ function _apDrawWave() {
     ctx.beginPath();
     ctx.moveTo(0, midY);
     for (var x = 0; x <= w; x += 2) {
-      var y = midY + Math.sin(x * freq + phase) * amp
-                    + Math.sin(x * freq * 1.5 + phase * 0.7) * amp * 0.3;
+      var y = midY + Math.sin(x * freq - phase) * amp
+                    + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
       ctx.lineTo(x, y);
     }
     ctx.strokeStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + alpha + ')';
@@ -11128,17 +11141,31 @@ def api_admin_market_activity():
         except Exception as e:
             log.warning(f"market-activity scan for {cid[:8]}: {e}")
 
-    # Session history from ring buffer
+    # Session history from ring buffer — track peak count + all names per hour
     session_bins = {k: 0 for k in hour_keys}
+    session_names = {k: set() for k in hour_keys}
     with _session_activity_lock:
-        for ts, count in _session_hourly:
-            # Map minute-level snapshots to hour bins
+        for entry in _session_hourly:
+            ts = entry[0]
+            count = entry[1]
+            names = entry[2] if len(entry) > 2 else []
             hour_key = ts[:13] + ':00'
             if hour_key in session_bins:
                 session_bins[hour_key] = max(session_bins[hour_key], count)
-        # Current active count
-        active_now = sum(1 for v in _session_activity.values()
-                        if (datetime.utcnow() - v['last_activity']).total_seconds() < 900)
+                for n in names:
+                    session_names[hour_key].add(n)
+        # Current active sessions with customer names
+        active_now = 0
+        active_customers = []
+        for cid, v in _session_activity.items():
+            idle = (datetime.utcnow() - v['last_activity']).total_seconds()
+            if idle < 900:
+                active_now += 1
+                try:
+                    name = auth.get_display_name_by_id(cid) if hasattr(auth, 'get_display_name_by_id') else cid[:8]
+                except Exception:
+                    name = cid[:8]
+                active_customers.append({'name': name, 'idle_secs': int(idle)})
 
     hours_list = sorted(total_bins.keys())
     total_buys = sum(total_bins[h]['buys'] for h in hours_list)
@@ -11152,6 +11179,7 @@ def api_admin_market_activity():
         'sells':    [round(total_bins[h]['sells'], 2) for h in hours_list],
         'customers': customers_data,
         'sessions': sessions_list,
+        'session_users': {h: sorted(session_names.get(h, set())) for h in hours_list if session_names.get(h)},
         'summary': {
             'total_buys':    round(total_buys, 2),
             'total_sells':   round(total_sells, 2),
@@ -11159,6 +11187,7 @@ def api_admin_market_activity():
             'buy_count':     sum(total_bins[h]['buy_count'] for h in hours_list),
             'sell_count':    sum(total_bins[h]['sell_count'] for h in hours_list),
             'active_now':    active_now,
+            'active_customers': active_customers,
             'peak_sessions': max(peak, active_now),
         },
         'trading_modes': _get_customer_trading_modes(),
@@ -11184,7 +11213,7 @@ def api_admin_scheduler_history():
 
 # ── SESSION SNAPSHOT BACKGROUND THREAD ──────────────────────────────────────
 def _session_snapshot_loop():
-    """Record active session count every 60 seconds for the market activity chart."""
+    """Record active session count + names every 60 seconds for the market activity chart."""
     import time as _t
     while True:
         _t.sleep(60)
@@ -11192,9 +11221,15 @@ def _session_snapshot_loop():
             now = datetime.utcnow()
             ts = now.strftime('%Y-%m-%dT%H:%M')
             with _session_activity_lock:
-                active = sum(1 for v in _session_activity.values()
-                           if (now - v['last_activity']).total_seconds() < 900)
-            _session_hourly.append((ts, active))
+                active_names = []
+                for cid, v in _session_activity.items():
+                    if (now - v['last_activity']).total_seconds() < 900:
+                        try:
+                            name = auth.get_display_name_by_id(cid)
+                        except Exception:
+                            name = cid[:8]
+                        active_names.append(name)
+            _session_hourly.append((ts, len(active_names), active_names))
         except Exception:
             pass
 
