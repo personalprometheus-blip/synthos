@@ -938,7 +938,7 @@ def check_auth():
     if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/') or request.path.startswith('/reset-password/'):
         return
     # Monitor-callable endpoints — bearer token handled inside the function
-    if request.path in {'/api/logs-audit', '/api/get-keys'}:
+    if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override'}:
         return
     # Stripe webhook — authenticated by Stripe signature, not session
     if request.path == '/webhook/stripe':
