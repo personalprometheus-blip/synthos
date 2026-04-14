@@ -48,7 +48,9 @@ ET                   = ZoneInfo("America/New_York")
 PORT                 = int(os.environ.get('PORTAL_PORT', 5001))
 PI_ID                = os.environ.get('PI_ID', 'synthos-pi')
 AUTONOMOUS_UNLOCK_KEY = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
-OPERATING_MODE       = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
+OPERATING_MODE       = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
+ADMIN_TRADING_GATE   = os.environ.get('ADMIN_TRADING_GATE', 'ALL')
+ADMIN_OPERATING_MODE = os.environ.get('ADMIN_OPERATING_MODE', 'ALL')
 MONITOR_URL          = os.environ.get('MONITOR_URL', 'http://localhost:5000')
 MONITOR_TOKEN        = os.environ.get('MONITOR_TOKEN', 'synthos-default-token')
 RESEND_API_KEY           = os.environ.get('RESEND_API_KEY', '')
@@ -2814,6 +2816,10 @@ def get_system_status():
                 "pi_id":           PI_ID,
                 "agent_running":   _agent_running['agent'],
                 "agent_running_secs": _agent_running.get('age_secs', 0),
+                "admin_overrides": {
+                    "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
+                    "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
+                },
             }
         except Exception as e:
             log.warning(f"Lock-mode status read failed: {e}")
@@ -2860,6 +2866,10 @@ def get_system_status():
                 "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":            PI_ID,
                 "agent_running":    None,
+                "admin_overrides": {
+                    "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
+                    "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
+                },
             }
         except Exception as e:
             if 'locked' in str(e).lower() and attempt < 2:
@@ -2883,6 +2893,10 @@ def get_system_status():
                 "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":            PI_ID,
                 "agent_running":    None,
+                "admin_overrides": {
+                    "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
+                    "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
+                },
             }
 
 def load_pending_approvals():
@@ -4654,7 +4668,7 @@ setInterval(loadAgentPulse, 10000);
     </div>
 
     <!-- APPROVALS -->
-    <div class="glass purple-glow">
+    <div class="glass purple-glow" id="approvals-card">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase" id="queue-label">Approvals</div>
         <div style="padding:1px 7px;border-radius:99px;font-size:9px;font-weight:700;background:var(--purple2);border:1px solid rgba(123,97,255,0.18);color:var(--purple)" id="pending-badge">0 pending</div>
@@ -6450,6 +6464,10 @@ async function toggleMode() {
     body: JSON.stringify({mode: next})
   });
   const d = await r.json();
+  if (d.locked) {
+    toast('Operating mode locked by administrator', 'err');
+    return;
+  }
   if (d.ok) {
     const isAuto = next === 'AUTOMATIC';
     const navBtn = document.getElementById('mode-nav-btn');
@@ -6463,7 +6481,10 @@ async function toggleMode() {
       : 'All trade decisions require your approval before execution';
     document.getElementById('mode-bar-btn').textContent = isAuto ? 'Switch to Managed' : 'Switch to Automatic';
     document.getElementById('mode-bar-btn').className   = 'kill-btn' + (isAuto ? ' resume' : '');
+    const appCard = document.getElementById('approvals-card');
+    if (appCard) appCard.style.display = isAuto ? 'none' : '';
     toast(isAuto ? '⚡ Switched to Automatic mode' : '🎯 Switched to Managed mode', isAuto ? 'warn' : 'ok');
+    if (!isAuto) loadLiveStatus();  // refresh approvals when switching back to managed
   }
 }
 
@@ -6843,7 +6864,7 @@ function renderPositions(positions) {
 }
 
 function renderApprovals(approvals) {
-  const isAuto  = (document.getElementById('stat-mode')||{}).textContent === 'AUTONOMOUS';
+  const isAuto  = (document.getElementById('stat-mode')||{}).textContent === 'AUTOMATIC';
   const el = document.getElementById('approval-list');
   const badge = document.getElementById('pending-badge');
   const qLabel = document.getElementById('queue-label');
@@ -7100,12 +7121,14 @@ async function loadLiveStatus() {
     sv('stat-pos-display', s.open_positions||0);
     sv('stat-flags', s.urgent_flags||0);
     sv('stat-heartbeat', (s.last_heartbeat||'Never').slice(0,16));
-    sv('stat-mode', s.operating_mode||'SUPERVISED');
+    sv('stat-mode', s.operating_mode||'MANAGED');
+    const appCard = document.getElementById('approvals-card');
+    if (appCard) appCard.style.display = s.operating_mode === 'AUTOMATIC' ? 'none' : '';
     const modeEl = document.getElementById('mode-display');
     if (modeEl) {
-      const m = s.operating_mode || 'SUPERVISED';
+      const m = s.operating_mode || 'MANAGED';
       modeEl.textContent = m;
-      modeEl.style.color = m === 'AUTONOMOUS' ? 'var(--amber)' : 'var(--teal)';
+      modeEl.style.color = m === 'AUTOMATIC' ? 'var(--amber)' : 'var(--teal)';
     }
     const hbAge = document.getElementById('stat-hb-age');
     if (hbAge && s.last_heartbeat) {
@@ -7156,9 +7179,9 @@ async function loadLiveStatus() {
     // Kill switch bar description
     const descEl = document.getElementById('kill-desc');
     if (descEl && !killState) {
-      const mode = s.operating_mode || 'SUPERVISED';
+      const mode = s.operating_mode || 'MANAGED';
       const cap  = s.max_trade_usd || 0;
-      descEl.textContent = mode === 'AUTONOMOUS'
+      descEl.textContent = mode === 'AUTOMATIC'
         ? 'Agents active · Autonomous · ' + (cap > 0 ? '$' + cap.toFixed(0) + ' cap per trade' : 'no trade cap')
         : 'Agents active · Supervised mode · No new entries without approval';
     }
@@ -7203,6 +7226,27 @@ async function loadLiveStatus() {
       if (agentEl) agentEl.style.display = 'none';
     }
     // renderPositions moved to top of function
+
+    // ── Admin override enforcement ──
+    const ov = s.admin_overrides || {};
+    // Operating mode lock
+    const modeToggleBtn = document.getElementById('mode-bar-btn');
+    const cfgModeSection = document.querySelector('.cfg-section + div > .setting-row')?.closest('div');
+    const cfgModeBtn = document.querySelector('button[onclick*="toggleMode"]');
+    if (ov.operating_mode && ov.operating_mode !== 'ALL') {
+      if (modeToggleBtn) { modeToggleBtn.style.opacity = '0.35'; modeToggleBtn.style.pointerEvents = 'none'; }
+      if (cfgModeBtn)    { cfgModeBtn.style.opacity = '0.35'; cfgModeBtn.style.pointerEvents = 'none'; cfgModeBtn.textContent = 'Locked by administrator'; }
+    } else {
+      if (modeToggleBtn) { modeToggleBtn.style.opacity = ''; modeToggleBtn.style.pointerEvents = ''; }
+      if (cfgModeBtn)    { cfgModeBtn.style.opacity = ''; cfgModeBtn.style.pointerEvents = ''; cfgModeBtn.textContent = 'Toggle Automatic / Managed'; }
+    }
+    // Trading gate lock
+    const cfgTradingMode = document.getElementById('cfg-trading-mode');
+    if (ov.trading_gate && ov.trading_gate !== 'ALL') {
+      if (cfgTradingMode) { cfgTradingMode.disabled = true; cfgTradingMode.style.opacity = '0.35'; }
+    } else {
+      if (cfgTradingMode) { cfgTradingMode.disabled = false; cfgTradingMode.style.opacity = ''; }
+    }
   } catch(e) { console.log('Status load error:', e); }
 }
 
@@ -8031,6 +8075,11 @@ def index():
 @login_required
 def api_set_mode():
     """Toggle between MANAGED (approve all trades) and AUTOMATIC (bot executes) per customer."""
+    # Check admin override
+    admin_mode = os.environ.get('ADMIN_OPERATING_MODE', 'ALL')
+    if admin_mode != 'ALL':
+        return jsonify({"ok": False, "locked": True, "forced_mode": admin_mode,
+                        "error": "Operating mode is locked by administrator"}), 403
     data = request.get_json(silent=True) or {}
     mode = data.get('mode', '').upper()
     if mode not in ('MANAGED', 'AUTOMATIC'):
@@ -8038,11 +8087,58 @@ def api_set_mode():
     customer_id = session.get('customer_id', 'admin')
     try:
         auth.set_operating_mode(customer_id, mode)
+        _customer_db().set_setting('OPERATING_MODE', mode)
         log.info(f"Operating mode set to {mode} for customer {customer_id}")
         return jsonify({"ok": True, "mode": mode})
     except Exception as e:
         log.error(f"set-mode error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route('/api/admin-override', methods=['GET', 'POST'])
+def api_admin_override():
+    """Receive admin override push from monitor or return current state."""
+    if request.method == 'GET':
+        return jsonify({
+            "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
+            "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
+        })
+
+    # POST — verify token (monitor sends X-Token header)
+    token = request.headers.get('X-Token', '')
+    if token != MONITOR_TOKEN and not _authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    trading_gate   = data.get('trading_gate', 'ALL').upper()
+    operating_mode = data.get('operating_mode', 'ALL').upper()
+
+    if trading_gate not in ('PAPER', 'LIVE', 'ALL'):
+        return jsonify({"ok": False, "error": "trading_gate must be PAPER, LIVE, or ALL"}), 400
+    if operating_mode not in ('MANAGED', 'AUTOMATIC', 'ALL'):
+        return jsonify({"ok": False, "error": "operating_mode must be MANAGED, AUTOMATIC, or ALL"}), 400
+
+    update_env('ADMIN_TRADING_GATE', trading_gate)
+    update_env('ADMIN_OPERATING_MODE', operating_mode)
+    os.environ['ADMIN_TRADING_GATE'] = trading_gate
+    os.environ['ADMIN_OPERATING_MODE'] = operating_mode
+
+    # If operating mode is forced, update all customers in auth.db + customer_settings
+    if operating_mode != 'ALL':
+        try:
+            for cust in auth.list_customers():
+                auth.set_operating_mode(cust['id'], operating_mode)
+            log.info(f"Admin override: forced all customers to {operating_mode}")
+        except Exception as e:
+            log.warning(f"admin-override: could not update all customers: {e}")
+
+    # If trading gate is forced, update .env TRADING_MODE
+    if trading_gate != 'ALL':
+        update_env('TRADING_MODE', trading_gate)
+        os.environ['TRADING_MODE'] = trading_gate
+
+    log.info(f"Admin override received: trading_gate={trading_gate} operating_mode={operating_mode}")
+    return jsonify({"ok": True})
 
 
 @app.route('/api/kill-switch', methods=['POST'])
@@ -8130,7 +8226,7 @@ def api_unlock_autonomous():
         return jsonify({"ok": False}), 403
 
     # Key matches — update OPERATING_MODE in .env
-    update_env('OPERATING_MODE', 'AUTONOMOUS')
+    update_env('OPERATING_MODE', 'AUTOMATIC')
     log.info(f"Autonomous mode unlocked via portal at {now_et()}")
 
     try:
@@ -8177,6 +8273,8 @@ def api_keys():
         'GMAIL_APP_PASSWORD',
         'TRADING_MODE',
         'OPERATING_MODE',
+        'ADMIN_TRADING_GATE',
+        'ADMIN_OPERATING_MODE',
     }
 
     updated = []
@@ -8343,6 +8441,11 @@ def api_settings():
     try:
         db = _customer_db()
         written = []
+        # Strip admin-locked fields before saving
+        if os.environ.get('ADMIN_TRADING_GATE', 'ALL') != 'ALL' and 'trading_mode' in data:
+            del data['trading_mode']
+        if os.environ.get('ADMIN_OPERATING_MODE', 'ALL') != 'ALL' and 'operating_mode' in data:
+            del data['operating_mode']
         for form_key, env_key in customer_keys.items():
             if form_key in data:
                 val = data[form_key]
@@ -8379,7 +8482,7 @@ def api_customer_settings():
 
         # Global defaults from .env
         global_defaults = {
-            'OPERATING_MODE':     os.environ.get('OPERATING_MODE', 'SUPERVISED'),
+            'OPERATING_MODE':     os.environ.get('OPERATING_MODE', 'MANAGED'),
             'MIN_CONFIDENCE':     os.environ.get('MIN_CONFIDENCE', 'LOW'),
             'MAX_POSITION_PCT':   os.environ.get('MAX_POSITION_PCT', '0.10'),
             'MAX_TRADE_USD':      os.environ.get('MAX_TRADE_USD', '1000'),

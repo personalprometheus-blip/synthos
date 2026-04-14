@@ -143,7 +143,7 @@ def main():
         "pi_id":          PI_ID,
         "label":          PI_LABEL,
         "agents":         agents,
-        "operating_mode": "SUPERVISED",
+        "operating_mode": "MANAGED",
         "trading_mode":   "PAPER",
         "kill_switch":    False,
         **metrics,

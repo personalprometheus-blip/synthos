@@ -204,13 +204,13 @@ if alpaca_key and alpaca_url:
       f"url={'paper' if url_is_paper else 'live'} — "
       f"{'consistent ✓' if consistent else 'MISMATCH ✗ — paper key against live URL or vice versa'}")
 
-# OPERATING_MODE enum — v3.0 accepts MANAGED/AUTOMATIC as aliases
+# OPERATING_MODE enum — v3.1 standardized to MANAGED/AUTOMATIC only
 if operating_mode:
-    valid_modes = ('SUPERVISED', 'AUTONOMOUS', 'MANAGED', 'AUTOMATIC')
+    valid_modes = ('MANAGED', 'AUTOMATIC')
     ok = operating_mode.upper() in valid_modes
     p("OPERATING_MODE value",
       ok,
-      f"'{operating_mode}' — {'valid' if ok else 'must be SUPERVISED | MANAGED | AUTONOMOUS | AUTOMATIC'}")
+      f"'{operating_mode}' — {'valid' if ok else 'must be MANAGED | AUTOMATIC'}")
 
 # ENCRYPTION_KEY — must be a valid Fernet key (32 url-safe base64 bytes = 44 chars)
 if encryption_key:

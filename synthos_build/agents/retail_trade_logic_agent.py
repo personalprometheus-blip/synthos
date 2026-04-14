@@ -61,7 +61,7 @@ ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
 ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
-OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
+OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
 AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 RESEND_API_KEY    = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
@@ -80,8 +80,8 @@ if TRADING_MODE not in ('PAPER', 'LIVE'):
 if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:
     print("ERROR: TRADING_MODE=LIVE but ALPACA_BASE_URL points to paper endpoint.")
     sys.exit(1)
-if OPERATING_MODE in ('AUTONOMOUS', 'AUTOMATIC') and not AUTONOMOUS_KEY:
-    print(f"ERROR: OPERATING_MODE={OPERATING_MODE} requires AUTONOMOUS_UNLOCK_KEY in .env")
+if OPERATING_MODE == 'AUTOMATIC' and not AUTONOMOUS_KEY:
+    print(f"ERROR: OPERATING_MODE=AUTOMATIC requires AUTONOMOUS_UNLOCK_KEY in .env")
     sys.exit(1)
 
 # ── MULTI-TENANT ROUTING ──────────────────────────────────────────────────────
@@ -123,9 +123,8 @@ def _customer_email() -> str:
 
 
 def _is_supervised() -> bool:
-    """True when the active operating mode requires trade approval.
-    Handles both old env terminology (SUPERVISED) and new portal terminology (MANAGED)."""
-    return OPERATING_MODE in ('SUPERVISED', 'MANAGED')
+    """True when the active operating mode requires trade approval (MANAGED mode)."""
+    return OPERATING_MODE == 'MANAGED'
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1440,7 +1439,7 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
     return True
 
 
-# ── SUPERVISED MODE (KEEP from v1.x) ─────────────────────────────────────────
+# ── MANAGED MODE (trade approval queue) ───────────────────────────────────────
 
 def queue_for_approval(signal, decision_data):
     try:
@@ -1462,7 +1461,7 @@ def queue_for_approval(signal, decision_data):
             reasoning  = decision_data.get('reasoning', ''),
             session    = decision_data.get('session', ''),
         )
-        log.info(f"[SUPERVISED] Trade queued: {signal['ticker']} ${decision_data.get('max_trade',0):.2f}")
+        log.info(f"[MANAGED] Trade queued: {signal['ticker']} ${decision_data.get('max_trade',0):.2f}")
     except Exception as e:
         log.error(f"queue_for_approval error: {e}")
         raise
@@ -1549,9 +1548,9 @@ def _notify_approval_request(signal, decision_data):
             },
             timeout=10,
         )
-        log.info(f"[SUPERVISED] Approval notification sent: {ticker} -> {recipient}")
+        log.info(f"[MANAGED] Approval notification sent: {ticker} -> {recipient}")
     except Exception as e:
-        log.warning(f"[SUPERVISED] Approval notification failed: {e}")
+        log.warning(f"[MANAGED] Approval notification failed: {e}")
 
 def get_approved_trades():
     try:
@@ -2186,7 +2185,7 @@ def run(session="open"):
                     log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
             pos_log.commit(db)
 
-    # ── SUPERVISED/MANAGED MODE: execute user-approved trades
+    # ── MANAGED MODE: execute user-approved trades
     if _is_supervised():
         approved = get_approved_trades()
         for approval in approved:
@@ -2214,11 +2213,11 @@ def run(session="open"):
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
-                    log.info(f"[SUPERVISED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
+                    log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
                 else:
-                    log.error(f"[SUPERVISED] Order failed: {ticker}")
+                    log.error(f"[MANAGED] Order failed: {ticker}")
             except Exception as e:
-                log.error(f"[SUPERVISED] Execution error: {e}")
+                log.error(f"[MANAGED] Execution error: {e}")
 
     # ── NEW SIGNAL EVALUATION (Gates 4–9 + 11)
     if not reconcile_ok:
@@ -2337,9 +2336,9 @@ def run(session="open"):
                     # re-processed on the next session run. The approval row in
                     # pending_approvals is the source of truth until user decides.
                     _shared_db().acknowledge_signal(signal['id'])
-                    log.info(f"[SUPERVISED/MANAGED] {signal['ticker']} queued for portal approval")
+                    log.info(f"[MANAGED] {signal['ticker']} queued for portal approval")
                 else:
-                    # AUTONOMOUS MODE ⚠️ UNDER REVIEW — live trading not yet authorized
+                    # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
                     order = alpaca.submit_order(signal['ticker'], size, "buy")
                     if order:
                         db.open_position(

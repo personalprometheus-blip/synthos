@@ -16,7 +16,7 @@ Usage (from any agent):
     PI_ID          — unique Pi identifier, e.g. "synthos-pi-01"
     PI_LABEL       — display name shown in console, e.g. "John's Pi" (optional)
     PI_EMAIL       — customer email shown in monitor console (optional)
-    OPERATING_MODE — SUPERVISED or AUTONOMOUS
+    OPERATING_MODE — MANAGED or AUTOMATIC
     TRADING_MODE   — PAPER or LIVE
 
 Monitor endpoint: POST /heartbeat
@@ -123,7 +123,7 @@ def _build_payload(agent_name: str, status: str) -> dict:
     pi_id          = os.environ.get('PI_ID', 'synthos-pi')
     pi_label       = os.environ.get('PI_LABEL', pi_id)
     pi_email       = os.environ.get('PI_EMAIL', '')
-    operating_mode = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
+    operating_mode = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
     trading_mode   = os.environ.get('TRADING_MODE', 'PAPER').upper()
 
     # Collect system metrics first (non-blocking)
@@ -242,7 +242,7 @@ def _process_commands(commands: list) -> None:
     Supported command types:
       set_kill_switch    — value: true/false  → create/remove .kill_switch file
       set_trading_mode   — value: "PAPER"/"LIVE" → update TRADING_MODE in .env
-      set_operating_mode — value: "SUPERVISED"/"AUTONOMOUS" → update OPERATING_MODE in .env
+      set_operating_mode — value: "MANAGED"/"AUTOMATIC" → update OPERATING_MODE in .env
     """
     for cmd in commands:
         cmd_type = cmd.get('type', '')
@@ -275,7 +275,7 @@ def _process_commands(commands: list) -> None:
 
         elif cmd_type == 'set_operating_mode':
             mode = str(value).upper()
-            if mode in ('SUPERVISED', 'AUTONOMOUS'):
+            if mode in ('MANAGED', 'AUTOMATIC'):
                 _update_env('OPERATING_MODE', mode)
             else:
                 log.warning(f"[CMD] Unrecognised operating_mode value: {value!r}")

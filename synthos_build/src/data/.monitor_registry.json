@@ -19,7 +19,7 @@
     },
     "uptime": null,
     "uptime_secs": 0,
-    "operating_mode": "SUPERVISED",
+    "operating_mode": "MANAGED",
     "trading_mode": "PAPER",
     "kill_switch": false,
     "last_errors": [],

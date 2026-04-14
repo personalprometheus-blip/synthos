@@ -895,7 +895,7 @@ class WizardHandler(BaseHTTPRequestHandler):
                 cap = 1000
             _state["config"].update({
                 "starting_capital": str(int(cap)),
-                "operating_mode":   data.get("operating_mode", "SUPERVISED"),
+                "operating_mode":   data.get("operating_mode", "MANAGED"),
             })
             self._redirect("/disclaimer")
 

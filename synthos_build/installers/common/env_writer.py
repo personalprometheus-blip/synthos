@@ -123,7 +123,7 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"",
         f"# ── TRADING SETTINGS ──────────────────────────────────────────",
         f"STARTING_CAPITAL={config.get('starting_capital', '1000')}",
-        f"OPERATING_MODE={config.get('operating_mode', 'SUPERVISED')}",
+        f"OPERATING_MODE={config.get('operating_mode', 'MANAGED')}",
         f"AUTONOMOUS_UNLOCK_KEY=",
         f"TRADING_MODE=PAPER",
         f"CLOSE_SESSION_MODE=conservative",
