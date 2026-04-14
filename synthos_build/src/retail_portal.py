@@ -8387,8 +8387,8 @@ def api_agent_pulse():
         agent_colors = {
             'Trade Logic': 'teal', 'retail_trade_logic_agent.py': 'teal',
             'News': 'purple', 'retail_news_agent.py': 'purple',
-            'The Pulse': 'amber', 'retail_market_sentiment_agent.py': 'amber',
-            'Screener': 'pink', 'retail_sector_screener.py': 'pink',
+            'The Pulse': 'amber', 'Market Sentiment': 'amber', 'retail_market_sentiment_agent.py': 'amber',
+            'Screener': 'pink', 'Sector Screener': 'pink', 'retail_sector_screener.py': 'pink',
         }
 
         running = None
