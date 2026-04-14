@@ -1,0 +1,160 @@
+[2026-04-07 20:17:56] INFO boot: =======================================================
+[2026-04-07 20:17:56] INFO boot: SYNTHOS v1.2 — BOOT SEQUENCE
+[2026-04-07 20:17:56] INFO boot: Started: 2026-04-07 20:17:56 ET
+[2026-04-07 20:17:56] INFO boot: =======================================================
+[2026-04-07 20:17:56] INFO boot: Step 1/9 — Network
+[2026-04-07 20:17:56] INFO boot: Waiting for network...
+[2026-04-07 20:17:56] INFO boot: Network ready after 0s
+[2026-04-07 20:17:56] INFO boot: ✓ Network connectivity — internet reachable
+[2026-04-07 20:17:56] INFO boot: Step 2/9 — Environment
+[2026-04-07 20:17:56] WARNING boot: API keys not yet set (ANTHROPIC_API_KEY, ALPACA_API_KEY) — restore from backup before trading sessions run
+[2026-04-07 20:17:56] INFO boot: ✓ .env file — structural keys present — API keys pending restore
+[2026-04-07 20:17:56] INFO boot: Step 3/9 — Files
+[2026-04-07 20:17:56] INFO boot: ✓ Agent files — all 9 files present
+[2026-04-07 20:17:56] INFO boot: Step 4/9 — Database
+[2026-04-07 20:17:56] INFO boot: ✓ Database integrity — OK · 0.14MB
+[2026-04-07 20:17:56] INFO boot: Step 5/9 — Health check
+[2026-04-07 20:17:57] INFO boot: ✓ Health check — all checks passed
+[2026-04-07 20:17:57] INFO boot: Step 6/9 — Watchdog
+[2026-04-07 20:17:59] INFO boot: ✓ Watchdog — started (pid=1132)
+[2026-04-07 20:17:59] INFO boot: Step 7/9 — Portal
+[2026-04-07 20:18:01] INFO boot: ✓ Portal — started (pid=1148) — http://raspberrypi.local:5001
+[2026-04-07 20:18:01] INFO boot: Step 8/9 — Monitor server
+[2026-04-07 20:18:03] INFO boot: ✓ Monitor — started (pid=1160) — http://localhost:5000/console
+[2026-04-07 20:18:03] INFO boot: Step — Interrogation listener
+[2026-04-07 20:18:03] INFO boot: ✓ Interrogation listener — retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)
+[2026-04-07 20:18:03] INFO boot: Step 9/9 — Initial data seed
+[2026-04-07 20:18:03] INFO boot: Schema verified: /home/pi516gb/synthos/synthos_build/src/../user/signals.db
+[2026-04-07 20:18:03] INFO boot: Empty signals DB — running initial 45-day seed...
+[2026-04-07 20:18:04] INFO boot: ✓ Data seed — initial 45-day seed complete
+[2026-04-07 20:18:04] INFO boot: Step 10/10 — Suggestions backlog (company node only)
+[2026-04-07 20:18:04] INFO boot: ✓ Suggestions backlog — skipped — not company node
+[2026-04-07 20:18:04] INFO boot: =======================================================
+[2026-04-07 20:18:04] INFO boot: Boot complete: 11/11 checks passed
+[2026-04-07 20:18:04] INFO boot: ✓ All critical checks passed — Synthos is ready
+[2026-04-07 20:18:04] INFO boot: System event: BOOT_COMPLETE — v1.2 — 11/11 checks passed
+[2026-04-07 20:18:04] INFO boot: Boot heartbeat written
+[2026-04-07 20:18:04] INFO boot: =======================================================
+[2026-04-07 20:18:04] INFO boot: Cron schedule now controls agent execution
+[2026-04-07 20:18:04] INFO boot: =======================================================
+[2026-04-08 12:53:11] INFO boot: =======================================================
+[2026-04-08 12:53:11] INFO boot: SYNTHOS v1.2 — BOOT SEQUENCE
+[2026-04-08 12:53:11] INFO boot: Started: 2026-04-08 12:53:11 ET
+[2026-04-08 12:53:11] INFO boot: =======================================================
+[2026-04-08 12:53:11] INFO boot: Step 1/9 — Network
+[2026-04-08 12:53:11] INFO boot: Waiting for network...
+[2026-04-08 12:53:11] INFO boot: Network ready after 0s
+[2026-04-08 12:53:11] INFO boot: ✓ Network connectivity — internet reachable
+[2026-04-08 12:53:11] INFO boot: Step 2/9 — Environment
+[2026-04-08 12:53:11] INFO boot: ✓ .env file — structural keys present
+[2026-04-08 12:53:11] INFO boot: Step 3/9 — Files
+[2026-04-08 12:53:11] INFO boot: ✓ Agent files — all 9 files present
+[2026-04-08 12:53:11] INFO boot: Step 4/9 — Database
+[2026-04-08 12:53:11] INFO boot: ✓ Database integrity — OK · 0.14MB
+[2026-04-08 12:53:11] INFO boot: Step 5/9 — Health check
+[2026-04-08 12:53:12] WARNING boot: Health check issues (non-fatal): [2026-04-08 12:53:11] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-08 12:53:12] ERROR health_check: Synthos reboot health check FAILED: | [2026-04-08 12:53:12] WARNING health_check: Alert not delivered — all paths failed or unconfigured. Message: Synthos reboot health check FAILED:
+[2026-04-08 12:53:12] INFO boot: ✓ Health check — issues noted (non-fatal): [2026-04-08 12:53:11] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-08 12:53:12] ERROR health_check: Synthos reboot health check FAILED: | [2026-04-08 12:53:12] WARNING health_check: Alert not delivered — all paths failed or unconfigured. Message: Synthos reboot health check FAILED:
+[2026-04-08 12:53:12] INFO boot: Step 6/9 — Watchdog
+[2026-04-08 12:53:14] INFO boot: ✓ Watchdog — started (pid=1215)
+[2026-04-08 12:53:14] INFO boot: Step 7/9 — Portal
+[2026-04-08 12:53:16] INFO boot: ✓ Portal — started (pid=1217) — http://raspberrypi.local:5001
+[2026-04-08 12:53:16] INFO boot: Step 8/9 — Monitor server
+[2026-04-08 12:53:18] INFO boot: ✓ Monitor — started (pid=1219) — http://localhost:5000/console
+[2026-04-08 12:53:18] INFO boot: Step — Interrogation listener
+[2026-04-08 12:53:18] INFO boot: ✓ Interrogation listener — retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)
+[2026-04-08 12:53:18] INFO boot: Step 9/9 — Initial data seed
+[2026-04-08 12:53:18] INFO boot: Schema verified: /home/pi516gb/synthos/synthos_build/src/../user/signals.db
+[2026-04-08 12:53:18] INFO boot: Empty signals DB — running initial 45-day seed...
+[2026-04-08 12:53:22] INFO boot: ✓ Data seed — initial 45-day seed complete
+[2026-04-08 12:53:22] INFO boot: Step 10/10 — Suggestions backlog (company node only)
+[2026-04-08 12:53:22] INFO boot: ✓ Suggestions backlog — skipped — not company node
+[2026-04-08 12:53:22] INFO boot: =======================================================
+[2026-04-08 12:53:22] INFO boot: Boot complete: 11/11 checks passed
+[2026-04-08 12:53:22] INFO boot: ✓ All critical checks passed — Synthos is ready
+[2026-04-08 12:53:22] INFO boot: System event: BOOT_COMPLETE — v1.2 — 11/11 checks passed
+[2026-04-08 12:53:23] INFO boot: Boot heartbeat written
+[2026-04-08 12:53:23] INFO boot: =======================================================
+[2026-04-08 12:53:23] INFO boot: Cron schedule now controls agent execution
+[2026-04-08 12:53:23] INFO boot: =======================================================
+[2026-04-09 09:28:03] INFO boot: =======================================================
+[2026-04-09 09:28:03] INFO boot: SYNTHOS v1.2 — BOOT SEQUENCE
+[2026-04-09 09:28:03] INFO boot: Started: 2026-04-09 09:28:03 ET
+[2026-04-09 09:28:03] INFO boot: =======================================================
+[2026-04-09 09:28:03] INFO boot: Step 1/9 — Network
+[2026-04-09 09:28:03] INFO boot: Waiting for network...
+[2026-04-09 09:28:03] INFO boot: Network ready after 0s
+[2026-04-09 09:28:03] INFO boot: ✓ Network connectivity — internet reachable
+[2026-04-09 09:28:03] INFO boot: Step 2/9 — Environment
+[2026-04-09 09:28:03] INFO boot: ✓ .env file — structural keys present
+[2026-04-09 09:28:03] INFO boot: Step 3/9 — Files
+[2026-04-09 09:28:03] INFO boot: ✓ Agent files — all 9 files present
+[2026-04-09 09:28:03] INFO boot: Step 4/9 — Database
+[2026-04-09 09:28:03] INFO boot: ✓ Database integrity — OK · 0.37MB
+[2026-04-09 09:28:03] INFO boot: Step 5/9 — Health check
+[2026-04-09 09:28:17] WARNING boot: Health check issues (non-fatal): [2026-04-09 09:28:03] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-09 09:28:12] ERROR health_check: Synthos reboot health check FAILED: | [2026-04-09 09:28:17] WARNING health_check: Alert not delivered — all paths failed or unconfigured. Message: Synthos reboot health check FAILED:
+[2026-04-09 09:28:17] INFO boot: ✓ Health check — issues noted (non-fatal): [2026-04-09 09:28:03] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-09 09:28:12] ERROR health_check: Synthos reboot health check FAILED: | [2026-04-09 09:28:17] WARNING health_check: Alert not delivered — all paths failed or unconfigured. Message: Synthos reboot health check FAILED:
+[2026-04-09 09:28:17] INFO boot: Step 6/9 — Watchdog
+[2026-04-09 09:28:19] ERROR boot: ✗ Watchdog — process exited immediately — check watchdog.log
+[2026-04-09 09:28:19] INFO boot: Step 7/9 — Portal
+[2026-04-09 09:28:21] ERROR boot: ✗ Portal — exited immediately — check portal.log
+[2026-04-09 09:28:21] INFO boot: Step 8/9 — Monitor server
+[2026-04-09 09:28:23] INFO boot: ✓ Monitor — started (pid=1212) — http://localhost:5000/console
+[2026-04-09 09:28:23] INFO boot: Step — Interrogation listener
+[2026-04-09 09:28:23] INFO boot: ✓ Interrogation listener — retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)
+[2026-04-09 09:28:23] INFO boot: Step 9/9 — Initial data seed
+[2026-04-09 09:28:23] INFO boot: Schema verified: /home/pi516gb/synthos/synthos_build/src/../user/signals.db
+[2026-04-09 09:28:23] INFO boot: Empty signals DB — running initial 45-day seed...
+[2026-04-09 09:28:36] INFO boot: ✓ Data seed — initial 45-day seed complete
+[2026-04-09 09:28:36] INFO boot: Step 10/10 — Suggestions backlog (company node only)
+[2026-04-09 09:28:36] INFO boot: ✓ Suggestions backlog — skipped — not company node
+[2026-04-09 09:28:36] INFO boot: =======================================================
+[2026-04-09 09:28:36] INFO boot: Boot complete: 9/11 checks passed
+[2026-04-09 09:28:36] WARNING boot: Issues: Watchdog, Portal
+[2026-04-09 09:28:36] INFO boot: ✓ All critical checks passed — Synthos is ready
+[2026-04-09 09:28:36] WARNING boot: Non-critical issues detected — check boot.log
+[2026-04-09 09:28:36] INFO boot: System event: BOOT_COMPLETE — v1.2 — 9/11 checks passed
+[2026-04-09 09:28:36] INFO boot: Boot heartbeat written
+[2026-04-09 09:28:36] INFO boot: =======================================================
+[2026-04-09 09:28:36] INFO boot: Cron schedule now controls agent execution
+[2026-04-09 09:28:36] INFO boot: =======================================================
+[2026-04-11 04:01:19] INFO boot: =======================================================
+[2026-04-11 04:01:19] INFO boot: SYNTHOS v1.2 — BOOT SEQUENCE
+[2026-04-11 04:01:19] INFO boot: Started: 2026-04-11 04:01:19 ET
+[2026-04-11 04:01:19] INFO boot: =======================================================
+[2026-04-11 04:01:19] INFO boot: Step 1/9 — Network
+[2026-04-11 04:01:19] INFO boot: Waiting for network...
+[2026-04-11 04:01:19] INFO boot: Network ready after 0s
+[2026-04-11 04:01:19] INFO boot: ✓ Network connectivity — internet reachable
+[2026-04-11 04:01:19] INFO boot: Step 2/9 — Environment
+[2026-04-11 04:01:19] INFO boot: ✓ .env file — structural keys present
+[2026-04-11 04:01:19] INFO boot: Step 3/9 — Files
+[2026-04-11 04:01:19] INFO boot: ✓ Agent files — all 9 files present
+[2026-04-11 04:01:19] INFO boot: Step 4/9 — Database
+[2026-04-11 04:01:19] INFO boot: ✓ Database integrity — OK · 1.87MB
+[2026-04-11 04:01:19] INFO boot: Step 5/9 — Health check
+[2026-04-11 04:01:20] WARNING boot: Health check issues (non-fatal): [2026-04-11 04:01:19] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-11 04:01:20] ERROR health_check: Synthos reboot health check FAILED:
+[2026-04-11 04:01:20] INFO boot: ✓ Health check — issues noted (non-fatal): [2026-04-11 04:01:19] ERROR health_check: ✗ ORPHAN positions in Alpaca (not in DB): BIL | [2026-04-11 04:01:20] ERROR health_check: Synthos reboot health check FAILED:
+[2026-04-11 04:01:20] INFO boot: Step 6/9 — Watchdog
+[2026-04-11 04:01:22] ERROR boot: ✗ Watchdog — process exited immediately — check watchdog.log
+[2026-04-11 04:01:22] INFO boot: Step 7/9 — Portal
+[2026-04-11 04:01:24] ERROR boot: ✗ Portal — exited immediately — check portal.log
+[2026-04-11 04:01:24] INFO boot: Step 8/9 — Monitor server
+[2026-04-11 04:01:26] INFO boot: ✓ Monitor — started (pid=1193) — http://localhost:5000/console
+[2026-04-11 04:01:26] INFO boot: Step — Interrogation listener
+[2026-04-11 04:01:26] INFO boot: ✓ Interrogation listener — retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)
+[2026-04-11 04:01:26] INFO boot: Step 9/9 — Initial data seed
+[2026-04-11 04:01:26] INFO boot: Schema verified: /home/pi516gb/synthos/synthos_build/src/../user/signals.db
+[2026-04-11 04:01:26] INFO boot: Empty signals DB — running initial 45-day seed...
+[2026-04-11 04:02:33] INFO boot: ✓ Data seed — initial 45-day seed complete
+[2026-04-11 04:02:33] INFO boot: Step 10/10 — Suggestions backlog (company node only)
+[2026-04-11 04:02:33] INFO boot: ✓ Suggestions backlog — skipped — not company node
+[2026-04-11 04:02:33] INFO boot: =======================================================
+[2026-04-11 04:02:33] INFO boot: Boot complete: 9/11 checks passed
+[2026-04-11 04:02:33] WARNING boot: Issues: Watchdog, Portal
+[2026-04-11 04:02:33] INFO boot: ✓ All critical checks passed — Synthos is ready
+[2026-04-11 04:02:33] WARNING boot: Non-critical issues detected — check boot.log
+[2026-04-11 04:02:33] INFO boot: System event: BOOT_COMPLETE — v1.2 — 9/11 checks passed
+[2026-04-11 04:02:33] INFO boot: Boot heartbeat written
+[2026-04-11 04:02:33] INFO boot: =======================================================
+[2026-04-11 04:02:33] INFO boot: Cron schedule now controls agent execution
+[2026-04-11 04:02:33] INFO boot: =======================================================

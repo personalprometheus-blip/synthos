@@ -1,0 +1,398 @@
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-07 20:17:57] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-07 20:17:57] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-07 20:17:57] INFO watchdog: Taking known-good snapshot after successful run of Bolt
+[2026-04-07 20:17:57] INFO watchdog: Taking known-good snapshot after successful run of Bolt
+[2026-04-07 20:17:57] INFO watchdog: Known-good snapshot saved at 2026-04-07 20:17:57
+[2026-04-07 20:17:57] INFO watchdog: Known-good snapshot saved at 2026-04-07 20:17:57
+[2026-04-07 20:18:26] WARNING watchdog: Watchdog already running (pid=1132) — exiting
+[2026-04-07 20:57:57] WARNING watchdog: Portal not running — starting now
+[2026-04-07 20:57:57] WARNING watchdog: Portal not running — starting now
+[2026-04-07 20:57:59] INFO watchdog: Started retail_portal.py (pid=1980)
+[2026-04-07 20:57:59] INFO watchdog: Started retail_portal.py (pid=1980)
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 12:53:12] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-08 12:53:12] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-08 12:53:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:00:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:00:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:00:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:00:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:24] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:24] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:01:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:01:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:05] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:05] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:15] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:15] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:36] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:36] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:46] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:46] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:02:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:02:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:27] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:27] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:03:58] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:03:58] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:04:08] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:04:08] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:04:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:04:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:04:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:04:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:04:39] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:04:39] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:04:49] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:04:49] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:20] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:20] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:30] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:30] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:05:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:05:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:11] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:11] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:42] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:42] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:06:52] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:06:52] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:23] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:23] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:33] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:33] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:44] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:44] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:07:54] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:07:54] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:25] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:25] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:08:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:08:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:06] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:06] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:16] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:16] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:36] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:36] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:09:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:09:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:28] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:28] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:10:58] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:10:58] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:11:09] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:11:09] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:11:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:11:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:11:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:11:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:11:39] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:11:39] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:11:50] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:11:50] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:20] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:20] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:31] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:31] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:12:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:12:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:11] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:11] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:42] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:42] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:13:52] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:13:52] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:23] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:23] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:34] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:34] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:44] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:44] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:14:54] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:14:54] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:04] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:14] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:25] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:25] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:35] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:45] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:15:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:15:55] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:06] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:06] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:16] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:16] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:26] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:37] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:37] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:47] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:16:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:16:57] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:07] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:17] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:28] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:28] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:38] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:48] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:17:59] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:17:59] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:18:09] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:18:09] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:18:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:18:19] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:18:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:18:29] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:18:40] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:18:40] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:18:50] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:18:50] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:00] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:10] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:21] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:21] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:31] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:31] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:41] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:19:51] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:01] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:12] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:12] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:22] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:32] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:43] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:43] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:20:53] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:20:53] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:21:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:21:03] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:21:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:21:13] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:21:24] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+[2026-04-08 22:21:24] WARNING watchdog: Watchdog already running (pid=1215) — exiting
+                                                                                                                                                                                                                                                                               db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-08 22:19:17] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-08 22:19:17] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-09 09:28:17] WARNING watchdog: Watchdog already running (pid=1135) — exiting
+[2026-04-09 09:28:17] WARNING watchdog: Watchdog already running (pid=1135) — exiting
+[2026-04-09 09:28:33] WARNING watchdog: Watchdog already running (pid=1135) — exiting
+[2026-04-11 04:00:01] INFO watchdog: Watchdog received signal 15 — shutting down cleanly
+[2026-04-11 04:00:01] INFO watchdog: Watchdog received signal 15 — shutting down cleanly
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-11 04:00:21] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+[2026-04-11 04:00:21] INFO watchdog: Watchdog v2.0 started on synthos-pi-retail — monitoring 5 agents | mode: pre-trading
+db_helpers not available — alerts will fall back to local log (No module named 'db_helpers')
+[2026-04-11 04:01:20] WARNING watchdog: Watchdog already running (pid=1135) — exiting
+[2026-04-11 04:01:20] WARNING watchdog: Watchdog already running (pid=1135) — exiting
+[2026-04-11 04:01:49] WARNING watchdog: Watchdog already running (pid=1135) — exiting

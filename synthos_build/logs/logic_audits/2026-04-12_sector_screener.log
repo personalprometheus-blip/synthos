@@ -1,0 +1,84 @@
+======================================================================
+SECTOR SCREENER — LOGIC AUDIT LOG
+Run ID   : 2026-04-12T20:00:01
+Sector   : Energy
+ETF      : XLE
+Date     : 2026-04-12
+======================================================================
+
+SECTOR PERFORMANCE
+  XLE 5-Year Return: +16.0%
+
+CANDIDATES UNDER REVIEW (ranked by momentum score)
+----------------------------------------------------------------------
+   1. OXY   — Occidental Petroleum
+      ETF Weight   : 3.9%
+      Momentum     : 0.82 / 1.00
+      Reasoning    : 3-month return +35.3% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume slightly above average (normal activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+   2. COP   — ConocoPhillips
+      ETF Weight   : 8.1%
+      Momentum     : 0.78 / 1.00
+      Reasoning    : 3-month return +25.7% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+   3. SLB   — SLB (Schlumberger)
+      ETF Weight   : 4.9%
+      Momentum     : 0.78 / 1.00
+      Reasoning    : 3-month return +14.9% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+   4. WMB   — Williams Companies
+      ETF Weight   : 3.8%
+      Momentum     : 0.78 / 1.00
+      Reasoning    : 3-month return +20.6% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+   5. KMI   — Kinder Morgan
+      ETF Weight   : 3.2%
+      Momentum     : 0.78 / 1.00
+      Reasoning    : 3-month return +20.6% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+   6. EOG   — EOG Resources
+      ETF Weight   : 5.2%
+      Momentum     : 0.74 / 1.00
+      Reasoning    : 3-month return +29.9% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume below average (fading interest)
+  [CONGRESSIONAL] No recent congressional activity
+
+   7. MPC   — Marathon Petroleum Corp
+      ETF Weight   : 4.3%
+      Momentum     : 0.74 / 1.00
+      Reasoning    : 3-month return +26.4% (strong positive momentum) | Price above 50-day MA but below 20-day MA (mixed trend) | Volume below average (fading interest)
+  [CONGRESSIONAL] No recent congressional activity
+
+   8. XOM   — ExxonMobil Corp
+      ETF Weight   : 22.1%
+      Momentum     : 0.70 / 1.00
+      Reasoning    : 3-month return +22.4% (strong positive momentum) | Price below both moving averages (downtrend) | Volume slightly above average (normal activity)
+  [CONGRESSIONAL] Recent BUY signal in last 90 days — supplemental bullish
+
+   9. CVX   — Chevron Corp
+      ETF Weight   : 16.8%
+      Momentum     : 0.66 / 1.00
+      Reasoning    : 3-month return +16.3% (strong positive momentum) | Price below both moving averages (downtrend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+  10. PSX   — Phillips 66
+      ETF Weight   : 4.1%
+      Momentum     : 0.66 / 1.00
+      Reasoning    : 3-month return +12.0% (strong positive momentum) | Price below both moving averages (downtrend) | Volume near average (no unusual activity)
+  [CONGRESSIONAL] No recent congressional activity
+
+SCREENING REQUESTS ISSUED
+----------------------------------------------------------------------
+  Scout  (news agent) : requested news signal for all 10 candidates
+  Pulse  (sentiment)  : requested sentiment score for all 10 candidates
+  Bolt   (trader)     : will receive congressional flags as supplemental context
+
+Next step: Scout and Pulse will fill in their signals on next run.
+Combined scores will update in real time as signals arrive.
+Portal — Screening tab shows live status of all candidates.
+======================================================================
+

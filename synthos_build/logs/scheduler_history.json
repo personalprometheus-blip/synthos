@@ -1,255 +1,345 @@
 [
   {
-    "session": "sentiment",
-    "started_at": "2026-04-11T03:30:27.869537+00:00",
-    "finished_at": "2026-04-11T03:30:39.442947+00:00",
+    "session": "trade",
+    "started_at": "2026-04-14T13:20:01.644735+00:00",
+    "finished_at": "2026-04-14T13:20:06.729234+00:00",
     "status": "ok",
     "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T13:00:01.243239+00:00",
+    "finished_at": "2026-04-14T13:10:01.253546+00:00",
+    "status": "partial",
+    "steps": {
       "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T13:05:02.088543+00:00",
+    "finished_at": "2026-04-14T13:05:10.219726+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
         "ok": 1,
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T13:00:10.685992+00:00",
+    "finished_at": "2026-04-14T13:00:18.899764+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T12:30:10.641517+00:00",
+    "finished_at": "2026-04-14T12:40:10.648746+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "trade",
-    "started_at": "2026-04-11T03:20:01.691773+00:00",
-    "finished_at": "2026-04-11T03:20:03.486431+00:00",
-    "status": "partial",
+    "started_at": "2026-04-14T12:20:01.726706+00:00",
+    "finished_at": "2026-04-14T12:20:06.170544+00:00",
+    "status": "ok",
     "steps": {
       "retail_trade_logic_agent.py": {
-        "ok": 0,
-        "failed": 1,
+        "ok": 3,
+        "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T12:00:10.651787+00:00",
+    "finished_at": "2026-04-14T12:10:10.657662+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "overnight",
-    "started_at": "2026-04-11T03:05:01.819574+00:00",
-    "finished_at": "2026-04-11T03:12:01.864508+00:00",
-    "status": "partial",
+    "started_at": "2026-04-14T12:05:01.922936+00:00",
+    "finished_at": "2026-04-14T12:05:08.998674+00:00",
+    "status": "ok",
     "steps": {
       "retail_news_agent.py": {
-        "ok": 0,
+        "ok": 1,
         "failed": 0,
-        "timeout": 1,
+        "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-11T03:00:17.951263+00:00",
-    "finished_at": "2026-04-11T03:07:18.007595+00:00",
-    "status": "partial",
+    "started_at": "2026-04-14T12:00:14.366467+00:00",
+    "finished_at": "2026-04-14T12:00:22.516134+00:00",
+    "status": "ok",
     "steps": {
       "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T11:30:27.850729+00:00",
+    "finished_at": "2026-04-14T11:40:27.855182+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-11T03:00:17.951263+00:00",
-    "finished_at": "2026-04-11T03:00:29.757293+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-11T02:30:27.915546+00:00",
-    "finished_at": "2026-04-11T02:30:39.442332+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "trade",
-    "started_at": "2026-04-11T02:20:01.739096+00:00",
-    "finished_at": "2026-04-11T02:20:06.675665+00:00",
+    "started_at": "2026-04-14T11:20:01.516309+00:00",
+    "finished_at": "2026-04-14T11:20:05.407064+00:00",
     "status": "ok",
     "steps": {
       "retail_trade_logic_agent.py": {
-        "ok": 1,
+        "ok": 3,
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
     }
   },
   {
-    "session": "news",
-    "started_at": "2026-04-11T02:00:31.825567+00:00",
-    "finished_at": "2026-04-11T02:07:31.866654+00:00",
+    "session": "sentiment",
+    "started_at": "2026-04-14T11:00:15.763329+00:00",
+    "finished_at": "2026-04-14T11:10:15.770299+00:00",
     "status": "partial",
     "steps": {
-      "retail_news_agent.py": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-11T02:00:31.826919+00:00",
-    "finished_at": "2026-04-11T02:00:43.533788+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-11T01:30:17.884853+00:00",
-    "finished_at": "2026-04-11T01:30:29.515652+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "overnight",
-    "started_at": "2026-04-11T01:05:01.932867+00:00",
-    "finished_at": "2026-04-11T01:12:01.987529+00:00",
-    "status": "partial",
+    "started_at": "2026-04-14T11:05:01.476041+00:00",
+    "finished_at": "2026-04-14T11:05:06.956065+00:00",
+    "status": "ok",
     "steps": {
       "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T11:00:15.756656+00:00",
+    "finished_at": "2026-04-14T11:00:26.495971+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T10:30:27.851940+00:00",
+    "finished_at": "2026-04-14T10:40:27.857061+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "news",
-    "started_at": "2026-04-11T01:00:17.921322+00:00",
-    "finished_at": "2026-04-11T01:07:17.981346+00:00",
+    "session": "trade",
+    "started_at": "2026-04-14T10:20:01.164255+00:00",
+    "finished_at": "2026-04-14T10:20:05.195934+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T10:00:02.090761+00:00",
+    "finished_at": "2026-04-14T10:10:02.096921+00:00",
     "status": "partial",
     "steps": {
-      "retail_news_agent.py": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-11T01:00:17.923234+00:00",
-    "finished_at": "2026-04-11T01:00:29.596920+00:00",
+    "session": "overnight",
+    "started_at": "2026-04-14T10:05:01.597048+00:00",
+    "finished_at": "2026-04-14T10:05:06.099613+00:00",
     "status": "ok",
     "steps": {
-      "retail_market_sentiment_agent.py": {
+      "retail_news_agent.py": {
         "ok": 1,
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-11T00:30:17.884387+00:00",
-    "finished_at": "2026-04-11T00:30:29.578740+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-11T00:00:01.297109+00:00",
-    "finished_at": "2026-04-11T00:07:01.349642+00:00",
-    "status": "partial",
+    "started_at": "2026-04-14T10:00:27.646982+00:00",
+    "finished_at": "2026-04-14T10:00:31.499781+00:00",
+    "status": "ok",
     "steps": {
       "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T09:30:27.854993+00:00",
+    "finished_at": "2026-04-14T09:40:27.860400+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-11T00:00:11.389539+00:00",
-    "finished_at": "2026-04-11T00:00:23.030793+00:00",
+    "session": "trade",
+    "started_at": "2026-04-14T09:20:01.111939+00:00",
+    "finished_at": "2026-04-14T09:20:05.363559+00:00",
     "status": "ok",
     "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
@@ -257,72 +347,24 @@
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T23:30:31.859975+00:00",
-    "finished_at": "2026-04-10T23:30:43.500608+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T23:00:26.137956+00:00",
-    "finished_at": "2026-04-10T23:07:26.192861+00:00",
+    "started_at": "2026-04-14T09:00:27.870106+00:00",
+    "finished_at": "2026-04-14T09:10:27.875530+00:00",
     "status": "partial",
     "steps": {
-      "retail_news_agent.py": {
+      "retail_market_sentiment_agent.py": {
         "ok": 0,
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-10T23:00:17.876171+00:00",
-    "finished_at": "2026-04-10T23:00:29.628253+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T22:30:23.118418+00:00",
-    "finished_at": "2026-04-10T22:30:35.116337+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T22:00:08.633538+00:00",
-    "finished_at": "2026-04-10T22:00:17.742890+00:00",
+    "session": "overnight",
+    "started_at": "2026-04-14T09:05:01.928952+00:00",
+    "finished_at": "2026-04-14T09:05:05.025995+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -330,63 +372,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T22:00:01.609748+00:00",
-    "finished_at": "2026-04-10T22:00:13.776616+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T21:30:17.908815+00:00",
-    "finished_at": "2026-04-10T21:30:29.506736+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T21:00:17.882229+00:00",
-    "finished_at": "2026-04-10T21:00:31.437688+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T21:00:17.882227+00:00",
-    "finished_at": "2026-04-10T21:00:25.892175+00:00",
+    "started_at": "2026-04-14T09:00:27.870105+00:00",
+    "finished_at": "2026-04-14T09:00:30.825088+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -394,6 +388,40 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T08:30:03.859838+00:00",
+    "finished_at": "2026-04-14T08:40:03.863906+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T08:20:01.248353+00:00",
+    "finished_at": "2026-04-14T08:20:05.251251+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
@@ -401,40 +429,24 @@
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T20:30:27.875833+00:00",
-    "finished_at": "2026-04-10T20:30:39.596633+00:00",
-    "status": "ok",
+    "started_at": "2026-04-14T08:00:10.643324+00:00",
+    "finished_at": "2026-04-14T08:10:10.657282+00:00",
+    "status": "partial",
     "steps": {
       "retail_market_sentiment_agent.py": {
-        "ok": 1,
+        "ok": 0,
         "failed": 0,
-        "timeout": 0,
+        "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-10T20:00:17.933741+00:00",
-    "finished_at": "2026-04-10T20:00:32.118146+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T20:00:17.934392+00:00",
-    "finished_at": "2026-04-10T20:00:27.692243+00:00",
+    "session": "overnight",
+    "started_at": "2026-04-14T08:05:01.349843+00:00",
+    "finished_at": "2026-04-14T08:05:04.173009+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -442,6 +454,56 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T08:00:27.853828+00:00",
+    "finished_at": "2026-04-14T08:00:32.912202+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T07:30:01.742515+00:00",
+    "finished_at": "2026-04-14T07:40:01.747082+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T07:20:01.553575+00:00",
+    "finished_at": "2026-04-14T07:20:05.399389+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
@@ -449,8 +511,466 @@
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T19:30:17.860176+00:00",
-    "finished_at": "2026-04-10T19:30:30.458963+00:00",
+    "started_at": "2026-04-14T07:00:27.873211+00:00",
+    "finished_at": "2026-04-14T07:10:27.878725+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T07:05:01.928337+00:00",
+    "finished_at": "2026-04-14T07:05:04.642130+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T07:00:27.873214+00:00",
+    "finished_at": "2026-04-14T07:00:30.790149+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T06:30:10.643453+00:00",
+    "finished_at": "2026-04-14T06:40:10.650183+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T06:20:01.573582+00:00",
+    "finished_at": "2026-04-14T06:20:05.407093+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T06:00:27.876230+00:00",
+    "finished_at": "2026-04-14T06:10:27.881127+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T06:05:01.355258+00:00",
+    "finished_at": "2026-04-14T06:05:03.866269+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T06:00:27.876230+00:00",
+    "finished_at": "2026-04-14T06:00:35.866845+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T05:30:27.845742+00:00",
+    "finished_at": "2026-04-14T05:40:27.851593+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T05:20:01.866275+00:00",
+    "finished_at": "2026-04-14T05:20:05.825625+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T05:00:10.678048+00:00",
+    "finished_at": "2026-04-14T05:10:10.685128+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T05:05:01.309706+00:00",
+    "finished_at": "2026-04-14T05:05:04.174609+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T05:00:12.858981+00:00",
+    "finished_at": "2026-04-14T05:00:16.700057+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T04:30:27.847379+00:00",
+    "finished_at": "2026-04-14T04:40:27.852197+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T04:20:01.877652+00:00",
+    "finished_at": "2026-04-14T04:20:05.804887+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T04:00:27.859174+00:00",
+    "finished_at": "2026-04-14T04:10:27.865926+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T04:05:01.420273+00:00",
+    "finished_at": "2026-04-14T04:05:04.787978+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T04:00:29.858422+00:00",
+    "finished_at": "2026-04-14T04:00:33.469080+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T03:30:22.677594+00:00",
+    "finished_at": "2026-04-14T03:40:22.684004+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T03:20:01.219141+00:00",
+    "finished_at": "2026-04-14T03:20:05.221932+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T03:00:06.404504+00:00",
+    "finished_at": "2026-04-14T03:10:06.409108+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T03:05:01.771326+00:00",
+    "finished_at": "2026-04-14T03:05:33.250548+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T03:00:01.294910+00:00",
+    "finished_at": "2026-04-14T03:00:36.386740+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T02:30:26.519191+00:00",
+    "finished_at": "2026-04-14T02:40:26.524339+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T02:20:01.867456+00:00",
+    "finished_at": "2026-04-14T02:20:05.774905+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T02:00:14.652404+00:00",
+    "finished_at": "2026-04-14T02:10:14.656858+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T02:05:01.918322+00:00",
+    "finished_at": "2026-04-14T02:05:32.497103+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T02:00:14.653816+00:00",
+    "finished_at": "2026-04-14T02:00:57.411033+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T01:30:22.187091+00:00",
+    "finished_at": "2026-04-14T01:39:28.828729+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -458,63 +978,559 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T01:20:01.411519+00:00",
+    "finished_at": "2026-04-14T01:20:05.480579+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T01:00:06.608165+00:00",
+    "finished_at": "2026-04-14T01:10:06.616239+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T01:05:01.686447+00:00",
+    "finished_at": "2026-04-14T01:05:35.440463+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T01:00:20.137491+00:00",
+    "finished_at": "2026-04-14T01:00:54.079170+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T00:30:27.858551+00:00",
+    "finished_at": "2026-04-14T00:40:27.862694+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-14T00:20:02.001147+00:00",
+    "finished_at": "2026-04-14T00:20:06.067164+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-14T00:00:01.480186+00:00",
+    "finished_at": "2026-04-14T00:10:01.484792+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-14T00:05:01.283995+00:00",
+    "finished_at": "2026-04-14T00:05:43.027290+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-14T00:00:05.610868+00:00",
+    "finished_at": "2026-04-14T00:00:44.165529+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T23:30:02.019124+00:00",
+    "finished_at": "2026-04-13T23:40:02.023749+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T23:20:01.953503+00:00",
+    "finished_at": "2026-04-13T23:22:56.270884+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T23:00:27.855250+00:00",
+    "finished_at": "2026-04-13T23:10:27.859809+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T23:05:01.650274+00:00",
+    "finished_at": "2026-04-13T23:05:44.129029+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T23:00:27.855250+00:00",
+    "finished_at": "2026-04-13T23:01:27.673643+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T22:30:27.853822+00:00",
+    "finished_at": "2026-04-13T22:40:27.858919+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T22:20:01.127490+00:00",
+    "finished_at": "2026-04-13T22:22:48.927907+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T22:00:13.076738+00:00",
+    "finished_at": "2026-04-13T22:10:13.084602+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T22:05:01.657166+00:00",
+    "finished_at": "2026-04-13T22:05:46.382088+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T22:00:27.855534+00:00",
+    "finished_at": "2026-04-13T22:01:13.214690+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T21:30:14.186414+00:00",
+    "finished_at": "2026-04-13T21:40:14.190996+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T21:20:01.591394+00:00",
+    "finished_at": "2026-04-13T21:22:32.830016+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T21:00:12.871491+00:00",
+    "finished_at": "2026-04-13T21:09:56.366049+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T21:05:01.711221+00:00",
+    "finished_at": "2026-04-13T21:05:32.243974+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T21:00:10.654584+00:00",
+    "finished_at": "2026-04-13T21:00:44.501409+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T20:30:27.855055+00:00",
+    "finished_at": "2026-04-13T20:39:31.750987+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T20:20:01.636921+00:00",
+    "finished_at": "2026-04-13T20:20:04.219475+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T20:00:27.868198+00:00",
+    "finished_at": "2026-04-13T20:10:15.401642+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T20:05:01.682471+00:00",
+    "finished_at": "2026-04-13T20:05:38.761267+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T20:00:27.868198+00:00",
+    "finished_at": "2026-04-13T20:01:12.477650+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T19:30:01.676774+00:00",
+    "finished_at": "2026-04-13T19:38:45.860616+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "close",
-    "started_at": "2026-04-10T19:30:17.860175+00:00",
-    "finished_at": "2026-04-10T19:30:19.587617+00:00",
-    "status": "ok",
+    "started_at": "2026-04-13T19:30:27.850361+00:00",
+    "finished_at": "2026-04-13T19:30:35.226878+00:00",
+    "status": "partial",
     "steps": {
       "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
+        "ok": 2,
+        "failed": 1,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-10T19:30:01.579500+00:00",
-    "finished_at": "2026-04-10T19:30:14.846659+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "close",
-    "started_at": "2026-04-10T19:30:01.581689+00:00",
-    "finished_at": "2026-04-10T19:30:03.536869+00:00",
-    "status": "ok",
+    "session": "trade",
+    "started_at": "2026-04-13T19:20:01.320803+00:00",
+    "finished_at": "2026-04-13T19:20:09.642013+00:00",
+    "status": "partial",
     "steps": {
       "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T19:00:02.055620+00:00",
+    "finished_at": "2026-04-13T19:08:45.335971+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
         "ok": 1,
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T19:05:01.625079+00:00",
-    "finished_at": "2026-04-10T19:05:04.516211+00:00",
+    "started_at": "2026-04-13T19:05:01.682740+00:00",
+    "finished_at": "2026-04-13T19:05:24.300256+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -522,31 +1538,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T19:00:17.880394+00:00",
-    "finished_at": "2026-04-10T19:00:31.895881+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T19:00:25.639128+00:00",
-    "finished_at": "2026-04-10T19:00:28.486598+00:00",
+    "started_at": "2026-04-13T19:00:27.861503+00:00",
+    "finished_at": "2026-04-13T19:00:50.296005+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -554,15 +1554,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T19:00:01.738670+00:00",
-    "finished_at": "2026-04-10T19:00:15.503333+00:00",
+    "started_at": "2026-04-13T18:30:01.443105+00:00",
+    "finished_at": "2026-04-13T18:38:25.218610+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -570,15 +1570,33 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T18:20:01.721297+00:00",
+    "finished_at": "2026-04-13T18:20:07.652249+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T18:30:27.880480+00:00",
-    "finished_at": "2026-04-10T18:30:41.007395+00:00",
+    "started_at": "2026-04-13T18:00:01.616672+00:00",
+    "finished_at": "2026-04-13T18:07:57.654800+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -586,31 +1604,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T18:30:01.966435+00:00",
-    "finished_at": "2026-04-10T18:30:15.882686+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T18:05:01.506384+00:00",
-    "finished_at": "2026-04-10T18:05:04.880973+00:00",
+    "started_at": "2026-04-13T18:05:01.515643+00:00",
+    "finished_at": "2026-04-13T18:05:27.958909+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -618,31 +1620,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T18:00:17.925982+00:00",
-    "finished_at": "2026-04-10T18:00:33.019772+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T18:00:17.928154+00:00",
-    "finished_at": "2026-04-10T18:00:30.359642+00:00",
+    "started_at": "2026-04-13T18:00:27.860241+00:00",
+    "finished_at": "2026-04-13T18:00:57.164155+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -650,15 +1636,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T18:00:01.588055+00:00",
-    "finished_at": "2026-04-10T18:00:15.391657+00:00",
+    "started_at": "2026-04-13T17:30:01.316665+00:00",
+    "finished_at": "2026-04-13T17:37:59.096250+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -666,15 +1652,33 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T17:20:01.413088+00:00",
+    "finished_at": "2026-04-13T17:20:10.680582+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T17:30:17.875846+00:00",
-    "finished_at": "2026-04-10T17:30:30.268809+00:00",
+    "started_at": "2026-04-13T17:00:01.197171+00:00",
+    "finished_at": "2026-04-13T17:08:08.278010+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -682,31 +1686,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T17:30:01.720609+00:00",
-    "finished_at": "2026-04-10T17:30:14.795389+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T17:05:01.884601+00:00",
-    "finished_at": "2026-04-10T17:05:04.656875+00:00",
+    "started_at": "2026-04-13T17:05:01.832968+00:00",
+    "finished_at": "2026-04-13T17:05:28.254271+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -714,31 +1702,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T17:00:27.895562+00:00",
-    "finished_at": "2026-04-10T17:00:40.775698+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T17:00:27.895562+00:00",
-    "finished_at": "2026-04-10T17:00:31.139337+00:00",
+    "started_at": "2026-04-13T17:00:30.358719+00:00",
+    "finished_at": "2026-04-13T17:00:56.090803+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -746,55 +1718,41 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T17:00:01.534033+00:00",
-    "finished_at": "2026-04-10T17:00:15.774624+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "midday",
-    "started_at": "2026-04-10T16:30:01.488542+00:00",
-    "finished_at": "2026-04-10T16:30:16.594266+00:00",
-    "status": "ok",
+    "started_at": "2026-04-13T16:30:10.656987+00:00",
+    "finished_at": "2026-04-13T16:37:47.983606+00:00",
+    "status": "partial",
     "steps": {
       "retail_market_sentiment_agent.py": {
         "ok": 1,
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       },
       "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
+        "ok": 2,
+        "failed": 1,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T16:30:01.507861+00:00",
-    "finished_at": "2026-04-10T16:30:15.445065+00:00",
+    "started_at": "2026-04-13T16:30:01.433262+00:00",
+    "finished_at": "2026-04-13T16:37:44.029433+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -802,15 +1760,49 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T16:20:01.644822+00:00",
+    "finished_at": "2026-04-13T16:20:15.100563+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T16:00:01.522515+00:00",
+    "finished_at": "2026-04-13T16:07:57.585108+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T16:05:01.133677+00:00",
-    "finished_at": "2026-04-10T16:05:03.391732+00:00",
+    "started_at": "2026-04-13T16:05:01.349311+00:00",
+    "finished_at": "2026-04-13T16:05:22.483799+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -818,31 +1810,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T16:00:17.860029+00:00",
-    "finished_at": "2026-04-10T16:00:30.784884+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T16:00:17.860030+00:00",
-    "finished_at": "2026-04-10T16:00:21.384317+00:00",
+    "started_at": "2026-04-13T16:00:27.882989+00:00",
+    "finished_at": "2026-04-13T16:00:44.639799+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -850,15 +1826,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T16:00:01.451573+00:00",
-    "finished_at": "2026-04-10T16:00:15.015495+00:00",
+    "started_at": "2026-04-13T15:30:01.273989+00:00",
+    "finished_at": "2026-04-13T15:37:37.969874+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -866,6 +1842,24 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T15:20:01.544613+00:00",
+    "finished_at": "2026-04-13T15:23:02.932977+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
@@ -873,8 +1867,8 @@
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T15:30:17.906364+00:00",
-    "finished_at": "2026-04-10T15:30:30.315134+00:00",
+    "started_at": "2026-04-13T15:00:01.513162+00:00",
+    "finished_at": "2026-04-13T15:07:37.105494+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -882,31 +1876,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T15:30:02.063310+00:00",
-    "finished_at": "2026-04-10T15:30:15.541418+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T15:05:01.572527+00:00",
-    "finished_at": "2026-04-10T15:05:03.975939+00:00",
+    "started_at": "2026-04-13T15:05:01.427358+00:00",
+    "finished_at": "2026-04-13T15:05:19.851416+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -914,31 +1892,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T15:00:17.857546+00:00",
-    "finished_at": "2026-04-10T15:00:32.920617+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T15:00:20.128537+00:00",
-    "finished_at": "2026-04-10T15:00:22.821776+00:00",
+    "started_at": "2026-04-13T15:00:27.863871+00:00",
+    "finished_at": "2026-04-13T15:01:06.142795+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -946,15 +1908,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T15:00:01.491947+00:00",
-    "finished_at": "2026-04-10T15:00:14.456497+00:00",
+    "started_at": "2026-04-13T14:30:01.763097+00:00",
+    "finished_at": "2026-04-13T14:37:20.996158+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -962,15 +1924,33 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T14:20:01.567744+00:00",
+    "finished_at": "2026-04-13T14:20:13.612900+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T14:30:19.905021+00:00",
-    "finished_at": "2026-04-10T14:30:32.508856+00:00",
+    "started_at": "2026-04-13T14:00:01.869919+00:00",
+    "finished_at": "2026-04-13T14:06:22.252189+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -978,31 +1958,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T14:30:01.909692+00:00",
-    "finished_at": "2026-04-10T14:30:14.700909+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T14:05:01.630273+00:00",
-    "finished_at": "2026-04-10T14:05:03.766930+00:00",
+    "started_at": "2026-04-13T14:05:01.452079+00:00",
+    "finished_at": "2026-04-13T14:05:20.918340+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -1010,31 +1974,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T14:00:17.864407+00:00",
-    "finished_at": "2026-04-10T14:00:30.285845+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T14:00:17.861692+00:00",
-    "finished_at": "2026-04-10T14:00:20.320413+00:00",
+    "started_at": "2026-04-13T14:00:27.822486+00:00",
+    "finished_at": "2026-04-13T14:00:46.134456+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -1042,31 +1990,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T14:00:01.986992+00:00",
-    "finished_at": "2026-04-10T14:00:15.517250+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "open",
-    "started_at": "2026-04-10T13:30:01.693771+00:00",
-    "finished_at": "2026-04-10T13:31:20.175953+00:00",
+    "started_at": "2026-04-13T13:30:27.868290+00:00",
+    "finished_at": "2026-04-13T13:37:27.775532+00:00",
     "status": "ok",
     "steps": {
       "retail_sector_screener.py": {
@@ -1074,7 +2006,7 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       },
       "retail_market_sentiment_agent.py": {
@@ -1082,7 +2014,7 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       },
       "retail_news_agent.py": {
@@ -1090,14 +2022,16 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       },
       "retail_trade_logic_agent.py": {
-        "ok": 1,
+        "ok": 3,
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
@@ -1105,8 +2039,8 @@
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T13:30:27.890933+00:00",
-    "finished_at": "2026-04-10T13:31:17.097890+00:00",
+    "started_at": "2026-04-13T13:30:27.868290+00:00",
+    "finished_at": "2026-04-13T13:36:33.305765+00:00",
     "status": "ok",
     "steps": {
       "retail_market_sentiment_agent.py": {
@@ -1114,15 +2048,49 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T13:20:01.095996+00:00",
+    "finished_at": "2026-04-13T13:20:08.144889+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 3,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
         }
       }
     }
   },
   {
+    "session": "sentiment",
+    "started_at": "2026-04-13T13:00:15.394360+00:00",
+    "finished_at": "2026-04-13T13:07:01.300628+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
     "session": "news",
-    "started_at": "2026-04-10T13:05:02.003726+00:00",
-    "finished_at": "2026-04-10T13:05:04.623428+00:00",
+    "started_at": "2026-04-13T13:05:01.910018+00:00",
+    "finished_at": "2026-04-13T13:05:08.077423+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -1130,31 +2098,15 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T13:00:17.926928+00:00",
-    "finished_at": "2026-04-10T13:00:29.820593+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "news",
-    "started_at": "2026-04-10T13:00:17.926934+00:00",
-    "finished_at": "2026-04-10T13:00:20.699148+00:00",
+    "started_at": "2026-04-13T13:00:31.382147+00:00",
+    "finished_at": "2026-04-13T13:02:21.608295+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -1162,79 +2114,49 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T12:30:17.875883+00:00",
-    "finished_at": "2026-04-10T12:30:29.577707+00:00",
-    "status": "ok",
+    "started_at": "2026-04-13T12:30:27.839686+00:00",
+    "finished_at": "2026-04-13T12:40:27.844911+00:00",
+    "status": "partial",
     "steps": {
       "retail_market_sentiment_agent.py": {
-        "ok": 1,
+        "ok": 0,
         "failed": 0,
-        "timeout": 0,
+        "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "sentiment",
-    "started_at": "2026-04-10T12:00:33.905335+00:00",
-    "finished_at": "2026-04-10T12:00:45.487555+00:00",
-    "status": "ok",
+    "session": "trade",
+    "started_at": "2026-04-13T12:20:02.024644+00:00",
+    "finished_at": "2026-04-13T12:20:11.756718+00:00",
+    "status": "partial",
     "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
     }
   },
   {
-    "session": "news",
-    "started_at": "2026-04-10T12:00:01.626693+00:00",
-    "finished_at": "2026-04-10T12:00:04.071110+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T11:30:17.887519+00:00",
-    "finished_at": "2026-04-10T11:30:29.620832+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T11:00:30.117121+00:00",
-    "finished_at": "2026-04-10T11:07:30.171726+00:00",
+    "session": "overnight",
+    "started_at": "2026-04-13T12:05:02.049162+00:00",
+    "finished_at": "2026-04-13T12:12:02.061937+00:00",
     "status": "partial",
     "steps": {
       "retail_news_agent.py": {
@@ -1242,1798 +2164,72 @@
         "failed": 0,
         "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "timeout"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-10T11:00:27.886040+00:00",
-    "finished_at": "2026-04-10T11:00:39.570263+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T10:30:22.388196+00:00",
-    "finished_at": "2026-04-10T10:30:33.903594+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T10:00:27.986924+00:00",
-    "finished_at": "2026-04-10T10:06:02.280040+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T10:00:27.985166+00:00",
-    "finished_at": "2026-04-10T10:00:39.708826+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T09:30:32.028743+00:00",
-    "finished_at": "2026-04-10T09:30:43.588406+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "overnight",
-    "started_at": "2026-04-10T09:05:01.104179+00:00",
-    "finished_at": "2026-04-10T09:09:34.806336+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T09:00:17.883578+00:00",
-    "finished_at": "2026-04-10T09:04:51.635433+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T09:00:17.883579+00:00",
-    "finished_at": "2026-04-10T09:00:29.596756+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T08:30:31.420206+00:00",
-    "finished_at": "2026-04-10T08:30:43.058747+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T08:00:17.889199+00:00",
-    "finished_at": "2026-04-10T08:03:21.247319+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T08:00:17.891527+00:00",
-    "finished_at": "2026-04-10T08:00:29.853120+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T07:30:27.875608+00:00",
-    "finished_at": "2026-04-10T07:30:39.346487+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T07:00:17.944410+00:00",
-    "finished_at": "2026-04-10T07:01:20.435375+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T07:00:17.943175+00:00",
-    "finished_at": "2026-04-10T07:00:29.854835+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T06:30:17.883011+00:00",
-    "finished_at": "2026-04-10T06:30:29.425605+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T06:00:27.916967+00:00",
-    "finished_at": "2026-04-10T06:01:00.705739+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T06:00:27.918534+00:00",
-    "finished_at": "2026-04-10T06:00:39.573524+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T05:30:27.869268+00:00",
-    "finished_at": "2026-04-10T05:30:39.374724+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "overnight",
-    "started_at": "2026-04-10T05:05:01.808830+00:00",
-    "finished_at": "2026-04-10T05:05:09.805488+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T05:00:32.144941+00:00",
-    "finished_at": "2026-04-10T05:00:44.219628+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T05:00:32.144941+00:00",
-    "finished_at": "2026-04-10T05:00:35.002061+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T04:30:17.879345+00:00",
-    "finished_at": "2026-04-10T04:30:29.573464+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T04:00:27.885662+00:00",
-    "finished_at": "2026-04-10T04:00:39.573050+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T04:00:27.884211+00:00",
-    "finished_at": "2026-04-10T04:00:31.430834+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T03:30:17.916234+00:00",
-    "finished_at": "2026-04-10T03:30:29.590178+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T03:00:17.891520+00:00",
-    "finished_at": "2026-04-10T03:00:29.628019+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T03:00:17.888748+00:00",
-    "finished_at": "2026-04-10T03:00:24.687943+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T02:30:01.832603+00:00",
-    "finished_at": "2026-04-10T02:30:13.556402+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T02:00:27.879020+00:00",
-    "finished_at": "2026-04-10T02:00:40.983469+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T02:00:27.879020+00:00",
-    "finished_at": "2026-04-10T02:00:39.866393+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T01:30:25.415691+00:00",
-    "finished_at": "2026-04-10T01:30:37.088538+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "overnight",
-    "started_at": "2026-04-10T01:05:01.845215+00:00",
-    "finished_at": "2026-04-10T01:05:10.802777+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T01:00:27.892838+00:00",
-    "finished_at": "2026-04-10T01:00:39.602947+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T01:00:27.890489+00:00",
-    "finished_at": "2026-04-10T01:00:37.129176+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T00:30:28.099311+00:00",
-    "finished_at": "2026-04-10T00:30:39.730166+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-10T00:00:30.117333+00:00",
-    "finished_at": "2026-04-10T00:00:41.016998+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-10T00:00:28.075058+00:00",
-    "finished_at": "2026-04-10T00:00:39.798993+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T23:30:27.916225+00:00",
-    "finished_at": "2026-04-09T23:30:39.930075+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T23:00:27.958644+00:00",
-    "finished_at": "2026-04-09T23:00:39.443957+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T23:00:27.958644+00:00",
-    "finished_at": "2026-04-09T23:00:38.751467+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T22:30:27.892051+00:00",
-    "finished_at": "2026-04-09T22:30:39.528362+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T22:00:31.286564+00:00",
-    "finished_at": "2026-04-09T22:00:45.736726+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T22:00:31.286564+00:00",
-    "finished_at": "2026-04-09T22:00:43.178186+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T21:30:27.640079+00:00",
-    "finished_at": "2026-04-09T21:30:39.258788+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T21:00:28.063971+00:00",
-    "finished_at": "2026-04-09T21:00:39.893482+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T21:00:28.063971+00:00",
-    "finished_at": "2026-04-09T21:00:37.978302+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T20:30:27.931985+00:00",
-    "finished_at": "2026-04-09T20:30:39.827438+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T20:00:27.982801+00:00",
-    "finished_at": "2026-04-09T20:00:40.404044+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T20:00:27.982801+00:00",
-    "finished_at": "2026-04-09T20:00:36.986094+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T19:30:27.922623+00:00",
-    "finished_at": "2026-04-09T19:30:40.925770+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "close",
-    "started_at": "2026-04-09T19:30:27.922625+00:00",
-    "finished_at": "2026-04-09T19:30:31.854693+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T19:30:01.127252+00:00",
-    "finished_at": "2026-04-09T19:30:14.557614+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "close",
-    "started_at": "2026-04-09T19:30:01.127254+00:00",
-    "finished_at": "2026-04-09T19:30:02.915398+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T19:05:01.779767+00:00",
-    "finished_at": "2026-04-09T19:05:06.037592+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T19:00:27.896870+00:00",
-    "finished_at": "2026-04-09T19:00:41.042276+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T19:00:01.991697+00:00",
-    "finished_at": "2026-04-09T19:00:15.658911+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T19:00:02.021055+00:00",
-    "finished_at": "2026-04-09T19:00:06.845998+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T18:30:28.082878+00:00",
-    "finished_at": "2026-04-09T18:30:41.015866+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T18:30:01.372604+00:00",
-    "finished_at": "2026-04-09T18:30:15.176776+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T18:05:01.794869+00:00",
-    "finished_at": "2026-04-09T18:05:05.295432+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T18:00:28.038632+00:00",
-    "finished_at": "2026-04-09T18:00:41.085260+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T18:00:28.037844+00:00",
-    "finished_at": "2026-04-09T18:00:32.032225+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T18:00:01.957057+00:00",
-    "finished_at": "2026-04-09T18:00:15.686545+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T17:30:29.847196+00:00",
-    "finished_at": "2026-04-09T17:30:42.615439+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T17:30:01.717693+00:00",
-    "finished_at": "2026-04-09T17:30:15.097018+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T17:05:01.325678+00:00",
-    "finished_at": "2026-04-09T17:05:04.647846+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T17:00:28.033481+00:00",
-    "finished_at": "2026-04-09T17:00:40.846016+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T17:00:28.030607+00:00",
-    "finished_at": "2026-04-09T17:00:31.695702+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T17:00:01.526877+00:00",
-    "finished_at": "2026-04-09T17:00:15.213774+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "midday",
-    "started_at": "2026-04-09T16:30:01.897935+00:00",
-    "finished_at": "2026-04-09T16:30:16.691056+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T16:30:01.891776+00:00",
-    "finished_at": "2026-04-09T16:30:15.449500+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T16:05:01.740914+00:00",
-    "finished_at": "2026-04-09T16:05:04.796906+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T16:00:27.966718+00:00",
-    "finished_at": "2026-04-09T16:00:41.096006+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T16:00:27.966715+00:00",
-    "finished_at": "2026-04-09T16:00:31.063241+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T16:00:01.836551+00:00",
-    "finished_at": "2026-04-09T16:00:15.630917+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T15:30:27.907955+00:00",
-    "finished_at": "2026-04-09T15:30:47.895750+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T15:30:01.911372+00:00",
-    "finished_at": "2026-04-09T15:30:22.932465+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "open",
-    "started_at": "2026-04-09T15:18:28.697819+00:00",
-    "finished_at": "2026-04-09T15:20:06.463595+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_sector_screener.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T15:05:01.332239+00:00",
-    "finished_at": "2026-04-09T15:05:11.836360+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T15:00:28.007278+00:00",
-    "finished_at": "2026-04-09T15:00:48.395005+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T15:00:28.008966+00:00",
-    "finished_at": "2026-04-09T15:00:38.755445+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T15:00:01.318988+00:00",
-    "finished_at": "2026-04-09T15:00:22.222733+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T14:30:28.042629+00:00",
-    "finished_at": "2026-04-09T14:30:48.661264+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T14:30:01.459540+00:00",
-    "finished_at": "2026-04-09T14:30:22.479848+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T14:05:01.335215+00:00",
-    "finished_at": "2026-04-09T14:05:11.320400+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T14:00:27.908127+00:00",
-    "finished_at": "2026-04-09T14:00:48.572882+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T14:00:27.908128+00:00",
-    "finished_at": "2026-04-09T14:00:38.236140+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T14:00:01.829526+00:00",
-    "finished_at": "2026-04-09T14:00:23.215799+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "open",
-    "started_at": "2026-04-09T13:30:02.010215+00:00",
-    "finished_at": "2026-04-09T13:31:46.935495+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_sector_screener.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T13:30:32.064497+00:00",
-    "finished_at": "2026-04-09T13:31:27.369177+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "open",
-    "started_at": "2026-04-09T02:19:17.915110+00:00",
-    "finished_at": "2026-04-09T13:28:44.241679+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_sector_screener.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "midday",
-    "started_at": "2026-04-09T02:19:17.887514+00:00",
-    "finished_at": "2026-04-09T13:28:34.625008+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T02:19:17.937031+00:00",
-    "finished_at": "2026-04-09T13:28:24.361471+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T13:27:32.626769+00:00",
-    "finished_at": "2026-04-09T13:27:46.516966+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "close",
-    "started_at": "2026-04-09T02:19:17.911952+00:00",
-    "finished_at": "2026-04-09T02:19:23.568196+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T02:19:17.928979+00:00",
-    "finished_at": "2026-04-09T02:19:19.332684+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-09T02:11:56.690440+00:00",
-    "finished_at": "2026-04-09T02:12:08.542480+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "open",
-    "started_at": "2026-04-09T02:02:10.711460+00:00",
-    "finished_at": "2026-04-09T02:02:15.564397+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_sector_screener.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      },
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      },
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-09T02:01:39.386579+00:00",
-    "finished_at": "2026-04-09T02:01:46.733876+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "open",
-    "started_at": "2026-04-09T02:01:38.307956+00:00",
-    "finished_at": "2026-04-09T02:01:43.788499+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_sector_screener.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      },
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      },
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "midday",
-    "started_at": "2026-04-09T02:01:38.675942+00:00",
-    "finished_at": "2026-04-09T02:01:40.903624+00:00",
+    "started_at": "2026-04-13T12:00:27.861141+00:00",
+    "finished_at": "2026-04-13T12:10:27.867245+00:00",
     "status": "partial",
     "steps": {
       "retail_market_sentiment_agent.py": {
         "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      },
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
         "failed": 0,
-        "timeout": 0,
+        "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
-    "session": "close",
-    "started_at": "2026-04-09T02:01:39.032890+00:00",
-    "finished_at": "2026-04-09T02:01:40.797066+00:00",
-    "status": "ok",
+    "session": "news",
+    "started_at": "2026-04-13T12:00:27.861141+00:00",
+    "finished_at": "2026-04-13T12:07:27.891704+00:00",
+    "status": "partial",
     "steps": {
-      "retail_trade_logic_agent.py": {
-        "ok": 1,
+      "retail_news_agent.py": {
+        "ok": 0,
         "failed": 0,
-        "timeout": 0,
+        "timeout": 1,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "timeout"
         }
       }
     }
   },
   {
     "session": "sentiment",
-    "started_at": "2026-04-09T02:01:39.766343+00:00",
-    "finished_at": "2026-04-09T02:01:40.034820+00:00",
+    "started_at": "2026-04-13T11:30:27.850126+00:00",
+    "finished_at": "2026-04-13T11:40:27.855094+00:00",
     "status": "partial",
     "steps": {
       "retail_market_sentiment_agent.py": {
         "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T11:20:01.565718+00:00",
+    "finished_at": "2026-04-13T11:20:11.075625+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
         "failed": 1,
         "timeout": 0,
         "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
@@ -3041,8 +2237,8 @@
   },
   {
     "session": "overnight",
-    "started_at": "2026-04-09T01:05:01.944257+00:00",
-    "finished_at": "2026-04-09T01:05:12.105665+00:00",
+    "started_at": "2026-04-13T11:05:01.885554+00:00",
+    "finished_at": "2026-04-13T11:11:37.944878+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -3050,166 +2246,72 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+          "__shared__": "ok"
         }
       }
     }
   },
   {
-    "session": "close",
-    "started_at": "2026-04-08T19:30:01.665239+00:00",
-    "finished_at": "2026-04-08T19:30:03.686843+00:00",
+    "session": "sentiment",
+    "started_at": "2026-04-13T11:00:27.853971+00:00",
+    "finished_at": "2026-04-13T11:10:27.859277+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T11:00:27.853969+00:00",
+    "finished_at": "2026-04-13T11:07:02.974880+00:00",
     "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T10:30:27.856964+00:00",
+    "finished_at": "2026-04-13T10:40:27.861951+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T10:20:01.434441+00:00",
+    "finished_at": "2026-04-13T10:20:10.829992+00:00",
+    "status": "partial",
     "steps": {
       "retail_trade_logic_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T19:30:01.665188+00:00",
-    "finished_at": "2026-04-08T19:30:01.893501+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
+        "ok": 2,
         "failed": 1,
         "timeout": 0,
         "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-08T19:05:01.370525+00:00",
-    "finished_at": "2026-04-08T19:05:05.545768+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T19:00:02.060028+00:00",
-    "finished_at": "2026-04-08T19:00:02.270295+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T18:30:01.741828+00:00",
-    "finished_at": "2026-04-08T18:30:01.950996+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-08T18:05:01.096470+00:00",
-    "finished_at": "2026-04-08T18:05:04.625561+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T18:00:01.778179+00:00",
-    "finished_at": "2026-04-08T18:00:01.992583+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T17:30:01.469150+00:00",
-    "finished_at": "2026-04-08T17:30:01.672981+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
-        }
-      }
-    }
-  },
-  {
-    "session": "news",
-    "started_at": "2026-04-08T17:05:01.493739+00:00",
-    "finished_at": "2026-04-08T17:05:06.354509+00:00",
-    "status": "ok",
-    "steps": {
-      "retail_news_agent.py": {
-        "ok": 1,
-        "failed": 0,
-        "timeout": 0,
-        "customers": {
-          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
-        }
-      }
-    }
-  },
-  {
-    "session": "sentiment",
-    "started_at": "2026-04-08T17:00:01.175229+00:00",
-    "finished_at": "2026-04-08T17:00:01.386565+00:00",
-    "status": "partial",
-    "steps": {
-      "retail_market_sentiment_agent.py": {
-        "ok": 0,
-        "failed": 1,
-        "timeout": 0,
-        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
         }
       }
@@ -3217,8 +2319,8 @@
   },
   {
     "session": "overnight",
-    "started_at": "2026-04-08T01:05:01.703822+00:00",
-    "finished_at": "2026-04-08T01:05:10.213509+00:00",
+    "started_at": "2026-04-13T10:05:01.666753+00:00",
+    "finished_at": "2026-04-13T10:10:35.854786+00:00",
     "status": "ok",
     "steps": {
       "retail_news_agent.py": {
@@ -3226,7 +2328,998 @@
         "failed": 0,
         "timeout": 0,
         "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T10:00:27.850110+00:00",
+    "finished_at": "2026-04-13T10:10:27.856877+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T10:00:29.866780+00:00",
+    "finished_at": "2026-04-13T10:05:34.190856+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T09:30:15.394668+00:00",
+    "finished_at": "2026-04-13T09:40:15.401280+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T09:20:01.110458+00:00",
+    "finished_at": "2026-04-13T09:20:10.818992+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T09:00:27.860103+00:00",
+    "finished_at": "2026-04-13T09:10:27.865963+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T09:05:01.471679+00:00",
+    "finished_at": "2026-04-13T09:08:04.546759+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T09:00:27.860104+00:00",
+    "finished_at": "2026-04-13T09:03:05.684952+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T08:30:27.844056+00:00",
+    "finished_at": "2026-04-13T08:40:27.849526+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T08:20:01.579295+00:00",
+    "finished_at": "2026-04-13T08:20:10.948699+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T08:00:20.653862+00:00",
+    "finished_at": "2026-04-13T08:10:20.659083+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T08:05:01.097139+00:00",
+    "finished_at": "2026-04-13T08:06:33.484470+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T08:00:20.653765+00:00",
+    "finished_at": "2026-04-13T08:01:58.271720+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T07:30:27.845472+00:00",
+    "finished_at": "2026-04-13T07:40:27.851064+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T07:20:01.981636+00:00",
+    "finished_at": "2026-04-13T07:20:11.844830+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T07:00:12.858306+00:00",
+    "finished_at": "2026-04-13T07:10:12.863131+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T07:05:01.969137+00:00",
+    "finished_at": "2026-04-13T07:06:03.759516+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T07:00:10.631378+00:00",
+    "finished_at": "2026-04-13T07:00:42.305172+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T06:30:27.852935+00:00",
+    "finished_at": "2026-04-13T06:40:27.857387+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T06:20:01.788506+00:00",
+    "finished_at": "2026-04-13T06:20:12.286921+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T06:00:27.859158+00:00",
+    "finished_at": "2026-04-13T06:10:27.864341+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T06:05:01.971643+00:00",
+    "finished_at": "2026-04-13T06:05:33.632084+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T06:00:27.861360+00:00",
+    "finished_at": "2026-04-13T06:01:04.719718+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T05:30:27.845551+00:00",
+    "finished_at": "2026-04-13T05:40:27.851147+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T05:20:01.209988+00:00",
+    "finished_at": "2026-04-13T05:20:10.897872+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T05:00:27.869264+00:00",
+    "finished_at": "2026-04-13T05:10:27.874432+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T05:05:01.690768+00:00",
+    "finished_at": "2026-04-13T05:05:03.267960+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T05:00:27.869264+00:00",
+    "finished_at": "2026-04-13T05:00:29.510876+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T04:30:20.647514+00:00",
+    "finished_at": "2026-04-13T04:40:20.653011+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "trade",
+    "started_at": "2026-04-13T04:20:01.115858+00:00",
+    "finished_at": "2026-04-13T04:20:16.620594+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_trade_logic_agent.py": {
+        "ok": 2,
+        "failed": 1,
+        "timeout": 0,
+        "customers": {
+          "46b10ff0-56ef-431c-94da-30949d02df42": "ok",
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "failed"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T04:00:27.864227+00:00",
+    "finished_at": "2026-04-13T04:10:27.872007+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "overnight",
+    "started_at": "2026-04-13T04:05:01.335876+00:00",
+    "finished_at": "2026-04-13T04:05:02.712485+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T04:00:27.863130+00:00",
+    "finished_at": "2026-04-13T04:00:30.309267+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T03:30:25.713516+00:00",
+    "finished_at": "2026-04-13T03:40:25.719114+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T03:00:27.873173+00:00",
+    "finished_at": "2026-04-13T03:10:27.877623+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T03:00:27.873111+00:00",
+    "finished_at": "2026-04-13T03:02:35.200077+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T02:30:27.855444+00:00",
+    "finished_at": "2026-04-13T02:40:27.860802+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T02:00:27.863651+00:00",
+    "finished_at": "2026-04-13T02:10:27.870526+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T02:00:27.861380+00:00",
+    "finished_at": "2026-04-13T02:03:05.424843+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T01:30:04.126668+00:00",
+    "finished_at": "2026-04-13T01:40:04.130348+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T01:00:20.653241+00:00",
+    "finished_at": "2026-04-13T01:04:20.659006+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T01:00:20.653115+00:00",
+    "finished_at": "2026-04-13T01:03:58.980155+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T00:30:27.863765+00:00",
+    "finished_at": "2026-04-13T00:34:27.868526+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "prep",
+    "started_at": "2026-04-13T00:00:01.784236+00:00",
+    "finished_at": "2026-04-13T00:07:37.843581+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_sector_screener.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      },
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      },
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-13T00:00:10.659259+00:00",
+    "finished_at": "2026-04-13T00:04:10.664398+00:00",
+    "status": "partial",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 0,
+        "failed": 0,
+        "timeout": 1,
+        "customers": {
+          "__shared__": "timeout"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-13T00:00:10.659259+00:00",
+    "finished_at": "2026-04-13T00:03:44.024516+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T23:30:27.848899+00:00",
+    "finished_at": "2026-04-12T23:31:36.992901+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 2,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
           "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-12T23:00:28.644479+00:00",
+    "finished_at": "2026-04-12T23:03:33.360651+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 2,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T23:00:21.394981+00:00",
+    "finished_at": "2026-04-12T23:01:33.657404+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 2,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "f313a3d9-e073-4185-8d18-a6550a4e9adc": "ok",
+          "30eff008-c27a-4c71-a788-05f883e4e3a0": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T22:30:27.854298+00:00",
+    "finished_at": "2026-04-12T22:31:39.458504+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-12T22:00:27.878439+00:00",
+    "finished_at": "2026-04-12T22:03:00.923650+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T22:00:27.875795+00:00",
+    "finished_at": "2026-04-12T22:01:42.800428+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T21:30:27.850513+00:00",
+    "finished_at": "2026-04-12T21:31:41.623008+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-12T21:00:27.868852+00:00",
+    "finished_at": "2026-04-12T21:03:01.007023+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T21:00:27.866273+00:00",
+    "finished_at": "2026-04-12T21:01:41.888387+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T20:30:10.634290+00:00",
+    "finished_at": "2026-04-12T20:31:21.202245+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-12T20:00:27.885646+00:00",
+    "finished_at": "2026-04-12T20:03:36.734465+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T20:00:27.885645+00:00",
+    "finished_at": "2026-04-12T20:01:38.382459+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T19:30:00.791539+00:00",
+    "finished_at": "2026-04-12T19:31:21.928176+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "news",
+    "started_at": "2026-04-12T19:00:20.648966+00:00",
+    "finished_at": "2026-04-12T19:03:29.096370+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_news_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
+        }
+      }
+    }
+  },
+  {
+    "session": "sentiment",
+    "started_at": "2026-04-12T19:00:20.648967+00:00",
+    "finished_at": "2026-04-12T19:01:29.823020+00:00",
+    "status": "ok",
+    "steps": {
+      "retail_market_sentiment_agent.py": {
+        "ok": 1,
+        "failed": 0,
+        "timeout": 0,
+        "customers": {
+          "__shared__": "ok"
         }
       }
     }

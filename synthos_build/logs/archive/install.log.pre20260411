@@ -1,0 +1,206 @@
+[2026-04-07 19:55:05] INFO     install_retail: =======================================================
+[2026-04-07 19:55:05] INFO     install_retail: SYNTHOS v3.0 — RETAIL INSTALLER
+[2026-04-07 19:55:05] INFO     install_retail: SYNTHOS_HOME: /home/pi516gb/synthos/synthos_build
+[2026-04-07 19:55:05] INFO     install_retail: =======================================================
+[2026-04-07 19:55:05] INFO     installer.preflight: PREFLIGHT ✓ Python version — 3.13 (>= 3.9 required)
+[2026-04-07 19:55:05] ERROR    installer.preflight: PREFLIGHT ✗ pip — pip not available — install python3-pip
+[2026-04-07 19:55:05] INFO     installer.preflight: PREFLIGHT ✓ sqlite3 — available
+[2026-04-07 19:55:05] INFO     installer.preflight: PREFLIGHT ✓ cron — crontab found
+[2026-04-07 19:55:05] INFO     installer.preflight: PREFLIGHT ✓ git — git version 2.47.3
+[2026-04-07 19:55:05] INFO     installer.preflight: PREFLIGHT ✓ Platform — Raspberry Pi detected (aarch64)
+[2026-04-07 19:55:05] ERROR    install_retail: Preflight failed — cannot continue
+[2026-04-07 19:55:27] INFO     install_retail: =======================================================
+[2026-04-07 19:55:27] INFO     install_retail: SYNTHOS v3.0 — RETAIL INSTALLER
+[2026-04-07 19:55:27] INFO     install_retail: SYNTHOS_HOME: /home/pi516gb/synthos/synthos_build
+[2026-04-07 19:55:27] INFO     install_retail: =======================================================
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ Python version — 3.13 (>= 3.9 required)
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ pip — 25.1.1
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ sqlite3 — available
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ cron — crontab found
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ git — git version 2.47.3
+[2026-04-07 19:55:27] INFO     installer.preflight: PREFLIGHT ✓ Platform — Raspberry Pi detected (aarch64)
+[2026-04-07 19:55:27] INFO     installer.progress: No prior install state found — starting fresh
+[2026-04-07 19:55:27] INFO     installer.progress: State transition: NONE → COLLECTING
+[2026-04-07 19:55:27] INFO     install_retail: Web wizard listening on port 8080
+[2026-04-07 20:04:14] INFO     installer.progress: Resumed install state: COLLECTING
+[2026-04-07 20:04:14] INFO     installer.progress: State transition: COLLECTING → COLLECTING
+[2026-04-07 20:06:42] INFO     installer.progress: Resumed install state: COLLECTING
+[2026-04-07 20:06:42] INFO     install_retail: ── INSTALLING ──────────────────────────────────────
+[2026-04-07 20:06:42] INFO     installer.progress: State transition: COLLECTING → INSTALLING
+[2026-04-07 20:06:42] INFO     install_retail: Creating directories...
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ src
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ user
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ user/agreements
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ data
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ data/customers
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ data/backup
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ logs
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ logs/crash_reports
+[2026-04-07 20:06:42] INFO     install_retail:   → Skipping protected dir (exists): .known_good
+[2026-04-07 20:06:42] INFO     install_retail: Writing environment configuration...
+[2026-04-07 20:06:42] INFO     installer.env_writer: Wrote /home/pi516gb/synthos/synthos_build/user/.env (4291 bytes, chmod 600)
+[2026-04-07 20:06:42] INFO     install_retail:   ✓ user/.env written
+[2026-04-07 20:06:42] INFO     install_retail: Installing Python packages...
+[2026-04-07 20:06:42] INFO     install_retail:   Installing flask...
+[2026-04-07 20:06:46] INFO     install_retail:   ✓ flask
+[2026-04-07 20:06:46] INFO     install_retail:   Installing requests...
+[2026-04-07 20:06:47] INFO     install_retail:   ✓ requests
+[2026-04-07 20:06:47] INFO     install_retail:   Installing python-dotenv...
+[2026-04-07 20:06:48] INFO     install_retail:   ✓ python-dotenv
+[2026-04-07 20:06:48] INFO     install_retail:   Installing anthropic...
+[2026-04-07 20:06:57] INFO     install_retail:   ✓ anthropic
+[2026-04-07 20:06:57] INFO     install_retail:   Installing alpaca-trade-api...
+[2026-04-07 20:07:33] INFO     install_retail:   ✓ alpaca-trade-api
+[2026-04-07 20:07:33] INFO     install_retail:   Installing resend...
+[2026-04-07 20:07:34] INFO     install_retail:   ✓ resend
+[2026-04-07 20:07:34] INFO     install_retail:   Installing cryptography...
+[2026-04-07 20:07:35] INFO     install_retail:   ✓ cryptography
+[2026-04-07 20:07:35] INFO     install_retail:   Installing itsdangerous...
+[2026-04-07 20:07:36] INFO     install_retail:   ✓ itsdangerous
+[2026-04-07 20:07:36] INFO     install_retail:   Installing psutil...
+[2026-04-07 20:07:37] INFO     install_retail:   ✓ psutil
+[2026-04-07 20:07:37] INFO     install_retail:   Installing python-dateutil...
+[2026-04-07 20:07:38] INFO     install_retail:   ✓ python-dateutil
+[2026-04-07 20:07:38] INFO     install_retail: Bootstrapping database...
+[2026-04-07 20:07:38] ERROR    install_retail:   ✗ DB bootstrap failed: No module named 'dotenv'
+[2026-04-07 20:07:38] ERROR    install_retail: DB bootstrap exception
+Traceback (most recent call last):
+  File "/home/pi516gb/synthos/synthos_build/src/install_retail.py", line 255, in bootstrap_database
+    spec.loader.exec_module(db_mod)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 1026, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/pi516gb/synthos/synthos_build/src/retail_database.py", line 25, in <module>
+    from dotenv import load_dotenv
+ModuleNotFoundError: No module named 'dotenv'
+[2026-04-07 20:07:38] ERROR    install_retail:   ✗ Database bootstrap failed
+[2026-04-07 20:07:38] INFO     installer.progress: State transition: INSTALLING → DEGRADED
+[2026-04-07 20:12:31] INFO     install_retail: =======================================================
+[2026-04-07 20:12:31] INFO     install_retail: SYNTHOS v3.0 — RETAIL INSTALLER
+[2026-04-07 20:12:31] INFO     install_retail: SYNTHOS_HOME: /home/pi516gb/synthos/synthos_build
+[2026-04-07 20:12:31] INFO     install_retail: =======================================================
+[2026-04-07 20:12:31] INFO     installer.progress: Resumed install state: DEGRADED
+[2026-04-07 20:12:31] INFO     installer.progress: State transition: DEGRADED → INSTALLING
+[2026-04-07 20:12:31] INFO     installer.progress: Resumed install state: INSTALLING
+[2026-04-07 20:12:31] INFO     install_retail: ── INSTALLING ──────────────────────────────────────
+[2026-04-07 20:12:31] INFO     installer.progress: State transition: INSTALLING → INSTALLING
+[2026-04-07 20:12:31] INFO     install_retail: Creating directories...
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ src
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ user
+[2026-04-07 20:12:31] INFO     install_retail:   → Skipping protected dir (exists): user/agreements
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ data
+[2026-04-07 20:12:31] INFO     install_retail:   → Skipping protected dir (exists): data/customers
+[2026-04-07 20:12:31] INFO     install_retail:   → Skipping protected dir (exists): data/backup
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ logs
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ logs/crash_reports
+[2026-04-07 20:12:31] INFO     install_retail:   → Skipping protected dir (exists): .known_good
+[2026-04-07 20:12:31] INFO     install_retail: Writing environment configuration...
+[2026-04-07 20:12:31] INFO     installer.env_writer: Existing .env backed up to .env.backup_20260408_001231
+[2026-04-07 20:12:31] INFO     installer.env_writer: Wrote /home/pi516gb/synthos/synthos_build/user/.env (4291 bytes, chmod 600)
+[2026-04-07 20:12:31] INFO     install_retail:   ✓ user/.env written
+[2026-04-07 20:12:31] INFO     install_retail: Installing Python packages...
+[2026-04-07 20:12:31] INFO     install_retail:   Installing flask...
+[2026-04-07 20:12:32] INFO     install_retail:   ✓ flask
+[2026-04-07 20:12:32] INFO     install_retail:   Installing requests...
+[2026-04-07 20:12:32] INFO     install_retail:   ✓ requests
+[2026-04-07 20:12:32] INFO     install_retail:   Installing python-dotenv...
+[2026-04-07 20:12:33] INFO     install_retail:   ✓ python-dotenv
+[2026-04-07 20:12:33] INFO     install_retail:   Installing anthropic...
+[2026-04-07 20:12:33] INFO     install_retail:   ✓ anthropic
+[2026-04-07 20:12:33] INFO     install_retail:   Installing alpaca-trade-api...
+[2026-04-07 20:12:34] INFO     install_retail:   ✓ alpaca-trade-api
+[2026-04-07 20:12:34] INFO     install_retail:   Installing resend...
+[2026-04-07 20:12:35] INFO     install_retail:   ✓ resend
+[2026-04-07 20:12:35] INFO     install_retail:   Installing cryptography...
+[2026-04-07 20:12:35] INFO     install_retail:   ✓ cryptography
+[2026-04-07 20:12:35] INFO     install_retail:   Installing itsdangerous...
+[2026-04-07 20:12:36] INFO     install_retail:   ✓ itsdangerous
+[2026-04-07 20:12:36] INFO     install_retail:   Installing psutil...
+[2026-04-07 20:12:36] INFO     install_retail:   ✓ psutil
+[2026-04-07 20:12:36] INFO     install_retail:   Installing python-dateutil...
+[2026-04-07 20:12:37] INFO     install_retail:   ✓ python-dateutil
+[2026-04-07 20:12:37] INFO     install_retail: Bootstrapping database...
+[2026-04-07 20:12:37] INFO     database: Schema verified: /home/pi516gb/synthos/synthos_build/src/../user/signals.db
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE urgent_flags ADD COLUMN label TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE signals ADD COLUMN price_history_used TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE signals ADD COLUMN interrogation_status TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE signals ADD COLUMN entry_signal_score TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE positions ADD COLUMN entry_sentiment_score REAL
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE positions ADD COLUMN entry_signal_score TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE positions ADD COLUMN price_history_used TEXT
+[2026-04-07 20:12:37] INFO     database: Migration applied: ALTER TABLE positions ADD COLUMN interrogation_status TEXT
+[2026-04-07 20:12:37] INFO     install_retail:   ✓ auth.db schema bootstrapped
+[2026-04-07 20:12:37] INFO     install_retail: Registering cron schedule...
+[2026-04-07 20:12:37] INFO     install_retail:   ✓ Cron schedule registered
+[2026-04-07 20:12:37] INFO     install_retail: Setting timezone...
+[2026-04-07 20:12:37] INFO     install_retail:   ✓ Timezone set to America/New_York (ET)
+[2026-04-07 20:12:37] INFO     install_retail: ── VERIFYING ───────────────────────────────────────
+[2026-04-07 20:12:37] INFO     installer.progress: State transition: INSTALLING → VERIFYING
+[2026-04-07 20:12:39] INFO     install_retail:   ✓ retail_health_check.py passed
+[2026-04-07 20:12:39] INFO     install_retail: ── DEGRADED ────────────────────────────────────────
+[2026-04-07 20:12:39] INFO     installer.progress: State transition: VERIFYING → DEGRADED
+[2026-04-07 20:12:39] ERROR    install_retail:   ✗ data/auth.db not found
+[2026-04-07 20:12:39] ERROR    install_retail: Installation is in DEGRADED state. Check logs and run --repair.
+[2026-04-07 20:14:04] INFO     install_retail: =======================================================
+[2026-04-07 20:14:04] INFO     install_retail: SYNTHOS v3.0 — RETAIL INSTALLER
+[2026-04-07 20:14:04] INFO     install_retail: SYNTHOS_HOME: /home/pi516gb/synthos/synthos_build
+[2026-04-07 20:14:04] INFO     install_retail: =======================================================
+[2026-04-07 20:14:04] INFO     installer.progress: Resumed install state: DEGRADED
+[2026-04-07 20:14:04] INFO     installer.progress: State transition: DEGRADED → INSTALLING
+[2026-04-07 20:14:04] INFO     installer.progress: Resumed install state: INSTALLING
+[2026-04-07 20:14:04] INFO     install_retail: ── INSTALLING ──────────────────────────────────────
+[2026-04-07 20:14:04] INFO     installer.progress: State transition: INSTALLING → INSTALLING
+[2026-04-07 20:14:04] INFO     install_retail: Creating directories...
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ src
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ user
+[2026-04-07 20:14:04] INFO     install_retail:   → Skipping protected dir (exists): user/agreements
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ data
+[2026-04-07 20:14:04] INFO     install_retail:   → Skipping protected dir (exists): data/customers
+[2026-04-07 20:14:04] INFO     install_retail:   → Skipping protected dir (exists): data/backup
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ logs
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ logs/crash_reports
+[2026-04-07 20:14:04] INFO     install_retail:   → Skipping protected dir (exists): .known_good
+[2026-04-07 20:14:04] INFO     install_retail: Writing environment configuration...
+[2026-04-07 20:14:04] INFO     installer.env_writer: Existing .env backed up to .env.backup_20260408_001404
+[2026-04-07 20:14:04] INFO     installer.env_writer: Wrote /home/pi516gb/synthos/synthos_build/user/.env (4291 bytes, chmod 600)
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ user/.env written
+[2026-04-07 20:14:04] INFO     install_retail: Installing Python packages...
+[2026-04-07 20:14:04] INFO     install_retail:   Installing flask...
+[2026-04-07 20:14:04] INFO     install_retail:   ✓ flask
+[2026-04-07 20:14:04] INFO     install_retail:   Installing requests...
+[2026-04-07 20:14:05] INFO     install_retail:   ✓ requests
+[2026-04-07 20:14:05] INFO     install_retail:   Installing python-dotenv...
+[2026-04-07 20:14:06] INFO     install_retail:   ✓ python-dotenv
+[2026-04-07 20:14:06] INFO     install_retail:   Installing anthropic...
+[2026-04-07 20:14:06] INFO     install_retail:   ✓ anthropic
+[2026-04-07 20:14:06] INFO     install_retail:   Installing alpaca-trade-api...
+[2026-04-07 20:14:07] INFO     install_retail:   ✓ alpaca-trade-api
+[2026-04-07 20:14:07] INFO     install_retail:   Installing resend...
+[2026-04-07 20:14:07] INFO     install_retail:   ✓ resend
+[2026-04-07 20:14:07] INFO     install_retail:   Installing cryptography...
+[2026-04-07 20:14:08] INFO     install_retail:   ✓ cryptography
+[2026-04-07 20:14:08] INFO     install_retail:   Installing itsdangerous...
+[2026-04-07 20:14:09] INFO     install_retail:   ✓ itsdangerous
+[2026-04-07 20:14:09] INFO     install_retail:   Installing psutil...
+[2026-04-07 20:14:09] INFO     install_retail:   ✓ psutil
+[2026-04-07 20:14:09] INFO     install_retail:   Installing python-dateutil...
+[2026-04-07 20:14:10] INFO     install_retail:   ✓ python-dateutil
+[2026-04-07 20:14:10] INFO     install_retail: Bootstrapping database...
+[2026-04-07 20:14:10] INFO     auth: Auth DB initialized
+[2026-04-07 20:14:10] INFO     auth: Created customer 30eff008-c27a-4c71-a788-05f883e4e3a0 (role=admin tier=standard auto_activate=True)
+[2026-04-07 20:14:10] INFO     auth: Admin account created: personal_prometheus@icloud.com
+[2026-04-07 20:14:10] INFO     install_retail:   ✓ auth.db schema bootstrapped
+[2026-04-07 20:14:10] INFO     install_retail: Registering cron schedule...
+[2026-04-07 20:14:10] INFO     install_retail:   ✓ Cron schedule registered
+[2026-04-07 20:14:10] INFO     install_retail: Setting timezone...
+[2026-04-07 20:14:10] INFO     install_retail:   ✓ Timezone set to America/New_York (ET)
+[2026-04-07 20:14:10] INFO     install_retail: ── VERIFYING ───────────────────────────────────────
+[2026-04-07 20:14:10] INFO     installer.progress: State transition: INSTALLING → VERIFYING
+[2026-04-07 20:14:12] INFO     install_retail:   ✓ retail_health_check.py passed
+[2026-04-07 20:14:12] INFO     install_retail: ── COMPLETE ────────────────────────────────────────
+[2026-04-07 20:14:12] INFO     installer.progress: State transition: VERIFYING → COMPLETE
+[2026-04-07 20:14:12] INFO     install_retail: Sentinel written: /home/pi516gb/synthos/synthos_build/.install_complete
+[2026-04-07 20:14:12] INFO     install_retail: ✓ Installation complete. Reboot to start Synthos.
+[2026-04-07 20:14:12] INFO     install_retail:   Sentinel: /home/pi516gb/synthos/synthos_build/.install_complete
+[2026-04-07 20:14:12] INFO     install_retail:   After reboot: open the portal and go to Settings → API Keys
+[2026-04-07 20:14:12] INFO     install_retail:   Add Anthropic, Alpaca, and Resend keys before trading sessions run.

@@ -1,0 +1,18 @@
+[2026-04-13 16:06:04] INFO     retail_backup: === Retail backup started (pi_id=synthos-pi-retail [DRY RUN]) ===
+[2026-04-13 16:06:05] INFO     retail_backup: Archive created: synthos_backup_synthos-pi-retail_2026-04-13.tar.gz (2038.3 KB) — data/auth.db, data/customers/ (4 account(s)), user/signals.db, user/.env
+[2026-04-13 16:06:05] INFO     retail_backup: Archive SHA-256: d71cc7a99f8bc6205b6a81d25ce237e9d2fbd9ccf3bd03f4c4cb337edbd70bea
+[2026-04-13 16:06:05] INFO     retail_backup: [DRY RUN] Would upload synthos_backup_synthos-pi-retail_2026-04-13.tar.gz to http://10.0.0.10:5050/receive_backup
+[2026-04-13 16:06:05] INFO     retail_backup: === Retail backup dry-run complete ===
+[2026-04-13 16:06:55] INFO     retail_backup: === Retail backup started (pi_id=synthos-pi-retail) ===
+[2026-04-13 16:06:56] INFO     retail_backup: Archive created: synthos_backup_synthos-pi-retail_2026-04-13.tar.gz (2038.7 KB) — data/auth.db, data/customers/ (4 account(s)), user/signals.db, user/.env
+[2026-04-13 16:06:56] INFO     retail_backup: Archive SHA-256: 7fe36b0c57036a0bdbd87f6b022b0dce143e7f1550db13c0d7af1edb3e11d516
+[2026-04-13 16:06:56] INFO     retail_backup: Local copy saved: /home/pi516gb/synthos/synthos_build/backups/staging/synthos_backup_synthos-pi-retail_2026-04-13.tar.gz
+[2026-04-13 16:06:56] ERROR    retail_backup: SECRET_TOKEN not set in .env — cannot authenticate to company Pi
+[2026-04-13 16:06:56] WARNING  retail_backup: === Retail backup PARTIAL — upload failed, local copy at /home/pi516gb/synthos/synthos_build/backups/staging/synthos_backup_synthos-pi-retail_2026-04-13.tar.gz ===
+[2026-04-13 16:07:28] INFO     retail_backup: === Retail backup started (pi_id=synthos-pi-retail) ===
+[2026-04-13 16:07:29] INFO     retail_backup: Archive created: synthos_backup_synthos-pi-retail_2026-04-13.tar.gz (2039.0 KB) — data/auth.db, data/customers/ (4 account(s)), user/signals.db, user/.env
+[2026-04-13 16:07:29] INFO     retail_backup: Archive SHA-256: 01b9a7e44c49878e18f954234dacd36d724a9a25cd112ce16b69e2e881f50183
+[2026-04-13 16:07:29] INFO     retail_backup: Local copy saved: /home/pi516gb/synthos/synthos_build/backups/staging/synthos_backup_synthos-pi-retail_2026-04-13.tar.gz
+[2026-04-13 16:07:29] INFO     retail_backup: Uploading to http://10.0.0.10:5050/receive_backup ...
+[2026-04-13 16:07:29] INFO     retail_backup: Upload successful — synthos_backup_synthos-pi-retail_2026-04-13.tar.gz
+[2026-04-13 16:07:29] INFO     retail_backup: === Retail backup complete — uploaded + local copy saved ===

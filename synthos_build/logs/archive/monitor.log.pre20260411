@@ -1,0 +1,1230 @@
+[Synthos Monitor] digest_agent.py not found — /digest endpoint unavailable
+[Synthos Monitor] Running on port 5000
+[Synthos Monitor] Console at http://0.0.0.0:5000/console
+[Synthos Monitor] Scoop events → Company Node at http://192.168.206.172:5010
+[Synthos Monitor] Tracking 0 Pi(s) from persistent state
+ * Serving Flask app 'synthos_monitor'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.205.198:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [07/Apr/2026 20:18:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:23:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:28:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:33:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:38:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:43:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:48:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:53:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 20:58:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:03:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:08:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:13:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:18:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:23:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:28:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:33:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [07/Apr/2026 21:38:20] "POST /heartbeat HTTP/1.1" 200 -
+[Registry] Loaded 1 Pi(s) from disk
+[Synthos Monitor] digest_agent.py not found — /digest endpoint unavailable
+[Synthos Monitor] Running on port 5000
+[Synthos Monitor] Console at http://0.0.0.0:5000/console
+[Synthos Monitor] Scoop events → Company Node at http://192.168.206.172:5010
+[Synthos Monitor] Tracking 1 Pi(s) from persistent state
+ * Serving Flask app 'synthos_monitor'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.205.198:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [08/Apr/2026 12:53:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 12:58:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:03:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:08:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:13:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:18:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:23:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:28:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:33:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:38:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:43:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:48:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:53:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 13:58:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:03:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:08:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:13:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:18:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:23:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:28:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:33:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:38:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:43:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:48:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:53:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 14:58:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:03:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:08:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:13:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:18:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:23:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:28:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:33:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:38:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:43:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:48:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:53:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 15:58:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:03:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:08:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:13:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:18:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:23:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:28:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:33:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:38:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:43:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:48:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:53:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 16:58:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:03:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:08:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:13:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:18:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:23:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:28:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:33:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:38:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:43:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:48:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:53:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 17:58:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:03:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:08:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:13:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:19:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:24:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:29:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:34:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:39:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:44:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:49:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:54:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 18:59:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:04:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:09:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:14:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:19:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:24:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:29:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:34:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:39:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:44:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:49:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:54:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 19:59:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:04:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:09:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:14:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:19:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:24:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:29:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:34:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:39:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:44:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:49:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:54:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 20:59:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:04:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:09:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:14:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:19:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:24:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:29:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:34:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:39:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:44:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:49:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:54:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 21:59:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 22:04:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 22:09:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 22:14:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [08/Apr/2026 22:19:24] "POST /heartbeat HTTP/1.1" 200 -
+[Registry] Loaded 1 Pi(s) from disk
+[Synthos Monitor] digest_agent.py not found — /digest endpoint unavailable
+[Synthos Monitor] Running on port 5000
+[Synthos Monitor] Console at http://0.0.0.0:5000/console
+[Synthos Monitor] Scoop events → Company Node at http://192.168.206.172:5050
+[Synthos Monitor] Tracking 1 Pi(s) from persistent state
+ * Serving Flask app 'synthos_monitor'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://10.0.0.4:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [09/Apr/2026 09:28:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:33:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:38:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:43:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:48:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:53:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 09:58:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:03:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:08:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:13:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:18:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:23:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:28:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:33:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:38:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:43:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:48:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:53:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 10:58:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:03:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:08:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:13:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:18:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:23:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:28:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:33:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:38:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:43:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:48:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:53:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 11:58:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:03:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:08:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:13:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:18:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:23:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:28:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:33:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:38:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:43:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:48:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:53:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 12:58:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:03:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:08:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:13:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:18:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:23:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:28:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:33:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:38:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:43:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:48:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:53:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 13:58:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:03:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:09:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:14:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:19:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:24:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:29:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:34:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:39:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:44:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:49:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:54:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 14:59:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:04:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:09:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:14:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:19:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:24:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:29:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:34:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:39:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:44:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:49:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:54:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 15:59:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:04:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:09:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:14:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:19:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:24:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:29:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:34:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:39:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:44:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:49:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:54:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 16:59:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:04:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:09:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:14:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:19:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:24:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:29:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:34:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:39:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:44:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:49:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:54:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 17:59:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:04:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:09:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:14:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:19:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:24:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:29:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:34:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:39:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:44:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:49:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:54:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 18:59:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:04:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:09:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:14:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:19:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:24:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:29:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:34:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:39:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:44:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:49:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:54:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 19:59:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:04:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:09:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:14:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:19:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:24:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:29:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:34:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:39:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:44:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:49:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:54:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 20:59:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:04:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:09:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:14:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:19:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:24:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:29:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:34:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:39:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:44:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:49:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:54:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 21:59:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:04:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:09:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:14:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:19:49] "POST /heartbeat HTTP/1.1" 200 -
+[SelfHB] Posted — CPU 0.0%  RAM 3.1%  Temp 27.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 34.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 37.5°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.2%  Temp 39.7°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.2%  Temp 40.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.2%  Temp 43.0°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 43.5°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 43.5°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.7%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.2%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.4%  Temp 43.5°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 4.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 2.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.3%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 2.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C127.0.0.1 - - [09/Apr/2026 22:24:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:29:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:34:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:39:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:44:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:49:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:54:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:59:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:04:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:09:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:14:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:19:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:24:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:29:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:34:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:39:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:44:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:49:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:54:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 23:59:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:05:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:10:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:15:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:20:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:25:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:30:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:35:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:40:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:45:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:50:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 00:55:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:00:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:05:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:10:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:15:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:20:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:25:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:30:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:35:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:40:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:45:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:50:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 01:55:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:00:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:05:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:10:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:15:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:20:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:25:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:30:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:35:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:40:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:45:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:50:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 02:55:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:00:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:05:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:10:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:15:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:20:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:25:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:30:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:35:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:40:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:45:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:50:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 03:55:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:00:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:05:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:10:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:15:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:20:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:25:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:30:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:35:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:40:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:45:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:50:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 04:55:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:00:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:05:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:10:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:15:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:20:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:25:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:30:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:35:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:40:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:45:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:50:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 05:55:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:00:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:05:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:10:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:15:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:20:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:25:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:30:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:35:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:40:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:45:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:50:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 06:55:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:00:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:05:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:10:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:15:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:20:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:25:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:30:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:35:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:40:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:45:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:50:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 07:55:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:00:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:05:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:10:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:15:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:20:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:25:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:30:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:35:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:40:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:45:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:50:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 08:55:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:00:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:05:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:10:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:15:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:20:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:25:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:30:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:35:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:40:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:45:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:50:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 09:55:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:01:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:06:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:11:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:16:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:21:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:26:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:31:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:36:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:41:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:46:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:51:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 10:56:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:01:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:06:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:11:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:16:08] "POST /heartbeat HTTP/1.1" 200 -
+
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 2.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 7.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 2.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.9%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 17.3%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 3.0%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.8%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.8%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 3.1%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.9%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 3.0%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.8°C
+[SelfHB] Posted — CPU 1.5%  RAM 2.3%  Temp 44.1°C127.0.0.1 - - [10/Apr/2026 11:21:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:26:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:31:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:36:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:41:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:46:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:51:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 11:56:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:01:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:06:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:11:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:16:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:21:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:26:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:31:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:36:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:41:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:46:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:51:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 12:56:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:01:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:06:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:11:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:16:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:21:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:26:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:31:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:36:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:41:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:46:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:51:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 13:56:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:01:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:06:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:11:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:16:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:21:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:26:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:31:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:36:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:41:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:46:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:51:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 14:56:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:01:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:06:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:11:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:16:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:21:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:26:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:31:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:36:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:41:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:46:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:51:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 15:56:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:01:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:06:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:11:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:16:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:21:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:26:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:31:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:36:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:41:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:46:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:51:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 16:56:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:01:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:06:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:11:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:16:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:21:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:26:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:31:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:36:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:41:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:46:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:51:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 17:56:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:01:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:06:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:11:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:16:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:21:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:26:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:31:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:36:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:41:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:46:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:51:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 18:56:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:01:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:06:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:11:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:16:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:21:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:26:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:31:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:36:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:41:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:46:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:52:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 19:57:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:02:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:07:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:12:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:17:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:22:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:27:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:32:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:37:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:42:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:47:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:52:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 20:57:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:02:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:07:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:12:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:17:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:22:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:27:09] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:32:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:37:10] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:42:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:47:11] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:52:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 21:57:12] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:02:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:07:13] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:12:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:17:14] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:22:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:27:15] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:32:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:37:16] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:42:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:47:17] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:52:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 22:57:18] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:02:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:07:19] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:12:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:17:20] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:22:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:27:21] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:32:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:37:22] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:42:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:47:23] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:52:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [10/Apr/2026 23:57:24] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:02:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:07:25] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:12:26] "POST /heartbeat HTTP/1.1" 200 -
+
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.1°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.3%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.4%  Temp 45.8°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.4%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 4.5%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 47.4°C
+[SelfHB] Posted — CPU 2.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 48.0°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.9%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.9%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.9%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 45.8°C
+[SelfHB] Posted — CPU 2.5%  RAM 2.8%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 44.6°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.5%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.5%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.8%  Temp 44.6°C
+[SelfHB] Posted — CPU 19.0%  RAM 3.1%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.7%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.9%  Temp 48.0°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.9%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 44.6°C
+[SelfHB] Posted — CPU 1.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.9%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 3.0%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.2°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.5%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 47.4°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 45.8°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.3°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.6%  Temp 46.9°C
+[SelfHB] Posted — CPU 0.0%  RAM 2.7%  Temp 46.9°C127.0.0.1 - - [11/Apr/2026 00:17:26] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:22:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:27:27] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:32:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:37:28] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:42:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:47:29] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:52:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 00:57:30] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:02:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:07:31] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:12:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:17:32] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:22:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:27:33] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:32:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:37:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:42:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:47:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:52:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 01:57:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:02:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:07:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:12:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:17:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:22:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:27:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:32:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:37:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:42:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:47:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:52:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 02:57:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:02:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:07:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:12:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:17:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:22:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:27:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:32:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:37:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:42:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:47:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:52:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 03:57:49] "POST /heartbeat HTTP/1.1" 200 -
+[Registry] Loaded 1 Pi(s) from disk
+[Synthos Monitor] digest_agent.py not found — /digest endpoint unavailable
+[Synthos Monitor] Running on port 5000
+[Synthos Monitor] Console at http://0.0.0.0:5000/console
+[Synthos Monitor] Scoop events → Company Node at http://192.168.206.172:5050
+[Synthos Monitor] Tracking 1 Pi(s) from persistent state
+ * Serving Flask app 'synthos_monitor'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://10.0.0.11:5000
+[33mPress CTRL+C to quit[0m
+127.0.0.1 - - [11/Apr/2026 04:01:34] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:06:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:11:35] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:16:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:21:36] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:26:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:31:37] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:36:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:41:38] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:46:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:51:39] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 04:56:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:01:40] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:06:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:11:41] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:16:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:21:42] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:26:43] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:31:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:36:44] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:41:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:46:45] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:51:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 05:56:46] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:01:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:06:47] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:11:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:16:48] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:21:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:26:49] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:31:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:36:50] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:41:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:46:51] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:51:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 06:56:52] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:01:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:06:53] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:11:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:16:54] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:21:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:26:55] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:31:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:36:56] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:41:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:46:57] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:51:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 07:56:58] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:01:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:06:59] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:12:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:17:00] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:22:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:27:01] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:32:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:37:02] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:42:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:47:03] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:52:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 08:57:04] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:02:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:07:05] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:12:06] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:17:06] "POST /heartbeat HTTP/1.1" 200 -
+10.0.0.10 - - [11/Apr/2026 09:18:03] "[33mPOST /login HTTP/1.1[0m" 404 -
+10.0.0.10 - - [11/Apr/2026 09:18:09] "[33mPOST /login HTTP/1.1[0m" 404 -
+10.0.0.10 - - [11/Apr/2026 09:18:17] "GET / HTTP/1.1" 200 -
+10.0.0.10 - - [11/Apr/2026 09:18:17] "[33mGET /login HTTP/1.1[0m" 404 -
+10.0.0.10 - - [11/Apr/2026 09:18:17] "[33mGET /api/notifications/unread-count HTTP/1.1[0m" 404 -
+10.0.0.10 - - [11/Apr/2026 09:18:20] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:22:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:27:07] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:32:08] "POST /heartbeat HTTP/1.1" 200 -
+127.0.0.1 - - [11/Apr/2026 09:37:08] "POST /heartbeat HTTP/1.1" 200 -

@@ -1852,7 +1852,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                 continue
 
             sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
-                                       signal_id=signal.get('id'))
+                                       signal_id=(signal.get('id') if _CUSTOMER_ID == _OWNER_CID else None))
 
             # Gates 4-6: must pass eligibility, scoring, and entry
             if not gate4_eligibility(signal, positions, alpaca, sig_log):
@@ -1915,7 +1915,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                     "session": session,
                 }
                 queue_for_approval(signal, decision_data)
-                db.acknowledge_signal(signal['id'])
+                _shared_db().acknowledge_signal(signal['id'])
                 log.info(f"[ROTATION/SUPERVISED] {signal['ticker']} queued for approval "
                          f"(replacing {weakest['ticker']})")
                 rotations += 1
@@ -1927,19 +1927,22 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         atr, candidate['price'], signal.get('sector', ''))
                     order = alpaca.submit_order(signal['ticker'], size, "buy")
                     if order:
+                        # signal_id=None for non-owner customers (FK references local signals table,
+                        # but signals live in shared DB)
+                        _sig_id = signal['id'] if _CUSTOMER_ID == _OWNER_CID else None
                         db.open_position(
                             ticker=signal['ticker'], company=signal.get('company'),
                             sector=signal.get('sector'), entry_price=candidate['price'],
                             shares=size, trail_stop_amt=trail_amt,
                             trail_stop_pct=trail_pct, vol_bucket=vol_label,
-                            signal_id=signal['id'],
+                            signal_id=_sig_id,
                             entry_signal_score=str(score),
                             entry_sentiment_score=signal.get('sentiment_score'),
                             interrogation_status=signal.get('interrogation_status'),
                         )
                         alpaca.submit_order(signal['ticker'], size, "sell",
                                             order_type="trailing_stop", trail_price=trail_amt)
-                        db.acknowledge_signal(signal['id'])
+                        _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"[ROTATION] COMPLETE: Sold {weakest['ticker']} → "
                                  f"BUY {size:.4f} {signal['ticker']} @ ${candidate['price']:.2f}")
                         rotations += 1
@@ -2209,7 +2212,7 @@ def run(session="open"):
                                      interrogation_status=_appr_sig.get('interrogation_status'))
                     alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
-                    db.acknowledge_signal(sig_id)
+                    _shared_db().acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
                     log.info(f"[SUPERVISED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
                 else:
@@ -2266,7 +2269,7 @@ def run(session="open"):
                     continue
 
                 sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
-                                           signal_id=signal.get('id'))
+                                           signal_id=(signal.get('id') if _CUSTOMER_ID == _OWNER_CID else None))
                 sig_log.note(f"politician={signal.get('politician','?')} "
                              f"staleness={signal.get('staleness','?')} "
                              f"headline={signal.get('headline','')[:60]}")
@@ -2333,7 +2336,7 @@ def run(session="open"):
                     # Acknowledge the signal so it leaves the QUEUED pool and is not
                     # re-processed on the next session run. The approval row in
                     # pending_approvals is the source of truth until user decides.
-                    db.acknowledge_signal(signal['id'])
+                    _shared_db().acknowledge_signal(signal['id'])
                     log.info(f"[SUPERVISED/MANAGED] {signal['ticker']} queued for portal approval")
                 else:
                     # AUTONOMOUS MODE ⚠️ UNDER REVIEW — live trading not yet authorized
@@ -2344,14 +2347,14 @@ def run(session="open"):
                             sector=signal.get('sector'), entry_price=candidate['price'],
                             shares=size, trail_stop_amt=trail_amt,
                             trail_stop_pct=trail_pct, vol_bucket=vol_label,
-                            signal_id=signal['id'],
+                            signal_id=(signal['id'] if _CUSTOMER_ID == _OWNER_CID else None),
                             entry_signal_score=str(score),
                             entry_sentiment_score=signal.get('sentiment_score'),
                             interrogation_status=signal.get('interrogation_status'),
                         )
                         alpaca.submit_order(signal['ticker'], size, "sell",
                                             order_type="trailing_stop", trail_price=trail_amt)
-                        db.acknowledge_signal(signal['id'])
+                        _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
                                  f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
                     else:

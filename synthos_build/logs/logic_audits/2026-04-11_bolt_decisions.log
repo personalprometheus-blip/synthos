@@ -1,0 +1,816 @@
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:22.033234-04:00
+  Session   : CLOSE
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:00 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:26.088423-04:00
+  Session   : CLOSE
+  Ticker    : PFE
+  Signal ID : 81
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : PFE
+    avg_volume_30d        : 1,879,918
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Healthcare
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6630
+    Reason : score 0.6630 ≥ threshold 0.55
+    ticker                : PFE
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6630
+    rel_strength_5d       : -6.45%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : PFE
+    price                 : $26.91
+    ma20                  : $27.37
+    roc_5d                : -5.05%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician= staleness=Fresh headline=TEST: Pfizer Beats Q2 Earnings Estimates on Strong Drug Sale
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:29.614151-04:00
+  Session   : CLOSE
+  Ticker    : ABBV
+  Signal ID : 83
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 265,269 below 500,000
+    ticker                : ABBV
+    avg_volume_30d        : 265,269
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=TEST: AbbVie Pipeline Drug Shows Positive Phase 3 Results
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:29.713635-04:00
+  Session   : CLOSE
+  Ticker    : MSFT
+  Signal ID : 86
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : MSFT
+    avg_volume_30d        : 798,603
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Technology
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.7225
+    Reason : score 0.7225 ≥ threshold 0.55
+    ticker                : MSFT
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.90 × 0.2
+    composite_score       : 0.7225
+    rel_strength_5d       : -3.60%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : MSFT
+    price                 : $370.89
+    ma20                  : $377.12
+    roc_5d                : -0.70%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician=Mark Warner staleness=Fresh headline=TEST: Sen. Warner Discloses $1M+ Microsoft Stock Purchase
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:33.233355-04:00
+  Session   : CLOSE
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:33.334504-04:00
+  Session   : CLOSE
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:33.423207-04:00
+  Session   : CLOSE
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:00:33.510329-04:00
+  Session   : CLOSE
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:28.737898-04:00
+  Session   : MIDDAY
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:01 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:29.812853-04:00
+  Session   : MIDDAY
+  Ticker    : PFE
+  Signal ID : 81
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : PFE
+    avg_volume_30d        : 1,879,918
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Healthcare
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6630
+    Reason : score 0.6630 ≥ threshold 0.55
+    ticker                : PFE
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6630
+    rel_strength_5d       : -6.45%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : PFE
+    price                 : $26.91
+    ma20                  : $27.37
+    roc_5d                : -5.05%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician= staleness=Fresh headline=TEST: Pfizer Beats Q2 Earnings Estimates on Strong Drug Sale
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:33.315104-04:00
+  Session   : MIDDAY
+  Ticker    : ABBV
+  Signal ID : 83
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 265,269 below 500,000
+    ticker                : ABBV
+    avg_volume_30d        : 265,269
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=TEST: AbbVie Pipeline Drug Shows Positive Phase 3 Results
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:33.404445-04:00
+  Session   : MIDDAY
+  Ticker    : MSFT
+  Signal ID : 86
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : MSFT
+    avg_volume_30d        : 798,603
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Technology
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.7225
+    Reason : score 0.7225 ≥ threshold 0.55
+    ticker                : MSFT
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.90 × 0.2
+    composite_score       : 0.7225
+    rel_strength_5d       : -3.60%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : MSFT
+    price                 : $370.89
+    ma20                  : $377.12
+    roc_5d                : -0.70%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician=Mark Warner staleness=Fresh headline=TEST: Sen. Warner Discloses $1M+ Microsoft Stock Purchase
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:36.912516-04:00
+  Session   : MIDDAY
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:37.008791-04:00
+  Session   : MIDDAY
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:37.110749-04:00
+  Session   : MIDDAY
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:01:37.201765-04:00
+  Session   : MIDDAY
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:33.140264-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:02 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99960.65
+    peak_equity           : $99960.65
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $79996.43
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=2.3% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $679.35
+    ma_short              : $658.14 (20d)
+    ma_long               : $674.26 (50d)
+    trend                 : DOWN
+    rolling_dd            : 2.33%
+    dd_threshold          : 5%
+    bm_volatility         : 1.532%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_ON
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_ON
+    volatility_atr_pct    : 1.532%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : FLAT_OR_DOWN
+    risk_posture          : RISK_ON
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : 0.08%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:34.150450-04:00
+  Session   : OPEN
+  Ticker    : PFE
+  Signal ID : 81
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : PFE
+    avg_volume_30d        : 1,879,918
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Healthcare
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.6630
+    Reason : score 0.6630 ≥ threshold 0.55
+    ticker                : PFE
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.55 × 0.2
+    composite_score       : 0.6630
+    rel_strength_5d       : -6.45%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : PFE
+    price                 : $26.91
+    ma20                  : $27.37
+    roc_5d                : -5.05%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician= staleness=Fresh headline=TEST: Pfizer Beats Q2 Earnings Estimates on Strong Drug Sale
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:37.663374-04:00
+  Session   : OPEN
+  Ticker    : ABBV
+  Signal ID : 83
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 265,269 below 500,000
+    ticker                : ABBV
+    avg_volume_30d        : 265,269
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=TEST: AbbVie Pipeline Drug Shows Positive Phase 3 Results
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:37.753336-04:00
+  Session   : OPEN
+  Ticker    : MSFT
+  Signal ID : 86
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : True
+    Reason : liquidity OK
+    ticker                : MSFT
+    avg_volume_30d        : 798,603
+    min_required          : 500,000
+  GATE 4_SPREAD
+    Result : SKIP_CHECK
+    Reason : spread check skipped — no quote
+    reason                : no quote data
+  GATE 4_EVENT_RISK
+    Result : NOT_CHECKED
+    Reason : event risk check skipped — TODO: DATA_DEPENDENCY
+    TODO                  : EVENT_CALENDAR not yet integrated
+  GATE 4_CORRELATION
+    Result : True
+    Reason : correlation OK
+    ticker_sector         : Technology
+    positions_in_sector   : 0
+    max_sector_positions  : 3
+  GATE 5_SIGNAL_SCORE
+    Result : 0.7225
+    Reason : score 0.7225 ≥ threshold 0.55
+    ticker                : MSFT
+    tier_score            : 1.00 × 0.25
+    politician_weight     : 0.50 × 0.2
+    staleness_score       : 1.00 × 0.15
+    interrogation_score   : 0.85 × 0.2
+    sentiment_score       : 0.90 × 0.2
+    composite_score       : 0.7225
+    rel_strength_5d       : -3.60%
+    threshold             : 0.55
+    result                : PASS
+  GATE 6_ENTRY
+    Result : WATCH
+    Reason : WATCH — no entry condition triggered
+    ticker                : MSFT
+    price                 : $370.89
+    ma20                  : $377.12
+    roc_5d                : -0.70%
+    regime                : SIDEWAYS/NORMAL
+    reason                : no entry condition met
+------------------------------------------------------------------------
+  FINAL DECISION : WATCH
+    → politician=Mark Warner staleness=Fresh headline=TEST: Sen. Warner Discloses $1M+ Microsoft Stock Purchase
+    → no entry condition met — signal retained in queue
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:41.262489-04:00
+  Session   : OPEN
+  Ticker    : RAYA
+  Signal ID : 2
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 39,956 below 500,000
+    ticker                : RAYA
+    avg_volume_30d        : 39,956
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Erayak Power Solution (RAYA) Stock Surges 49% After Hours: H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:41.369568-04:00
+  Session   : OPEN
+  Ticker    : BWET
+  Signal ID : 3
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 1,504 below 500,000
+    ticker                : BWET
+    avg_volume_30d        : 1,504
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=This ETF Just Spiked 15% As Global Ship Orders Hit 17-Year H
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:41.485113-04:00
+  Session   : OPEN
+  Ticker    : ISPC
+  Signal ID : 5
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 105,882 below 500,000
+    ticker                : ISPC
+    avg_volume_30d        : 105,882
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=iSpecimen Is Trending Overnight — Here's Why ISPC Stock Surg
+    → failed eligibility gate
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-11T04:02:41.578330-04:00
+  Session   : OPEN
+  Ticker    : LHSW
+  Signal ID : 6
+  Mode      : PAPER / MANAGED
+------------------------------------------------------------------------
+  GATE 4_LIQUIDITY
+    Result : False
+    Reason : SKIP — volume 12,044 below 500,000
+    ticker                : LHSW
+    avg_volume_30d        : 12,044
+    min_required          : 500,000
+------------------------------------------------------------------------
+  FINAL DECISION : SKIP
+    → politician= staleness=Fresh headline=Why Did Lianhe Sowell (LHSW) Stock Jump Over 17% After Hours
+    → failed eligibility gate
+========================================================================

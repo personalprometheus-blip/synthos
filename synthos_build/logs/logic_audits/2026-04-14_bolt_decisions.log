@@ -1,0 +1,2210 @@
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T00:20:02.251454-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 00:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T00:20:02.240992-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 00:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.59
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T00:20:02.257005-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 00:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T00:20:04.819469-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T01:20:02.206498-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 01:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.59
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T01:20:02.202893-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 01:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T01:20:02.201625-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 01:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T01:20:04.774949-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T02:20:01.912557-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 02:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T02:20:01.911464-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 02:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.59
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T02:20:01.916593-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 02:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T02:20:04.412798-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T03:20:01.893431-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 03:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.59
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T03:20:01.904955-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 03:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T03:20:01.919454-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 03:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T03:20:04.445704-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T04:20:01.598238-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T04:20:01.611935-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.59
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T04:20:01.599368-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 04:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T04:20:04.275173-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T05:20:01.569570-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 05:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.59
+    peak_equity           : $67914.59
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.56
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T05:20:01.570642-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 05:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T05:20:01.573605-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 05:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T05:20:04.337920-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T06:20:01.526269-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 06:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T06:20:01.515514-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 06:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T06:20:01.514465-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 06:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.56
+    peak_equity           : $67914.56
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.56
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T06:20:04.211233-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T07:20:01.885797-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 07:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T07:20:01.878854-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 07:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.56
+    peak_equity           : $67914.56
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.56
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T07:20:01.878839-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 07:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T07:20:04.462235-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T08:20:02.122722-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 08:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T08:20:02.117657-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 08:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T08:20:02.110583-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 08:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.56
+    peak_equity           : $67914.56
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.56
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T08:20:05.136033-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T09:20:02.020459-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 09:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T09:20:02.033450-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 09:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $99977.93
+    peak_equity           : $99977.93
+    drawdown_pct          : 0.00%
+    limit                 : 15%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-500.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $-100000.00
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T09:20:02.028791-04:00
+  Session   : OPEN
+  Ticker    : —
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 1_MARKET_TIME
+    Result : False
+    Reason : outside market hours (evaluation only)
+    current_time          : 09:20 ET
+    market_hours          : 9:30–16:00
+    regime                : premarket
+  GATE 1_DRAWDOWN
+    Result : True
+    Reason : drawdown 0.0% within limit
+    current_equity        : $67914.56
+    peak_equity           : $67914.56
+    drawdown_pct          : 0.00%
+    limit                 : 25%
+  GATE 1_DAILY_LOSS
+    Result : True
+    Reason : daily P&L within limit
+    pnl_today             : $+0.00
+    daily_loss_limit      : $-1000.00
+  GATE 1_API_HEALTH
+    Result : True
+    Reason : broker API reachable
+    broker                : Alpaca
+    cash                  : $67914.56
+  GATE 1_SYSTEM
+    Result : True
+    Reason : all system gates passed
+  GATE 2_BENCHMARK
+    Result : NEUTRAL
+    Reason : mode=NEUTRAL: dd=1.4% trend=DOWN vol=OK
+    benchmark             : SPY
+    current_price         : $686.00
+    ma_short              : $659.32 (20d)
+    ma_long               : $674.10 (50d)
+    trend                 : DOWN
+    rolling_dd            : 1.35%
+    dd_threshold          : 5%
+    bm_volatility         : 1.470%
+    vol_threshold         : 1.800%
+  GATE 3_REGIME
+    Result : vol=NORMAL trend=SIDEWAYS posture=RISK_OFF
+    Reason : volatility=NORMAL trend=SIDEWAYS risk=RISK_OFF
+    volatility_atr_pct    : 1.470%
+    vol_threshold         : 2.000%
+    ma_separation_pct     : 0.000%
+    flat_threshold        : 0.500%
+    tlt_trend             : UP
+    risk_posture          : RISK_OFF
+  GATE 13_STRESS
+    Result : True
+    Reason : no stress condition detected
+    benchmark             : SPY
+    intraday_drop         : -0.98%
+  GATE 14_EVALUATION
+    Result : True
+    Reason : evaluation skipped — need ≥5 trades
+    reason                : insufficient trade history
+------------------------------------------------------------------------
+  FINAL DECISION : NONE
+========================================================================
+========================================================================
+TRADE DECISION LOG
+  Timestamp : 2026-04-14T09:20:05.499038-04:00
+  Session   : OPEN
+  Ticker    : BAC
+  Signal ID : —
+  Mode      : PAPER / AUTOMATIC
+------------------------------------------------------------------------
+  GATE 10_STOP_LOSS
+    Result : True
+    Reason : stop loss triggered
+    current               : $52.10
+    stop_level            : $52.57
+    trail_stop            : $52.57
+    entry                 : $51.99
+    spy_corr              : 0.87
+------------------------------------------------------------------------
+  FINAL DECISION : EXIT
+    → reason=STOP_LOSS price=$52.10
+========================================================================

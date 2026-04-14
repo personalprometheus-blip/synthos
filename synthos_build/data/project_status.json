@@ -3,7 +3,7 @@
     "project": "Synthos",
     "last_updated": "2026-04-12",
     "current_phase": 7,
-    "total_phases": 9,
+    "total_phases": 10,
     "version": "2.1",
     "next_milestone": "Beta testing + paper trading review",
     "domain_map": {
@@ -398,19 +398,43 @@
           "done": false
         },
         {
-          "label": "Fix fidget agent (get_daily_api_usage bug)",
-          "done": false
-        },
-        {
           "label": "Hero cards rendering on Intelligence page",
           "done": false
         },
         {
-          "label": "Beta tester role + QA notification system",
+          "label": "Schedule fidget v2 hourly cron on pi4b",
           "done": false
         },
         {
-          "label": "Paper trading dry run with 2+ test accounts",
+          "label": "Wire fidget report to Company Finances API costs card",
+          "done": false
+        },
+        {
+          "label": "Schedule librarian weekly CVE scan (Monday 2am)",
+          "done": false
+        },
+        {
+          "label": "Stripe account setup + API keys in env",
+          "done": false
+        },
+        {
+          "label": "Stripe Checkout integration (collect payment)",
+          "done": false
+        },
+        {
+          "label": "Stripe webhook wiring (payment events)",
+          "done": false
+        },
+        {
+          "label": "Customer billing display on retail portal",
+          "done": false
+        },
+        {
+          "label": "Beta tester QA validation with 2+ accounts",
+          "done": false
+        },
+        {
+          "label": "Paper trading dry run with multi-tenant settings",
           "done": false
         },
         {
@@ -425,35 +449,94 @@
     },
     {
       "id": 9,
-      "name": "Live Trading Gate",
+      "name": "Live Trading Gate + Production Hardening",
       "status": "not_started",
       "tasks": [
         {
-          "label": "All Phase 7 security items complete",
+          "label": "Activate strongbox \u2014 R2 credentials + daily encrypted backup cron",
           "done": false
         },
         {
-          "label": "All Phase 8 paper trading sign-offs complete",
+          "label": "Activate vault \u2014 KEY_SIGNING_SECRET + license key system",
           "done": false
         },
         {
-          "label": "Customer onboarding flow tested end-to-end (Stripe + portal)",
+          "label": "Activate blueprint \u2014 scheduled build window (Mon-Thu 8pm)",
           "done": false
         },
         {
-          "label": "Admin dashboard verified (Patrick login \u2192 company API)",
+          "label": "PDF/spreadsheet export utility for reports page",
           "done": false
         },
         {
-          "label": "TRADING_MODE flip to LIVE (explicit human action only)",
+          "label": "Company expenses module \u2014 manual + Stripe income tracking",
           "done": false
         },
         {
-          "label": "First live trade logged and confirmed",
+          "label": "Georgia sales tax calculation per invoice",
           "done": false
         },
         {
-          "label": "Post-live monitoring plan active (sentinel + heartbeat + alerts)",
+          "label": "Business bank account + Plaid integration planning",
+          "done": false
+        },
+        {
+          "label": "GitHub repos made private",
+          "done": false
+        },
+        {
+          "label": "GitHub branch protection on main",
+          "done": false
+        },
+        {
+          "label": "Live trading switch \u2014 first real money trade",
+          "done": false
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Advanced Agent Stack (data feeds required)",
+      "status": "not_started",
+      "tasks": [
+        {
+          "label": "Macro data feeds \u2014 inflation, labor, GDP (FRED API or similar)",
+          "done": false
+        },
+        {
+          "label": "Activate macro_regime_agent \u2014 23-gate regime classifier",
+          "done": false
+        },
+        {
+          "label": "Yield curve + credit spread data feed",
+          "done": false
+        },
+        {
+          "label": "Activate market_state_aggregator \u2014 26-gate fusion layer",
+          "done": false
+        },
+        {
+          "label": "Social media API integration (Reddit, X/Twitter)",
+          "done": false
+        },
+        {
+          "label": "Activate social_rumor_agent \u2014 24-gate rumor classifier",
+          "done": false
+        },
+        {
+          "label": "Level 2 / institutional flow data feed",
+          "done": false
+        },
+        {
+          "label": "Activate flow_positioning_agent \u2014 squeeze/liquidation detection",
+          "done": false
+        },
+        {
+          "label": "Activate bias_audit_agent \u2014 20-gate bias detection on results",
+          "done": false
+        },
+        {
+          "label": "Multi-state tax support (expand beyond Georgia)",
           "done": false
         }
       ]
