@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG_FILE="/tmp/synthos_install.log"
+LOG_FILE="/tmp/synthos_install_$(id -un).log"
 TEAL='\033[0;36m'
 GREEN='\033[0;32m'
 AMBER='\033[0;33m'
@@ -34,8 +34,24 @@ echo -e "${TEAL}║${NC}  ${DIM}Unified setup for all node types${NC}           
 echo -e "${TEAL}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
 
+# Parse flags
+REPAIR=false
+RESTORE_FILE=""
+VERIFY_ONLY=false
+NODE_TYPE_ARG=""
+for arg in "$@"; do
+    case "$arg" in
+        --repair) REPAIR=true ;;
+        --restore=*) RESTORE_FILE="${arg#*=}" ;;
+        --verify) VERIFY_ONLY=true ;;
+        --retail) NODE_TYPE_ARG="retail" ;;
+        --company) NODE_TYPE_ARG="company" ;;
+        --monitor) NODE_TYPE_ARG="monitor" ;;
+    esac
+done
+
 # Check if running as root for system-level changes
-if [ "$EUID" -ne 0 ]; then
+if [ "$EUID" -ne 0 ] && ! $VERIFY_ONLY; then
     log "This installer needs sudo for system packages and systemd."
     log "Re-running with sudo..."
     exec sudo bash "$0" "$@"
@@ -45,18 +61,6 @@ CURRENT_USER="${SUDO_USER:-$(whoami)}"
 log "Running as: $CURRENT_USER (effective: root)"
 log "Repo directory: $SCRIPT_DIR"
 
-# Parse flags
-REPAIR=false
-RESTORE_FILE=""
-VERIFY_ONLY=false
-for arg in "$@"; do
-    case "$arg" in
-        --repair) REPAIR=true ;;
-        --restore=*) RESTORE_FILE="${arg#*=}" ;;
-        --verify) VERIFY_ONLY=true ;;
-    esac
-done
-
 # Node selection
 echo -e "${BOLD}Which node is this?${NC}"
 echo ""
@@ -64,7 +68,16 @@ echo -e "  ${TEAL}1)${NC} retail    — Pi 5, trading stack + customer portal"
 echo -e "  ${AMBER}2)${NC} company   — Pi 4B, admin portal + company agents"
 echo -e "  ${DIM}3)${NC} monitor   — Pi 2W, heartbeat receiver"
 echo ""
-read -p "Select [1-3]: " node_choice
+if [ -n "$NODE_TYPE_ARG" ]; then
+    node_choice=""
+    case "$NODE_TYPE_ARG" in
+        retail)  node_choice=1 ;;
+        company) node_choice=2 ;;
+        monitor) node_choice=3 ;;
+    esac
+else
+    read -p "Select [1-3]: " node_choice
+fi
 
 case "$node_choice" in
     1) NODE_TYPE="retail";  NODE_IP="10.0.0.11"; NODE_LABEL="Retail Node (Pi 5)" ;;
@@ -85,6 +98,18 @@ esac
 
 log "Home directory: $HOME_DIR"
 
+# If --verify, skip straight to verification
+if $VERIFY_ONLY; then
+    ENV_FILE=""
+    case "$NODE_TYPE" in
+        retail)  ENV_FILE="$HOME_DIR/user/.env" ;;
+        company) ENV_FILE="$HOME_DIR/company.env" ;;
+        monitor) ENV_FILE="$HOME_DIR/.env" ;;
+    esac
+    # Jump to verification (function defined below gets sourced)
+fi
+
+if ! $VERIFY_ONLY; then
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 2: SYSTEM PACKAGES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -647,6 +672,8 @@ print('company.db schema bootstrapped')
         ;;
 esac
 
+fi  # end of if ! $VERIFY_ONLY
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PHASE 11: VERIFICATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -661,10 +688,10 @@ check() {
     local desc="$1" cmd="$2"
     if eval "$cmd" >/dev/null 2>&1; then
         ok "$desc"
-        ((PASS++))
+        PASS=$((PASS+1))
     else
         err "$desc"
-        ((FAIL++))
+        FAIL=$((FAIL+1))
     fi
 }
 
