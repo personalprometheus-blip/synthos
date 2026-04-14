@@ -900,6 +900,7 @@ footer{
 </nav>
 <div class="login-wrap">
   <div class="card">
+    {% if maintenance_msg %}<div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);color:#f5a623;padding:0.6rem 0.85rem;border-radius:7px;margin-bottom:1.1rem;font-size:0.8rem;font-family:var(--mono)">{{ maintenance_msg }}</div>{% endif %}
     <div class="card-title">Welcome back</div>
     <div class="card-sub">Sign in to your Synthos account</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
@@ -916,6 +917,14 @@ footer{
 </body>
 </html>"""
 
+
+def _maintenance_msg():
+    """Read .maintenance_message file if it exists. Returns message string or None."""
+    try:
+        f = _ROOT_DIR / '.maintenance_message'
+        return f.read_text().strip() if f.exists() else None
+    except Exception:
+        return None
 
 def is_authenticated():
     """Returns True if the current session has a valid customer_id."""
@@ -1459,7 +1468,8 @@ def login():
         if _rate_limited(_login_attempts, ip, _LOGIN_MAX, _LOGIN_WINDOW):
             log.warning("Login rate limit hit for IP %s", ip)
             return render_template_string(LOGIN_HTML,
-                error="Too many login attempts — please wait a few minutes.")
+                error="Too many login attempts — please wait a few minutes.",
+                maintenance_msg=_maintenance_msg())
 
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
@@ -1479,7 +1489,7 @@ def login():
                             return redirect('/subscribe?reason=' + reason)
                         else:
                             log.warning(f"Login denied: {customer['id']} reason={reason}")
-                            return render_template_string(LOGIN_HTML, error="Account access denied. Contact support.")
+                            return render_template_string(LOGIN_HTML, error="Account access denied. Contact support.", maintenance_msg=_maintenance_msg())
 
                     session.clear()
                     session['customer_id']  = customer['id']
@@ -1494,9 +1504,9 @@ def login():
             except Exception as e:
                 log.error(f"Auth error during login: {e}")
 
-        return render_template_string(LOGIN_HTML, error="Incorrect email or password")
+        return render_template_string(LOGIN_HTML, error="Incorrect email or password", maintenance_msg=_maintenance_msg())
 
-    return render_template_string(LOGIN_HTML, error=None)
+    return render_template_string(LOGIN_HTML, error=None, maintenance_msg=_maintenance_msg())
 
 
 @app.route('/logout')
@@ -4499,6 +4509,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
         </div>
       </div>
+      <!-- WAVE CONTROLS -->
+      <div style="padding:4px 14px 8px;display:flex;align-items:center;gap:12px;border-top:1px solid var(--border)">
+        <span style="font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim)">Speed</span>
+        <input type="range" id="ap-freq" min="3" max="30" value="10" style="flex:1;height:3px;accent-color:var(--teal);cursor:pointer"
+               oninput="_apFreqMult=this.value/10">
+        <button id="ap-dir-btn" style="padding:2px 8px;border-radius:6px;font-size:9px;font-weight:700;border:1px solid var(--border);background:transparent;color:var(--dim);cursor:pointer;font-family:var(--mono)"
+                onclick="_apFlowDir*=-1;this.textContent=_apFlowDir>0?'&#x25B6;':'&#x25C0;'">&#x25B6;</button>
+      </div>
       <!-- LAST ACTIVITY -->
       <div style="padding:0 14px 12px">
         <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
@@ -4510,6 +4528,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 var _apRunning = null;
 var _apFrame = 0;
 var _apWaveId = null;
+var _apCurrentColor = {r:0, g:245, b:212};
+var _apTargetColor = {r:0, g:245, b:212};
+var _apColorLerp = 0.04;
+var _apFlowDir = 1;
+var _apFreqMult = 1.0;
 
 var _apColors = {
   teal:   {r:0,   g:245, b:212},
@@ -4533,8 +4556,12 @@ function _apDrawWave() {
 
   var active = !!_apRunning;
   var colorKey = active ? (_apRunning.color || 'teal') : 'teal';
-  var c = _apColors[colorKey] || _apColors.teal;
-  var t = _apFrame * 0.015;
+  _apTargetColor = _apColors[colorKey] || _apColors.teal;
+  _apCurrentColor.r += (_apTargetColor.r - _apCurrentColor.r) * _apColorLerp;
+  _apCurrentColor.g += (_apTargetColor.g - _apCurrentColor.g) * _apColorLerp;
+  _apCurrentColor.b += (_apTargetColor.b - _apCurrentColor.b) * _apColorLerp;
+  var c = {r:Math.round(_apCurrentColor.r), g:Math.round(_apCurrentColor.g), b:Math.round(_apCurrentColor.b)};
+  var t = _apFrame * 0.015 * _apFlowDir * _apFreqMult;
   // Idle: slow heartbeat pulse — amplitude breathes between 4 and 18
   var heartbeat = Math.sin(t * 0.4) * 0.5 + 0.5;  // 0→1 slow cycle
   var ampOverride = (active && _apRunning && _apRunning.amplitude) ? _apRunning.amplitude : null;
