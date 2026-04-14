@@ -416,6 +416,51 @@ class TradeDecisionLog:
             )
         except Exception as e:
             log.warning(f"TradeDecisionLog.commit failed: {e}")
+        # Write to scan_log for per-ticker gate breakdown visibility
+        if self.ticker:
+            try:
+                # Map gate results to scan_log schema
+                gate_map = {g['gate']: g for g in self.gates}
+                liquidity = gate_map.get('4_LIQUIDITY', {})
+                score_gate = gate_map.get('5_SIGNAL_SCORE', {})
+                entry_gate = gate_map.get('6_ENTRY', {})
+
+                vol_str = liquidity.get('inputs', {}).get('avg_volume_30d', '')
+                score_val = score_gate.get('inputs', {}).get('composite_score', '')
+
+                # Determine tier: 1=passed all gates, 2=passed score, 3=passed liquidity, 4=failed early
+                if self.final in ('MIRROR', 'ROTATE'):
+                    tier = 1
+                elif score_gate and float(score_gate.get('result', '0') or '0') > 0:
+                    tier = 2
+                elif liquidity.get('result') == 'True':
+                    tier = 3
+                else:
+                    tier = 4
+
+                summary_parts = []
+                if self.final:
+                    summary_parts.append(self.final)
+                if score_val:
+                    summary_parts.append(f"score={score_val}")
+                for n in self.notes[:2]:
+                    if n:
+                        summary_parts.append(n[:60])
+
+                db.log_scan(
+                    ticker=self.ticker,
+                    put_call_ratio=None,
+                    put_call_avg30d=None,
+                    insider_net=None,
+                    volume_vs_avg=vol_str or None,
+                    seller_dominance=None,
+                    cascade_detected=False,
+                    tier=tier,
+                    event_summary=' | '.join(summary_parts)[:200],
+                )
+            except Exception as e:
+                log.debug(f"scan_log write failed (non-fatal): {e}")
+
         # Also write to human-readable logic audit log
         try:
             import os as _os
