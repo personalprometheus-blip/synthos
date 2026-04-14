@@ -300,6 +300,16 @@ def run_session(session: str, dry_run: bool = False) -> bool:
             f"Step: {script}"
             + (f" {' '.join(effective_args)}" if effective_args else "")
         )
+        # Write status file for portal wave animation
+        try:
+            import json as _json
+            (_ROOT_DIR / '.agent_running').write_text(_json.dumps({
+                'agent': script.replace('retail_', '').replace('_agent.py', '').replace('.py', '').replace('_', ' ').title(),
+                'started': datetime.now(timezone.utc).isoformat(),
+                'session': session,
+            }))
+        except Exception:
+            pass
         t0 = time.monotonic()
         if script in _PER_CUSTOMER_AGENTS:
             # Per-customer: spawn one process per active customer
@@ -350,6 +360,12 @@ def run_session(session: str, dry_run: bool = False) -> bool:
             # Do NOT abort pipeline — later agents may still be able to run.
             # Trade Logic should execute even if Sentiment had errors.
             log.warning(f"Failures in {script} — continuing pipeline")
+
+    # Clear agent running status
+    try:
+        (_ROOT_DIR / '.agent_running').unlink(missing_ok=True)
+    except Exception:
+        pass
 
     status = 'ok' if session_ok else 'partial'
     log.info(
