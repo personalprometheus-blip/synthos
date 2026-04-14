@@ -9598,7 +9598,7 @@ def api_support_ticket_status(ticket_id):
     data = request.get_json(force=True)
     status = data.get('status', '')
     target_customer = data.get('customer_id')
-    if status not in ('open', 'in_progress', 'resolved', 'closed'):
+    if status not in ('open', 'in_progress', 'resolved', 'closed', 'archived'):
         return jsonify({'error': 'Invalid status'}), 400
     if target_customer and is_admin():
         from retail_database import get_customer_db
