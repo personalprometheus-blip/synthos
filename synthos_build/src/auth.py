@@ -205,6 +205,8 @@ def _migrate_auth_db():
     new_columns = [
         ("email_verified",       "INTEGER NOT NULL DEFAULT 0"),
         ("email_verify_token",   "TEXT"),
+        ("password_reset_token", "TEXT"),
+        ("password_reset_expires", "TEXT"),
         ("email_verify_sent_at", "TEXT"),
         ("stripe_customer_id",   "TEXT"),
         ("subscription_id",      "TEXT"),
@@ -617,6 +619,62 @@ def reject_signup(signup_id: int, reviewed_by: str = 'admin'):
             (now, reviewed_by, signup_id)
         )
     log.info(f"Rejected signup #{signup_id}")
+
+
+
+
+def create_password_reset_token(email: str) -> str:
+    """Generate a password reset token for the given email. Returns token or None if email not found."""
+    email_hash = _email_lookup_hash(email)
+    with _auth_conn() as c:
+        row = c.execute("SELECT id FROM customers WHERE email_hash = ?", (email_hash,)).fetchone()
+        if not row:
+            return None  # Don't reveal whether email exists
+        customer_id = row['id']
+        token = secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        c.execute(
+            "UPDATE customers SET password_reset_token=?, password_reset_expires=? WHERE id=?",
+            (token, expires, customer_id))
+        return token
+
+
+def verify_reset_token(token: str):
+    """Verify a reset token. Returns customer row if valid, None if expired/invalid."""
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT id, password_reset_expires FROM customers WHERE password_reset_token=?",
+            (token,)).fetchone()
+        if not row:
+            return None
+        expires = row['password_reset_expires']
+        if not expires or datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+            # Expired — clear it
+            c.execute("UPDATE customers SET password_reset_token=NULL, password_reset_expires=NULL WHERE id=?",
+                      (row['id'],))
+            return None
+        return row
+
+
+def reset_password(token: str, new_password: str) -> bool:
+    """Reset password using a valid token. Returns True if successful."""
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT id, password_reset_expires FROM customers WHERE password_reset_token=?",
+            (token,)).fetchone()
+        if not row:
+            return False
+        expires = row['password_reset_expires']
+        if not expires or datetime.fromisoformat(expires) < datetime.now(timezone.utc):
+            c.execute("UPDATE customers SET password_reset_token=NULL, password_reset_expires=NULL WHERE id=?",
+                      (row['id'],))
+            return False
+        new_hash = hash_password(new_password)
+        c.execute(
+            "UPDATE customers SET password_hash=?, password_reset_token=NULL, password_reset_expires=NULL WHERE id=?",
+            (new_hash, row['id']))
+        log.info(f"Password reset completed for customer {row['id']}")
+        return True
 
 
 def generate_signup_verify_token(signup_id: int) -> str:

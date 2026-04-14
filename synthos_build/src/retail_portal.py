@@ -928,12 +928,12 @@ def is_admin():
 @app.before_request
 def check_auth():
     # Routes that are always public — no session required
-    public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email',
+    public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email', '/reset-password',
                      '/admin/construction-verify'}
     if request.path in public_routes:
         return
     # Token-based routes are public (the token IS the auth)
-    if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/'):
+    if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/') or request.path.startswith('/reset-password/'):
         return
     # Monitor-callable endpoints — bearer token handled inside the function
     if request.path in {'/api/logs-audit', '/api/get-keys'}:
@@ -1118,13 +1118,35 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password_page():
-    """Placeholder forgot-password page — collects email. Reset mechanism TBD."""
+    """Send password reset email with time-limited link."""
     submitted = False
     if request.method == 'POST':
         email = request.form.get('email', '').strip()
         if email:
             log.info(f"Password reset requested for: {email}")
-            submitted = True
+            try:
+                token = auth.create_password_reset_token(email)
+                if token:
+                    # Send reset email via Resend
+                    import requests as _req
+                    resend_key = os.environ.get('RESEND_API_KEY', '')
+                    portal_domain = os.environ.get('PORTAL_DOMAIN', 'portal.synth-cloud.com')
+                    reset_url = f"https://{portal_domain}/reset-password/{token}"
+                    if resend_key:
+                        _req.post("https://api.resend.com/emails", json={
+                            "from": f"Synthos <{os.environ.get('ALERT_FROM', 'alerts@synth-cloud.com')}>",
+                            "to": [email],
+                            "subject": "Synthos — Password Reset",
+                            "html": f"<p>You requested a password reset for your Synthos account.</p>"
+                                    f"<p><a href=\"{reset_url}\" style=\"display:inline-block;padding:12px 24px;background:#00f5d4;color:#000;text-decoration:none;border-radius:8px;font-weight:bold\">Reset Password</a></p>"
+                                    f"<p style=\"color:#888;font-size:12px\">This link expires in 30 minutes. If you did not request this, ignore this email.</p>",
+                        }, headers={"Authorization": f"Bearer {resend_key}"}, timeout=10)
+                        log.info(f"Password reset email sent to {email}")
+                    else:
+                        log.warning("RESEND_API_KEY not set — cannot send reset email")
+            except Exception as e:
+                log.error(f"Password reset error: {e}")
+            submitted = True  # Always show success (don't reveal if email exists)
 
     return render_template_string("""<!DOCTYPE html>
 <html lang="en">
