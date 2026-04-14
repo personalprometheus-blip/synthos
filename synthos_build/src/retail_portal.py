@@ -2544,16 +2544,19 @@ def _enrich_positions(db_positions, alpaca_pos_map):
         _sig_id = p.get('signal_id')
         if _sig_id:
             try:
-                _shared = _shared_db()
-                with _shared.conn() as _sc:
-                    _sig = _sc.execute("SELECT headline, source, confidence FROM signals WHERE id=?", (_sig_id,)).fetchone()
-                    if _sig:
-                        _sig_headline = _sig['headline']
-                        _sig_source = _sig['source']
-                        _sig_confidence = _sig['confidence']
-                        _sig_image_url = _sig.get('image_url')
-            except Exception:
-                pass
+                import sqlite3 as _sql
+                _shared_path = _shared_db().path
+                _sc = _sql.connect(_shared_path, timeout=5)
+                _sc.row_factory = _sql.Row
+                _sig = _sc.execute("SELECT headline, source, confidence, image_url FROM signals WHERE id=?", (_sig_id,)).fetchone()
+                if _sig:
+                    _sig_headline = _sig['headline']
+                    _sig_source = _sig['source']
+                    _sig_confidence = _sig['confidence']
+                    _sig_image_url = _sig['image_url'] if 'image_url' in _sig.keys() else None
+                _sc.close()
+            except Exception as _e:
+                log.warning(f"Signal lookup failed for id={_sig_id}: {_e}")
 
         enriched.append({
             **p,
