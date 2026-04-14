@@ -2536,6 +2536,23 @@ def _enrich_positions(db_positions, alpaca_pos_map):
             day_pl      = 0.0
             day_plpc    = 0.0
             avg_entry   = entry
+        # Look up signal source for this position
+        _sig_headline = None
+        _sig_source = None
+        _sig_confidence = None
+        _sig_id = p.get('signal_id')
+        if _sig_id:
+            try:
+                _shared = _shared_db()
+                with _shared.conn() as _sc:
+                    _sig = _sc.execute("SELECT headline, source, confidence FROM signals WHERE id=?", (_sig_id,)).fetchone()
+                    if _sig:
+                        _sig_headline = _sig['headline']
+                        _sig_source = _sig['source']
+                        _sig_confidence = _sig['confidence']
+            except Exception:
+                pass
+
         enriched.append({
             **p,
             'current_price':    round(cur_price, 4),
@@ -2547,6 +2564,9 @@ def _enrich_positions(db_positions, alpaca_pos_map):
             'avg_entry_price':  round(avg_entry, 4),
             'cost_basis':       round(cost, 2),
             'is_orphan':        False,
+            'signal_headline':  _sig_headline,
+            'signal_source':    _sig_source,
+            'signal_confidence': _sig_confidence,
         })
 
     orphans = []
@@ -5463,17 +5483,14 @@ setInterval(loadAgentPulse, 10000);
       <div class="drawer-row"><span class="drawer-label">Today %</span><span class="drawer-val" id="dr-day-pct">—</span></div>
     </div>
     <div class="drawer-section">
-      <div class="drawer-section-title">Entry Conditions</div>
-      <div style="height:80px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;margin-bottom:8px">
-        <span style="font-size:10px;color:var(--dim)">Gate scores at entry · Available after wiring</span>
+      <div class="drawer-section-title">Signal Source</div>
+      <div id="dr-signal-source" style="padding:10px;border-radius:8px;background:var(--surface2);border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--dim)">Loading...</div>
       </div>
-      <div id="dr-gate-scores" style="font-size:10px;color:var(--muted)"></div>
     </div>
     <div class="drawer-section">
-      <div class="drawer-section-title">Price Chart</div>
-      <div style="height:120px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center">
-        <span style="font-size:10px;color:var(--dim)" id="drawer-chart-stub">Chart · Available after wiring</span>
-      </div>
+      <div class="drawer-section-title">Trade Info</div>
+      <div id="dr-trade-info" style="font-size:11px;color:var(--muted)"></div>
     </div>
   </div>
 </div>
@@ -6182,6 +6199,31 @@ function openPositionDrawer(p) {
   const dpPEl = document.getElementById('dr-day-pct');
   if (dpEl) { dpEl.textContent = plSign(p.day_pl) + fmt(p.day_pl||0); dpEl.style.color = dayC; }
   if (dpPEl) { dpPEl.textContent = plSign(p.day_plpc) + (p.day_plpc||0).toFixed(2) + '%'; dpPEl.style.color = dayC; }
+
+  // Signal source
+  var srcEl = document.getElementById('dr-signal-source');
+  if (srcEl) {
+    if (p.ticker === 'BIL') {
+      srcEl.innerHTML = '<div style="font-size:11px;color:var(--amber)">&#x1F3E6; Treasury Reserve — auto-managed by BIL reserve system</div>';
+    } else if (p.signal_headline) {
+      var confColor = p.signal_confidence === 'HIGH' ? 'var(--teal)' : p.signal_confidence === 'MEDIUM' ? 'var(--amber)' : 'var(--muted)';
+      srcEl.innerHTML = '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + p.signal_headline + '</div>'
+        + '<div style="font-size:10px;color:var(--muted)">' + (p.signal_source||'News') + ' · <span style="color:' + confColor + '">' + (p.signal_confidence||'—') + '</span></div>';
+    } else {
+      srcEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No signal source linked</div>';
+    }
+  }
+
+  // Trade info
+  var infoEl = document.getElementById('dr-trade-info');
+  if (infoEl) {
+    var lines = [];
+    if (p.entry_signal_score) lines.push('Confidence: ' + p.entry_signal_score);
+    if (p.vol_bucket) lines.push('Volatility: ' + p.vol_bucket);
+    if (p.opened_at) lines.push('Opened: ' + (p.opened_at||'').slice(0,16).replace('T',' '));
+    if (p.exit_reason) lines.push('Exit: ' + p.exit_reason);
+    infoEl.innerHTML = lines.map(function(l) { return '<div style="padding:2px 0">' + l + '</div>'; }).join('') || '<div style="color:var(--dim)">—</div>';
+  }
 
   document.getElementById('drawer-overlay').classList.add('open');
   document.getElementById('pos-drawer').classList.add('open');
