@@ -1,0 +1,125 @@
+{
+  "meta": {
+    "last_updated": "2026-04-14T10:30:00-04:00",
+    "version": "2.0"
+  },
+  "nodes": [
+    {
+      "id": "pi4b",
+      "name": "pi4b",
+      "role": "Company Server",
+      "hardware": "Pi 4B 8GB",
+      "ip": "10.0.0.10",
+      "network": "eth0 static",
+      "status": "live",
+      "agents": [
+        {"name": "synthos_monitor.py", "desc": "Admin portal + dashboard", "how": "systemd", "status": "live"},
+        {"name": "company_server.py", "desc": "Event queue API, /receive_backup", "how": "systemd", "status": "live"},
+        {"name": "company_auditor.py", "desc": "Cross-node log scanner (SSH to pi5, pi2w)", "how": "daemon", "status": "live"},
+        {"name": "company_archivist.py", "desc": "DB row archival to compressed JSON", "how": "daemon", "status": "live"},
+        {"name": "company_scoop.py", "desc": "Email queue drain, Resend dispatch", "how": "daemon", "status": "live"},
+        {"name": "company_sentinel.py", "desc": "Heartbeat receiver, silence alerts", "how": "cron 15m", "status": "cron"},
+        {"name": "company_vault.py", "desc": "License keys, compliance, secrets", "how": "cron 1h", "status": "cron"},
+        {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
+        {"name": "company_librarian.py", "desc": "Package audit, CVE scan, all nodes", "how": "cron Sun", "status": "cron"},
+        {"name": "company_strongbox.py", "desc": "Encrypt + R2 cloud upload (nightly 2am)", "how": "cron 2am", "status": "cron"},
+        {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 5m", "status": "cron"}
+      ],
+      "databases": ["company.db", "auditor.db", "login.db"],
+      "services": ["Cloudflare tunnel", "command.synth-cloud.com"]
+    },
+    {
+      "id": "pi5",
+      "name": "retail_node (pi5)",
+      "role": "Trading Stack",
+      "hardware": "Pi 5 16GB",
+      "ip": "10.0.0.11",
+      "network": "eth0 static",
+      "status": "live",
+      "agents": [
+        {"name": "retail_portal.py", "desc": "Customer dashboard + API", "how": "watchdog", "status": "live"},
+        {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "@reboot", "status": "live"},
+        {"name": "retail_scheduler.py", "desc": "Session orchestrator + DB locks", "how": "cron", "status": "live"},
+        {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
+        {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution", "how": "scheduler", "status": "cron"},
+        {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "scheduler", "status": "cron"},
+        {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "scheduler", "status": "cron"},
+        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "scheduler", "status": "cron"},
+        {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "cron 1m", "status": "cron"},
+        {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b", "how": "per agent", "status": "cron"},
+        {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 1m", "status": "cron"},
+        {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check", "how": "@reboot", "status": "boot"},
+        {"name": "retail_health_check.py", "desc": "Post-reboot DB + Alpaca verify", "how": "boot only", "status": "boot"},
+        {"name": "retail_patch.py", "desc": "Safe file updater, rollback", "how": "manual", "status": "tool"},
+        {"name": "retail_backup.py", "desc": "Nightly archive to pi4b staging", "how": "cron 1:30am", "status": "cron"},
+        {"name": "retail_shutdown.py", "desc": "Graceful pre-maintenance shutdown", "how": "Sat 3:55", "status": "cron"},
+        {"name": "rebuild_default_template.py", "desc": "Nightly customer DB template rebuild", "how": "cron 3am", "status": "cron"},
+        {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"}
+      ],
+      "databases": ["auth.db", "customers/*/signals.db", "live_prices (shared)"],
+      "services": ["Cloudflare tunnel", "portal.synth-cloud.com"]
+    },
+    {
+      "id": "pi2w_monitor",
+      "name": "pi2w_monitor_node",
+      "role": "External Watchdog",
+      "hardware": "Pi Zero 2W",
+      "ip": "10.0.0.121",
+      "network": "WiFi",
+      "status": "live",
+      "agents": [
+        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 1m", "status": "cron"},
+        {"name": "node_watchdog.py", "desc": "Pings pi4b + pi5 + display, alerts on failure", "how": "cron 1m", "status": "cron"}
+      ],
+      "databases": [],
+      "services": [],
+      "note": "Consolidated — heartbeat + external watchdog only"
+    },
+    {
+      "id": "pi2w_sentinel",
+      "name": "pi2w_sentinel",
+      "role": "Display Node",
+      "hardware": "Pi Zero 2W",
+      "ip": "10.0.0.87",
+      "network": "WiFi (SantaMcGuire)",
+      "status": "live",
+      "agents": [
+        {"name": "sentinel_display.py", "desc": "GeeekPi 3.5\" TFT dashboard", "how": "systemd", "status": "live"},
+        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 5m", "status": "cron"}
+      ],
+      "databases": [],
+      "services": ["Sidecar HTTP on port 5100"],
+      "note": "Online — WiFi connected"
+    }
+  ],
+  "data_flow": {
+    "trading_pipeline": "News Agent → 22 gates → signals to shared DB → Sentiment Agent → 27 gates → enriches signals → Trade Logic Agent → 14 gates → BUY / SKIP / WATCH → Alpaca API",
+    "shared_data": "Price Poller → live_prices table → portal reads. News/Sentiment → shared signals → all customers read same intel.",
+    "monitoring": "Auditor → SSH scans pi4b, pi5, pi2w → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts.",
+    "backup_chain": "pi5 retail_backup.py (1:30am) → tar.gz → POST to pi4b → Strongbox (2am) → AES-256 encrypt → Cloudflare R2 (30-day retention)"
+  },
+  "ssh_map": {
+    "from_pi4b": [
+      {"alias": "SentinelRetail", "ip": "10.0.0.11", "user": "pi516gb", "target": "pi5"},
+      {"alias": "pi0-2monitor", "ip": "10.0.0.121", "user": "pi-02w", "target": "pi2w_monitor"},
+      {"alias": "Sentineldisplay", "ip": "10.0.0.87", "user": "pi-02w", "target": "pi2w_sentinel"}
+    ],
+    "agents_with_ssh": [
+      {"agent": "Auditor", "targets": "pi5 + pi2w (log scanning, process checks)"},
+      {"agent": "Librarian", "targets": "pi5 + pi2w (package auditing)"},
+      {"agent": "Watchdog (pi2w)", "targets": "pi4b + pi5 + display (ping monitoring)"}
+    ]
+  },
+  "known_issues": [],
+  "resolved": [
+    "Backup chain pi5→pi4b working",
+    "Ghost cron entries removed",
+    "Write-access protection (company_lock.py)",
+    "Auditor cross-node SSH scanning",
+    "Timekeeper + Patches deleted, Blueprint archived",
+    "pi2w consolidated to heartbeat + watchdog",
+    "Sentinel display WiFi connected",
+    "FK constraint fix for multi-tenant signal routing",
+    "Schema migration system + nightly template rebuild"
+  ]
+}
