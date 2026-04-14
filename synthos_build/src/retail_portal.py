@@ -4481,7 +4481,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
           <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
         </div>
         <div style="text-align:center">
-          <div style="font-size:14px;font-weight:700;font-family:var(--mono)" id="ap-regime" style="color:var(--teal)">—</div>
+          <div style="font-size:11px;font-weight:700;font-family:var(--mono);cursor:help;color:var(--teal)" id="ap-regime" title="Market regime">—</div>
           <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Regime</div>
         </div>
       </div>
@@ -4604,9 +4604,17 @@ async function loadAgentPulse() {
     sv('ap-decisions', d.decisions_today || 0);
     var regEl = document.getElementById('ap-regime');
     if (regEl) {
-      var regime = (d.regime || 'unknown').replace(/_/g, ' ');
-      regEl.textContent = regime;
-      regEl.style.color = regime.includes('risk_on') || regime.includes('healthy') ? 'var(--teal)' : regime.includes('defensive') ? 'var(--amber)' : 'var(--muted)';
+      var rawRegime = d.regime || 'unknown';
+      var regimeMap = {
+        'healthy_risk_on': {short: 'RISK ON', color: 'var(--teal)', tip: 'Market healthy — agent is actively seeking opportunities'},
+        'defensive_risk_off': {short: 'DEFENSIVE', color: 'var(--amber)', tip: 'Market stressed — agent is cautious, avoiding new positions'},
+        'neutral': {short: 'NEUTRAL', color: 'var(--muted)', tip: 'Mixed signals — agent is selective, only high-confidence entries'},
+        'unknown': {short: '—', color: 'var(--dim)', tip: 'Regime not yet determined — waiting for sentiment analysis'}
+      };
+      var reg = regimeMap[rawRegime] || {short: rawRegime.replace(/_/g,' ').toUpperCase(), color: 'var(--muted)', tip: rawRegime};
+      regEl.textContent = reg.short;
+      regEl.style.color = reg.color;
+      regEl.title = reg.tip;
     }
 
     // Events
