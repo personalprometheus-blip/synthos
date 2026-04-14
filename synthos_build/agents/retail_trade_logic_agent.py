@@ -1749,6 +1749,132 @@ def reconcile_with_alpaca(db, alpaca):
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────────
 
+
+
+# ── POSITION ROTATION ─────────────────────────────────────────────────────────
+
+def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
+                      portfolio, tradeable, session, now):
+    """
+    When portfolio is full, evaluate top signals against weakest holdings.
+    Sell losing positions if a new signal significantly outscores them.
+    Rules: only rotate losers, score gap >= 0.20, max 1 per session, never BIL.
+    """
+    ROTATION_THRESHOLD = 0.20
+    MAX_ROTATIONS = 1
+
+    signals = shared_db.get_queued_signals()
+    if not signals:
+        return
+
+    held = []
+    for p in positions:
+        if p['ticker'] == C.BIL_TICKER:
+            continue
+        entry_score = float(p.get('entry_signal_score') or 0)
+        current_price = float(p.get('current_price') or p['entry_price'])
+        entry_price = float(p['entry_price'])
+        pnl_pct = (current_price - entry_price) / entry_price if entry_price else 0
+        held.append({
+            'id': p['id'], 'ticker': p['ticker'],
+            'entry_score': entry_score, 'pnl_pct': pnl_pct,
+            'shares': float(p['shares']), 'entry_price': entry_price,
+        })
+
+    if not held:
+        return
+
+    losers = [h for h in held if h['pnl_pct'] < 0]
+    if not losers:
+        log.info("[ROTATION] All positions in profit — no rotation candidates")
+        return
+
+    losers.sort(key=lambda x: x['entry_score'])
+    weakest = losers[0]
+    rotations = 0
+
+    for signal in signals[:20]:
+        if rotations >= MAX_ROTATIONS:
+            break
+
+        sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
+                                   signal_id=signal.get('id'))
+
+        if not gate4_eligibility(signal, positions, alpaca, sig_log):
+            continue
+
+        score = gate5_signal_score(signal, positions, alpaca, sig_log)
+        if score == 0.0:
+            continue
+
+        candidate = gate6_entry(signal, score, regime, alpaca, sig_log)
+        if candidate is None:
+            continue
+
+        score_gap = score - weakest['entry_score']
+        if score_gap < ROTATION_THRESHOLD:
+            continue
+
+        log.info(f"[ROTATION] {signal['ticker']} (score {score:.3f}) replaces "
+                 f"{weakest['ticker']} (score {weakest['entry_score']:.3f}, "
+                 f"P&L {weakest['pnl_pct']*100:+.1f}%) — gap {score_gap:.3f}")
+
+        sell_ok = alpaca.close_position(weakest['ticker'])
+        if not sell_ok:
+            log.warning(f"[ROTATION] Failed to sell {weakest['ticker']}")
+            continue
+
+        current_price = weakest['entry_price']
+        db.close_position(weakest['id'], current_price, exit_reason='ROTATED_OUT')
+        db.log_event("POSITION_ROTATED", agent="Trade Logic",
+                     details=f"Sold {weakest['ticker']} (score {weakest['entry_score']:.3f}, "
+                             f"P&L {weakest['pnl_pct']*100:+.1f}%) for {signal['ticker']} (score {score:.3f})")
+
+        atr = alpaca.get_atr(signal['ticker'])
+        if not atr:
+            atr = candidate['price'] * 0.02
+
+        size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log)
+        risk = gate8_risk(candidate, atr, session, sig_log)
+
+        if _is_supervised():
+            decision_data = {
+                "price": candidate['price'], "shares": size,
+                "max_trade": round(size * candidate['price'], 2),
+                "trail_amt": 0, "trail_pct": 0, "vol_label": "ROTATION",
+                "reasoning": f"ROTATION: replaces {weakest['ticker']} | Score gap: {score_gap:.3f}",
+                "session": session,
+            }
+            queue_for_approval(signal, decision_data)
+            db.acknowledge_signal(signal['id'])
+            log.info(f"[ROTATION/SUPERVISED] {signal['ticker']} queued for approval")
+        else:
+            trail_amt, trail_pct, vol_label = calculate_trail_stop(
+                atr, candidate['price'], signal.get('sector', ''))
+            order = alpaca.submit_order(signal['ticker'], size, "buy")
+            if order:
+                db.open_position(
+                    ticker=signal['ticker'], company=signal.get('company'),
+                    sector=signal.get('sector'), entry_price=candidate['price'],
+                    shares=size, trail_stop_amt=trail_amt,
+                    trail_stop_pct=trail_pct, vol_bucket=vol_label,
+                    signal_id=signal['id'],
+                    entry_signal_score=str(score),
+                    entry_sentiment_score=signal.get('sentiment_score'),
+                    interrogation_status=signal.get('interrogation_status'),
+                )
+                alpaca.submit_order(signal['ticker'], size, "sell",
+                                    order_type="trailing_stop", trail_price=trail_amt)
+                db.acknowledge_signal(signal['id'])
+                log.info(f"[ROTATION] BUY {size:.4f} {signal['ticker']} @ ${candidate['price']:.2f}")
+
+        rotations += 1
+        sig_log.decide("ROTATE", f"Replaced {weakest['ticker']} (gap {score_gap:.3f})")
+        sig_log.commit(db)
+
+    if rotations == 0:
+        log.info("[ROTATION] No signals strong enough to justify rotation")
+
 def run(session="open"):
     db     = _db()
     alpaca = AlpacaClient()
@@ -2022,8 +2148,11 @@ def run(session="open"):
         )
 
         if not can_enter:
-            log.info("Deployment/position cap reached — no new entries this session")
-        else:
+            log.info("Deployment/position cap reached — checking for position rotation")
+            _rotate_positions(db, _shared_db(), alpaca, positions, regime, tier,
+                              portfolio, tradeable, session, now)
+
+        if can_enter:
             signals = _shared_db().get_queued_signals()
             log.info(f"Evaluating {len(signals)} queued signal(s)")
 
