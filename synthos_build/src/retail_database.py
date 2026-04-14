@@ -598,6 +598,7 @@ class DB:
                 ts TEXT PRIMARY KEY, count INTEGER, names TEXT)""",
             # v2.2 — image URL on signals for visual display
             "ALTER TABLE signals ADD COLUMN image_url TEXT",
+            "ALTER TABLE signals ADD COLUMN source_url TEXT",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -900,7 +901,7 @@ class DB:
                       amount_range=None, confidence="MEDIUM",
                       staleness="Fresh", corroborated=False,
                       corroboration_note=None, sector=None, company=None,
-                      is_amended=False, is_spousal=False, image_url=None):
+                      is_amended=False, is_spousal=False, image_url=None, source_url=None):
         """
         Insert a new signal or update if same ticker+tx_date already exists.
         Returns signal id.
@@ -931,13 +932,13 @@ class DB:
                      politician, tx_date, disc_date, amount_range, confidence,
                      staleness, corroborated, corroboration_note,
                      is_amended, is_spousal, status, expires_at,
-                     discard_delete_at, created_at, updated_at, image_url)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     discard_delete_at, created_at, updated_at, image_url, source_url)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (ticker, company, sector, source, source_tier, headline,
                   politician, tx_date, disc_date, amount_range, confidence,
                   staleness, int(corroborated), corroboration_note,
                   int(is_amended), int(is_spousal), status, expires_at,
-                  discard_del, self.now(), self.now(), image_url))
+                  discard_del, self.now(), self.now(), image_url, source_url))
 
             sig_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
             log.info(f"New signal: {ticker} T{source_tier} {confidence} — id={sig_id}")

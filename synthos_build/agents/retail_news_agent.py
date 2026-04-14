@@ -2859,6 +2859,7 @@ def run(session="market"):
             is_amended    = is_amended,
             is_spousal    = is_spousal,
             image_url     = item.get("image_url"),
+            source_url    = item.get("source_url"),
         )
         if not sig_id:
             continue

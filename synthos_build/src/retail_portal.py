@@ -2541,6 +2541,7 @@ def _enrich_positions(db_positions, alpaca_pos_map):
         _sig_source = None
         _sig_confidence = None
         _sig_image_url = None
+        _sig_source_url = None
         _sig_id = p.get('signal_id')
         if _sig_id:
             try:
@@ -2548,12 +2549,13 @@ def _enrich_positions(db_positions, alpaca_pos_map):
                 _shared_path = _shared_db().path
                 _sc = _sql.connect(_shared_path, timeout=5)
                 _sc.row_factory = _sql.Row
-                _sig = _sc.execute("SELECT headline, source, confidence, image_url FROM signals WHERE id=?", (_sig_id,)).fetchone()
+                _sig = _sc.execute("SELECT headline, source, confidence, image_url, source_url FROM signals WHERE id=?", (_sig_id,)).fetchone()
                 if _sig:
                     _sig_headline = _sig['headline']
                     _sig_source = _sig['source']
                     _sig_confidence = _sig['confidence']
                     _sig_image_url = _sig['image_url'] if 'image_url' in _sig.keys() else None
+                    _sig_source_url = _sig['source_url'] if 'source_url' in _sig.keys() else None
                 _sc.close()
             except Exception as _e:
                 log.warning(f"Signal lookup failed for id={_sig_id}: {_e}")
@@ -2573,6 +2575,7 @@ def _enrich_positions(db_positions, alpaca_pos_map):
             'signal_source':    _sig_source,
             'signal_confidence': _sig_confidence,
             'signal_image_url': _sig_image_url,
+            'signal_source_url': _sig_source_url,
         })
 
     orphans = []
@@ -6214,7 +6217,10 @@ function openPositionDrawer(p) {
     } else if (p.signal_headline) {
       var imgHtml = p.signal_image_url ? '<img src="' + p.signal_image_url + '" style="width:100%;height:80px;object-fit:cover;border-radius:6px;margin-bottom:8px;opacity:0.85" onerror="this.style.display=\'none\'">' : '';
       var confColor = p.signal_confidence === 'HIGH' ? 'var(--teal)' : p.signal_confidence === 'MEDIUM' ? 'var(--amber)' : 'var(--muted)';
-      srcEl.innerHTML = imgHtml + '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + p.signal_headline + '</div>'
+      var headlineHtml = p.signal_source_url
+        ? '<a href="' + p.signal_source_url + '" target="_blank" style="color:var(--text);text-decoration:none;border-bottom:1px solid var(--border2)">&#x1F4F0; ' + p.signal_headline + '</a>'
+        : '&#x1F4F0; ' + p.signal_headline;
+      srcEl.innerHTML = imgHtml + '<div style="font-size:11px;margin-bottom:4px">' + headlineHtml + '</div>'
         + '<div style="font-size:10px;color:var(--muted)">' + (p.signal_source||'News') + ' · <span style="color:' + confColor + '">' + (p.signal_confidence||'—') + '</span></div>';
     } else {
       srcEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No signal source linked</div>';
