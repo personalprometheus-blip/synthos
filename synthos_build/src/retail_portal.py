@@ -8483,17 +8483,24 @@ def api_agent_pulse():
                 'amplitude': lock.get('amplitude'),
             }
 
-        # Market regime from last sentiment
+        # Market regime from shared DB (Pulse is a shared agent)
         regime = 'unknown'
-        for e in events:
-            if e.get('agent') == 'The Pulse' and e.get('event') == 'AGENT_COMPLETE':
-                det = e.get('details') or ''
-                try:
-                    if 'regime=' in det:
-                        regime = det.split('regime=')[1].split(' ')[0].split(',')[0]
-                except (IndexError, AttributeError):
-                    pass
-                break
+        try:
+            import sqlite3 as _sql
+            _shared_path = _shared_db().path
+            _rc = _sql.connect(_shared_path, timeout=5)
+            _rc.row_factory = _sql.Row
+            _regime_row = _rc.execute(
+                "SELECT details FROM system_log WHERE agent='The Pulse' AND event='AGENT_COMPLETE' "
+                "ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            if _regime_row:
+                _det = _regime_row['details'] or ''
+                if 'regime=' in _det:
+                    regime = _det.split('regime=')[1].split(' ')[0].split(',')[0]
+            _rc.close()
+        except Exception:
+            pass
 
         return jsonify({
             'running': running,
