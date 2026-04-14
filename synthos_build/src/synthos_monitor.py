@@ -62,6 +62,8 @@ REGISTRY_FILE = os.path.join(DATA_DIR, ".monitor_registry.json")
 # ── State ─────────────────────────────────────────────────────────────────────
 pi_registry   = {}
 registry_lock = threading.Lock()
+OVERRIDES_FILE = os.path.join(DATA_DIR, ".admin_overrides.json")
+admin_overrides = {"trading_gate": "ALL", "operating_mode": "ALL"}
 
 
 def save_registry():
@@ -102,6 +104,26 @@ def load_registry():
         print(f"[Registry] Loaded {len(pi_registry)} Pi(s) from disk")
     except Exception as e:
         print(f"[Registry] Load failed (starting fresh): {e}")
+
+
+# ── Admin Overrides ──────────────────────────────────────────────────────────
+def save_overrides():
+    try:
+        import json as _json
+        with open(OVERRIDES_FILE, 'w') as f:
+            _json.dump(admin_overrides, f)
+    except Exception as e:
+        print(f"[Overrides] Save failed: {e}")
+
+def load_overrides():
+    global admin_overrides
+    try:
+        import json as _json
+        with open(OVERRIDES_FILE, 'r') as f:
+            admin_overrides.update(_json.load(f))
+        print(f"[Overrides] Loaded: trading_gate={admin_overrides['trading_gate']} operating_mode={admin_overrides['operating_mode']}")
+    except Exception:
+        pass  # defaults are fine
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -190,7 +212,8 @@ def heartbeat():
             "last_seen":         now_utc(),
             "first_seen":        existing.get("first_seen", now_utc()),
             "alerted":           False,
-            # Identity
+            # Identity + network
+            "ip":                request.remote_addr or existing.get("ip", ""),
             "label":             data.get("label",          existing.get("label", pi_id)),
             "email":             data.get("email",          existing.get("email", "")),
             "pi_id":             pi_id,
@@ -207,14 +230,32 @@ def heartbeat():
             "agents":            data.get("agents",         existing.get("agents", {})),
             "uptime":            data.get("uptime",         existing.get("uptime", None)),
             "uptime_secs":       data.get("uptime_secs",    existing.get("uptime_secs", 0)),
-            "operating_mode":    data.get("operating_mode", existing.get("operating_mode", "SUPERVISED")),
+            "operating_mode":    data.get("operating_mode", existing.get("operating_mode", "MANAGED")),
             "trading_mode":      data.get("trading_mode",   existing.get("trading_mode", "PAPER")),
             "kill_switch":       data.get("kill_switch",    existing.get("kill_switch", False)),
             "last_errors":       data.get("last_errors",    existing.get("last_errors", [])),
-            # History — keep last 48 heartbeat values for sparkline
+            # Hardware metrics
+            "cpu_percent":    data.get("cpu_percent",    existing.get("cpu_percent")),
+            "cpu_count":      data.get("cpu_count",      existing.get("cpu_count")),
+            "load_avg":       data.get("load_avg",        existing.get("load_avg")),
+            "ram_percent":    data.get("ram_percent",    existing.get("ram_percent")),
+            "ram_total_gb":   data.get("ram_total_gb",   existing.get("ram_total_gb")),
+            "ram_used_gb":    data.get("ram_used_gb",    existing.get("ram_used_gb")),
+            "ram_avail_gb":   data.get("ram_avail_gb",   existing.get("ram_avail_gb")),
+            "ram_cached_gb":  data.get("ram_cached_gb",  existing.get("ram_cached_gb")),
+            "disk_percent":   data.get("disk_percent",   existing.get("disk_percent")),
+            "disk_total_gb":  data.get("disk_total_gb",  existing.get("disk_total_gb")),
+            "disk_used_gb":   data.get("disk_used_gb",   existing.get("disk_used_gb")),
+            "disk_free_gb":   data.get("disk_free_gb",   existing.get("disk_free_gb")),
+            "net_bytes_sent": data.get("net_bytes_sent", existing.get("net_bytes_sent")),
+            "net_bytes_recv": data.get("net_bytes_recv", existing.get("net_bytes_recv")),
+            "cpu_temp":       data.get("cpu_temp",       existing.get("cpu_temp")),
+            # History — keep last 48 heartbeat samples for time-series graphs
             "history":           (existing.get("history", []) + [{
-                "t": now_utc().isoformat(),
-                "v": data.get("portfolio_value", data.get("portfolio", 0.0)),
+                "t":   now_utc().isoformat(),
+                "v":   data.get("portfolio_value", data.get("portfolio", 0.0)),
+                "cpu": data.get("cpu_percent"),
+                "ram": data.get("ram_percent"),
             }])[-48:],
         }
         save_registry()
@@ -261,9 +302,25 @@ def api_status():
                 "trades_today":      data.get("trades_today", 0),
                 "agents":            data.get("agents", {}),
                 "uptime":            data.get("uptime", None),
-                "operating_mode":    data.get("operating_mode", "SUPERVISED"),
+                "operating_mode":    data.get("operating_mode", "MANAGED"),
                 "trading_mode":      data.get("trading_mode", "PAPER"),
                 "kill_switch":       data.get("kill_switch", False),
+                "cpu_percent":    data.get("cpu_percent"),
+                "cpu_count":      data.get("cpu_count"),
+                "load_avg":       data.get("load_avg"),
+                "ram_percent":    data.get("ram_percent"),
+                "ram_total_gb":   data.get("ram_total_gb"),
+                "ram_used_gb":    data.get("ram_used_gb"),
+                "ram_avail_gb":   data.get("ram_avail_gb"),
+                "ram_cached_gb":  data.get("ram_cached_gb"),
+                "disk_percent":   data.get("disk_percent"),
+                "disk_total_gb":  data.get("disk_total_gb"),
+                "disk_used_gb":   data.get("disk_used_gb"),
+                "disk_free_gb":   data.get("disk_free_gb"),
+                "net_bytes_sent": data.get("net_bytes_sent"),
+                "net_bytes_recv": data.get("net_bytes_recv"),
+                "cpu_temp":       data.get("cpu_temp"),
+                "history":        data.get("history", []),
             }
     return jsonify(out), 200
 
@@ -386,6 +443,61 @@ def api_enqueue():
         "queued": False,
         "note": "COMPANY_URL not set — event logged but not persisted",
     }), 200
+
+
+# ── Admin Override API ────────────────────────────────────────────────────────
+@app.route("/api/admin-override", methods=["GET", "POST"])
+def api_admin_override():
+    if request.method == "GET":
+        return jsonify(admin_overrides), 200
+
+    token = request.headers.get("X-Token", "")
+    if token != SECRET_TOKEN and not (request.cookies.get("auth") == SECRET_TOKEN):
+        return jsonify({"error": "unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    tg = data.get("trading_gate", admin_overrides["trading_gate"]).upper()
+    om = data.get("operating_mode", admin_overrides["operating_mode"]).upper()
+
+    if tg not in ("PAPER", "LIVE", "ALL"):
+        return jsonify({"ok": False, "error": "trading_gate must be PAPER, LIVE, or ALL"}), 400
+    if om not in ("MANAGED", "AUTOMATIC", "ALL"):
+        return jsonify({"ok": False, "error": "operating_mode must be MANAGED, AUTOMATIC, or ALL"}), 400
+
+    admin_overrides["trading_gate"] = tg
+    admin_overrides["operating_mode"] = om
+    admin_overrides["updated_at"] = now_utc().isoformat()
+    save_overrides()
+
+    # Push to all registered retail Pis
+    import requests as _req
+    pushed = []
+    errors = []
+    with registry_lock:
+        pis = list(pi_registry.items())
+    for pi_id, pi_data in pis:
+        if pi_id == os.environ.get("PI_ID", ""):
+            continue  # skip self (monitor node)
+        ip = pi_data.get("ip", "")
+        if not ip:
+            continue
+        port = 5001  # retail portal port
+        try:
+            r = _req.post(
+                f"http://{ip}:{port}/api/admin-override",
+                headers={"X-Token": SECRET_TOKEN, "Content-Type": "application/json"},
+                json={"trading_gate": tg, "operating_mode": om},
+                timeout=5,
+            )
+            if r.ok:
+                pushed.append(pi_id)
+            else:
+                errors.append(f"{pi_id}: {r.status_code}")
+        except Exception as e:
+            errors.append(f"{pi_id}: {e}")
+
+    print(f"[Override] trading_gate={tg} operating_mode={om} pushed={pushed} errors={errors}")
+    return jsonify({"ok": True, "pushed_to": pushed, "errors": errors}), 200
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -562,6 +674,15 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
            display:flex;align-items:center;gap:8px}
 .sec-title::after{content:'';flex:1;height:1px;background:var(--border)}
 
+/* ADMIN TOGGLE */
+.adm-toggle{padding:7px 14px;border-radius:8px;background:var(--surface2);border:1px solid var(--border2);
+  color:var(--muted);font-size:11px;font-weight:600;cursor:pointer;transition:all 0.2s;font-family:var(--sans)}
+.adm-toggle:hover{border-color:rgba(0,245,212,0.25);color:var(--text)}
+.adm-toggle.active{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.3);color:var(--teal)}
+.adm-toggle.active[data-val="PAPER"],.adm-toggle.active[data-val="MANAGED"]{background:rgba(0,245,212,0.08);border-color:rgba(0,245,212,0.3);color:var(--teal)}
+.adm-toggle.active[data-val="LIVE"],.adm-toggle.active[data-val="AUTOMATIC"]{background:rgba(245,166,35,0.08);border-color:rgba(245,166,35,0.3);color:var(--amber)}
+.adm-toggle.active[data-val="ALL"]{background:rgba(123,97,255,0.08);border-color:rgba(123,97,255,0.3);color:var(--purple)}
+
 /* MODAL */
 .modal-overlay{
   position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);
@@ -648,6 +769,30 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
            border:1px solid rgba(255,75,110,0.15)}
 .error-log.empty{color:var(--teal);font-size:11px;text-align:center;padding:20px}
 
+/* NODE ROSTER TABLE */
+.node-table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);margin-bottom:20px}
+.node-thead{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
+            padding:8px 16px;background:rgba(255,255,255,0.025);min-width:740px;border-bottom:1px solid var(--border)}
+.node-th{font-size:9px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted)}
+.node-row{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
+          padding:10px 16px;border-top:1px solid var(--border);align-items:center;
+          cursor:pointer;transition:background 0.15s;min-width:740px}
+.node-row:hover{background:rgba(255,255,255,0.025)}
+.node-cell{font-size:12px;font-family:var(--mono)}
+.node-name-cell{display:flex;align-items:center;gap:8px}
+.node-micro-av{width:28px;height:28px;border-radius:8px;flex-shrink:0;
+               display:flex;align-items:center;justify-content:center;
+               background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.09)}
+.node-lbl{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:148px}
+.node-id-tag{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.mc-ok{color:var(--teal)}.mc-warn{color:var(--amber)}.mc-crit{color:var(--pink)}.mc-na{color:var(--dim)}
+/* GRAPH CARDS */
+.graph-card{border-radius:14px;border:1px solid var(--border);background:var(--surface);
+            padding:16px 16px 10px;margin-bottom:14px}
+.graph-card-title{font-size:10px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;
+                  color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.graph-canvas-wrap{height:110px;position:relative}
+
 /* Toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
        padding:10px 20px;border-radius:12px;font-size:12px;font-weight:600;
@@ -676,6 +821,18 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </head>
 <body>
 
+<!-- DEBUG BANNER — remove after console is confirmed working -->
+<div id="dbg-banner" style="background:#1a0a2e;border:2px solid #7b61ff;color:#fff;padding:10px 16px;font-family:monospace;font-size:13px;position:fixed;bottom:0;left:0;right:0;z-index:99999">
+  <b>DEBUG</b> | Server rendered: {{ build_ts }} |
+  JS status: <span id="dbg-js" style="color:#ff4b6e">NOT RUNNING</span> |
+  Fetch status: <span id="dbg-fetch" style="color:#ff4b6e">NOT CALLED</span> |
+  piData keys: <span id="dbg-keys" style="color:#ff4b6e">—</span>
+</div>
+<script>
+document.getElementById('dbg-js').textContent = 'RUNNING';
+document.getElementById('dbg-js').style.color = '#00f5d4';
+</script>
+
 <!-- HEADER -->
 <header class="header">
   <div class="wordmark">SYNTHOS</div>
@@ -684,8 +841,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="clock" id="clock">--:--:-- ET</div>
     <a href="/audit" style="padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;
        background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.3);color:var(--purple);
-       text-decoration:none;letter-spacing:0.04em">Agent 4</a>
-    <div class="live-pill"><div class="live-dot"></div><span id="pi-count">0 Pis</span></div>
+       text-decoration:none;letter-spacing:0.04em">AI Audit</a>
+    <div class="live-pill"><div class="live-dot"></div><span id="pi-count">No Nodes</span></div>
   </div>
 </header>
 
@@ -733,8 +890,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   <!-- FLEET STATS -->
   <div class="fleet-grid">
+    <!-- Nodes Online -->
     <div class="fleet-card fc-teal">
-      <div class="fleet-label">Pis Online</div>
+      <div class="fleet-label">Nodes Online</div>
       <div class="fleet-val" id="fl-online">0</div>
       <div class="fleet-sub" id="fl-total">of 0 registered</div>
       <svg class="fleet-cloud" viewBox="0 0 54 38" xmlns="http://www.w3.org/2000/svg" width="54" height="38">
@@ -747,28 +905,46 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <path d="M3,29 Q3,22 10,22 Q9,15 18,15 Q24,15 26,19 Q33,18 33,24 Q37,24 37,29 Q37,33 33,33 L7,33 Q3,33 3,29 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
       </svg>
     </div>
-    <div class="fleet-card fc-purple">
-      <div class="fleet-label">Fleet Portfolio</div>
-      <div class="fleet-val" id="fl-portfolio">$0</div>
-      <div class="fleet-sub">Combined value</div>
-      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
-        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
-        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.9" stroke-linecap="round"/>
-      </svg>
-    </div>
-    <div class="fleet-card fc-amber">
-      <div class="fleet-label">Pending Approvals</div>
-      <div class="fleet-val" id="fl-pending">0</div>
-      <div class="fleet-sub">Across all Pis</div>
+    <!-- Active Alerts -->
+    <div class="fleet-card fc-pink">
+      <div class="fleet-label">Active Alerts</div>
+      <div class="fleet-val" id="fl-issues">0</div>
+      <div class="fleet-sub">Open issues</div>
       <svg class="fleet-cloud" viewBox="0 0 44 40" xmlns="http://www.w3.org/2000/svg" width="44" height="40">
         <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
         <path d="M21,28 L18,35 L21,34.5 L19.5,40 L25.5,32 L22,32.5 Z" fill="rgba(255,255,255,1)" stroke="none"/>
       </svg>
     </div>
-    <div class="fleet-card fc-pink">
-      <div class="fleet-label">Open Issues</div>
-      <div class="fleet-val" id="fl-issues">0</div>
-      <div class="fleet-sub">Needs attention</div>
+    <!-- Avg CPU -->
+    <div class="fleet-card fc-amber">
+      <div class="fleet-label">Avg CPU</div>
+      <div class="fleet-val" id="fl-cpu">—</div>
+      <div class="fleet-sub" id="fl-cpu-sub">Awaiting data</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <g stroke="rgba(255,255,255,0.7)" stroke-width="1.1" stroke-linecap="round">
+          <line x1="11" y1="19" x2="11" y2="23"/><line x1="15" y1="16" x2="15" y2="23"/>
+          <line x1="19" y1="18" x2="19" y2="23"/><line x1="23" y1="14" x2="23" y2="23"/>
+        </g>
+      </svg>
+    </div>
+    <!-- Avg RAM -->
+    <div class="fleet-card fc-purple">
+      <div class="fleet-label">Avg RAM</div>
+      <div class="fleet-val" id="fl-ram">—</div>
+      <div class="fleet-sub" id="fl-ram-sub">Awaiting data</div>
+      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
+        <rect x="9" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.7)" stroke="none"/>
+        <rect x="16" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.4)" stroke="none"/>
+        <rect x="23" y="17" width="5" height="5" rx="1" fill="rgba(255,255,255,0.7)" stroke="none"/>
+      </svg>
+    </div>
+    <!-- Avg Temp -->
+    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
+      <div class="fleet-label">Avg Temp</div>
+      <div class="fleet-val" id="fl-temp" style="color:var(--text)">—</div>
+      <div class="fleet-sub">°C · CPU temp</div>
       <svg class="fleet-cloud" viewBox="0 0 44 38" xmlns="http://www.w3.org/2000/svg" width="44" height="38">
         <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
         <g stroke="rgba(255,255,255,1)" stroke-width="1.4" stroke-linecap="round">
@@ -776,40 +952,66 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         </g>
       </svg>
     </div>
+    <!-- Customers (placeholder — Pi 5 portal pending) -->
     <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Open Positions</div>
-      <div class="fleet-val" id="fl-positions" style="color:var(--text)">0</div>
-      <div class="fleet-sub">Fleet-wide</div>
+      <div class="fleet-label">Customers</div>
+      <div class="fleet-val" id="fl-customers" style="color:var(--dim)">—</div>
+      <div class="fleet-sub">Portal pending</div>
       <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
-        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
-        <g stroke="rgba(255,255,255,0.6)" stroke-width="1.1" stroke-linecap="round">
-          <line x1="8" y1="22" x2="5" y2="22"/><line x1="8.8" y1="18.5" x2="6.5" y2="17"/>
-        </g>
-      </svg>
-    </div>
-    <div class="fleet-card" style="border-color:rgba(255,255,255,0.07)">
-      <div class="fleet-label">Trades Today</div>
-      <div class="fleet-val" id="fl-trades" style="color:var(--text)">0</div>
-      <div class="fleet-sub">All Pis</div>
-      <svg class="fleet-cloud" viewBox="0 0 44 32" xmlns="http://www.w3.org/2000/svg" width="44" height="32">
-        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,1)" stroke-width="1.3" stroke-linejoin="round"/>
-        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.9" stroke-linecap="round"/>
+        <path d="M3,23 Q3,16 10,16 Q9,9 18,9 Q24,9 26,13 Q33,12 33,18 Q37,18 37,23 Q37,27 33,27 L7,27 Q3,27 3,23 Z" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.3" stroke-linejoin="round"/>
+        <path d="M7,16 Q7,11 13,11 Q12,6 19,6" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.9" stroke-linecap="round"/>
       </svg>
     </div>
   </div>
 
-  <!-- TWO COLUMN: PI GRID + TODOS -->
+  <!-- ADMIN OVERRIDES -->
+  <div class="sec-title">Admin Overrides</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Trading Gate</div>
+      <div id="adm-gate-btns" style="display:flex;gap:6px">
+        <button class="adm-toggle" data-field="trading_gate" data-val="PAPER">Paper</button>
+        <button class="adm-toggle" data-field="trading_gate" data-val="LIVE">Live</button>
+        <button class="adm-toggle active" data-field="trading_gate" data-val="ALL">All</button>
+      </div>
+      <div style="font-size:9px;color:var(--dim);margin-top:8px" id="adm-gate-sub">Customers choose</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Operating Mode</div>
+      <div id="adm-mode-btns" style="display:flex;gap:6px">
+        <button class="adm-toggle" data-field="operating_mode" data-val="MANAGED">Managed</button>
+        <button class="adm-toggle" data-field="operating_mode" data-val="AUTOMATIC">Automatic</button>
+        <button class="adm-toggle active" data-field="operating_mode" data-val="ALL">All</button>
+      </div>
+      <div style="font-size:9px;color:var(--dim);margin-top:8px" id="adm-mode-sub">Customers choose</div>
+    </div>
+  </div>
+
+  <!-- NODE ROSTER — full width -->
+  <div class="sec-title">Node Roster <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
+  <div id="node-roster">
+    <div class="node-table-wrap">
+      <div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">Waiting for first heartbeat…</div>
+    </div>
+  </div>
+
+  <!-- TWO COLUMN: GRAPHS + ISSUES -->
   <div class="two-col">
 
-    <!-- PI GRID -->
+    <!-- SYSTEM HEALTH GRAPHS -->
     <div>
-      <div class="sec-title">Customer Pis <span id="sync-label" style="font-size:9px;color:var(--dim);font-weight:400;letter-spacing:0;text-transform:none">syncing...</span></div>
-      <div class="pi-grid" id="pi-grid">
-        <div style="color:var(--muted);font-size:12px;padding:20px;grid-column:1/-1">No Pis registered yet. Waiting for first heartbeat...</div>
+      <div class="sec-title">System Health Over Time</div>
+      <div class="graph-card">
+        <div class="graph-card-title">CPU Usage %</div>
+        <div class="graph-canvas-wrap"><canvas id="cpu-chart"></canvas></div>
+      </div>
+      <div class="graph-card">
+        <div class="graph-card-title">Memory Usage %</div>
+        <div class="graph-canvas-wrap"><canvas id="ram-chart"></canvas></div>
       </div>
     </div>
 
-    <!-- TODO LIST -->
+    <!-- ISSUES PANEL -->
     <div>
       <div class="sec-title">Open Issues</div>
       <div class="todo-panel">
@@ -827,6 +1029,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </div>
 
 <script>
+/* DBG */ try { document.getElementById('dbg-fetch').textContent = 'MAIN SCRIPT STARTED'; } catch(e){}
 const SECRET_TOKEN = '{{ secret_token }}';
 let piData = {};
 let allTodos = [];
@@ -854,8 +1057,8 @@ function toast(msg, type='ok') {
 }
 
 // ── STATUS HELPERS ──
-function statusClass(s) { return s === 'online' ? 'online' : s === 'offline' ? 'offline' : 'warning'; }
-function dotClass(s) { return s === 'online' ? 'online' : s === 'offline' ? 'offline' : s === 'warning' ? 'warning' : 'unknown'; }
+function statusClass(s) { return (s === 'online' || s === 'active') ? 'online' : s === 'offline' ? 'offline' : (s === 'fault' || s === 'warning') ? 'warning' : 'warning'; }
+function dotClass(s) { return (s === 'online' || s === 'active') ? 'online' : s === 'offline' ? 'offline' : (s === 'fault' || s === 'warning') ? 'warning' : 'unknown'; }
 function ageSince(isoStr) {
   const secs = Math.floor((Date.now() - new Date(isoStr).getTime()) / 1000);
   if (secs < 60) return secs + 's ago';
@@ -917,91 +1120,134 @@ function weatherIcon(status) {
 
 // ── FETCH STATUS ──
 async function fetchStatus() {
+  const dbgFetch = document.getElementById('dbg-fetch');
+  const dbgKeys  = document.getElementById('dbg-keys');
   try {
+    if (dbgFetch) dbgFetch.textContent = 'FETCHING...';
     const r = await fetch('/api/status');
-    if (!r.ok) return;
+    if (!r.ok) { if (dbgFetch) dbgFetch.textContent = 'HTTP ' + r.status; return; }
     piData = await r.json();
-    renderPiGrid();
+    if (dbgFetch) { dbgFetch.textContent = 'OK (' + Object.keys(piData).length + ' nodes)'; dbgFetch.style.color = '#00f5d4'; }
+    if (dbgKeys) dbgKeys.textContent = Object.keys(piData).join(', ') || 'empty';
+    renderNodeRoster();
     updateFleetStats();
+    buildFleetCharts();
     document.getElementById('sync-label').textContent = 'synced ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'});
-  } catch(e) {}
+  } catch(e) {
+    console.error('[fetchStatus]', e);
+    if (dbgFetch) { dbgFetch.textContent = 'ERROR: ' + e.message; dbgFetch.style.color = '#ff4b6e'; }
+  }
+}
+
+// ── METRIC COLOR HELPERS ──
+function metricClass(v, warn, crit) {
+  if (v == null) return 'mc-na';
+  if (v >= crit) return 'mc-crit';
+  if (v >= warn) return 'mc-warn';
+  return 'mc-ok';
+}
+function fmtMetric(v, unit, dec=0) {
+  return v != null ? v.toFixed(dec) + unit : '—';
+}
+function colorWithAlpha(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 }
 
 // ── FLEET STATS ──
 function updateFleetStats() {
-  const pis = Object.values(piData);
-  const total    = pis.length;
-  const online   = pis.filter(p => p.status === 'online').length;
-  const portfolio = pis.reduce((s,p) => s + (p.portfolio_value||0), 0);
-  const pending  = pis.reduce((s,p) => s + (p.pending_approvals||0), 0);
-  const positions = pis.reduce((s,p) => s + (p.open_positions||0), 0);
-  const trades   = pis.reduce((s,p) => s + (p.trades_today||0), 0);
+  const pis   = Object.values(piData);
+  const total  = pis.length;
+  const online = pis.filter(p => p.status === 'online' || p.status === 'active').length;
+  const notOk  = pis.filter(p => p.status !== 'online' && p.status !== 'active').length;
+
+  const cpuNodes  = pis.filter(p => p.cpu_percent != null);
+  const ramNodes  = pis.filter(p => p.ram_percent != null);
+  const tempNodes = pis.filter(p => p.cpu_temp   != null);
+
+  const avg = (arr, key) => arr.length ? arr.reduce((s,p) => s + p[key], 0) / arr.length : null;
+  const avgCpu  = avg(cpuNodes,  'cpu_percent');
+  const avgRam  = avg(ramNodes,  'ram_percent');
+  const avgTemp = avg(tempNodes, 'cpu_temp');
 
   const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
-  sv('fl-online', online);
-  sv('fl-total', 'of ' + total + ' registered');
-  sv('fl-portfolio', '$' + portfolio.toFixed(2));
-  sv('fl-pending', pending);
-  sv('fl-positions', positions);
-  sv('fl-trades', trades);
-  sv('pi-count', total + ' Pi' + (total===1?'':'s'));
 
-  // Issues count from todos
-  sv('fl-issues', allTodos.filter(t=>!t.resolved).length);
+  sv('fl-online',  online + (total ? ' / ' + total : ''));
+  sv('fl-total',   total === 0 ? 'No nodes registered' : notOk === 0 ? 'All reporting' : notOk + ' not reporting');
+  sv('fl-issues',  allTodos.filter(t=>!t.resolved).length);
+  sv('fl-cpu',     avgCpu  != null ? avgCpu.toFixed(1)  + '%'  : '—');
+  sv('fl-ram',     avgRam  != null ? avgRam.toFixed(1)  + '%'  : '—');
+  sv('fl-temp',    avgTemp != null ? avgTemp.toFixed(1) + '°C' : '—');
+
+  // Header pill
+  if (total === 0)       sv('pi-count', 'No Nodes');
+  else if (notOk === 0)  sv('pi-count', 'All Nodes Online');
+  else                   sv('pi-count', notOk + ' not reporting');
 }
 
-// ── PI GRID ──
-function renderPiGrid() {
-  const grid = document.getElementById('pi-grid');
+// ── NODE ROSTER TABLE ──
+function renderNodeRoster() {
+  const wrap = document.getElementById('node-roster');
   const pis  = Object.values(piData);
+
   if (!pis.length) {
-    grid.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px;grid-column:1/-1">No Pis registered yet. Waiting for first heartbeat...</div>';
+    wrap.innerHTML = '<div class="node-table-wrap"><div style="color:var(--muted);font-size:12px;padding:24px;text-align:center">No nodes registered yet. Waiting for first heartbeat\u2026</div></div>';
     return;
   }
-  // Sort: online first, then offline
+
   pis.sort((a,b) => {
-    const order = {online:0,warning:1,offline:2};
-    return (order[a.status]??3) - (order[b.status]??3);
+    const ord = {online:0,warning:1,fault:1,offline:2};
+    return (ord[a.status]??3) - (ord[b.status]??3);
   });
-  grid.innerHTML = pis.map(pi => {
+
+  const rows = pis.map(pi => {
     const sc   = statusClass(pi.status);
     const dc   = dotClass(pi.status);
-    const pnl  = pi.realized_gains || 0;
-    const pnlCls = pnl >= 0 ? 'teal' : 'pink';
-    const pnlStr = (pnl>=0?'+$':'-$') + Math.abs(pnl).toFixed(2);
-    const modeBadge = pi.kill_switch ? '<span class="pi-badge pb-kill">HALTED</span>'
-      : pi.operating_mode === 'AUTONOMOUS' ? '<span class="pi-badge pb-auto">AUTO</span>'
-      : '<span class="pi-badge pb-supervised">SUPERVISED</span>';
-    const tradeBadge = (pi.trading_mode||'PAPER') === 'PAPER'
-      ? '<span class="pi-badge pb-paper">PAPER</span>' : '';
-    const pendBadge = (pi.pending_approvals||0) > 0
-      ? '<span class="pi-badge pb-pend">' + pi.pending_approvals + ' pending</span>' : '';
-
-    return '<div class="pi-card ' + sc + '" onclick="openModal('' + pi.pi_id + '')">'
-      + '<div class="pi-card-top">'
-        + '<div class="pi-avatar">' + weatherIcon(pi.status) + '</div>'
-        + '<div class="pi-info">'
-          + '<div class="pi-name">' + (pi.label||pi.pi_id) + '</div>'
-          + '<div class="pi-email">' + (pi.email||'No email') + '</div>'
-          + '<div class="pi-id-tag">' + pi.pi_id + '</div>'
-        + '</div>'
-        + '<div class="status-dot-wrap">'
+    const load1 = pi.load_avg && pi.load_avg[0] != null ? pi.load_avg[0] : null;
+    return '<div class="node-row" data-piid="' + pi.pi_id + '" onclick="openModal(this.dataset.piid)">'
+      + '<div class="node-name-cell">'
+          + '<div class="node-micro-av">' + weatherIcon(pi.status) + '</div>'
+          + '<div><div class="node-lbl">' + escHtml(pi.label || pi.pi_id) + '</div>'
+              + '<div class="node-id-tag">' + pi.pi_id + '</div></div>'
+      + '</div>'
+      + '<div><div class="status-dot-wrap">'
           + '<div class="sdot ' + dc + '"></div>'
           + '<span class="status-text st-' + sc + '">' + pi.status + '</span>'
-        + '</div>'
-      + '</div>'
-      + '<div class="pi-stats">'
-        + '<div class="pi-stat"><div class="psl">Portfolio</div><div class="psv teal">$' + (pi.portfolio_value||0).toFixed(2) + '</div></div>'
-        + '<div class="pi-stat"><div class="psl">Positions</div><div class="psv ' + ((pi.open_positions||0)>0?'amber':'') + '">' + (pi.open_positions||0) + '</div></div>'
-        + '<div class="pi-stat"><div class="psl">P&L</div><div class="psv ' + pnlCls + '">' + pnlStr + '</div></div>'
-      + '</div>'
-      + '<div class="pi-footer">'
-        + modeBadge + tradeBadge + pendBadge
-        + '<span class="pi-uptime">' + (pi.uptime||'—') + ' up · ' + ageSince(pi.last_seen) + '</span>'
-      + '</div>'
+      + '</div></div>'
+      + '<div class="node-cell ' + metricClass(pi.cpu_percent, 70, 90) + '">'
+          + fmtMetric(pi.cpu_percent, '%') + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.ram_percent, 75, 90) + '">'
+          + fmtMetric(pi.ram_percent, '%') + '</div>'
+      + '<div class="node-cell ' + metricClass(load1, 1.5, 3.0) + '">'
+          + fmtMetric(load1, '', 2) + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.cpu_temp, 65, 80) + '">'
+          + fmtMetric(pi.cpu_temp, '\u00b0', 1) + '</div>'
+      + '<div class="node-cell ' + metricClass(pi.disk_percent, 75, 90) + '">'
+          + fmtMetric(pi.disk_percent, '%') + '</div>'
+      + '<div class="node-cell mc-na">' + (pi.uptime || '\u2014') + '</div>'
+      + '<div class="node-cell mc-na">' + ageSince(pi.last_seen) + '</div>'
     + '</div>';
   }).join('');
+
+  wrap.innerHTML =
+    '<div class="node-table-wrap">'
+    + '<div class="node-thead">'
+        + '<div class="node-th">Node</div>'
+        + '<div class="node-th">Status</div>'
+        + '<div class="node-th">CPU</div>'
+        + '<div class="node-th">RAM</div>'
+        + '<div class="node-th">Load</div>'
+        + '<div class="node-th">Temp</div>'
+        + '<div class="node-th">Disk</div>'
+        + '<div class="node-th">Uptime</div>'
+        + '<div class="node-th">Last Seen</div>'
+    + '</div>'
+    + rows
+    + '</div>';
 }
+
 
 // ── MODAL ──
 async function openModal(piId) {
@@ -1064,75 +1310,219 @@ async function switchTab(tab, btn) {
 
 function renderModalTab(tab, pi) {
   const body = document.getElementById('modal-body');
+
+  const mc  = (v,w,c) => v==null?'mc-na':v>=c?'mc-crit':v>=w?'mc-warn':'mc-ok';
+  const fmt = (v,u,d=0) => v!=null ? v.toFixed(d)+u : '\u2014';
+  const gb  = (v) => v!=null ? v.toFixed(2)+' GB' : '\u2014';
+
   if (tab === 'overview') {
-    const pnl = pi.realized_gains || 0;
-    const pos = pi.positions || [];
+    // ── Processor panel data ──
+    const cpuCls  = mc(pi.cpu_percent, 70, 90);
+    const load    = pi.load_avg || [];
+    const cores   = pi.cpu_count || '\u2014';
+    // ── Memory panel data ──
+    const ramTot  = pi.ram_total_gb  || 0;
+    const ramUsed = pi.ram_used_gb   || 0;
+    const ramCach = pi.ram_cached_gb || 0;
+    const ramFree = pi.ram_avail_gb  || 0;
+    const ramUsedPct  = ramTot ? Math.round(ramUsed / ramTot * 100) : 0;
+    const ramCachPct  = ramTot ? Math.round(ramCach / ramTot * 100) : 0;
+    const ramFreePct  = Math.max(0, 100 - ramUsedPct - ramCachPct);
+    // ── Disk panel data ──
+    const dskCls  = mc(pi.disk_percent, 75, 90);
+    const dskUsed = pi.disk_used_gb  || 0;
+    const dskTot  = pi.disk_total_gb || 0;
+    const dskFree = pi.disk_free_gb  || 0;
+    const dskPct  = pi.disk_percent  || 0;
+    // ── Temp panel data ──
+    const tmpCls  = mc(pi.cpu_temp, 65, 80);
+
     body.innerHTML =
-      '<div class="modal-stats">'
-        + '<div class="mstat"><div class="mstat-label">Portfolio</div><div class="mstat-val mv-teal">$' + (pi.portfolio_value||0).toFixed(2) + '</div><div class="mstat-sub">$' + (pi.cash||0).toFixed(2) + ' cash</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Realized P&L</div><div class="mstat-val ' + (pnl>=0?'mv-teal':'mv-pink') + '">' + (pnl>=0?'+$':'-$') + Math.abs(pnl).toFixed(2) + '</div><div class="mstat-sub">This month</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Positions</div><div class="mstat-val ' + ((pi.open_positions||0)>0?'mv-amber':'') + '">' + (pi.open_positions||0) + '</div><div class="mstat-sub">' + (pi.trades_today||0) + ' trades today</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Pending</div><div class="mstat-val ' + ((pi.pending_approvals||0)>0?'mv-amber':'') + '">' + (pi.pending_approvals||0) + '</div><div class="mstat-sub">Approvals</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Flags</div><div class="mstat-val ' + ((pi.urgent_flags||0)>0?'mv-pink':'') + '">' + (pi.urgent_flags||0) + '</div><div class="mstat-sub">Urgent</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Uptime</div><div class="mstat-val" style="font-size:16px">' + (pi.uptime||'N/A') + '</div><div class="mstat-sub">Since last reboot</div></div>'
+      // ── 2x2 Panel Grid ──────────────────────────────────────────────────
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+
+        // PROCESSOR panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Processor</div>'
+            + '<div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:8px">'
+                + '<div class="' + cpuCls + '" style="font-size:32px;font-weight:700;line-height:1;font-family:var(--mono)">' + fmt(pi.cpu_percent,'%') + '</div>'
+                + '<div style="padding-bottom:4px">'
+                    + '<div style="font-size:10px;color:var(--muted)">' + cores + ' cores</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">load ' + (load[0]!=null?load[0].toFixed(2):'\u2014') + '</div>'
+                + '</div>'
+            + '</div>'
+            + '<div style="height:40px;position:relative"><canvas id="mc-cpu-spark"></canvas></div>'
+            + '<div style="display:flex;gap:16px;margin-top:6px">'
+                + '<div><div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em">5m avg</div>'
+                    + '<div style="font-size:11px;font-family:var(--mono);color:var(--muted)">' + (load[1]!=null?load[1].toFixed(2):'\u2014') + '</div></div>'
+                + '<div><div style="font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em">15m avg</div>'
+                    + '<div style="font-size:11px;font-family:var(--mono);color:var(--muted)">' + (load[2]!=null?load[2].toFixed(2):'\u2014') + '</div></div>'
+            + '</div>'
+        + '</div>'
+
+        // MEMORY panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Memory</div>'
+            + '<div style="display:flex;align-items:center;gap:12px">'
+                // Donut chart
+                + '<div style="position:relative;width:72px;height:72px;flex-shrink:0">'
+                    + '<canvas id="mc-ram-donut" width="72" height="72"></canvas>'
+                    + '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">'
+                        + '<div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--teal)">' + ramUsedPct + '%</div>'
+                    + '</div>'
+                + '</div>'
+                // Breakdown table
+                + '<div style="flex:1;display:flex;flex-direction:column;gap:4px">'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:var(--teal);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Used</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--teal)">' + gb(pi.ram_used_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:var(--purple);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Cached</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--purple)">' + gb(pi.ram_cached_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="display:flex;align-items:center;gap:6px">'
+                        + '<div style="width:8px;height:8px;border-radius:2px;background:rgba(255,255,255,0.1);flex-shrink:0"></div>'
+                        + '<div style="font-size:10px;color:var(--muted);flex:1">Free</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--dim)">' + gb(pi.ram_avail_gb) + '</div>'
+                    + '</div>'
+                    + '<div style="margin-top:2px;padding-top:4px;border-top:1px solid var(--border);display:flex;justify-content:space-between">'
+                        + '<div style="font-size:9px;color:var(--dim)">Total</div>'
+                        + '<div style="font-size:10px;font-family:var(--mono);color:var(--muted)">' + gb(pi.ram_total_gb) + '</div>'
+                    + '</div>'
+                + '</div>'
+            + '</div>'
+        + '</div>'
+
+        // STORAGE panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Storage</div>'
+            + '<div style="display:flex;justify-content:space-between;margin-bottom:8px">'
+                + '<div class="' + dskCls + '" style="font-size:28px;font-weight:700;font-family:var(--mono);line-height:1">' + fmt(pi.disk_percent,'%') + '</div>'
+                + '<div style="text-align:right">'
+                    + '<div style="font-size:10px;color:var(--muted)">Used: ' + gb(pi.disk_used_gb) + '</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">Free: ' + gb(pi.disk_free_gb) + '</div>'
+                    + '<div style="font-size:10px;color:var(--dim)">Total: ' + gb(pi.disk_total_gb) + '</div>'
+                + '</div>'
+            + '</div>'
+            // Fill bar
+            + '<div style="height:6px;border-radius:99px;background:rgba(255,255,255,0.07);overflow:hidden;margin-bottom:4px">'
+                + '<div style="height:100%;width:' + dskPct + '%;border-radius:99px;background:' + (dskPct>=90?'var(--pink)':dskPct>=75?'var(--amber)':'var(--teal)') + ';transition:width 0.4s"></div>'
+            + '</div>'
+            + '<div style="font-size:9px;color:var(--dim)">/ (root filesystem)</div>'
+        + '</div>'
+
+        // THERMAL & UPTIME panel
+        + '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:14px">'
+            + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Thermal &amp; Uptime</div>'
+            + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+                + '<div style="width:36px;height:36px;border-radius:9px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center">'
+                    + '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">'
+                        + '<rect x="8.5" y="2" width="3" height="11" rx="1.5" fill="rgba(255,255,255,0.15)"/>'
+                        + '<rect x="9" y="2.5" width="2" height="' + (pi.cpu_temp!=null?Math.min(10,pi.cpu_temp/10).toFixed(1):'5') + '" rx="1" fill="' + (tmpCls==='mc-crit'?'#ff4b6e':tmpCls==='mc-warn'?'#ffb347':'#00f5d4') + '"/>'
+                        + '<circle cx="10" cy="14.5" r="2.5" fill="' + (tmpCls==='mc-crit'?'#ff4b6e':tmpCls==='mc-warn'?'#ffb347':'#00f5d4') + '"/>'
+                    + '</svg>'
+                + '</div>'
+                + '<div>'
+                    + '<div class="' + tmpCls + '" style="font-size:22px;font-weight:700;font-family:var(--mono);line-height:1">' + fmt(pi.cpu_temp,'\u00b0C',1) + '</div>'
+                    + '<div style="font-size:9px;color:var(--dim);margin-top:2px">CPU Temperature</div>'
+                + '</div>'
+            + '</div>'
+            + '<div style="border-top:1px solid var(--border);padding-top:10px">'
+                + '<div style="font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px">Uptime</div>'
+                + '<div style="font-size:16px;font-weight:600;color:var(--text);font-family:var(--mono)">' + (pi.uptime||'N/A') + '</div>'
+                + '<div style="font-size:9px;color:var(--dim);margin-top:6px">Mode: ' + (pi.operating_mode||'MANAGED') + ' &nbsp;&middot;&nbsp; ' + (pi.trading_mode||'PAPER') + '</div>'
+            + '</div>'
+        + '</div>'
+
       + '</div>'
-      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Open Positions</div>'
-      + '<div style="margin-bottom:14px">'
-      + (pos.length ? pos.map(p => {
-          const pnl2 = p.pnl || 0;
-          return '<div class="pos-row">'
-            + '<div class="pos-chip">' + (p.ticker||'?').slice(0,4) + '</div>'
-            + '<div><div class="pos-ticker-t">' + p.ticker + '</div><div class="pos-shares-t">' + (p.shares||0).toFixed(2) + ' @ $' + (p.entry_price||0).toFixed(2) + '</div></div>'
-            + '<div class="pos-pnl-t ' + (pnl2>=0?'mv-teal':'mv-pink') + '">' + (pnl2>=0?'+$':'-$') + Math.abs(pnl2).toFixed(2) + '</div>'
-            + '</div>';
-        }).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px 0">No open positions</div>')
-      + '</div>'
-      + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Agent Status</div>'
+
+      // ── Agents / Process List ──────────────────────────────────────────────
+      + '<div style="font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Agents</div>'
       + renderAgents(pi.agents||{});
+
+    // Draw micro charts after DOM ready
+    setTimeout(() => {
+      // CPU sparkline
+      const cpuCtx = document.getElementById('mc-cpu-spark');
+      if (cpuCtx) {
+        const hist = (pi.history||[]).filter(h=>h.cpu!=null);
+        const vals = hist.map(h=>h.cpu);
+        if (vals.length > 1) {
+          const g = cpuCtx.getContext('2d').createLinearGradient(0,0,0,40);
+          g.addColorStop(0,'rgba(0,245,212,0.25)'); g.addColorStop(1,'rgba(0,245,212,0)');
+          new Chart(cpuCtx, { type:'line', data:{ labels:vals.map((_,i)=>i),
+            datasets:[{data:vals,borderColor:'#00f5d4',borderWidth:1.5,fill:true,
+              backgroundColor:g,tension:0.4,pointRadius:0}]},
+            options:{animation:false,responsive:true,maintainAspectRatio:false,
+              plugins:{legend:{display:false},tooltip:{enabled:false}},
+              scales:{x:{display:false},y:{display:false,min:0,max:100}}}});
+        }
+      }
+      // RAM donut
+      const ramCtx = document.getElementById('mc-ram-donut');
+      if (ramCtx) {
+        new Chart(ramCtx, { type:'doughnut',
+          data:{ datasets:[{
+            data:[ramUsedPct, ramCachPct, ramFreePct],
+            backgroundColor:['rgba(0,245,212,0.85)','rgba(123,97,255,0.75)','rgba(255,255,255,0.07)'],
+            borderWidth:0, hoverOffset:0,
+          }]},
+          options:{cutout:'68%',animation:false,
+            plugins:{legend:{display:false},tooltip:{enabled:false}}}});
+      }
+    }, 30);
 
   } else if (tab === 'performance') {
     body.innerHTML =
       '<div class="modal-graph-wrap">'
-        + '<div class="modal-graph-title">Portfolio History</div>'
-        + '<div class="modal-graph-canvas"><canvas id="modal-chart"></canvas></div>'
+        + '<div class="modal-graph-title">CPU Usage %</div>'
+        + '<div class="modal-graph-canvas"><canvas id="modal-chart-cpu"></canvas></div>'
       + '</div>'
-      + '<div class="modal-stats">'
-        + '<div class="mstat"><div class="mstat-label">Mode</div><div class="mstat-val" style="font-size:14px">' + (pi.operating_mode||'SUPERVISED') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Trading</div><div class="mstat-val" style="font-size:14px">' + (pi.trading_mode||'PAPER') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Kill Switch</div><div class="mstat-val ' + (pi.kill_switch?'mv-pink':'mv-teal') + '" style="font-size:14px">' + (pi.kill_switch?'ACTIVE':'CLEAR') + '</div></div>'
+      + '<div class="modal-graph-wrap" style="margin-top:12px">'
+        + '<div class="modal-graph-title">Memory Usage %</div>'
+        + '<div class="modal-graph-canvas"><canvas id="modal-chart-ram"></canvas></div>'
       + '</div>';
 
-    // Draw chart
     setTimeout(() => {
-      const hist = pi.history || [];
-      const ctx = document.getElementById('modal-chart');
-      if (!ctx || !hist.length) return;
-      const labels = hist.map(h => new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit'}));
-      const values = hist.map(h => h.v);
-      const grad = ctx.getContext('2d').createLinearGradient(0,0,0,100);
-      grad.addColorStop(0, 'rgba(0,245,212,0.2)');
-      grad.addColorStop(1, 'rgba(0,245,212,0)');
-      if (modalChartInst) modalChartInst.destroy();
-      modalChartInst = new Chart(ctx, {
-        type: 'line',
-        data: { labels, datasets: [{
-          data: values, borderColor: '#00f5d4', borderWidth: 2,
-          fill: true, backgroundColor: grad, tension: 0.4,
-          pointRadius: 0, pointHitRadius: 8,
-        }]},
-        options: {
-          responsive:true, maintainAspectRatio:false,
-          plugins:{legend:{display:false},tooltip:{
-            backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(0,245,212,0.3)',borderWidth:1,
-            titleColor:'rgba(255,255,255,0.5)',bodyColor:'#00f5d4',bodyFont:{weight:'bold'},
-            callbacks:{label:c=>'$'+c.parsed.y.toFixed(2)}
-          }},
-          scales:{
-            x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:6}},
-            y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>'$'+v.toFixed(0)},position:'right'}
+      const hist = (pi.history || []).filter(h => h.cpu != null || h.ram != null);
+      if (!hist.length) {
+        body.innerHTML += '<div style="color:var(--muted);font-size:11px;text-align:center;padding:12px">No metric history yet \u2014 awaiting next heartbeat</div>';
+        return;
+      }
+      const labels = hist.map(h => new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}));
+      const mkChart = (canvasId, data, color, unit) => {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return null;
+        const grad = ctx.getContext('2d').createLinearGradient(0,0,0,100);
+        grad.addColorStop(0, colorWithAlpha(color, 0.18));
+        grad.addColorStop(1, colorWithAlpha(color, 0.0));
+        return new Chart(ctx, {
+          type: 'line',
+          data: { labels, datasets: [{
+            data, borderColor: color, borderWidth: 2,
+            fill: true, backgroundColor: grad, tension: 0.4,
+            pointRadius: 0, pointHitRadius: 8, spanGaps: true,
+          }]},
+          options: {
+            responsive:true, maintainAspectRatio:false,
+            plugins:{legend:{display:false},tooltip:{
+              backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
+              titleColor:'rgba(255,255,255,0.5)',bodyColor:color,bodyFont:{weight:'bold'},
+              callbacks:{label:c=>c.parsed.y.toFixed(1)+unit}
+            }},
+            scales:{
+              x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:6}},
+              y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>v+unit},min:0,max:100,position:'right'}
+            }
           }
-        }
-      });
+        });
+      };
+      if (modalChartInst) { modalChartInst.destroy(); modalChartInst = null; }
+      modalChartInst = mkChart('modal-chart-cpu', hist.map(h=>h.cpu), '#00f5d4', '%');
+      mkChart('modal-chart-ram', hist.map(h=>h.ram), '#7b61ff', '%');
     }, 50);
 
   } else if (tab === 'logs') {
@@ -1140,22 +1530,20 @@ function renderModalTab(tab, pi) {
     body.innerHTML =
       '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Recent Errors</div>'
       + (errors.length
-          ? '<div class="error-log">' + errors.map(e => escHtml(e)).join('\n') + '</div>'
-          : '<div class="error-log empty">✓ No recent errors</div>')
+          ? '<div class="error-log">' + errors.map(e => escHtml(e)).join('\\n') + '</div>'
+          : '<div class="error-log empty">\u2713 No recent errors</div>')
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">Agent Status</div>'
       + renderAgents(pi.agents||{})
-      + '<div style="font-size:10px;color:var(--muted);margin-top:12px">Full logs available in customer portal at ' + (pi.pi_id||'') + ':5001/logs</div>';
+      + '<div style="font-size:10px;color:var(--muted);margin-top:12px">Full logs: ' + (pi.pi_id||'') + ':5001/logs</div>';
 
   } else if (tab === 'admin') {
     body.innerHTML =
       '<div class="modal-stats" style="grid-template-columns:1fr 1fr;margin-bottom:16px">'
-        + '<div class="mstat"><div class="mstat-label">Customer</div><div class="mstat-val" style="font-size:14px;word-break:break-all">' + (pi.label||'—') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">Email</div><div class="mstat-val" style="font-size:12px;word-break:break-all"><a href="mailto:' + (pi.email||'') + '" style="color:var(--teal)">' + (pi.email||'—') + '</a></div></div>'
-        + '<div class="mstat"><div class="mstat-label">Pi ID</div><div class="mstat-val" style="font-size:11px;font-family:var(--mono)">' + (pi.pi_id||'—') + '</div></div>'
-        + '<div class="mstat"><div class="mstat-label">First Seen</div><div class="mstat-val" style="font-size:12px">' + (pi.first_seen||'—').slice(0,10) + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Node</div><div class="mstat-val" style="font-size:14px;word-break:break-all">' + (pi.label||'\u2014') + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">Contact</div><div class="mstat-val" style="font-size:12px;word-break:break-all"><a href="mailto:' + (pi.email||'') + '" style="color:var(--teal)">' + (pi.email||'\u2014') + '</a></div></div>'
+        + '<div class="mstat"><div class="mstat-label">Pi ID</div><div class="mstat-val" style="font-size:11px;font-family:var(--mono)">' + (pi.pi_id||'\u2014') + '</div></div>'
+        + '<div class="mstat"><div class="mstat-label">First Seen</div><div class="mstat-val" style="font-size:12px">' + (pi.first_seen||'\u2014').slice(0,10) + '</div></div>'
       + '</div>'
-
-      // Key update form — pushes to Pi portal which writes to .env
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Update Keys on Pi</div>'
       + '<div style="font-size:11px;color:var(--amber);background:rgba(255,179,71,0.06);border:1px solid rgba(255,179,71,0.15);border-radius:8px;padding:8px 10px;margin-bottom:12px">'
         + '&#9888; Keys are sent directly to the Pi portal at ' + (pi.pi_id||'?') + ':5001 and written to .env'
@@ -1168,32 +1556,57 @@ function renderModalTab(tab, pi) {
         + '<div><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Alpaca Secret</div>'
           + '<input id="adm-alpaca-secret" type="password" placeholder="Secret..." style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
         + '<div><div style="font-size:10px;color:var(--muted);margin-bottom:4px">Alert Email</div>'
-          + '<input id="adm-alert-to" type="email" placeholder="customer@email.com" style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
+          + '<input id="adm-alert-to" type="email" placeholder="node@email.com" style="width:100%;padding:7px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;outline:none"></div>'
       + '</div>'
       + '<div style="display:flex;gap:8px;margin-bottom:16px">'
-        + '<button onclick="pushKeysToPi(\'' + (pi.pi_id||'') + '\')" style="padding:9px 18px;border-radius:10px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push Keys to Pi</button>'
+        + '<button data-piid="' + (pi.pi_id||'') + '" onclick="pushKeysToPi(this.dataset.piid)" style="padding:9px 18px;border-radius:10px;background:var(--teal2);border:1px solid rgba(0,245,212,0.3);color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans)">Push Keys to Pi</button>'
         + '<div id="adm-key-result-' + (pi.pi_id||'') + '" style="font-size:11px;color:var(--muted);align-self:center"></div>'
       + '</div>'
-
       + '<div style="font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Danger Zone</div>'
       + '<div style="display:flex;flex-direction:column;gap:8px">'
-        + '<button onclick="promptDelete(\'' + pi.pi_id + '\')" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Pi from Registry</button>'
+        + '<button data-piid="' + pi.pi_id + '" onclick="promptDelete(this.dataset.piid)" style="padding:10px 16px;border-radius:10px;background:var(--pink2);border:1px solid rgba(255,75,110,0.25);color:var(--pink);font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:var(--sans)">Remove Node from Registry</button>'
       + '</div>';
   }
 }
 
+
 function renderAgents(agents) {
-  const names = {'trade_logic_agent':'Trade Logic','news_agent':'News','market_sentiment_agent':'Market Sentiment'};
-  const list = Object.keys(names);
-  return '<div>' + list.map(k => {
-    const status = agents[k];
-    const hasStatus = !!status;
-    return '<div class="agent-row">'
-      + '<div class="agent-dot" style="background:' + (hasStatus?'var(--teal)':'var(--muted)') + ';box-shadow:' + (hasStatus?'0 0 5px var(--teal)':'none') + '"></div>'
-      + '<span class="agent-name">' + names[k] + '</span>'
-      + '<span class="agent-status">' + (status||'No data') + '</span>'
+  // Known agent descriptive names — add entries as agents report in
+  const knownNames = {
+    'retail_trade_logic_agent':     'Trade Logic',
+    'retail_news_agent':            'News',
+    'retail_market_sentiment_agent':'Market Sentiment',
+    'retail_sector_screener':       'Screener',
+    'retail_scheduler':             'Scheduler',
+    'retail_heartbeat':             'Heartbeat',
+    'retail_watchdog':              'Watchdog',
+    'retail_health_check':          'Health Check',
+    // Legacy names (pre-rename)
+    'trade_logic_agent':            'Trade Logic',
+    'news_agent':                   'News',
+    'market_sentiment_agent':       'Market Sentiment',
+  };
+  // Render whatever agents are reported (fall back to raw key if name unknown)
+  const keys = Object.keys(agents);
+  if (!keys.length) return '<div style="color:var(--muted);font-size:11px;padding:12px 0;text-align:center">No agent data received yet</div>';
+  return '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+    + keys.map((k,i) => {
+      const status = agents[k];
+      const label  = knownNames[k] || k;
+      const isOk   = status && status !== 'fault' && status !== 'error';
+      const isFault= status === 'fault' || status === 'error';
+      const dotClr = isFault ? 'var(--pink)' : isOk ? 'var(--teal)' : 'var(--muted)';
+      const dotGlw = isFault ? '0 0 5px var(--pink)' : isOk ? '0 0 5px var(--teal)' : 'none';
+      const stClr  = isFault ? 'var(--pink)' : isOk ? 'rgba(255,255,255,0.45)' : 'var(--dim)';
+      return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;'
+          + (i > 0 ? 'border-top:1px solid var(--border);' : '')
+          + '">'
+        + '<div style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:' + dotClr + ';box-shadow:' + dotGlw + '"></div>'
+        + '<span style="font-size:11px;font-weight:600;font-family:var(--mono);color:var(--text);flex:1">' + label + '</span>'
+        + '<span style="font-size:10px;font-family:var(--mono);color:' + stClr + '">' + (status||'—') + '</span>'
+      + '</div>';
+    }).join('')
     + '</div>';
-  }).join('') + '</div>';
 }
 
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1246,7 +1659,7 @@ function renderTodos() {
         + '<div class="todo-meta">' + (t.pi_id||'') + ' · ' + (t.date||'') + ' · ' + (t.category||'') + '</div>'
         + (t.action ? '<div class="todo-action">→ ' + escHtml(t.action) + '</div>' : '')
       + '</div>'
-      + '<button class="resolve-btn" onclick="resolveTodo('' + CSS.escape(t.id) + '',event)">Done</button>'
+      + '<button class="resolve-btn" data-todoid="' + CSS.escape(t.id) + '" onclick="resolveTodo(this.dataset.todoid,event)">Done</button>'
     + '</div>'
   ).join('');
 }
@@ -1308,6 +1721,64 @@ async function resolveTodo(id, e) {
   toast('✓ Issue resolved', 'ok');
 }
 
+// ── FLEET CHARTS ──
+const CHART_COLORS = ['#00f5d4','#7b61ff','#ffb347','#ff4b6e','#a78bfa','#67e8f9'];
+let cpuChartInst = null;
+let ramChartInst = null;
+
+function buildFleetCharts() {
+  const pis  = Object.values(piData).filter(p => p.history && p.history.length > 1);
+  if (!pis.length) return;
+
+  const cpuCtx = document.getElementById('cpu-chart');
+  const ramCtx = document.getElementById('ram-chart');
+  if (!cpuCtx || !ramCtx) return;
+
+  // Use the longest history for labels
+  const refPi = pis.reduce((a,b) => a.history.length >= b.history.length ? a : b);
+  const labels = refPi.history.map(h =>
+    new Date(h.t).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})
+  );
+
+  const mkDatasets = (histKey, alpha) => pis
+    .filter(p => p.history.some(h => h[histKey] != null))
+    .map((pi, i) => {
+      const color = CHART_COLORS[i % CHART_COLORS.length];
+      return {
+        label: pi.label || pi.pi_id,
+        data:  pi.history.map(h => h[histKey] != null ? h[histKey] : null),
+        borderColor: color, borderWidth: 2,
+        fill: true, backgroundColor: colorWithAlpha(color, alpha),
+        tension: 0.4, pointRadius: 0, pointHitRadius: 8, spanGaps: true,
+      };
+    });
+
+  const chartOpts = unit => ({
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: pis.length > 1, position: 'bottom',
+                labels:{color:'rgba(255,255,255,0.4)',font:{size:9},boxWidth:8,padding:8}},
+      tooltip: {
+        backgroundColor:'rgba(13,17,32,0.95)',borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
+        titleColor:'rgba(255,255,255,0.5)',bodyColor:'rgba(255,255,255,0.85)',
+        callbacks:{label:c=>(c.dataset.label||'')+': '+c.parsed.y.toFixed(1)+unit}
+      }
+    },
+    scales: {
+      x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},maxTicksLimit:8}},
+      y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'rgba(255,255,255,0.3)',font:{size:9},callback:v=>v+unit},min:0,max:100,position:'right'}
+    }
+  });
+
+  if (cpuChartInst) cpuChartInst.destroy();
+  if (ramChartInst) ramChartInst.destroy();
+
+  const cpuDs = mkDatasets('cpu', 0.1);
+  const ramDs = mkDatasets('ram', 0.1);
+  if (cpuDs.length) cpuChartInst = new Chart(cpuCtx, {type:'line', data:{labels,datasets:cpuDs}, options:chartOpts('%')});
+  if (ramDs.length) ramChartInst = new Chart(ramCtx, {type:'line', data:{labels,datasets:ramDs}, options:chartOpts('%')});
+}
+
 // ── COUNTDOWN ──
 let countdown = 30;
 function tickCountdown() {
@@ -1315,9 +1786,74 @@ function tickCountdown() {
   if (countdown <= 0) { countdown = 30; fetchStatus(); }
 }
 
+// ── ADMIN OVERRIDES ──
+let admOverrides = {trading_gate:'ALL', operating_mode:'ALL'};
+
+async function fetchAdminOverrides() {
+  try {
+    const r = await fetch('/api/admin-override');
+    if (r.ok) { admOverrides = await r.json(); renderAdmButtons(); }
+  } catch(e) { console.log('Override fetch error:', e); }
+}
+
+function renderAdmButtons() {
+  document.querySelectorAll('.adm-toggle').forEach(btn => {
+    const field = btn.dataset.field;
+    const val   = btn.dataset.val;
+    btn.classList.toggle('active', admOverrides[field] === val);
+  });
+  const gs = document.getElementById('adm-gate-sub');
+  const ms = document.getElementById('adm-mode-sub');
+  if (gs) gs.textContent = admOverrides.trading_gate === 'ALL' ? 'Customers choose' : 'Forced: ' + admOverrides.trading_gate;
+  if (ms) ms.textContent = admOverrides.operating_mode === 'ALL' ? 'Customers choose' : 'Forced: ' + admOverrides.operating_mode;
+}
+
+async function setAdmOverride(field, val) {
+  const payload = {...admOverrides, [field]: val};
+  try {
+    const r = await fetch('/api/admin-override', {
+      method:'POST',
+      headers:{'Content-Type':'application/json', 'X-Token': document.cookie.replace(/(?:(?:^|.*;\\s*)auth\\s*=\\s*([^;]*).*$)|^.*$/, '$1')},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      admOverrides = payload;
+      renderAdmButtons();
+      const pushed = d.pushed_to ? d.pushed_to.length : 0;
+      const errs   = d.errors ? d.errors.length : 0;
+      const msg    = field === 'trading_gate'
+        ? (val === 'ALL' ? 'Trading gate unlocked' : 'Trading gate forced to ' + val)
+        : (val === 'ALL' ? 'Operating mode unlocked' : 'Operating mode forced to ' + val);
+      showToast(msg + (pushed ? ' · pushed to ' + pushed + ' node(s)' : '') + (errs ? ' · ' + errs + ' error(s)' : ''));
+    }
+  } catch(e) { showToast('Override push failed: ' + e.message); }
+}
+
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('adm-toggle')) {
+    setAdmOverride(e.target.dataset.field, e.target.dataset.val);
+  }
+});
+
+function showToast(msg) {
+  let t = document.getElementById('adm-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'adm-toast';
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--teal);color:var(--teal);padding:10px 20px;border-radius:10px;font-size:12px;font-weight:600;z-index:9999;opacity:0;transition:opacity 0.3s';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = '1';
+  setTimeout(() => t.style.opacity = '0', 3000);
+}
+
 // ── INIT ──
+/* DBG */ try { document.getElementById('dbg-keys').textContent = 'INIT REACHED'; } catch(e){}
 fetchStatus();
 fetchTodos();
+fetchAdminOverrides();
 setInterval(tickCountdown, 1000);
 setInterval(fetchTodos, 120000);
 </script>
@@ -1326,7 +1862,13 @@ setInterval(fetchTodos, 120000);
 
 @app.route("/console")
 def console():
-    return render_template_string(DASHBOARD, secret_token=SECRET_TOKEN)
+    import datetime as _dt
+    from flask import make_response
+    resp = make_response(render_template_string(DASHBOARD, secret_token=SECRET_TOKEN, build_ts=_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 # keep old / route as JSON redirect
 @app.route("/health")
@@ -1681,7 +2223,7 @@ function renderPiTabs() {
     return;
   }
   wrap.innerHTML = pis.map(pi =>
-    '<button class="pi-tab" id="tab-' + pi.pi_id + '" onclick="loadPiData(\'' + pi.pi_id + '\')">'
+    '<button class="pi-tab" id="tab-' + pi.pi_id + '" data-piid="' + pi.pi_id + '" onclick="loadPiData(this.dataset.piid)">'
     + (pi.label || pi.pi_id)
     + '</button>'
   ).join('');
@@ -1888,7 +2430,8 @@ if __name__ == "__main__":
         print("[Synthos Monitor]   Run install_monitor.py to generate one.")
         raise SystemExit(1)
 
-    load_registry()  # restore Pi state from last run
+    load_registry()   # restore Pi state from last run
+    load_overrides()  # restore admin override state
 
     # Register digest agent blueprint
     try:
@@ -1900,6 +2443,79 @@ if __name__ == "__main__":
 
     t = threading.Thread(target=silence_detector, daemon=True)
     t.start()
+
+    # ── Self-heartbeat: monitor node reports its own metrics to itself ─────────
+    def _self_heartbeat_loop():
+        """
+        Post this monitor node's own system metrics to /heartbeat every 5 minutes.
+        Allows the node roster to show pi2w_monitor_node's CPU/RAM/temp inline
+        with all other nodes — no external agent needed.
+        """
+        self_pi_id    = os.getenv("PI_ID",    "pi2w-monitor")
+        self_pi_label = os.getenv("PI_LABEL", "Monitor Node")
+        self_url      = f"http://127.0.0.1:{PORT}/heartbeat"
+        interval      = int(os.getenv("SELF_HB_INTERVAL", "300"))  # default 5 min
+
+        time.sleep(10)  # let Flask finish starting
+        while True:
+            try:
+                import psutil as _ps
+                vm   = _ps.virtual_memory()
+                du   = _ps.disk_usage('/')
+                net  = _ps.net_io_counters()
+                load = os.getloadavg()
+                gb   = 1024 ** 3
+
+                cpu_t = None
+                try:
+                    with open('/sys/class/thermal/thermal_zone0/temp') as _f:
+                        cpu_t = round(int(_f.read().strip()) / 1000, 1)
+                except Exception:
+                    pass
+
+                cached_bytes = getattr(vm, 'cached', 0) + getattr(vm, 'buffers', 0)
+
+                payload = {
+                    "pi_id":          self_pi_id,
+                    "label":          self_pi_label,
+                    "agents":         {"synthos_monitor": "active"},
+                    "operating_mode": "MANAGED",
+                    "trading_mode":   "PAPER",
+                    "kill_switch":    False,
+                    # CPU
+                    "cpu_percent":    round(_ps.cpu_percent(interval=0.5), 1),
+                    "cpu_count":      _ps.cpu_count(logical=True),
+                    "load_avg":       [round(load[0],2), round(load[1],2), round(load[2],2)],
+                    # RAM
+                    "ram_percent":    round(vm.percent, 1),
+                    "ram_total_gb":   round(vm.total     / gb, 2),
+                    "ram_used_gb":    round(vm.used      / gb, 2),
+                    "ram_avail_gb":   round(vm.available / gb, 2),
+                    "ram_cached_gb":  round(cached_bytes / gb, 2),
+                    # Disk
+                    "disk_percent":   round(du.percent, 1),
+                    "disk_total_gb":  round(du.total / gb, 1),
+                    "disk_used_gb":   round(du.used  / gb, 1),
+                    "disk_free_gb":   round(du.free  / gb, 1),
+                    # Network
+                    "net_bytes_sent": net.bytes_sent,
+                    "net_bytes_recv": net.bytes_recv,
+                    # Temp
+                    "cpu_temp":       cpu_t,
+                }
+                import requests as _req
+                _req.post(self_url, json=payload,
+                          headers={"X-Token": SECRET_TOKEN}, timeout=5)
+                print(f"[SelfHB] Posted — CPU {payload['cpu_percent']}%  "
+                      f"RAM {payload['ram_percent']}%  Temp {cpu_t}°C")
+            except Exception as _e:
+                print(f"[SelfHB] Failed: {_e}")
+            time.sleep(interval)
+
+    sh = threading.Thread(target=_self_heartbeat_loop, daemon=True)
+    sh.start()
+    # ──────────────────────────────────────────────────────────────────────────
+
     print(f"[Synthos Monitor] Running on port {PORT}")
     print(f"[Synthos Monitor] Console at http://0.0.0.0:{PORT}/console")
     if COMPANY_URL:

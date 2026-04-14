@@ -28,6 +28,36 @@ import os
 import logging
 from dotenv import load_dotenv
 
+def _system_metrics() -> dict:
+    """
+    Collect CPU, RAM, load average, CPU temperature, and disk usage.
+    Returns a dict with float values or None for each metric.
+    Requires psutil (install: pip install psutil). Fails silently if unavailable.
+    """
+    metrics = {
+        'cpu_percent':  None,
+        'ram_percent':  None,
+        'load_avg':     None,
+        'cpu_temp':     None,
+        'disk_percent': None,
+    }
+    try:
+        import psutil
+        metrics['cpu_percent']  = round(psutil.cpu_percent(interval=0.5), 1)
+        metrics['ram_percent']  = round(psutil.virtual_memory().percent, 1)
+        metrics['disk_percent'] = round(psutil.disk_usage('/').percent, 1)
+        load = os.getloadavg()
+        metrics['load_avg'] = [round(load[0], 2), round(load[1], 2), round(load[2], 2)]
+    except Exception:
+        pass
+    try:
+        # Raspberry Pi thermal zone — /sys/class/thermal/thermal_zone0/temp (millidegrees C)
+        with open('/sys/class/thermal/thermal_zone0/temp') as f:
+            metrics['cpu_temp'] = round(int(f.read().strip()) / 1000, 1)
+    except Exception:
+        pass
+    return metrics
+
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 log = logging.getLogger('heartbeat')
@@ -53,6 +83,9 @@ def _build_payload(agent_name: str, status: str) -> dict:
     operating_mode = os.environ.get('OPERATING_MODE', 'SUPERVISED').upper()
     trading_mode   = os.environ.get('TRADING_MODE', 'PAPER').upper()
 
+    # Collect system metrics first (non-blocking)
+    sys_metrics = _system_metrics()
+
     payload = {
         'pi_id':             pi_id,
         'label':             pi_label,
@@ -68,6 +101,12 @@ def _build_payload(agent_name: str, status: str) -> dict:
         'pending_approvals': 0,
         'urgent_flags':      0,
         'positions':         [],
+        # System health metrics
+        'cpu_percent':       sys_metrics['cpu_percent'],
+        'ram_percent':       sys_metrics['ram_percent'],
+        'load_avg':          sys_metrics['load_avg'],
+        'cpu_temp':          sys_metrics['cpu_temp'],
+        'disk_percent':      sys_metrics['disk_percent'],
     }
 
     try:
