@@ -7,10 +7,15 @@ market hours. Runs continuously from 9:10 AM to 4:00 PM ET.
 
 Architecture:
     1. Pre-market prep (9:15): screener → news → sentiment → price poll → trade
-    2. Market open (9:30): continuous trade evaluation loop
-    3. Enrichment every 30m: screener + sentiment + news interleaved
-    4. Price poller: runs every cycle (~2s, keeps live_prices table fresh)
-    5. Market close (4:00): final close-session trade evaluation, then exit
+    2. Market open (9:30): first trade evaluation (signals from prep)
+    3. Every 30 min: enrichment (screener → sentiment → news) → full trade eval
+    4. Every 10 min: lightweight reconciliation + exit checks only (no new signal eval)
+    5. Every 60 sec: price poller (keeps live_prices fresh for portal)
+    6. Market close (4:00): final close-session trade evaluation, then exit
+
+    The trade agent only runs full signal evaluation after enrichment brings
+    new data. Between enrichments, only reconciliation and exit checks run.
+    This eliminates wasted cycles while keeping position monitoring responsive.
 
 Kill switch behavior:
     - Kill switch ONLY stops trade execution
@@ -75,7 +80,9 @@ MARKET_OPEN_HOUR = 9
 MARKET_OPEN_MIN = 30
 MARKET_CLOSE_HOUR = 16
 MARKET_CLOSE_MIN = 0
-ENRICHMENT_INTERVAL_MIN = 30    # run sentiment+news every N minutes
+ENRICHMENT_INTERVAL_MIN = 30    # run enrichment (screener+sentiment+news) then trade
+RECON_INTERVAL_MIN      = 10    # lightweight reconciliation + exit checks between enrichments
+PRICE_POLL_INTERVAL_SEC = 60    # price poller between major cycles
 HEARTBEAT_FILE = _ROOT_DIR / '.market_daemon_heartbeat'
 MAX_CRASH_RETRIES = 3
 # OWNER_CUSTOMER_ID loaded for startup info only
@@ -391,64 +398,86 @@ def run_premarket_prep():
 
 def run_market_loop():
     """
-    9:30 AM - 4:00 PM: Continuous trade evaluation with periodic enrichment.
+    9:30 AM - 4:00 PM: Event-driven trading with periodic enrichment.
 
-    Loop:
-        1. Run trade agent for all customers
-        2. Check if it's time for enrichment (every ENRICHMENT_INTERVAL_MIN)
-        3. If yes: run sentiment + news
-        4. Repeat immediately
+    Schedule:
+        Every 30 min:  enrichment (screener → sentiment → news) → trade
+        Every 10 min:  lightweight reconciliation + exit checks only
+        Every 60 sec:  price poller (keeps live_prices fresh for portal)
+
+    The trade agent only runs full signal evaluation after enrichment
+    brings new data. Between enrichments, only reconciliation and exit
+    condition checks run — no wasted signal re-evaluation.
     """
     log.info("=" * 60)
-    log.info("MARKET HOURS — continuous evaluation loop")
+    log.info("MARKET HOURS — event-driven loop")
     log.info("=" * 60)
 
     cycle = 0
     last_enrichment = time.monotonic()
-    enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60  # seconds
+    last_recon = time.monotonic()
+    last_price_poll = time.monotonic()
+    enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
+    recon_interval = RECON_INTERVAL_MIN * 60
+
+    # First trade evaluation right at market open (pre-market prep already ran enrichment)
+    if not kill_switch_active():
+        run_trade_all_customers(session='open')
+    clear_agent_running()
 
     while not _shutdown_requested and not past_market_close():
         cycle += 1
         t_cycle = now_et().strftime('%H:%M:%S')
+        now_mono = time.monotonic()
 
-        # Kill switch only blocks trade execution — enrichment continues
-        if kill_switch_active():
-            log.info(f"[CYCLE {cycle}] {t_cycle} — kill switch active, skipping trade evaluation")
-            ok, fail = 0, 0
-        else:
-            # Trade evaluation for all customers
-            ok, fail = run_trade_all_customers(session='open')
+        since_enrichment = now_mono - last_enrichment
+        since_recon = now_mono - last_recon
+        since_price = now_mono - last_price_poll
 
-        write_heartbeat(status="OK" if not kill_switch_active() else "KILL_SWITCH",
-                        cycle=cycle, customers=ok + fail)
-
-        # Check if enrichment is due (runs regardless of kill switch)
-        since_enrichment = time.monotonic() - last_enrichment
+        # ── ENRICHMENT CYCLE (every 30 min) ──
+        # New data → full trade evaluation
         if since_enrichment >= enrichment_interval:
-            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m since last — running screener + sentiment + news")
+            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — running screener → sentiment → news → trade")
             run_screener()
             if not _shutdown_requested:
                 run_sentiment()
             if not _shutdown_requested:
-                session = 'market' if is_market_hours() else 'overnight'
-                run_news(session=session)
+                run_news(session='market')
+            if not _shutdown_requested and not kill_switch_active():
+                run_trade_all_customers(session='open')
             last_enrichment = time.monotonic()
+            last_recon = time.monotonic()  # enrichment includes reconciliation
+            clear_agent_running()
+            send_retail_heartbeat('market_daemon', 'OK')
 
-        # Update live prices every cycle (fast, ~2s)
-        run_price_poller()
+        # ── RECONCILIATION CYCLE (every 10 min between enrichments) ──
+        # Lightweight: catches trailing stop fills, exit conditions, approved trades
+        elif since_recon >= recon_interval:
+            if not kill_switch_active():
+                log.info(f"[RECON] {since_recon/60:.0f}m — reconciliation + exit checks")
+                run_trade_all_customers(session='open')
+                clear_agent_running()
+            last_recon = time.monotonic()
+            send_retail_heartbeat('market_daemon', 'OK')
 
-        clear_agent_running()
-        send_retail_heartbeat('market_daemon', 'OK')
+        # ── PRICE POLL (every 60 sec) ──
+        if since_price >= PRICE_POLL_INTERVAL_SEC:
+            run_price_poller()
+            last_price_poll = time.monotonic()
 
-        # Brief pause between cycles to avoid hammering
-        # Adaptive: 5s with few customers, shorter as list grows
-        customers_count = ok + fail
-        pause = max(2, min(10, 30 // max(customers_count, 1)))
-        log.info(f"[CYCLE {cycle}] {t_cycle} — {ok} ok, {fail} fail — "
-                 f"next enrichment in {(enrichment_interval - (time.monotonic() - last_enrichment))/60:.0f}m — "
-                 f"pause {pause}s")
+        write_heartbeat(status="OK" if not kill_switch_active() else "KILL_SWITCH",
+                        cycle=cycle, customers=0)
 
-        time.sleep(pause)
+        # Next enrichment / recon countdown
+        next_enrichment = max(0, enrichment_interval - (time.monotonic() - last_enrichment))
+        next_recon = max(0, recon_interval - (time.monotonic() - last_recon))
+        next_event = min(next_enrichment, next_recon, PRICE_POLL_INTERVAL_SEC)
+
+        log.info(f"[IDLE {cycle}] {t_cycle} — next enrichment {next_enrichment/60:.0f}m, "
+                 f"next recon {next_recon/60:.0f}m — sleeping {min(next_event, 30):.0f}s")
+
+        # Sleep until next event (cap at 30s for responsiveness)
+        time.sleep(min(next_event, 30))
 
     log.info(f"Market loop ended — cycle={cycle} shutdown={_shutdown_requested} "
              f"past_close={past_market_close()}")
