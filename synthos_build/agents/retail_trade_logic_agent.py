@@ -2582,13 +2582,19 @@ if __name__ == '__main__':
         try:
             import auth as _auth
             _ak, _sk = _auth.get_alpaca_credentials(args.customer_id)
-            if _ak:
-                ALPACA_API_KEY = _ak
-                ALPACA_SECRET_KEY  = _sk
+            if not _ak:
+                # Gate 0: no Alpaca key → skip this customer entirely
+                log.info(f"Gate 0 SKIP: customer {args.customer_id[:8]} has no Alpaca key — cannot trade")
+                sys.exit(0)
+            ALPACA_API_KEY = _ak
+            ALPACA_SECRET_KEY  = _sk
             OPERATING_MODE = _auth.get_operating_mode(args.customer_id)
             log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE}")
+        except SystemExit:
+            raise  # let exit(0) from gate above propagate
         except Exception as _e:
             log.warning(f"Could not load customer credentials from auth.db: {_e}")
+            sys.exit(1)  # fail closed — do not fall back to global key
         # Apply per-customer trading parameters from customer_settings DB
         _apply_customer_settings()
 
