@@ -785,6 +785,35 @@ footer{
   </div>
 </section>
 
+<!-- WHO IT'S FOR -->
+<section class="features" style="padding-top:4rem;padding-bottom:1.5rem">
+  <div class="section-eyebrow">For You</div>
+  <h2 class="section-title">Built for people who work for a living</h2>
+  <p class="section-sub">You earned it. Let a systematic approach put it to work while you focus on what matters.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;max-width:900px;margin:2rem auto 0">
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🔧</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Trades &amp; Contractors</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">On the job site by 6am. No time for charts. Your money should work as hard as you do.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🏥</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Nurses &amp; Healthcare</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">12-hour shifts don't leave room for portfolio management. Synthos runs while you're saving lives.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🌙</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Night Shift Workers</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">You sleep when the market is open. Your trading system doesn't have to.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">💼</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Small Business Owners</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">You're wearing every hat already. Institutional-grade tools without the institutional price tag.</div>
+    </div>
+  </div>
+</section>
+
 <!-- HOW IT WORKS -->
 <div class="how">
   <div class="how-inner">
