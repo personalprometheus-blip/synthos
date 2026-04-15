@@ -2673,7 +2673,8 @@ def run():
             log.info(f"Scanning {ticker}...")
 
             # Fetch all three signals
-            pos_put_call, pos_put_call_avg = fetch_put_call_ratio(ticker)
+            # reuse market-wide put/call from Phase 1 — same CBOE page regardless of ticker
+            pos_put_call, pos_put_call_avg = put_call, put_call_avg
             insider_data                   = fetch_sec_insider_transactions(ticker)
             volume_data                    = fetch_volume_profile(ticker, is_position=True)
 
@@ -2727,7 +2728,7 @@ def run():
         for sig in queued_signals:
             ticker = sig['ticker']
             # Quick check only — full scan done on open positions
-            qs_put_call, qs_put_call_avg = fetch_put_call_ratio(ticker)
+            qs_put_call, qs_put_call_avg = put_call, put_call_avg  # reuse market-wide put/call from Phase 1
             qs_insider_data              = fetch_sec_insider_transactions(ticker, days_back=7)
             qs_volume_data               = fetch_volume_profile(ticker)
             tier, tier_label, cascade_detected, summary = detect_cascade(
