@@ -7288,6 +7288,7 @@ async function loadIntel() {
     document.getElementById('intel-count').textContent =
       freshCount + ' fresh' + (staleCount ? ' · ' + staleCount + ' archive' : '');
     renderIntelGrid(signals);
+    updateHeroCards(signals);
   } catch(e) { console.error('loadIntel error:', e); }
 }
 
@@ -7300,6 +7301,7 @@ function filterIntel(type, btn) {
   else if (type === 'bull') filtered = allSignals.filter(s=>!s.is_stale);
   else if (type === 'bear') filtered = allSignals.filter(s=>s.is_stale);
   renderIntelGrid(filtered);
+  updateHeroCards(filtered);
 }
 
 function renderIntelGrid(signals) {
