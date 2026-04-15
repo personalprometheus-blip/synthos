@@ -596,6 +596,8 @@ class DB:
             # v2.1 — session history for market activity chart
             """CREATE TABLE IF NOT EXISTS session_history (
                 ts TEXT PRIMARY KEY, count INTEGER, names TEXT)""",
+            # v2.2 — memo field on pending_approvals for admin notes
+            "ALTER TABLE pending_approvals ADD COLUMN memo TEXT",
             # v2.2 — image URL on signals for visual display
             "ALTER TABLE signals ADD COLUMN image_url TEXT",
             "ALTER TABLE signals ADD COLUMN source_url TEXT",

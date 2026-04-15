@@ -6478,10 +6478,12 @@ async function toggleMode() {
 
 // ── APPROVAL ──
 async function actionTrade(id, status) {
+  const memoEl = document.getElementById('memo-'+id);
+  const note = memoEl ? memoEl.value.trim() : '';
   const r = await fetch('/api/approval', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id, status})
+    body: JSON.stringify({id, status, note: note || undefined})
   });
   const d = await r.json();
   if (d.ok) {
@@ -6909,6 +6911,7 @@ function renderApprovals(approvals) {
           <div class="conf-chip ${confCls}">${conf}</div>
         </div>
         ${reasoning ? `<div class="trade-reasoning">${reasoning}</div>` : ''}
+        <input id="memo-${t.id}" placeholder="Add memo (optional)" style="width:100%;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.03);color:var(--text);font-size:10px;font-family:var(--mono);margin-bottom:6px;outline:none">
         <div class="trade-actions">
           <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
           <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED')">✗ Reject</button>
