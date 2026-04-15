@@ -1059,15 +1059,6 @@ class DB:
                 (tier_pct, pos_id)
             )
 
-    def flag_orphan(self, pos_id):
-        """Mark a position as needing human reconciliation."""
-        with self.conn() as c:
-            c.execute(
-                "UPDATE positions SET status='RECONCILE_NEEDED' WHERE id=?",
-                (pos_id,)
-            )
-        log.warning(f"Position {pos_id} flagged as RECONCILE_NEEDED — human review required")
-
     # ── SIGNALS ────────────────────────────────────────────────────────────
 
     def upsert_signal(self, ticker, source, source_tier, headline,

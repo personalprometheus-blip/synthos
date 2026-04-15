@@ -56,12 +56,6 @@ for cid in os.listdir(customers_dir):
             if recent == 0:
                 results.append({'cid': cid[:12], 'severity': 'medium', 'issue': 'STALE_ACTIVITY', 'detail': 'No agent activity in 24h'})
 
-        # Check for RECONCILE_NEEDED positions
-        recon = db.execute("SELECT COUNT(*) FROM positions WHERE status='RECONCILE_NEEDED'").fetchone()[0]
-        if recon > 0:
-            results.append({'cid': cid[:12], 'severity': 'high', 'issue': 'RECONCILE_NEEDED',
-                'detail': f'{recon} position(s) flagged for reconciliation'})
-
         db.close()
     except Exception as e:
         results.append({'cid': cid[:12], 'severity': 'high', 'issue': 'DB_ERROR', 'detail': str(e)[:80]})
