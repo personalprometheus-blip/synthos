@@ -7192,18 +7192,39 @@ function renderIntelGrid(signals) {
     return;
   }
   const colors = ['background:linear-gradient(135deg,rgba(0,245,212,0.18),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.14);color:#00f5d4','background:linear-gradient(135deg,rgba(123,97,255,0.18),rgba(123,97,255,0.1));border:1px solid rgba(123,97,255,0.14);color:#a78bfa','background:linear-gradient(135deg,rgba(245,166,35,0.3),rgba(245,166,35,0.1));border:1px solid rgba(245,166,35,0.25);color:#f5a623','background:linear-gradient(135deg,rgba(255,75,110,0.18),rgba(255,75,110,0.1));border:1px solid rgba(255,75,110,0.14);color:#ff4b6e'];
-  const sentiment = s => s.corroborated ? 'bull' : s.confidence === 'LOW' ? 'bear' : 'neut';
-  const sentLabel = s => s.corroborated ? '↑ Bullish' : s.confidence === 'LOW' ? '↓ Bearish' : '— Neutral';
-  const sentBadge = s => s.corroborated ? 'sb-bull' : s.confidence === 'LOW' ? 'sb-bear' : 'sb-neut';
+  // Derive sentiment from Pulse tier, corroboration, and confidence
+  const pulseTier = s => {
+    const note = s.corroboration_note || '';
+    const m = note.match(/PULSE Tier (\d)/);
+    return m ? parseInt(m[1]) : 0;
+  };
+  const sentiment = s => {
+    const tier = pulseTier(s);
+    if (s.corroborated || tier >= 3 || s.confidence === 'HIGH') return 'bull';
+    if (s.confidence === 'LOW' || s.is_stale || tier === 1) return 'bear';
+    return 'neut';
+  };
+  const sentLabel = s => {
+    const sent = sentiment(s);
+    return sent === 'bull' ? '↑ Bullish' : sent === 'bear' ? '↓ Bearish' : '— Neutral';
+  };
+  const sentBadge = s => {
+    const sent = sentiment(s);
+    return sent === 'bull' ? 'sb-bull' : sent === 'bear' ? 'sb-bear' : 'sb-neut';
+  };
   const agentScore = s => {
     const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'NOISE' ? 15 : 30;
-    const sent = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score || 0) * 20) : 0;
-    return Math.min(99, Math.max(5, base + sent));
+    const sentBonus = s.sentiment_score ? Math.round(s.sentiment_score * 15) : 0;
+    const tier = pulseTier(s);
+    const tierBonus = tier >= 3 ? 12 : tier === 2 ? 5 : tier === 1 ? -5 : 0;
+    const corrBonus = s.corroborated ? 10 : 0;
+    const staleHit = s.is_stale ? -15 : 0;
+    return Math.min(99, Math.max(5, base + sentBonus + tierBonus + corrBonus + staleHit));
   };
   const marketScore = s => {
     const as = agentScore(s);
-    const adj = s.is_stale ? -12 : (s.corroborated ? 8 : 0);
-    return Math.min(99, Math.max(5, as - 8 + adj));
+    const adj = s.is_stale ? -12 : (s.corroborated ? 8 : -5);
+    return Math.min(99, Math.max(5, as + adj));
   };
   const sentClass = s => agentScore(s) > 60 ? 'of-ab' : agentScore(s) < 40 ? 'of-ar' : 'of-an';
   const mSentClass = s => agentScore(s) > 60 ? 'of-mb' : agentScore(s) < 40 ? 'of-mr' : 'of-mn';
