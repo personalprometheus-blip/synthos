@@ -7214,7 +7214,7 @@ function renderIntelGrid(signals) {
   };
   const agentScore = s => {
     const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'NOISE' ? 15 : 30;
-    const sentBonus = s.sentiment_score ? Math.round(s.sentiment_score * 15) : 0;
+    const sentBonus = s.sentiment_score ? Math.round(s.sentiment_score * 80) : 0;
     const tier = pulseTier(s);
     const tierBonus = tier >= 3 ? 12 : tier === 2 ? 5 : tier === 1 ? -5 : 0;
     const corrBonus = s.corroborated ? 10 : 0;
