@@ -2028,6 +2028,41 @@ def run(session="open"):
         session_log.commit(db)
         sys.exit(0)
 
+    # ── GATE 0: First-Run Setup (new customer accounts)
+    # If account has no trade history, just reconcile with Alpaca and seed the portfolio.
+    # Don't evaluate signals — the customer may still be setting up.
+    portfolio = db.get_portfolio()
+    positions = db.get_open_positions()
+    has_history = len(positions) > 0 or portfolio.get('realized_gains', 0) != 0
+    if not has_history:
+        account = alpaca.get_account()
+        if account:
+            alpaca_equity = float(account.get('equity', 0))
+            alpaca_cash = float(account.get('cash', 0))
+            if alpaca_equity < 1:
+                log.info(f"[FIRST-RUN] Account has no equity (${alpaca_equity:.2f}) — skipping setup until funded")
+                session_log.gate("0_FIRST_RUN", "SKIP", {"equity": alpaca_equity}, "account not funded")
+                session_log.commit(db)
+                db.log_event("FIRST_RUN_SKIP", agent="Trade Logic",
+                             details=f"Account equity ${alpaca_equity:.2f} — waiting for funding")
+                db.log_heartbeat("trade_logic_agent", "OK")
+                return
+            # Funded account — reconcile, sync cash, set up BIL
+            log.info(f"[FIRST-RUN] New account setup — equity ${alpaca_equity:.2f}, cash ${alpaca_cash:.2f}")
+            db.update_portfolio(cash=alpaca_cash)
+            reconcile_with_alpaca(db, alpaca)
+            sync_bil_reserve(db, alpaca)
+            session_log.gate("0_FIRST_RUN", "SETUP", {
+                "equity": alpaca_equity, "cash": alpaca_cash,
+                "positions": len(db.get_open_positions()),
+            }, f"first-run setup complete — equity ${alpaca_equity:.2f}")
+            session_log.commit(db)
+            db.log_event("FIRST_RUN_COMPLETE", agent="Trade Logic",
+                         details=f"Account initialized — equity ${alpaca_equity:.2f}, cash ${alpaca_cash:.2f}")
+            db.log_heartbeat("trade_logic_agent", "OK")
+            log.info(f"[FIRST-RUN] Setup complete — will evaluate signals on next run")
+            return
+
     # ── GATE 2: Benchmark Gate
     mode = gate2_benchmark(alpaca, session_log)
 
