@@ -4772,7 +4772,11 @@ setInterval(loadAgentPulse, 10000);
 <!-- ══════════════ SCREENING TAB ══════════════ -->
 <div class="page" id="tab-screening" style="display:none">
 
-  <div class="section-title">Sector Screening</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
+      Sector <span style="background:linear-gradient(90deg,var(--amber),var(--teal));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Screening</span>
+    </div>
+  </div>
   <div style="padding:0 4px 16px">
     <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
     <div id="screening-grid" style="display:grid;gap:10px"></div>
@@ -4782,6 +4786,12 @@ setInterval(loadAgentPulse, 10000);
 
 <!-- ══════════════ PERFORMANCE TAB ══════════════ -->
 <div class="page" id="tab-performance" style="display:none">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
+      Trade <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Performance</span>
+    </div>
+  </div>
 
   <!-- SUMMARY STATS -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
@@ -4923,6 +4933,12 @@ setInterval(loadAgentPulse, 10000);
 
 <!-- ══════════════ RISK TAB ══════════════ -->
 <div class="page" id="tab-risk" style="display:none">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
+      Risk <span style="background:linear-gradient(90deg,var(--pink),var(--amber));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Management</span>
+    </div>
+  </div>
 
   <!-- EXPOSURE METERS -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;align-items:start">
