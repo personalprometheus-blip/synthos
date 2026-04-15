@@ -267,6 +267,18 @@ def _apply_customer_settings():
             'TRADING_MODE':         ('TRADING_MODE',           str),
             'ENABLE_BIL_RESERVE':   ('ENABLE_BIL_RESERVE',     lambda v: v != '0'),
             'IDLE_RESERVE_PCT':     ('IDLE_RESERVE_PCT',       lambda v: float(v) / 100 if float(v) > 1 else float(v)),
+            # Optimizer-tuned parameters
+            'ATR_TRAIL_MULTIPLIER': ('ATR_TRAIL_MULTIPLIER',   float),
+            'ATR_STOP_MULTIPLIER':  ('ATR_STOP_MULTIPLIER',    float),
+            'LATE_DAY_TIGHTEN_PCT': ('LATE_DAY_TIGHTEN_PCT',   float),
+            'BENCHMARK_CORR_WIDEN': ('BENCHMARK_CORR_WIDEN',   float),
+            'BENCHMARK_CORR_TIGHTEN':('BENCHMARK_CORR_TIGHTEN', float),
+            'VOL_MULT_LOW':         ('_VOL_MULT_LOW',          float),
+            'VOL_MULT_MID':         ('_VOL_MULT_MID',          float),
+            'VOL_MULT_HIGH':        ('_VOL_MULT_HIGH',         float),
+            'PROFIT_TIER_1_PCT':    ('_PROFIT_TIER_1_PCT',     float),
+            'PROFIT_TIER_2_PCT':    ('_PROFIT_TIER_2_PCT',     float),
+            'PROFIT_TIER_3_PCT':    ('_PROFIT_TIER_3_PCT',     float),
         }
 
         applied = []
@@ -319,11 +331,22 @@ VOLATILITY_BUCKETS = {
 
 STALENESS_DISCOUNTS = {"Fresh": 0.0, "Aging": 0.15, "Stale": 0.30, "Expired": 0.50}
 
-PROFIT_RULES = [
+PROFIT_RULES_DEFAULT = [
     {"gain_pct": 0.08, "sell_pct": 0.33, "label": "8% — sell ⅓"},
     {"gain_pct": 0.15, "sell_pct": 0.50, "label": "15% — sell ½"},
     {"gain_pct": 0.25, "sell_pct": 0.75, "label": "25% — sell ¾"},
 ]
+
+def get_profit_rules():
+    """Return profit rules using optimizer-tuned thresholds if available."""
+    t1 = getattr(C, '_PROFIT_TIER_1_PCT', None) or 0.08
+    t2 = getattr(C, '_PROFIT_TIER_2_PCT', None) or 0.15
+    t3 = getattr(C, '_PROFIT_TIER_3_PCT', None) or 0.25
+    return [
+        {"gain_pct": t1, "sell_pct": 0.33, "label": f"{t1*100:.0f}% — sell ⅓"},
+        {"gain_pct": t2, "sell_pct": 0.50, "label": f"{t2*100:.0f}% — sell ½"},
+        {"gain_pct": t3, "sell_pct": 0.75, "label": f"{t3*100:.0f}% — sell ¾"},
+    ]
 
 
 # ── TRADE DECISION LOG ────────────────────────────────────────────────────────
@@ -515,8 +538,11 @@ def get_volatility_bucket(sector):
     return "mid", VOLATILITY_BUCKETS["mid"]
 
 def calculate_trail_stop(atr, price, sector):
-    _, bucket = get_volatility_bucket(sector)
-    amt = round(atr * bucket["multiplier"], 2)
+    key, bucket = get_volatility_bucket(sector)
+    # Check for optimizer-tuned multiplier override
+    override_attr = f'_VOL_MULT_{key.upper()}'
+    multiplier = getattr(C, override_attr, None) or bucket["multiplier"]
+    amt = round(atr * multiplier, 2)
     pct = round((amt / price) * 100, 2)
     return amt, pct, bucket["label"]
 
@@ -2294,7 +2320,7 @@ def run(session="open"):
             # Profit-taking: tiered partial sells, reduce shares in-place
             gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
             last_tier = float(pos.get('last_profit_tier') or 0)
-            triggered = [r for r in PROFIT_RULES
+            triggered = [r for r in get_profit_rules()
                          if gain_pct >= r["gain_pct"] and r["gain_pct"] > last_tier]
             if triggered:
                 rule = triggered[-1]
