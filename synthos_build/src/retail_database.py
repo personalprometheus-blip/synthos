@@ -1448,11 +1448,15 @@ class DB:
         return defaults
 
     def get_queued_signals(self):
-        """All signals ready for the trader to act on."""
+        """Signals ready for the trader to act on — excludes SKIPPED interrogation.
+        SKIPPED = watch-only news signals that never went through interrogation;
+        including them caused Phase 3 of the sentiment agent to scan 400+ tickers.
+        """
         with self.conn() as c:
             rows = c.execute("""
                 SELECT * FROM signals
                 WHERE status='QUEUED'
+                AND interrogation_status != 'SKIPPED'
                 ORDER BY source_tier ASC, created_at ASC
             """).fetchall()
             return [dict(r) for r in rows]
