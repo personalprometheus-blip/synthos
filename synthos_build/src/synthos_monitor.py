@@ -190,7 +190,8 @@ def silence_detector():
             for pi_id, data in pi_registry.items():
                 age_hours = (now_utc() - data["last_seen"]).total_seconds() / 3600
                 if age_hours >= SILENCE_WINDOW_HOURS and not data["alerted"]:
-                    send_alert(pi_id, data["last_seen"])
+                    if not data.get("silenced"):
+                        send_alert(pi_id, data["last_seen"])
                     data["alerted"] = True
                 elif age_hours < SILENCE_WINDOW_HOURS and data["alerted"]:
                     data["alerted"] = False
@@ -212,6 +213,7 @@ def heartbeat():
             "last_seen":         now_utc(),
             "first_seen":        existing.get("first_seen", now_utc()),
             "alerted":           False,
+            "silenced":          existing.get("silenced", False),
             # Identity + network
             "ip":                request.remote_addr or existing.get("ip", ""),
             "label":             data.get("label",          existing.get("label", pi_id)),
@@ -321,6 +323,7 @@ def api_status():
                 "net_bytes_recv": data.get("net_bytes_recv"),
                 "cpu_temp":       data.get("cpu_temp"),
                 "history":        data.get("history", []),
+                "silenced":       data.get("silenced", False),
             }
     return jsonify(out), 200
 
@@ -374,6 +377,7 @@ def receive_report():
                 "email":      "",
                 "label":      pi_id,
                 "alerted":    False,
+                "silenced":   False,
                 "first_seen": now_utc(),
             }
         pi_registry[pi_id]["last_report"] = {
@@ -498,6 +502,21 @@ def api_admin_override():
 
     print(f"[Override] trading_gate={tg} operating_mode={om} pushed={pushed} errors={errors}")
     return jsonify({"ok": True, "pushed_to": pushed, "errors": errors}), 200
+
+
+# ── Silence Toggle API ────────────────────────────────────────────────────────
+@app.route("/api/silence/<pi_id>", methods=["POST"])
+def api_silence_toggle(pi_id):
+    if not (request.cookies.get("auth") == SECRET_TOKEN):
+        return jsonify({"error": "unauthorized"}), 401
+    with registry_lock:
+        if pi_id not in pi_registry:
+            return jsonify({"error": "not found"}), 404
+        pi_registry[pi_id]["silenced"] = not pi_registry[pi_id].get("silenced", False)
+        silenced = pi_registry[pi_id]["silenced"]
+        save_registry()
+    print(f"[Silence] {pi_id} silenced={silenced}")
+    return jsonify({"ok": True, "silenced": silenced}), 200
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -771,12 +790,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 /* NODE ROSTER TABLE */
 .node-table-wrap{overflow-x:auto;border-radius:14px;border:1px solid var(--border);background:var(--surface);margin-bottom:20px}
-.node-thead{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
-            padding:8px 16px;background:rgba(255,255,255,0.025);min-width:740px;border-bottom:1px solid var(--border)}
+.node-thead{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px 54px;
+            padding:8px 16px;background:rgba(255,255,255,0.025);min-width:794px;border-bottom:1px solid var(--border)}
 .node-th{font-size:9px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted)}
-.node-row{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px;
+.node-row{display:grid;grid-template-columns:220px 96px 66px 66px 70px 66px 66px 90px 80px 54px;
           padding:10px 16px;border-top:1px solid var(--border);align-items:center;
-          cursor:pointer;transition:background 0.15s;min-width:740px}
+          cursor:pointer;transition:background 0.15s;min-width:794px}
+.mute-btn{background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;border-radius:6px;
+          opacity:0.45;transition:opacity 0.15s}
+.mute-btn:hover{opacity:1}
+.mute-btn.muted{opacity:1}
 .node-row:hover{background:rgba(255,255,255,0.025)}
 .node-cell{font-size:12px;font-family:var(--mono)}
 .node-name-cell{display:flex;align-items:center;gap:8px}
@@ -1228,6 +1251,12 @@ function renderNodeRoster() {
           + fmtMetric(pi.disk_percent, '%') + '</div>'
       + '<div class="node-cell mc-na">' + (pi.uptime || '\u2014') + '</div>'
       + '<div class="node-cell mc-na">' + ageSince(pi.last_seen) + '</div>'
+      + '<div class="node-cell" style="display:flex;align-items:center;justify-content:center">'
+          + '<button class="mute-btn' + (pi.silenced ? ' muted' : '') + '" '
+          + 'onclick="event.stopPropagation();toggleSilence(\'' + escHtml(pi.pi_id) + '\')" '
+          + 'title="' + (pi.silenced ? 'Unmute alerts' : 'Mute alerts') + '">'
+          + (pi.silenced ? '\uD83D\uDD07' : '\uD83D\uDD14') + '</button>'
+      + '</div>'
     + '</div>';
   }).join('');
 
@@ -1243,6 +1272,7 @@ function renderNodeRoster() {
         + '<div class="node-th">Disk</div>'
         + '<div class="node-th">Uptime</div>'
         + '<div class="node-th">Last Seen</div>'
+        + '<div class="node-th">Mute</div>'
     + '</div>'
     + rows
     + '</div>';
@@ -1618,6 +1648,16 @@ function promptDelete(piId) {
   document.getElementById('confirm-overlay').classList.add('show');
 }
 function cancelDelete() { pendingDelete=null; document.getElementById('confirm-overlay').classList.remove('show'); }
+async function toggleSilence(piId) {
+  try {
+    const r = await fetch('/api/silence/' + encodeURIComponent(piId), {method:'POST'});
+    if (!r.ok) { toast('Failed to toggle silence', 'err'); return; }
+    const d = await r.json();
+    if (piData[piId]) piData[piId].silenced = d.silenced;
+    renderNodeRoster();
+    toast(d.silenced ? '\uD83D\uDD07 Alerts muted for ' + (piData[piId]&&piData[piId].label||piId) : '\uD83D\uDD14 Alerts unmuted for ' + (piData[piId]&&piData[piId].label||piId), 'ok');
+  } catch(e) { toast('Error: ' + e, 'err'); }
+}
 async function confirmDelete() {
   if (!pendingDelete) return;
   try {
