@@ -3703,6 +3703,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .intel-grid{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  grid-auto-rows:minmax(140px,auto);
   gap:14px;
 }
 
@@ -7216,7 +7217,7 @@ function renderIntelGrid(signals) {
   const sentClass = s => agentScore(s) > 60 ? 'of-ab' : agentScore(s) < 40 ? 'of-ar' : 'of-an';
   const mSentClass = s => agentScore(s) > 60 ? 'of-mb' : agentScore(s) < 40 ? 'of-mr' : 'of-mn';
   const valClass = s => agentScore(s) > 60 ? 'oval-b' : agentScore(s) < 40 ? 'oval-r' : 'oval-n';
-  grid.innerHTML = signals.map((s,i) => {
+  var cards = signals.map((s,i) => {
     const as = agentScore(s); const ms = marketScore(s);
     const sent = sentiment(s);
     const col = colors[i%colors.length];
