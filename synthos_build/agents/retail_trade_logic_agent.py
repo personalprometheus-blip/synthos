@@ -1932,10 +1932,14 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
 
             # Record exit at current market price (not entry price)
             exit_price = weakest['current_price']
-            db.close_position(weakest['id'], exit_price, exit_reason='ROTATED_OUT')
+            _rot_pnl = db.close_position(weakest['id'], exit_price, exit_reason='ROTATED_OUT')
             db.log_event("POSITION_ROTATED", agent="Trade Logic",
                          details=f"Sold {weakest['ticker']} (score {weakest['entry_score']:.3f}, "
                                  f"P&L {weakest['pnl_pct']*100:+.1f}%) for {signal['ticker']} (score {score:.3f})")
+            _rp_sign = '+' if _rot_pnl >= 0 else ''
+            db.add_notification('trade', f'Sold {weakest["ticker"]}',
+                f'Rotated out for stronger signal — P&L {_rp_sign}${_rot_pnl:.2f}',
+                meta={'ticker': weakest['ticker'], 'side': 'sell', 'pnl': round(_rot_pnl, 2), 'reason': 'ROTATED_OUT', 'replaced_by': signal['ticker']})
 
             # ── BUY the stronger signal ──
             atr = alpaca.get_atr(signal['ticker'])
@@ -1990,6 +1994,10 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"[ROTATION] COMPLETE: Sold {weakest['ticker']} → "
                                  f"BUY {size:.4f} {signal['ticker']} @ ${candidate['price']:.2f}")
+                        _cost = round(candidate['price'] * size, 2)
+                        db.add_notification('trade', f'Bought {signal["ticker"]}',
+                            f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested (rotated from {weakest["ticker"]})',
+                            meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2), 'rotation_from': weakest['ticker']})
                         rotations += 1
                         sig_log.decide("ROTATE", f"Replaced {weakest['ticker']} (gap {score_gap:.3f})")
                         sig_log.commit(db)
@@ -2082,6 +2090,9 @@ def run(session="open"):
             )
             db.log_event("ORPHAN_ADOPTED", agent="Trade Logic",
                          details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca")
+            db.add_notification('account', f'{t} position detected',
+                f'{shares:.2f} shares @ ${entry:.2f} added to your portfolio',
+                meta={'ticker': t, 'type': 'orphan_adopted'})
             healed += 1
 
     # Auto-close ghosts (customer sold on Alpaca directly, or trailing stop filled)
@@ -2109,6 +2120,10 @@ def run(session="open"):
             log.warning(f"[GATE 0] GHOST: {t} closed — reason={reason} price=${fill_price:.2f} pnl=${pnl:+.2f}")
             db.log_event("GHOST_CLOSED", agent="Trade Logic",
                          details=f"{t} {reason} @ ${fill_price:.2f} pnl=${pnl:+.2f}")
+            _pnl_sign = '+' if pnl >= 0 else ''
+            db.add_notification('account', f'{t} position closed',
+                f'Position no longer on Alpaca — P&L {_pnl_sign}${pnl:.2f}',
+                meta={'ticker': t, 'type': 'ghost_closed', 'pnl': round(pnl, 2), 'reason': reason})
             healed += 1
         except Exception as _e:
             log.error(f"[GATE 0] Failed to close ghost {t}: {_e}")
@@ -2133,6 +2148,9 @@ def run(session="open"):
         session_log.commit(db)
         db.log_event("FIRST_RUN_COMPLETE", agent="Trade Logic",
                      details=f"Account initialized — equity ${alpaca_equity:.2f}")
+        db.add_notification('system', 'Account Ready',
+            f'Your account has been initialized with ${alpaca_equity:,.2f} equity. Trading begins next session.',
+            meta={'type': 'first_run', 'equity': alpaca_equity})
         db.log_heartbeat("trade_logic_agent", "OK")
         return
 
@@ -2341,6 +2359,10 @@ def run(session="open"):
                     db.log_event(exit_reason, agent="Trade Logic",
                                  details=f"{pos['ticker']} exit=${current_price:.2f} pnl=${pnl:+.2f}")
                     log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
+                    _exit_sign = '+' if pnl >= 0 else ''
+                    db.add_notification('trade', f'Sold {pos["ticker"]}',
+                        f'Exit @ ${current_price:.2f} — P&L {_exit_sign}${pnl:.2f} ({exit_reason.replace("_"," ").lower()})',
+                        meta={'ticker': pos['ticker'], 'side': 'sell', 'pnl': round(pnl, 2), 'reason': exit_reason})
             pos_log.commit(db)
 
     # ── MANAGED MODE: execute user-approved trades
@@ -2372,6 +2394,10 @@ def run(session="open"):
                     _shared_db().acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
                     log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
+                    _cost = round(price * shares, 2)
+                    db.add_notification('trade', f'Bought {ticker}',
+                        f'{shares:.2f} shares @ ${price:.2f} — ${_cost:.2f} invested',
+                        meta={'ticker': ticker, 'side': 'buy', 'shares': round(shares, 4), 'price': round(price, 2)})
                 else:
                     log.error(f"[MANAGED] Order failed: {ticker}")
             except Exception as e:
@@ -2512,6 +2538,10 @@ def run(session="open"):
                         _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
                                  f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
+                        _cost = round(candidate['price'] * size, 2)
+                        db.add_notification('trade', f'Bought {signal["ticker"]}',
+                            f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested',
+                            meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2)})
                     else:
                         log.error(f"Order failed: {signal['ticker']}")
 
@@ -2543,6 +2573,9 @@ def run(session="open"):
     db.log_event("AGENT_COMPLETE", agent="Trade Logic",
                  details=f"session={session} positions={len(positions)}",
                  portfolio_value=total_value)
+    db.add_notification('daily', 'Session Complete',
+        f'{session.title()} session: {len(positions)} positions, portfolio ${total_value:,.2f}',
+        meta={'session': session, 'positions': len(positions), 'portfolio': round(total_value, 2)})
 
     try:
         from retail_heartbeat import write_heartbeat
