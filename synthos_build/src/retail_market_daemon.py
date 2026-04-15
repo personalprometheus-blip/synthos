@@ -78,6 +78,7 @@ MARKET_CLOSE_MIN = 0
 ENRICHMENT_INTERVAL_MIN = 30    # run sentiment+news every N minutes
 HEARTBEAT_FILE = _ROOT_DIR / '.market_daemon_heartbeat'
 MAX_CRASH_RETRIES = 3
+# OWNER_CUSTOMER_ID loaded for startup info only
 OWNER_CUSTOMER_ID = os.environ.get('OWNER_CUSTOMER_ID', '')
 
 logging.basicConfig(
@@ -134,6 +135,34 @@ def past_market_close():
 def kill_switch_active():
     kill_file = _ROOT_DIR / '.kill_switch'
     return kill_file.exists()
+
+
+PID_FILE = _ROOT_DIR / '.market_daemon.pid'
+
+def acquire_pidlock():
+    """Prevent multiple daemon instances. Returns True if lock acquired."""
+    if PID_FILE.exists():
+        try:
+            old_pid = int(PID_FILE.read_text().strip())
+            # Check if process is still alive
+            os.kill(old_pid, 0)
+            log.error(f"Another daemon is running (pid={old_pid}) — exiting")
+            return False
+        except (ProcessLookupError, ValueError):
+            log.info(f"Stale pidfile found (pid not running) — taking over")
+        except PermissionError:
+            log.error(f"Another daemon is running (pid={old_pid}, permission denied) — exiting")
+            return False
+    PID_FILE.write_text(str(os.getpid()))
+    return True
+
+def release_pidlock():
+    """Remove pidfile on shutdown."""
+    try:
+        if PID_FILE.exists():
+            PID_FILE.unlink()
+    except Exception:
+        pass
 
 
 def write_heartbeat(status="OK", cycle=0, customers=0):
@@ -440,6 +469,8 @@ def run_close_session():
 
 def main():
     """Main entry point. Waits for pre-market, then runs through market day."""
+    if not acquire_pidlock():
+        return
     log.info("=" * 60)
     log.info(f"MARKET DAEMON starting — pid={os.getpid()}")
     log.info(f"  Pre-market: {PREMARKET_START_HOUR}:{PREMARKET_START_MIN:02d} ET")
@@ -502,6 +533,7 @@ def main():
         run_close_session()
 
     clear_agent_running()
+    release_pidlock()
     write_heartbeat(status="STOPPED")
     send_retail_heartbeat('market_daemon', 'STOPPED')
     log.info("Market daemon shutting down — day complete")
@@ -524,5 +556,6 @@ if __name__ == '__main__':
                 time.sleep(30)
             else:
                 log.error("Max retries reached — daemon exiting")
+                release_pidlock()
                 write_heartbeat(status="DEAD")
                 send_retail_heartbeat('market_daemon', 'DEAD')

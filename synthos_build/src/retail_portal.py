@@ -8125,6 +8125,9 @@ def api_set_mode():
 def api_admin_override():
     """Receive admin override push from monitor or return current state."""
     if request.method == 'GET':
+        token = request.headers.get('X-Token', '')
+        if token != MONITOR_TOKEN and not is_authenticated():
+            return jsonify({"error": "unauthorized"}), 401
         return jsonify({
             "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
             "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
