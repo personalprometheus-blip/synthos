@@ -4722,7 +4722,7 @@ setInterval(loadAgentPulse, 10000);
     <div class="glass teal-glow">
       <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Planning</div>
-        <div style="font-size:9px;color:var(--dim)">Signals under watch</div>
+        <div style="font-size:9px;color:var(--dim)" id="planning-sub">Queued for next trade run</div>
         <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="planning-count"></div>
       </div>
       <div id="planning-list" style="height:300px;overflow-y:auto"><div class="empty-state"><div class="empty-icon">&#x1F50D;</div>Loading&#x2026;</div></div>
@@ -8368,6 +8368,10 @@ def api_keys():
         'OPERATING_MODE',
         'ADMIN_TRADING_GATE',
         'ADMIN_OPERATING_MODE',
+        'STRIPE_SECRET_KEY',
+        'STRIPE_WEBHOOK_SECRET',
+        'STRIPE_PRICE_ID',
+        'STRIPE_EARLY_ADOPTER_PRICE_ID',
     }
 
     updated = []
@@ -8847,6 +8851,19 @@ def api_watchlist():
         return jsonify({'signals': signals})
     except Exception as e:
         return jsonify({'signals': [], 'error': str(e)})
+
+
+@app.route('/api/planning')
+def api_planning():
+    """Planning panel — real signal queue first, intel fallback when empty."""
+    try:
+        queued = _shared_db().get_queued_signals()
+        if queued:
+            return jsonify({'signals': queued, 'mode': 'queue', 'count': len(queued)})
+        intel = _shared_db().get_watching_signals(limit=8)
+        return jsonify({'signals': intel, 'mode': 'intel', 'count': len(intel)})
+    except Exception as e:
+        return jsonify({'signals': [], 'mode': 'intel', 'count': 0, 'error': str(e)})
 
 
 @login_required
