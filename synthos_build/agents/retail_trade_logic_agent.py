@@ -1750,9 +1750,22 @@ def reconcile_with_alpaca(db, alpaca):
         db_tickers     = db.get_open_tickers()
         orphans = alpaca_tickers - db_tickers
         ghosts  = db_tickers - alpaca_tickers
+        # Auto-adopt orphans: positions on Alpaca but missing from DB
         for t in orphans:
-            log.critical(f"ORPHAN: {t} in Alpaca but not DB")
-            db.log_event("ORPHAN_POSITION", agent="Trade Logic", details=f"Ticker {t}")
+            ap = next((p for p in alpaca_positions if p['symbol'] == t), None)
+            if ap:
+                shares = float(ap.get('qty', 0))
+                entry  = float(ap.get('avg_entry_price', 0))
+                log.warning(f"ORPHAN AUTO-ADOPT: {t} {shares:.4f}sh @ ${entry:.2f} — adding to DB")
+                db.open_position(
+                    ticker=t, company=t, sector=ap.get('sector', ''),
+                    entry_price=entry, shares=shares,
+                    trail_stop_amt=0, trail_stop_pct=0, vol_bucket='normal',
+                    signal_id=None, entry_signal_score=None,
+                    entry_sentiment_score=None, interrogation_status=None,
+                )
+                db.log_event("ORPHAN_ADOPTED", agent="Trade Logic",
+                             details=f"{t} {shares:.4f}sh @ ${entry:.2f} auto-adopted from Alpaca")
         for t in ghosts:
             # Check if Alpaca filled a trailing stop order for this ghost
             db_pos = next((p for p in db.get_open_positions() if p['ticker'] == t), None)
@@ -1776,9 +1789,11 @@ def reconcile_with_alpaca(db, alpaca):
             for pos in db.get_open_positions():
                 if pos['ticker'] == t:
                     db.flag_orphan(pos['id'])
-        if orphans or ghosts:
-            log.critical(f"Reconciliation issues — {len(orphans)} orphans, {len(ghosts)} ghosts. Halting new trades.")
+        if ghosts:
+            log.critical(f"Reconciliation issues — {len(ghosts)} ghost(s) in DB but not Alpaca. Halting new trades.")
             return False
+        if orphans:
+            log.info(f"Reconciliation: {len(orphans)} orphan(s) auto-adopted from Alpaca")
         for ap in alpaca_positions:
             cp = float(ap.get('current_price', 0))
             if cp:
@@ -1786,9 +1801,10 @@ def reconcile_with_alpaca(db, alpaca):
                     if pos['ticker'] == ap['symbol']:
                         db.update_position_price(pos['id'], cp)
         return True
-    except Exception as e:
-        log.error(f"Reconciliation error: {e}")
-        return True
+    except Exception as _e:
+        log.error(f"Reconciliation error: {_e}")
+        log.debug(f"Reconciliation traceback: {_e}")
+        return None  # Unknown state — don't assume OK
 
 
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────────

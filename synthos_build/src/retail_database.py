@@ -622,21 +622,26 @@ class DB:
     # ── PORTFOLIO ──────────────────────────────────────────────────────────
 
     def get_portfolio(self):
-        """Returns current portfolio row or seeds it with starting capital."""
+        """Returns current portfolio row or seeds it with starting capital.
+        Uses INSERT OR IGNORE + unique id=1 to prevent duplicate rows from race conditions."""
         with self.conn() as c:
-            row = c.execute("SELECT * FROM portfolio ORDER BY id DESC LIMIT 1").fetchone()
+            # Clean up duplicates if they exist (legacy fix)
+            count = c.execute("SELECT COUNT(*) FROM portfolio").fetchone()[0]
+            if count > 1:
+                log.warning(f"Portfolio has {count} rows — cleaning duplicates, keeping id=1")
+                c.execute("DELETE FROM portfolio WHERE id != (SELECT MIN(id) FROM portfolio)")
+            row = c.execute("SELECT * FROM portfolio ORDER BY id LIMIT 1").fetchone()
             if row:
                 return dict(row)
-            # Cold start — seed with starting capital, return directly (no recursion)
+            # Cold start — seed with starting capital
             starting = float(os.environ.get('STARTING_CAPITAL', 100000.0))
             c.execute("""
-                INSERT INTO portfolio (cash, realized_gains, tax_withdrawn, month_start, updated_at)
-                VALUES (?, 0.0, 0.0, ?, ?)
+                INSERT OR IGNORE INTO portfolio (id, cash, realized_gains, tax_withdrawn, month_start, updated_at)
+                VALUES (1, ?, 0.0, 0.0, ?, ?)
             """, (starting, starting, self.now()))
             log.info(f"Cold start — portfolio seeded at ${starting:.2f}")
-            row_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
             return {
-                'id': row_id, 'cash': starting, 'realized_gains': 0.0,
+                'id': 1, 'cash': starting, 'realized_gains': 0.0,
                 'tax_withdrawn': 0.0, 'month_start': starting, 'updated_at': self.now()
             }
 
