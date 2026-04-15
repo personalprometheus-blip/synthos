@@ -11480,14 +11480,31 @@ def api_admin_market_activity():
             cust_buys = {k: 0.0 for k in hour_keys}
             cust_sells = {k: 0.0 for k in hour_keys}
             has_activity = False
+            def _hour_key(ts_str):
+                """Normalize any timestamp to ET hour key: YYYY-MM-DDTHH:00"""
+                if not ts_str:
+                    return None
+                s = str(ts_str).strip()
+                try:
+                    if '+' in s or s.endswith('Z'):
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                        dt = dt.astimezone(_et)
+                    else:
+                        dt = datetime.fromisoformat(s.replace(' ', 'T')[:19])
+                        dt = dt.replace(tzinfo=_et)
+                    return dt.strftime('%Y-%m-%dT%H:00')
+                except Exception:
+                    s = s.replace(' ', 'T')
+                    return s[:13] + ':00' if len(s) >= 13 else None
+
             # Buys
             for r in conn.execute(
                 "SELECT opened_at, entry_price * shares AS amt, ticker FROM positions WHERE opened_at >= ?",
                 (cutoff,)
             ).fetchall():
-                ts = (r['opened_at'] or '')[:13] + ':00'
+                ts = _hour_key(r['opened_at'])
                 amt = float(r['amt'] or 0)
-                if ts in cust_buys:
+                if ts and ts in cust_buys:
                     cust_buys[ts] += amt
                     total_bins[ts]['buys'] += amt
                     total_bins[ts]['buy_count'] += 1
@@ -11497,9 +11514,9 @@ def api_admin_market_activity():
                 "SELECT closed_at, entry_price * shares AS amt, ticker FROM positions WHERE closed_at IS NOT NULL AND closed_at >= ?",
                 (cutoff,)
             ).fetchall():
-                ts = (r['closed_at'] or '')[:13] + ':00'
+                ts = _hour_key(r['closed_at'])
                 amt = float(r['amt'] or 0)
-                if ts in cust_sells:
+                if ts and ts in cust_sells:
                     cust_sells[ts] += amt
                     total_bins[ts]['sells'] += amt
                     total_bins[ts]['sell_count'] += 1
