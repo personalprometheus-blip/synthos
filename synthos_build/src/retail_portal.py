@@ -3709,61 +3709,41 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 /* ── HERO SIGNAL RAIL ── */
 .hero-rail{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px}
 .hero-card{
-  border-radius:20px;overflow:hidden;position:relative;
-  border:1px solid rgba(255,255,255,0.10);
-  transition:transform 0.2s,box-shadow 0.2s;
+  border-radius:14px;overflow:hidden;position:relative;
+  border:1px solid rgba(255,255,255,0.08);
+  background:var(--surface2);
+  transition:border-color 0.2s;
 }
-.hero-card:hover{transform:translateY(-4px)}
-.hero-card::before{
-  content:'';position:absolute;top:0;left:10%;right:10%;height:1px;
-}
-.hero-card.hc-cyan{
-  background:linear-gradient(160deg,rgba(0,245,212,0.08) 0%,var(--surface2) 55%);
-  box-shadow:0 0 0 1px rgba(0,245,212,0.14),0 8px 32px rgba(0,245,212,0.07);
-}
-.hero-card.hc-cyan::before{background:linear-gradient(90deg,transparent,rgba(0,245,212,0.55),transparent)}
-.hero-card.hc-cyan:hover{box-shadow:0 0 0 1px rgba(0,245,212,0.22),var(--glow-hero),0 18px 52px rgba(0,0,0,0.4)}
-.hero-card.hc-violet{
-  background:linear-gradient(160deg,rgba(123,97,255,0.08) 0%,var(--surface2) 55%);
-  box-shadow:0 0 0 1px rgba(123,97,255,0.14),0 8px 32px rgba(123,97,255,0.07);
-}
-.hero-card.hc-violet::before{background:linear-gradient(90deg,transparent,rgba(123,97,255,0.55),transparent)}
-.hero-card.hc-violet:hover{box-shadow:0 0 0 1px rgba(123,97,255,0.22),0 0 20px rgba(123,97,255,0.18),0 18px 52px rgba(0,0,0,0.4)}
-.hero-rank-badge{
-  position:absolute;top:14px;right:14px;
-  font-size:8px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;
-  padding:3px 9px;border-radius:99px;
-}
-.hrb-cyan{background:rgba(0,245,212,0.10);border:1px solid rgba(0,245,212,0.22);color:var(--teal)}
-.hrb-violet{background:rgba(123,97,255,0.10);border:1px solid rgba(123,97,255,0.22);color:var(--purple)}
-.hero-body{padding:18px 16px 14px}
-.hero-ticker-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.hero-card:hover{border-color:rgba(255,255,255,0.15)}
+.hero-card.hc-cyan{border-left:3px solid var(--teal)}
+.hero-card.hc-violet{border-left:3px solid var(--purple)}
+.hero-body{padding:14px 16px 12px}
+.hero-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.hero-left{display:flex;align-items:center;gap:10px}
 .hero-icon{
-  width:50px;height:50px;border-radius:13px;flex-shrink:0;
+  width:38px;height:38px;border-radius:10px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:800;letter-spacing:-0.3px;
-  position:relative;overflow:hidden;
+  font-size:10px;font-weight:800;letter-spacing:-0.3px;
 }
-.hero-icon::after{content:'';position:absolute;inset:0;background:linear-gradient(145deg,rgba(255,255,255,0.18) 0%,transparent 55%)}
-.hi-cyan{
-  background:linear-gradient(135deg,rgba(0,245,212,0.18),rgba(0,245,212,0.06));
-  color:var(--teal);border:1px solid rgba(0,245,212,0.20);
-}
-.hi-violet{
-  background:linear-gradient(135deg,rgba(123,97,255,0.18),rgba(123,97,255,0.06));
-  color:var(--purple);border:1px solid rgba(123,97,255,0.20);
-}
-.hero-id{flex:1;min-width:0}
-.hero-label{font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--dim);margin-bottom:3px}
-.hero-ticker{font-size:20px;font-weight:700;letter-spacing:-0.4px;color:var(--text)}
-.hero-conv{margin-bottom:12px}
-.hero-conv-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.hero-conv-name{font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)}
-.hero-conv-val{font-size:10px;font-weight:800}
-.hcv-cyan{color:var(--teal)}
-.hcv-violet{color:var(--purple)}
-.hero-conv-track{height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden}
-.hero-conv-fill{height:100%;border-radius:99px}
+.hi-cyan{background:rgba(0,245,212,0.1);color:var(--teal);border:1px solid rgba(0,245,212,0.15)}
+.hi-violet{background:rgba(123,97,255,0.1);color:var(--purple);border:1px solid rgba(123,97,255,0.15)}
+.hero-id{min-width:0}
+.hero-ticker{font-size:16px;font-weight:700;letter-spacing:-0.3px;color:var(--text);line-height:1}
+.hero-label{font-size:9px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+.hero-score{text-align:right}
+.hero-score-val{font-size:28px;font-weight:800;font-family:var(--mono);line-height:1}
+.hero-score-label{font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);margin-top:2px}
+.hcv-cyan{color:var(--teal)}.hcv-violet{color:var(--purple)}
+.hero-spark{height:28px;margin-bottom:8px}
+.hero-spark canvas{width:100%;height:100%;display:block}
+.hero-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid rgba(255,255,255,0.06);padding-top:8px}
+.hero-metric{text-align:center}
+.hero-metric-val{font-size:12px;font-weight:700;font-family:var(--mono);color:var(--text)}
+.hero-metric-label{font-size:7px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-top:1px}
+.hero-rank-badge{font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px}
+.hrb-cyan{background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.18);color:var(--teal)}
+.hrb-violet{background:rgba(123,97,255,0.08);border:1px solid rgba(123,97,255,0.18);color:var(--purple)}
+.hero-pending{padding:8px 0 2px;font-size:9px;color:var(--dim);text-align:center;letter-spacing:0.06em}
 .hcf-cyan{background:linear-gradient(90deg,var(--purple),var(--teal))}
 .hcf-violet{background:linear-gradient(90deg,rgba(123,97,255,0.5),var(--purple))}
 .hero-meta-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
@@ -4771,88 +4751,55 @@ setInterval(loadAgentPulse, 10000);
   <div class="hero-rail" id="hero-rail">
 
     <!-- Hero #1 — Highest conviction -->
-    <div class="hero-card hc-cyan">
-      <div class="hero-rank-badge hrb-cyan">#1 Conviction</div>
+    <div class="hero-card hc-cyan" id="hero-1">
       <div class="hero-body">
-        <div class="hero-ticker-row">
-          <div class="hero-icon hi-cyan">—</div>
-          <div class="hero-id">
-            <div class="hero-label">Top Signal · Agent Score</div>
-            <div class="hero-ticker">——</div>
+        <div class="hero-top">
+          <div class="hero-left">
+            <div class="hero-icon hi-cyan">—</div>
+            <div class="hero-id">
+              <div class="hero-ticker">——</div>
+              <div class="hero-label">Top Signal</div>
+            </div>
+          </div>
+          <div class="hero-score">
+            <div class="hero-score-val hcv-cyan">—</div>
+            <div class="hero-score-label">Agent Score</div>
           </div>
         </div>
-        <div class="hero-conv">
-          <div class="hero-conv-row">
-            <span class="hero-conv-name">Synthos</span>
-            <span class="hero-conv-val hcv-cyan">—</span>
-          </div>
-          <div class="hero-conv-track"><div class="hero-conv-fill hcf-cyan" style="width:0%"></div></div>
+        <div class="hero-spark"><canvas id="hero-spark-1"></canvas></div>
+        <div class="hero-metrics">
+          <div class="hero-metric"><div class="hero-metric-val" id="h1-market">—</div><div class="hero-metric-label">Market</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h1-delta">—</div><div class="hero-metric-label">Delta</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h1-sources">—</div><div class="hero-metric-label">Sources</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h1-status">—</div><div class="hero-metric-label">Status</div></div>
         </div>
-        <div class="hero-conv" style="margin-bottom:12px">
-          <div class="hero-conv-row">
-            <span class="hero-conv-name">Market</span>
-            <span class="hero-conv-val" style="color:var(--muted)">—</span>
-          </div>
-          <div class="hero-conv-track"><div class="hero-conv-fill hcf-cyan" style="width:0%;opacity:0.5"></div></div>
-        </div>
-        <div class="hero-meta-row">
-          <div class="hm-item">
-            <div class="hm-label">Consensus Δ</div>
-            <div class="hm-val">—</div>
-          </div>
-          <div class="hm-item">
-            <div class="hm-label">Sources</div>
-            <div class="hm-val">—</div>
-          </div>
-          <div class="hm-item">
-            <div class="hm-label">Score Δ</div>
-            <div class="hm-val">—</div>
-          </div>
-        </div>
-        <div class="hero-pending">Ranking integration pending</div>
+        <div class="hero-pending">Awaiting signals</div>
       </div>
     </div>
 
-    <!-- Hero #2 — Highest agent/market divergence -->
-    <div class="hero-card hc-violet">
-      <div class="hero-rank-badge hrb-violet">#1 Divergence</div>
+    <div class="hero-card hc-violet" id="hero-2">
       <div class="hero-body">
-        <div class="hero-ticker-row">
-          <div class="hero-icon hi-violet">—</div>
-          <div class="hero-id">
-            <div class="hero-label">Agent Edge · Market Spread</div>
-            <div class="hero-ticker">——</div>
+        <div class="hero-top">
+          <div class="hero-left">
+            <div class="hero-icon hi-violet">—</div>
+            <div class="hero-id">
+              <div class="hero-ticker">——</div>
+              <div class="hero-label">Top Divergence</div>
+            </div>
+          </div>
+          <div class="hero-score">
+            <div class="hero-score-val hcv-violet">—</div>
+            <div class="hero-score-label">Spread</div>
           </div>
         </div>
-        <div class="hero-conv">
-          <div class="hero-conv-row">
-            <span class="hero-conv-name">Synthos</span>
-            <span class="hero-conv-val hcv-violet">—</span>
-          </div>
-          <div class="hero-conv-track"><div class="hero-conv-fill hcf-violet" style="width:0%"></div></div>
+        <div class="hero-spark"><canvas id="hero-spark-2"></canvas></div>
+        <div class="hero-metrics">
+          <div class="hero-metric"><div class="hero-metric-val" id="h2-agent">—</div><div class="hero-metric-label">Agent</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h2-market">—</div><div class="hero-metric-label">Market</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h2-sources">—</div><div class="hero-metric-label">Sources</div></div>
+          <div class="hero-metric"><div class="hero-metric-val" id="h2-status">—</div><div class="hero-metric-label">Status</div></div>
         </div>
-        <div class="hero-conv" style="margin-bottom:12px">
-          <div class="hero-conv-row">
-            <span class="hero-conv-name">Market</span>
-            <span class="hero-conv-val" style="color:var(--muted)">—</span>
-          </div>
-          <div class="hero-conv-track"><div class="hero-conv-fill hcf-violet" style="width:0%;opacity:0.4"></div></div>
-        </div>
-        <div class="hero-meta-row">
-          <div class="hm-item">
-            <div class="hm-label">Agent − Mkt</div>
-            <div class="hm-val">—</div>
-          </div>
-          <div class="hm-item">
-            <div class="hm-label">Sources</div>
-            <div class="hm-val">—</div>
-          </div>
-          <div class="hm-item">
-            <div class="hm-label">Score Δ</div>
-            <div class="hm-val">—</div>
-          </div>
-        </div>
-        <div class="hero-pending">Ranking integration pending</div>
+        <div class="hero-pending">Awaiting signals</div>
       </div>
     </div>
 
@@ -7360,6 +7307,39 @@ function renderIntelGrid(signals) {
 }
 
 
+function _drawSparkline(canvasId, values, color) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas || !values.length) return;
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  var mn = Math.min.apply(null, values), mx = Math.max.apply(null, values);
+  var range = mx - mn || 1;
+  var step = w / (values.length - 1 || 1);
+  // Fill gradient
+  ctx.beginPath();
+  ctx.moveTo(0, h);
+  values.forEach(function(v, i) { ctx.lineTo(i * step, h - ((v - mn) / range) * (h - 4) - 2); });
+  ctx.lineTo(w, h); ctx.closePath();
+  var grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color.replace(')', ',0.15)').replace('rgb', 'rgba'));
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad; ctx.fill();
+  // Line
+  ctx.beginPath();
+  values.forEach(function(v, i) {
+    var y = h - ((v - mn) / range) * (h - 4) - 2;
+    i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * step, y);
+  });
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+  // End dot
+  var lastY = h - ((values[values.length-1] - mn) / range) * (h - 4) - 2;
+  ctx.beginPath(); ctx.arc(w, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = color; ctx.fill();
+}
+
 function updateHeroCards(signals) {
   if (!signals || !signals.length) return;
   function _as(s) {
@@ -7383,38 +7363,46 @@ function updateHeroCards(signals) {
   });
   var div = diverged[0];
   if (div === top && diverged.length > 1) div = diverged[1];
-  var cards = document.querySelectorAll('.hero-card');
-  // Hero #1 Conviction
-  if (cards[0] && top) {
-    var a1=_as(top), m1=_ms(top);
+
+  // Hero #1 — Top Conviction
+  var h1 = document.getElementById('hero-1');
+  if (h1 && top) {
+    var a1=_as(top), m1=_ms(top), d1=a1-m1;
     var c1 = signals.filter(function(s){return s.ticker===top.ticker}).length;
-    cards[0].querySelector('.hero-icon').textContent = (top.ticker||'?').slice(0,4);
-    cards[0].querySelector('.hero-ticker').textContent = top.ticker||'??';
-    cards[0].querySelector('.hero-label').textContent = (top.headline||'').slice(0,40)||'Top Signal';
-    var cv=cards[0].querySelectorAll('.hero-conv');
-    if(cv[0]){cv[0].querySelector('.hero-conv-val').textContent=a1;cv[0].querySelector('.hero-conv-fill').style.width=a1+'%';}
-    if(cv[1]){cv[1].querySelector('.hero-conv-val').textContent=m1;cv[1].querySelector('.hero-conv-fill').style.width=m1+'%';}
-    var hm=cards[0].querySelectorAll('.hm-val');
-    if(hm[0])hm[0].textContent=(a1>m1?'+':'')+(a1-m1);
-    if(hm[1])hm[1].textContent=c1+' hit'+(c1!==1?'s':'');
-    if(hm[2])hm[2].textContent=top.corroborated?'Confirmed':'Pending';
-    var p=cards[0].querySelector('.hero-pending');if(p)p.style.display='none';
+    h1.querySelector('.hero-icon').textContent = (top.ticker||'?').slice(0,4);
+    h1.querySelector('.hero-ticker').textContent = top.ticker||'??';
+    h1.querySelector('.hero-label').textContent = (top.headline||'').slice(0,40)||'Top Signal';
+    h1.querySelector('.hero-score-val').textContent = a1;
+    document.getElementById('h1-market').textContent = m1;
+    document.getElementById('h1-delta').textContent = (d1>=0?'+':'')+d1;
+    document.getElementById('h1-delta').style.color = d1>0?'var(--teal)':d1<0?'var(--pink)':'var(--muted)';
+    document.getElementById('h1-sources').textContent = c1;
+    document.getElementById('h1-status').textContent = top.corroborated?'Conf':'Active';
+    document.getElementById('h1-status').style.color = top.corroborated?'var(--teal)':'var(--muted)';
+    // Sparkline from top 8 signals by score
+    var sparkData = ranked.slice(0,8).map(function(s){return _as(s)});
+    _drawSparkline('hero-spark-1', sparkData, 'rgb(0,245,212)');
+    var p1=h1.querySelector('.hero-pending');if(p1)p1.style.display='none';
   }
-  // Hero #2 Divergence
-  if (cards[1] && div) {
-    var a2=_as(div), m2=_ms(div), sp=a2-m2;
+
+  // Hero #2 — Top Divergence
+  var h2 = document.getElementById('hero-2');
+  if (h2 && div) {
+    var a2=_as(div), m2=_ms(div), sp=Math.abs(a2-m2);
     var c2 = signals.filter(function(s){return s.ticker===div.ticker}).length;
-    cards[1].querySelector('.hero-icon').textContent = (div.ticker||'?').slice(0,4);
-    cards[1].querySelector('.hero-ticker').textContent = div.ticker||'??';
-    cards[1].querySelector('.hero-label').textContent = (div.headline||'').slice(0,40)||'Agent Edge';
-    var cv2=cards[1].querySelectorAll('.hero-conv');
-    if(cv2[0]){cv2[0].querySelector('.hero-conv-val').textContent=a2;cv2[0].querySelector('.hero-conv-fill').style.width=a2+'%';}
-    if(cv2[1]){cv2[1].querySelector('.hero-conv-val').textContent=m2;cv2[1].querySelector('.hero-conv-fill').style.width=m2+'%';}
-    var hm2=cards[1].querySelectorAll('.hm-val');
-    if(hm2[0])hm2[0].textContent=(sp>=0?'+':'')+sp+' pts';
-    if(hm2[1])hm2[1].textContent=c2+' hit'+(c2!==1?'s':'');
-    if(hm2[2])hm2[2].textContent=div.corroborated?'Confirmed':'Pending';
-    var p2=cards[1].querySelector('.hero-pending');if(p2)p2.style.display='none';
+    h2.querySelector('.hero-icon').textContent = (div.ticker||'?').slice(0,4);
+    h2.querySelector('.hero-ticker').textContent = div.ticker||'??';
+    h2.querySelector('.hero-label').textContent = (div.headline||'').slice(0,40)||'Top Divergence';
+    h2.querySelector('.hero-score-val').textContent = (a2>m2?'+':'')+sp;
+    document.getElementById('h2-agent').textContent = a2;
+    document.getElementById('h2-market').textContent = m2;
+    document.getElementById('h2-sources').textContent = c2;
+    document.getElementById('h2-status').textContent = div.corroborated?'Conf':'Active';
+    document.getElementById('h2-status').style.color = div.corroborated?'var(--purple)':'var(--muted)';
+    // Sparkline from top 8 divergences
+    var sparkData2 = diverged.slice(0,8).map(function(s){return Math.abs(_as(s)-_ms(s))});
+    _drawSparkline('hero-spark-2', sparkData2, 'rgb(123,97,255)');
+    var p2=h2.querySelector('.hero-pending');if(p2)p2.style.display='none';
   }
 }
 
