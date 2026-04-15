@@ -7756,40 +7756,78 @@ async function loadTraderActivity() {
 // ── PLANNING PANEL ──
 async function loadPlanning() {
   try {
-    const r = await fetch('/api/watchlist');
+    const r = await fetch('/api/planning');
     const d = await r.json();
     const signals = d.signals || [];
-    const el    = document.getElementById('planning-list');
-    const cntEl = document.getElementById('planning-count');
+    const mode    = d.mode    || 'intel';
+    const el      = document.getElementById('planning-list');
+    const cntEl   = document.getElementById('planning-count');
+    const subEl   = document.getElementById('planning-sub');
     if (!el) return;
-    const fresh = signals.filter(s => !s.is_stale);
-    if (cntEl) cntEl.textContent = fresh.length + ' active';
+
+    if (mode === 'queue') {
+      if (cntEl) cntEl.textContent = signals.length + ' queued';
+      if (subEl) subEl.textContent = 'Queued for next trade run';
+    } else {
+      if (cntEl) cntEl.textContent = signals.length + ' signals';
+      if (subEl) subEl.textContent = 'Queue empty \xb7 latest intel';
+    }
+
     if (!signals.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\U0001f50d</div>No signals under watch</div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\U0001f50d</div>No signals available</div>';
       return;
     }
-    el.innerHTML = signals.slice(0,8).map(sig => {
-      const conf    = (sig.confidence||'LOW').toUpperCase();
-      const confCls = conf==='HIGH'?'conf-high':conf==='MEDIUM'?'conf-med':'conf-low';
-      const ticker  = sig.ticker||'?';
-      const sigType = sig.signal_type||'WATCH';
-      const summary = (sig.headline||sig.reason||sig.summary||'Signal detected').slice(0,60);
-      const stale   = sig.is_stale ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">archive</span>' : '';
-      return `<div class="agent-row"
-          data-ticker="${ticker.replace(/"/g,'')}"
-          data-conf="${conf}"
-          data-summary="${summary.replace(/"/g,'')}"
-          data-type="${sigType}"
-          onmouseenter="showIntelTooltip(event,this)"
-          onmouseleave="hideIntelTooltip()"
-          onclick="openLogicModal(this)">
-        <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.12),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.12);color:var(--teal)">${ticker.slice(0,4)}</div>
-        <div class="agent-row-body">
-          <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:4px">${sigType}</span>${stale}</div>
-          <div class="agent-row-sub">${summary}</div>
-        </div>
-        <div class="agent-row-right"><div class="conf-chip ${confCls}">${conf}</div></div>
-      </div>`;
+
+    el.innerHTML = signals.slice(0, 8).map(sig => {
+      const conf    = (sig.confidence || 'LOW').toUpperCase();
+      const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
+      const ticker  = (sig.ticker || '?');
+      const summary = (sig.headline || sig.reason || sig.summary || 'Signal detected').slice(0, 65);
+      const esc     = s => (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+      if (mode === 'queue') {
+        const staleness  = sig.staleness || '';
+        const staleColor = staleness === 'Fresh' ? 'var(--teal)' : staleness === 'Aging' ? 'var(--amber)' : 'var(--dim)';
+        const corrBadge  = sig.corroborated ? '<span style="font-size:8px;color:var(--teal);margin-left:5px">\u2726 confirmed</span>' : '';
+        const tierColor  = sig.source_tier === 1 ? 'var(--teal)' : sig.source_tier === 2 ? 'var(--amber)' : 'var(--dim)';
+        const tierLabel  = sig.source_tier === 1 ? 'Official' : sig.source_tier === 2 ? 'Wire' : 'Press';
+        return `<div class="agent-row"
+            data-ticker="${esc(ticker)}"
+            data-conf="${conf}"
+            data-summary="${esc(summary)}"
+            data-type="QUEUE"
+            onmouseenter="showIntelTooltip(event,this)"
+            onmouseleave="hideIntelTooltip()"
+            onclick="openLogicModal(this)">
+          <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700">${ticker.slice(0,4)}</div>
+          <div class="agent-row-body">
+            <div class="agent-row-ticker">${ticker}${corrBadge}</div>
+            <div class="agent-row-sub">${summary}</div>
+            <div style="margin-top:3px;display:flex;align-items:center;gap:6px">
+              <span style="font-size:8px;color:${staleColor}">${staleness}</span>
+              <span style="font-size:8px;color:${tierColor}">\u25cf ${tierLabel}</span>
+            </div>
+          </div>
+          <div class="agent-row-right"><div class="conf-chip ${confCls}">${conf}</div></div>
+        </div>`;
+      } else {
+        const stale = sig.is_stale ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">archive</span>' : '';
+        return `<div class="agent-row"
+            data-ticker="${esc(ticker)}"
+            data-conf="${conf}"
+            data-summary="${esc(summary)}"
+            data-type="INTEL"
+            onmouseenter="showIntelTooltip(event,this)"
+            onmouseleave="hideIntelTooltip()"
+            onclick="openLogicModal(this)">
+          <div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted)">${ticker.slice(0,4)}</div>
+          <div class="agent-row-body">
+            <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--dim);font-weight:400;margin-left:4px">intel${stale}</span></div>
+            <div class="agent-row-sub">${summary}</div>
+          </div>
+          <div class="agent-row-right"><div class="conf-chip ${confCls}">${conf}</div></div>
+        </div>`;
+      }
     }).join('');
   } catch(e) { console.log('Planning error:', e); }
 }
