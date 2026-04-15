@@ -3703,21 +3703,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .intel-grid{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  grid-auto-rows:minmax(140px,auto);
   gap:14px;
 }
 
-/* ── HERO CARDS (inline in grid) ── */
-.hero-card{
-  grid-row:span 2;border-radius:14px;overflow:hidden;position:relative;
-  border:1px solid rgba(255,255,255,0.08);
-  background:var(--surface2);
-  transition:border-color 0.2s;
-  display:flex;flex-direction:column;
-}
-.hero-card:hover{border-color:rgba(255,255,255,0.15)}
-.hero-card.hc-cyan{border-left:3px solid var(--teal)}
-.hero-card.hc-violet{border-left:3px solid var(--purple)}
+/* ── HERO CARDS — same style as regular cards, revisit later ── */
 .hero-body{padding:14px 16px 12px}
 .hero-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
 .hero-left{display:flex;align-items:center;gap:10px}
@@ -7247,79 +7236,7 @@ function renderIntelGrid(signals) {
       ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   });
-
-  // Build hero cards and insert at random positions
-  var fresh = signals.filter(function(s){return !s.is_stale});
-  if (!fresh.length) fresh = signals;
-  if (fresh.length >= 2) {
-    var ranked = fresh.slice().sort(function(a,b){return (agentScore(b)+(b.corroborated?10:0))-(agentScore(a)+(a.corroborated?10:0))});
-    var diverged = fresh.slice().sort(function(a,b){return Math.abs(agentScore(b)-marketScore(b))-Math.abs(agentScore(a)-marketScore(a))});
-    var heroTop = ranked[0];
-    var heroDiv = diverged[0];
-    if (heroDiv === heroTop && diverged.length > 1) heroDiv = diverged[1];
-    var heroes = [];
-
-    // Hero 1 — conviction
-    var a1=agentScore(heroTop),m1=marketScore(heroTop),d1=a1-m1;
-    var c1=signals.filter(function(s){return s.ticker===heroTop.ticker}).length;
-    var sparkIds = 'hero-spark-'+Date.now();
-    heroes.push({pos: Math.min(1, cards.length-1), html:
-      '<div class="hero-card hc-cyan"><div class="hero-body">'
-      +'<div class="hero-top"><div class="hero-left"><div class="hero-icon hi-cyan">'+(heroTop.ticker||'?').slice(0,4)+'</div>'
-      +'<div class="hero-id"><div class="hero-ticker">'+(heroTop.ticker||'??')+'</div>'
-      +'<div class="hero-label">'+(heroTop.headline||'Top Signal').slice(0,35)+'</div></div></div>'
-      +'<div class="hero-score"><div class="hero-score-val hcv-cyan">'+a1+'</div><div class="hero-score-label">Agent Score</div></div></div>'
-      +'<div class="hero-spark"><canvas id="'+sparkIds+'-1"></canvas></div>'
-      +'<div style="padding:0 16px 10px"><div style="display:flex;gap:12px;align-items:center">'
-      +'<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:3px"><span>Synthos</span><span>'+a1+'</span></div>'
-      +'<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+a1+'%;background:var(--teal);border-radius:99px"></div></div></div>'
-      +'<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:3px"><span>Market</span><span>'+m1+'</span></div>'
-      +'<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+m1+'%;background:rgba(255,255,255,0.25);border-radius:99px"></div></div></div>'
-      +'</div></div>'
-      +'<div class="hero-metrics">'
-      +'<div class="hero-metric"><div class="hero-metric-val" style="color:'+(d1>0?'var(--teal)':'var(--pink)')+'">'+(d1>=0?'+':'')+d1+'</div><div class="hero-metric-label">Delta</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val">'+c1+'</div><div class="hero-metric-label">Sources</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val" style="color:'+(heroTop.corroborated?'var(--teal)':'var(--muted)')+'">'+(heroTop.corroborated?'Conf':'Active')+'</div><div class="hero-metric-label">Status</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val" style="font-size:7px;letter-spacing:0.06em;color:var(--teal)">CONVICTION</div><div class="hero-metric-label">#1</div></div>'
-      +'</div></div></div>', sparkId: sparkIds+'-1', sparkData: ranked.slice(0,8).map(function(s){return agentScore(s)}), sparkColor: 'rgb(0,245,212)'
-    });
-
-    // Hero 2 — divergence
-    var a2=agentScore(heroDiv),m2=marketScore(heroDiv),sp=Math.abs(a2-m2);
-    var c2=signals.filter(function(s){return s.ticker===heroDiv.ticker}).length;
-    heroes.push({pos: Math.min(4, cards.length), html:
-      '<div class="hero-card hc-violet"><div class="hero-body">'
-      +'<div class="hero-top"><div class="hero-left"><div class="hero-icon hi-violet">'+(heroDiv.ticker||'?').slice(0,4)+'</div>'
-      +'<div class="hero-id"><div class="hero-ticker">'+(heroDiv.ticker||'??')+'</div>'
-      +'<div class="hero-label">'+(heroDiv.headline||'Top Divergence').slice(0,35)+'</div></div></div>'
-      +'<div class="hero-score"><div class="hero-score-val hcv-violet">'+(a2>m2?'+':'')+sp+'</div><div class="hero-score-label">Spread</div></div></div>'
-      +'<div class="hero-spark"><canvas id="'+sparkIds+'-2"></canvas></div>'
-      +'<div style="padding:0 16px 10px"><div style="display:flex;gap:12px;align-items:center">'
-      +'<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:3px"><span>Synthos</span><span>'+a2+'</span></div>'
-      +'<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+a2+'%;background:var(--purple);border-radius:99px"></div></div></div>'
-      +'<div style="flex:1"><div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:3px"><span>Market</span><span>'+m2+'</span></div>'
-      +'<div style="height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden"><div style="height:100%;width:'+m2+'%;background:rgba(255,255,255,0.25);border-radius:99px"></div></div></div>'
-      +'</div></div>'
-      +'<div class="hero-metrics">'
-      +'<div class="hero-metric"><div class="hero-metric-val">'+a2+'</div><div class="hero-metric-label">Agent</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val">'+m2+'</div><div class="hero-metric-label">Market</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val" style="color:'+(heroDiv.corroborated?'var(--purple)':'var(--muted)')+'">'+(heroDiv.corroborated?'Conf':'Active')+'</div><div class="hero-metric-label">Status</div></div>'
-      +'<div class="hero-metric"><div class="hero-metric-val" style="font-size:7px;letter-spacing:0.06em;color:var(--purple)">DIVERGENCE</div><div class="hero-metric-label">#1</div></div>'
-      +'</div></div></div>', sparkId: sparkIds+'-2', sparkData: diverged.slice(0,8).map(function(s){return Math.abs(agentScore(s)-marketScore(s))}), sparkColor: 'rgb(123,97,255)'
-    });
-
-    // Insert hero cards at their positions
-    heroes.sort(function(a,b){return b.pos-a.pos});
-    heroes.forEach(function(h){cards.splice(h.pos, 0, h.html)});
-    grid.innerHTML = cards.join('');
-
-    // Draw sparklines after DOM insertion
-    setTimeout(function(){
-      heroes.forEach(function(h){_drawSparkline(h.sparkId, h.sparkData, h.sparkColor)});
-    }, 50);
-  } else {
-    grid.innerHTML = cards.join('');
-  }
+  grid.innerHTML = cards.join('');
 }
 
 
