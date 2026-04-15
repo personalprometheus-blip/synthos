@@ -3708,8 +3708,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 /* ── HERO BADGE (overlaid on .charm cards) ── */
 .hero-badge{position:absolute;top:42px;right:8px;font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px;z-index:1}
-.hero-badge.hb-cyan{background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.2);color:var(--teal)}
-.hero-badge.hb-violet{background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.2);color:var(--purple)}
+.hero-badge.hb-cyan,.hero-badge.hb-violet{background:linear-gradient(135deg,#d4a017,#f5d442,#d4a017);border:1px solid rgba(245,212,66,0.5);color:#1a1400;text-shadow:0 1px 0 rgba(245,212,66,0.4);box-shadow:0 0 8px rgba(245,212,66,0.3)}
 
 /* unused hero CSS kept minimal for future */
 .hero-icon{
