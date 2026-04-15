@@ -6,9 +6,9 @@ Replaces cron-based trading schedule with a single daemon process that owns
 market hours. Runs continuously from 9:10 AM to 4:00 PM ET.
 
 Architecture:
-    1. Pre-market prep (9:15): screener → news → sentiment → price poll → trade
+    1. Pre-market prep (9:15): news → screener → sentiment → price poll → trade
     2. Market open (9:30): first trade evaluation (signals from prep)
-    3. Every 30 min: enrichment (screener → sentiment → news) → full trade eval
+    3. Every 30 min: enrichment (news → screener → sentiment) → full trade eval
     4. Every 10 min: lightweight reconciliation + exit checks only (no new signal eval)
     5. Every 60 sec: price poller (keeps live_prices fresh for portal)
     6. Market close (4:00): final close-session trade evaluation, then exit
@@ -378,15 +378,16 @@ def run_screener():
 # ── Main Daemon Loop ──
 
 def run_premarket_prep():
-    """9:15 AM: Sequential prep block — screener → news → sentiment → trade."""
+    """9:15 AM: Sequential prep block — news → screener → sentiment → trade."""
     log.info("=" * 60)
-    log.info("PRE-MARKET PREP — screener → news → sentiment → trade")
+    log.info("PRE-MARKET PREP — news → screener → sentiment → trade")
     log.info("=" * 60)
 
-    run_screener()
+    # reuse-news-first-sentinel
+    run_news(session='market')
     if _shutdown_requested:
         return
-    run_news(session='market')
+    run_screener()
     if _shutdown_requested:
         return
     run_sentiment()
@@ -402,7 +403,7 @@ def run_market_loop():
     9:30 AM - 4:00 PM: Event-driven trading with periodic enrichment.
 
     Schedule:
-        Every 30 min:  enrichment (screener → sentiment → news) → trade
+        Every 30 min:  enrichment (news → screener → sentiment) → trade
         Every 10 min:  lightweight reconciliation + exit checks only
         Every 60 sec:  price poller (keeps live_prices fresh for portal)
 
@@ -436,14 +437,14 @@ def run_market_loop():
         since_price = now_mono - last_price_poll
 
         # ── ENRICHMENT CYCLE (every 30 min) ──
-        # New data → full trade evaluation
+        # news → screener → sentiment → trade (news first so downstream agents have fresh data)
         if since_enrichment >= enrichment_interval:
-            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — running screener → sentiment → news → trade")
-            run_screener()
+            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — running news → screener → sentiment → trade")
+            run_news(session='market')
+            if not _shutdown_requested:
+                run_screener()
             if not _shutdown_requested:
                 run_sentiment()
-            if not _shutdown_requested:
-                run_news(session='market')
             if not _shutdown_requested and not kill_switch_active():
                 run_trade_all_customers(session='open')
             last_enrichment = time.monotonic()
