@@ -495,6 +495,82 @@ def run_close_session():
         log.info("[CLOSE] Kill switch active — skipping close session trades")
     clear_agent_running()
 
+    # Post-close: backfill exit performance data for optimizer
+    run_exit_backfill()
+
+
+def run_exit_backfill():
+    """Backfill post-exit prices for the trailing stop optimizer."""
+    customers = get_active_customers()
+    if not customers:
+        return
+    log.info(f"[BACKFILL] Checking {len(customers)} customer(s) for exit performance backfill")
+    try:
+        import auth
+        from retail_database import get_customer_db
+    except ImportError:
+        return
+
+    for cid in customers:
+        try:
+            db = get_customer_db(cid)
+            rows = db.get_exit_performance_needing_backfill(min_days=5)
+            if not rows:
+                continue
+
+            # Get Alpaca creds for price lookups
+            ak, sk = auth.get_alpaca_credentials(cid)
+            if not ak:
+                continue
+
+            import requests as _req
+            base_url = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+            headers = {'APCA-API-KEY-ID': ak, 'APCA-API-SECRET-KEY': sk}
+            filled = 0
+
+            for row in rows:
+                try:
+                    ticker = row['ticker']
+                    exit_ts = row['exit_timestamp']
+
+                    # Fetch bars for 15 days after exit
+                    r = _req.get(
+                        f"{base_url}/v2/stocks/{ticker}/bars",
+                        headers=headers,
+                        params={'timeframe': '1Day', 'start': exit_ts[:10], 'limit': 15},
+                        timeout=8,
+                    )
+                    if not r.ok:
+                        continue
+                    bars = (r.json().get('bars') or [])
+                    if len(bars) < 2:
+                        continue
+
+                    closes = [b['c'] for b in bars]
+                    highs = [b['h'] for b in bars]
+                    lows = [b['l'] for b in bars]
+
+                    price_5d = closes[min(5, len(closes) - 1)] if len(closes) > 1 else None
+                    price_10d = closes[min(10, len(closes) - 1)] if len(closes) > 5 else None
+                    peak = max(highs) if highs else None
+                    trough = min(lows) if lows else None
+
+                    db.backfill_exit_performance(
+                        row_id=row['id'],
+                        price_5d=price_5d,
+                        price_10d=price_10d,
+                        peak_during_hold=peak,
+                        trough_during_hold=trough,
+                    )
+                    filled += 1
+                except Exception as _e:
+                    log.debug(f"[BACKFILL] {row.get('ticker','?')}: {_e}")
+
+            if filled:
+                log.info(f"[BACKFILL] {cid[:8]}: backfilled {filled}/{len(rows)} exits")
+        except Exception as _e:
+            log.debug(f"[BACKFILL] {cid[:8]} error: {_e}")
+
 
 def main():
     """Main entry point. Waits for pre-market, then runs through market day."""

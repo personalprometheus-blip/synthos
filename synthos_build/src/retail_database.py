@@ -897,6 +897,74 @@ class DB:
                 self.now(),
             ))
 
+    def get_exit_performance_needing_backfill(self, min_days=5):
+        """Return exit_performance rows missing post-exit price data that are old enough."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT id, ticker, exit_price, exit_reason, exit_timestamp, entry_price
+                FROM exit_performance
+                WHERE price_5d_after_exit IS NULL
+                  AND exit_timestamp <= datetime('now', ?)
+                ORDER BY exit_timestamp ASC LIMIT 50
+            """, (f'-{min_days} days',)).fetchall()
+            return [dict(r) for r in rows]
+
+    def backfill_exit_performance(self, row_id, price_5d=None, price_10d=None,
+                                  peak_during_hold=None, trough_during_hold=None):
+        """Fill in hindsight price data and compute stop quality metrics."""
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM exit_performance WHERE id=?", (row_id,)).fetchone()
+            if not row:
+                return
+            row = dict(row)
+
+            entry = row['entry_price'] or 0
+            exit_p = row['exit_price'] or 0
+
+            # Compute stop quality
+            stop_too_tight = 0
+            stop_too_loose = 0
+            missed_gain_pct = 0.0
+            excess_loss_pct = 0.0
+            optimal_exit = exit_p
+
+            if price_5d is not None and entry > 0:
+                recovery_pct = (price_5d - exit_p) / entry if entry else 0
+                # Stop too tight: price recovered >3% of entry within 5 days
+                if recovery_pct > 0.03 and row['exit_reason'] in ('TRAILING_STOP_FILLED', 'STOP_LOSS'):
+                    stop_too_tight = 1
+                # Stop too loose: price fell >3% further after exit (we should have exited earlier)
+                if recovery_pct < -0.03:
+                    stop_too_loose = 1
+
+            if peak_during_hold and entry > 0:
+                optimal_exit = peak_during_hold
+                missed_gain_pct = round((peak_during_hold - exit_p) / entry * 100, 2)
+
+            if price_5d is not None and exit_p > 0:
+                excess_loss_pct = round((price_5d - exit_p) / exit_p * 100, 2)
+
+            c.execute("""
+                UPDATE exit_performance SET
+                    price_5d_after_exit = ?,
+                    price_10d_after_exit = ?,
+                    peak_price_during_hold = ?,
+                    trough_price_during_hold = ?,
+                    stop_too_tight = ?,
+                    stop_too_loose = ?,
+                    optimal_exit_price = ?,
+                    missed_gain_pct = ?,
+                    excess_loss_pct = ?
+                WHERE id = ?
+            """, (
+                price_5d, price_10d,
+                peak_during_hold, trough_during_hold,
+                stop_too_tight, stop_too_loose,
+                round(optimal_exit, 2),
+                missed_gain_pct, excess_loss_pct,
+                row_id,
+            ))
+
     def reduce_position(self, pos_id, sell_shares, sell_price, exit_reason="PROFIT_TAKE"):
         """
         Partial sell: reduce shares in-place, record outcome, update cash.
