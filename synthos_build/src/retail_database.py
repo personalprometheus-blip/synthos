@@ -813,7 +813,8 @@ class DB:
         cost       = round(float(pos['entry_price']) * float(pos['shares']), 2)
         pnl_dollar = round(proceeds - cost, 2)
         pnl_pct    = round((pnl_dollar / cost) * 100, 2)
-        hold_days  = (datetime.now() - datetime.strptime(pos['opened_at'], '%Y-%m-%d %H:%M:%S')).days
+        _opened   = datetime.fromisoformat(pos['opened_at'].replace('Z', '+00:00')).replace(tzinfo=None)
+        hold_days  = (datetime.now() - _opened).days
         verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
         portfolio  = self.get_portfolio()
         new_cash   = round(portfolio['cash'] + proceeds, 2)
