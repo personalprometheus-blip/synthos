@@ -2065,6 +2065,11 @@ def verify_email(token):
     try:
         import auth as _auth
         result = _auth.verify_signup_email(token)
+        if result.get("customer_id") and not result.get("already"):
+            try:
+                _send_approval_email(result.get("email", ""), result.get("name", ""))
+            except Exception as _ae:
+                log.warning(f"Approval email after verify failed: {_ae}")
         return _VERIFY_SUCCESS_HTML
     except ValueError as e:
         # Not a signup verification token — try setup-account redirect (legacy)

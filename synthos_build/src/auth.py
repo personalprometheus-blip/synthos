@@ -742,7 +742,13 @@ def verify_signup_email(token: str) -> dict:
             "email_verify_token=NULL WHERE id=?",
             (now_iso, signup_id)
         )
-        return {"signup_id": signup_id, "name": name, "email": email}
+        # Auto-approve — invite code was pre-validated at signup, email verify is the final gate
+        try:
+            approval = approve_signup(signup_id, reviewed_by="invite_auto")
+            return {"signup_id": signup_id, "name": name, "email": email, **approval}
+        except Exception as _ae:
+            log.warning(f"Auto-approve after email verify failed: {_ae}")
+            return {"signup_id": signup_id, "name": name, "email": email}
 
 
 
