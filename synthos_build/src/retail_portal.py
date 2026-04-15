@@ -3706,10 +3706,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   gap:14px;
 }
 
-/* ── HERO CARDS — same style as regular cards, revisit later ── */
-.hero-body{padding:14px 16px 12px}
-.hero-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
-.hero-left{display:flex;align-items:center;gap:10px}
+/* ── HERO BADGE (overlaid on .charm cards) ── */
+.hero-badge{position:absolute;top:8px;right:8px;font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px;z-index:1}
+.hero-badge.hb-cyan{background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.2);color:var(--teal)}
+.hero-badge.hb-violet{background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.2);color:var(--purple)}
+
+/* unused hero CSS kept minimal for future */
 .hero-icon{
   width:38px;height:38px;border-radius:10px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
@@ -7236,6 +7238,59 @@ function renderIntelGrid(signals) {
       ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   });
+
+  // Build hero cards as .charm cards with a badge — insert into the flow
+  var fresh = signals.filter(s => !s.is_stale);
+  if (fresh.length >= 2) {
+    var ranked = fresh.slice().sort((a,b) => (agentScore(b)+(b.corroborated?10:0)) - (agentScore(a)+(a.corroborated?10:0)));
+    var divList = fresh.slice().sort((a,b) => Math.abs(agentScore(b)-marketScore(b)) - Math.abs(agentScore(a)-marketScore(a)));
+    var heroTop = ranked[0];
+    var heroDiv = divList[0];
+    if (heroDiv === heroTop && divList.length > 1) heroDiv = divList[1];
+
+    function heroCard(s, badge, badgeClass) {
+      var as = agentScore(s), ms = marketScore(s);
+      var sent = sentiment(s);
+      var col = badgeClass === 'hb-cyan' ? colors[0] : colors[2];
+      return `<div class="charm ${sent}" style="cursor:pointer;position:relative" onclick="openSigModal(allSignals[${signals.indexOf(s)}])">
+        <div class="hero-badge ${badgeClass}">${badge}</div>
+        <div class="charm-top">
+          <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
+          <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
+        </div>
+        <div class="charm-body">
+          <div class="charm-source">${s.politician||'Unknown'} · ${(s.disc_date||s.created_at||'').slice(0,10)}</div>
+          <div class="charm-headline">${s.headline||s.ticker+' — Congressional disclosure'}</div>
+          <div class="charm-snippet">${s.amount_range||'Amount not disclosed'} · ${s.staleness||'Unknown age'} · ${s.sector||'Unknown sector'}</div>
+          <div class="opinion-bar">
+            <div class="op-row">
+              <span class="op-label ol-agent">Synthos</span>
+              <div class="op-track"><div class="op-fill ${sentClass(s)}" style="width:${as}%"></div></div>
+              <span class="op-val ${valClass(s)}">${as}</span>
+            </div>
+            <div class="op-row">
+              <span class="op-label ol-market">Market</span>
+              <div class="op-track"><div class="op-fill ${mSentClass(s)}" style="width:${ms}%"></div></div>
+              <span class="op-val ${valClass(s)}">${ms}</span>
+            </div>
+          </div>
+        </div>
+        ${s.corroborated ? '<div class="alert-strip"><div class="alert-dot"></div>Corroborated signal</div>' : ''}
+      </div>`;
+    }
+
+    // Don't duplicate — remove hero signals from regular cards if they exist
+    var heroTickers = new Set([heroTop.ticker, heroDiv.ticker]);
+    cards = cards.filter((c, i) => {
+      var sig = signals[i];
+      return !sig || !heroTickers.has(sig.ticker) || sig !== heroTop && sig !== heroDiv;
+    });
+
+    // Insert at positions
+    cards.splice(Math.min(0, cards.length), 0, heroCard(heroTop, '#1 Conviction', 'hb-cyan'));
+    cards.splice(Math.min(3, cards.length), 0, heroCard(heroDiv, '#1 Divergence', 'hb-violet'));
+  }
+
   grid.innerHTML = cards.join('');
 }
 
