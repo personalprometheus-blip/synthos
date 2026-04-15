@@ -1778,6 +1778,17 @@ class DB:
             """, (run_id,)).fetchall()
             return [dict(r) for r in rows]
 
+    def get_screening_score(self, ticker):
+        """Return the most recent screening data for a ticker, or None."""
+        with self.conn() as c:
+            row = c.execute("""
+                SELECT combined_score, news_signal, sentiment_signal, congressional_flag
+                FROM sector_screening
+                WHERE ticker = ?
+                ORDER BY created_at DESC LIMIT 1
+            """, (ticker,)).fetchone()
+            return dict(row) if row else None
+
     # ── SYSTEM LOG & HEARTBEAT ─────────────────────────────────────────────
 
     def log_heartbeat(self, agent_name, status="OK", portfolio_value=None):

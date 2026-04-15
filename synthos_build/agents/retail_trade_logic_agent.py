@@ -1080,6 +1080,35 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     else:
         rel_str = None
 
+    # Sector screener boost — if this ticker was screened and scored well, nudge the score
+    screening_adj = 0.0
+    screening_info = "not screened"
+    try:
+        scr = _shared_db().get_screening_score(ticker)
+        if scr:
+            cs = scr.get('combined_score') or 0.5
+            cong = scr.get('congressional_flag', 'none')
+            if cs >= 0.7:
+                screening_adj = 0.06
+                screening_info = f"strong ({cs:.2f}) +6%"
+            elif cs >= 0.55:
+                screening_adj = 0.03
+                screening_info = f"moderate ({cs:.2f}) +3%"
+            elif cs < 0.3:
+                screening_adj = -0.03
+                screening_info = f"weak ({cs:.2f}) -3%"
+            else:
+                screening_info = f"neutral ({cs:.2f})"
+            if cong == 'recent_buy':
+                screening_adj += 0.04
+                screening_info += " +congress_buy"
+            elif cong == 'recent_sell':
+                screening_adj -= 0.04
+                screening_info += " -congress_sell"
+            final_score = round(min(max(final_score + screening_adj, 0.0), 1.0), 4)
+    except Exception as _e:
+        log.debug(f"Screening lookup failed for {ticker}: {_e}")
+
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
     decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
@@ -1089,6 +1118,7 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "staleness_score":    f"{stale_score:.2f} × {W['staleness']}",
         "interrogation_score":f"{interr_score:.2f} × {W['interrogation']}",
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
+        "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
