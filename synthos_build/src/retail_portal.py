@@ -4298,6 +4298,20 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       </div>
     </div>
 
+    <div class="cfg-section" style="margin-top:24px">Notifications</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+      <div>
+        <div class="setting-label">Approval Alerts</div>
+        <div class="setting-desc">When in managed mode, receive notifications about pending trade approvals. Checked at market open, midday, and close.</div>
+      </div>
+      <select id="cfg-notif-pref" class="glass-select" style="width:100%">
+        <option value="off">Off — no notifications</option>
+        <option value="text">Text message (preferred)</option>
+        <option value="email">Email only</option>
+        <option value="both">Text + Email</option>
+      </select>
+    </div>
+
     <div class="cfg-section" style="margin-top:24px">Kill Switch</div>
     <div style="font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px">
       Halt all trading immediately. Existing positions are held; no new orders will be placed.
@@ -5697,6 +5711,7 @@ async function loadCfgPanel() {
     if (g('cfg-bil-enabled'))   g('cfg-bil-enabled').checked = d.ENABLE_BIL_RESERVE !== '0';
     if (g('cfg-bil-reserve'))   g('cfg-bil-reserve').value = d.IDLE_RESERVE_PCT || '20';
     if (g('cfg-bil-label'))     g('cfg-bil-label').textContent = (d.ENABLE_BIL_RESERVE !== '0') ? 'Enabled' : 'Disabled';
+    if (g('cfg-notif-pref'))    g('cfg-notif-pref').value = d.NOTIFICATION_PREFERENCE || 'off';
     // Restore saved preset from DB (not guessed from values)
     var wrap = document.getElementById('cfg-controls-wrap');
     var matched = d.PRESET_NAME || 'custom';
@@ -5824,6 +5839,7 @@ async function saveCfgPanel(){
     trading_mode:        document.getElementById('cfg-trading-mode')?.value,
     enable_bil_reserve:  document.getElementById('cfg-bil-enabled')?.checked ? '1' : '0',
     idle_reserve_pct:    parseFloat(document.getElementById('cfg-bil-reserve')?.value)||20,
+    notification_preference: document.getElementById('cfg-notif-pref')?.value || 'off',
     preset_name:         _currentPreset,
   };
   const mirror = {
@@ -8468,6 +8484,7 @@ def api_settings():
         'idle_reserve_pct':   'IDLE_RESERVE_PCT',
         'operating_mode':     'OPERATING_MODE',
         'preset_name':        'PRESET_NAME',
+        'notification_preference': 'NOTIFICATION_PREFERENCE',
     }
     try:
         db = _customer_db()

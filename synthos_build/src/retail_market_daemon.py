@@ -81,6 +81,7 @@ MARKET_OPEN_MIN = 30
 MARKET_CLOSE_HOUR = 16
 MARKET_CLOSE_MIN = 0
 ENRICHMENT_INTERVAL_MIN = 30    # run enrichment (screener+sentiment+news) then trade
+APPROVAL_CHECK_TIMES    = [(9, 30), (12, 0), (15, 30)]  # ET times to nudge managed-mode customers
 RECON_INTERVAL_MIN      = 10    # lightweight reconciliation + exit checks between enrichments
 PRICE_POLL_INTERVAL_SEC = 60    # price poller between major cycles
 HEARTBEAT_FILE = _ROOT_DIR / '.market_daemon_heartbeat'
@@ -468,6 +469,9 @@ def run_market_loop():
         write_heartbeat(status="OK" if not kill_switch_active() else "KILL_SWITCH",
                         cycle=cycle, customers=0)
 
+        # Approval notifications (3x/day for managed-mode customers)
+        check_approval_notifications()
+
         # Next enrichment / recon countdown
         next_enrichment = max(0, enrichment_interval - (time.monotonic() - last_enrichment))
         next_recon = max(0, recon_interval - (time.monotonic() - last_recon))
@@ -481,6 +485,148 @@ def run_market_loop():
 
     log.info(f"Market loop ended — cycle={cycle} shutdown={_shutdown_requested} "
              f"past_close={past_market_close()}")
+
+
+def check_approval_notifications():
+    """
+    At 9:30, 12:00, 15:30 ET — check managed-mode customers for pending approvals.
+    If they have pending trades and aren't logged in, send text (preferred) or email.
+    Max 3 notifications per day per customer.
+    """
+    t = now_et()
+    current_check = (t.hour, t.minute)
+
+    # Only run if we're within 2 minutes of a check time
+    matched = False
+    for check_h, check_m in APPROVAL_CHECK_TIMES:
+        if t.hour == check_h and abs(t.minute - check_m) <= 2:
+            matched = True
+            break
+    if not matched:
+        return
+
+    try:
+        import auth
+        from retail_database import get_customer_db
+    except ImportError:
+        return
+
+    today_str = t.strftime('%Y-%m-%d')
+    customers = get_active_customers()
+
+    for cid in customers:
+        try:
+            db = get_customer_db(cid)
+            mode = auth.get_operating_mode(cid)
+            if mode != 'MANAGED':
+                continue
+
+            # Check for pending approvals
+            pending = db.get_pending_approvals(status_filter=['PENDING_APPROVAL'])
+            if not pending:
+                continue
+
+            # Check if already notified today (max 3)
+            notif_key = f'_APPROVAL_NOTIF_{today_str}'
+            sent_today = int(db.get_setting(notif_key) or 0)
+            if sent_today >= 3:
+                continue
+
+            # Check if customer is currently logged in (session activity)
+            # Skip notification if they're active — they can see it themselves
+            try:
+                last_activity = db.get_setting('_LAST_PORTAL_ACTIVITY')
+                if last_activity:
+                    from datetime import datetime as _dt
+                    last = _dt.fromisoformat(last_activity)
+                    idle_min = (t.replace(tzinfo=None) - last.replace(tzinfo=None)).total_seconds() / 60
+                    if idle_min < 15:
+                        continue  # active in last 15 min — skip
+            except Exception:
+                pass
+
+            # Get customer contact info
+            customer = auth.get_customer_by_id(cid) if hasattr(auth, 'get_customer_by_id') else None
+            if not customer:
+                try:
+                    custs = auth.list_customers()
+                    customer = next((c for c in custs if c['id'] == cid), None)
+                except Exception:
+                    continue
+            if not customer:
+                continue
+
+            phone = customer.get('phone', '')
+            email = customer.get('email', '')
+            pref = (db.get_setting('NOTIFICATION_PREFERENCE') or 'text').lower()
+
+            count = len(pending)
+            tickers = ', '.join(p.get('ticker', '?') for p in pending[:3])
+            msg = f"Synthos: {count} trade{'s' if count > 1 else ''} waiting for approval ({tickers}). Log in to review."
+
+            sent = False
+            # Prefer text if phone available and preference allows
+            if pref in ('text', 'both') and phone:
+                sent = _send_sms(phone, msg)
+            # Fall back to email, or use if preferred
+            if (not sent or pref == 'both') and email:
+                sent = _send_email(email, f"[Synthos] {count} trade{'s' if count > 1 else ''} pending approval", msg)
+
+            if sent:
+                db.set_setting(notif_key, str(sent_today + 1))
+                log.info(f"[APPROVAL NOTIFY] {cid[:8]}: {count} pending, notified via {'text' if phone and pref != 'email' else 'email'}")
+
+        except Exception as _e:
+            log.debug(f"[APPROVAL NOTIFY] {cid[:8]} error: {_e}")
+
+
+def _send_sms(phone, message):
+    """Send SMS via email-to-SMS gateway or Resend."""
+    carrier_gw = os.environ.get('CARRIER_GATEWAY', '')
+    resend_key = os.environ.get('RESEND_API_KEY', '')
+    alert_from = os.environ.get('ALERT_FROM', '')
+
+    if not resend_key or not alert_from:
+        return False
+
+    # Clean phone number
+    digits = ''.join(c for c in phone if c.isdigit())
+    if len(digits) < 10:
+        return False
+
+    # If carrier gateway configured, send as email-to-SMS
+    if carrier_gw:
+        to_addr = f"{digits}@{carrier_gw}"
+    else:
+        # No gateway — fall back to email
+        return False
+
+    try:
+        import requests as _req
+        _req.post('https://api.resend.com/emails',
+            headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
+            json={'from': alert_from, 'to': [to_addr], 'subject': '', 'text': message},
+            timeout=10)
+        return True
+    except Exception:
+        return False
+
+
+def _send_email(email, subject, body):
+    """Send email via Resend."""
+    resend_key = os.environ.get('RESEND_API_KEY', '')
+    alert_from = os.environ.get('ALERT_FROM', '')
+    if not resend_key or not alert_from or not email:
+        return False
+    try:
+        import requests as _req
+        _req.post('https://api.resend.com/emails',
+            headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
+            json={'from': alert_from, 'to': [email], 'subject': subject, 'text': body},
+            timeout=10)
+        return True
+    except Exception:
+        return False
 
 
 def run_close_session():
