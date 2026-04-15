@@ -6384,7 +6384,7 @@ function toast(msg, type='ok') {
 
 // ── MODE TOGGLE ──
 async function toggleMode() {
-  const current = document.getElementById('mode-nav-btn').textContent.trim().includes('Automatic') ? 'AUTOMATIC' : 'MANAGED';
+  const current = document.getElementById('mode-nav-btn').textContent.trim().toUpperCase().includes('AUTO') ? 'AUTOMATIC' : 'MANAGED';
   const next    = current === 'AUTOMATIC' ? 'MANAGED' : 'AUTOMATIC';
   const r = await fetch('/api/set-mode', {
     method: 'POST',
