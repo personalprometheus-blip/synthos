@@ -11313,10 +11313,12 @@ def api_admin_market_activity():
     import auth as _auth
 
     hours = int(request.args.get('hours', 24))
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
-    now = datetime.utcnow()
+    from zoneinfo import ZoneInfo
+    _et = ZoneInfo("America/New_York")
+    now = datetime.now(_et)
+    cutoff = (now - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S')
 
-    # Build hourly bins
+    # Build hourly bins in ET
     hour_keys = []
     for i in range(hours):
         h = (now - timedelta(hours=hours - 1 - i))
