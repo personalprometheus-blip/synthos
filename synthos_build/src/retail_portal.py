@@ -4517,7 +4517,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div id="positions-count" class="dash-panel-sub">0 open</div>
         <div class="dash-panel-right" id="positions-refresh-ts"></div>
       </div>
-      <div id="positions-list" style="max-height:260px;overflow-y:auto">
+      <div id="positions-list" style="height:300px;overflow-y:auto">
         <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
       </div>
     </div>
@@ -4725,7 +4725,7 @@ setInterval(loadAgentPulse, 10000);
         <div style="font-size:9px;color:var(--dim)">Signals under watch</div>
         <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="planning-count"></div>
       </div>
-      <div id="planning-list"><div class="empty-state"><div class="empty-icon">&#x1F50D;</div>Loading&#x2026;</div></div>
+      <div id="planning-list" style="height:300px;overflow-y:auto"><div class="empty-state"><div class="empty-icon">&#x1F50D;</div>Loading&#x2026;</div></div>
     </div>
 
     <!-- APPROVALS -->
@@ -4744,7 +4744,7 @@ setInterval(loadAgentPulse, 10000);
         <div style="font-size:9px;color:var(--dim)">Recent agent decisions</div>
         <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="trader-activity-ts"></div>
       </div>
-      <div id="history-list"><div class="empty-state"><div class="empty-icon">&#x26A1;</div>Loading&#x2026;</div></div>
+      <div id="history-list" style="height:300px;overflow-y:auto"><div class="empty-state"><div class="empty-icon">&#x26A1;</div>Loading&#x2026;</div></div>
     </div>
 
 
