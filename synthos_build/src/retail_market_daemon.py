@@ -495,8 +495,9 @@ def run_close_session():
         log.info("[CLOSE] Kill switch active — skipping close session trades")
     clear_agent_running()
 
-    # Post-close: backfill exit performance data for optimizer
+    # Post-close: backfill exit performance data, then run optimizer
     run_exit_backfill()
+    run_trail_optimizer()
 
 
 def run_exit_backfill():
@@ -570,6 +571,44 @@ def run_exit_backfill():
                 log.info(f"[BACKFILL] {cid[:8]}: backfilled {filled}/{len(rows)} exits")
         except Exception as _e:
             log.debug(f"[BACKFILL] {cid[:8]} error: {_e}")
+
+
+def run_trail_optimizer():
+    """Run trailing stop optimizer for each customer after backfill."""
+    customers = get_active_customers()
+    if not customers:
+        return
+    log.info(f"[OPTIMIZER] Checking {len(customers)} customer(s)")
+    try:
+        import auth
+        from retail_database import get_customer_db
+        from trailing_stop_optimizer import run_optimization
+    except ImportError as e:
+        log.warning(f"[OPTIMIZER] Import error: {e}")
+        return
+
+    for cid in customers:
+        try:
+            db = get_customer_db(cid)
+            # Check weekly cooldown
+            last_run = db.get_setting('_OPTIMIZER_LAST_RUN')
+            if last_run:
+                from datetime import datetime as _dt
+                try:
+                    days_since = (_dt.now() - _dt.fromisoformat(last_run)).days
+                    if days_since < 7:
+                        continue
+                except Exception:
+                    pass
+
+            result = run_optimization(db, min_sample=20, max_adj=0.20)
+            if result and result.get('adjustments'):
+                db.set_setting('_OPTIMIZER_LAST_RUN', now_et().isoformat())
+                log.info(f"[OPTIMIZER] {cid[:8]}: {len(result['adjustments'])} adjustments applied")
+            else:
+                log.info(f"[OPTIMIZER] {cid[:8]}: no adjustments needed")
+        except Exception as _e:
+            log.debug(f"[OPTIMIZER] {cid[:8]} error: {_e}")
 
 
 def main():
