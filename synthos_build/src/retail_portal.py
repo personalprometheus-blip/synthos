@@ -4986,52 +4986,13 @@ setInterval(loadAgentPulse, 10000);
 
   </div>
 
-  <!-- GATE SCORE HEATMAP -->
+  <!-- POSITION CONCENTRATION -->
   <div class="glass" style="margin-bottom:14px">
-    <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Gate Score Heatmap</div>
-      <div style="font-size:9px;color:var(--dim)">Last 7 sessions · 14 gates per session</div>
-      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;font-size:9px;color:var(--dim)">
-        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(0,245,212,0.20);vertical-align:middle"></span>Pass
-        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(255,75,110,0.35);vertical-align:middle;margin-left:4px"></span>Fail
-        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(255,255,255,0.06);vertical-align:middle;margin-left:4px"></span>Skip
-      </div>
+    <div style="padding:10px 14px 8px;border-bottom:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Position Concentration</div>
     </div>
-    <div style="padding:12px 14px;overflow-x:auto" id="gate-heatmap">
-      <div style="font-size:10px;color:var(--muted);margin-bottom:8px;display:flex;gap:4px" id="hm-session-labels"></div>
-      <div style="font-size:9px;color:var(--dim);margin-bottom:6px">Gate →</div>
-      <div id="hm-rows"></div>
-      <div style="font-size:10px;color:var(--muted);margin-top:10px;font-family:var(--mono)" id="hm-stub">No session data yet — heatmap populates after first trading session</div>
-    </div>
-  </div>
-
-  <!-- BACKTESTED vs LIVE -->
-  <div class="glass" style="margin-bottom:14px">
-    <div style="padding:10px 14px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">Strategy vs Benchmark</div>
-      <div style="padding:1px 7px;border-radius:99px;font-size:9px;font-weight:700;background:rgba(123,97,255,0.1);border:1px solid rgba(123,97,255,0.14);color:var(--purple)">Live</div>
-    </div>
-    <div style="padding:12px 14px">
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px">
-        <div style="text-align:center;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.07em">Synthos</div>
-          <div style="font-size:16px;font-weight:700;color:var(--teal);font-family:var(--mono)" id="bench-synthos">—%</div>
-          <div style="font-size:9px;color:var(--dim)">this month</div>
-        </div>
-        <div style="text-align:center;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.07em">S&amp;P 500</div>
-          <div style="font-size:16px;font-weight:700;color:var(--muted);font-family:var(--mono)" id="bench-sp">—%</div>
-          <div style="font-size:9px;color:var(--dim)">this month</div>
-        </div>
-        <div style="text-align:center;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:0.07em">Alpha</div>
-          <div style="font-size:16px;font-weight:700;font-family:var(--mono)" id="bench-alpha" style="color:var(--muted)">—%</div>
-          <div style="font-size:9px;color:var(--dim)">outperformance</div>
-        </div>
-      </div>
-      <div style="height:120px;position:relative;background:var(--surface2);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center">
-        <span style="font-size:10px;color:var(--dim)">Comparison chart · Populates with trade history</span>
-      </div>
+    <div style="padding:12px 14px" id="position-concentration">
+      <div style="font-size:10px;color:var(--muted)">Loading...</div>
     </div>
   </div>
 
@@ -6364,6 +6325,48 @@ function loadRisk() {
     if (bar) bar.style.width = pct + '%';
     if (lbl) lbl.textContent = pct + '%';
   }
+  // Sector exposure + position concentration from status data
+  fetch('/api/status').then(r=>r.json()).then(function(s){
+    var positions = (s.positions||[]).filter(function(p){return p.ticker !== 'BIL'});
+    var totalMv = positions.reduce(function(a,p){return a+(p.market_value||p.entry_price*p.shares||0)},0);
+    // Sector bars
+    var sectors = {};
+    positions.forEach(function(p){
+      var sec = p.sector || 'Other';
+      if (!sec || sec === '') sec = 'Other';
+      sectors[sec] = (sectors[sec]||0) + (p.market_value||p.entry_price*p.shares||0);
+    });
+    var sectorEl = document.getElementById('sector-bars');
+    if (sectorEl) {
+      var entries = Object.entries(sectors).sort(function(a,b){return b[1]-a[1]});
+      var maxSec = entries.length ? entries[0][1] : 1;
+      var colors = ['var(--teal)','var(--purple)','var(--amber)','var(--pink)','var(--muted)'];
+      sectorEl.innerHTML = entries.length ? entries.map(function(e,i){
+        var pct = totalMv > 0 ? (e[1]/totalMv*100).toFixed(0) : 0;
+        var c = colors[i % colors.length];
+        return '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px"><span style="color:var(--muted)">'+e[0]+'</span><span style="color:'+c+';font-family:var(--mono)">'+pct+'% · $'+e[1].toFixed(0)+'</span></div>'
+          +'<div class="gauge-bar"><div class="gauge-fill" style="width:'+(maxSec>0?e[1]/maxSec*100:0)+'%;background:'+c+'"></div></div></div>';
+      }).join('') : '<div style="font-size:10px;color:var(--dim)">No positions</div>';
+    }
+    // Position concentration
+    var concEl = document.getElementById('position-concentration');
+    if (concEl) {
+      if (!positions.length) { concEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No open positions</div>'; return; }
+      var sorted = positions.slice().sort(function(a,b){return (b.market_value||0)-(a.market_value||0)});
+      concEl.innerHTML = sorted.map(function(p){
+        var mv = p.market_value || (p.entry_price * p.shares) || 0;
+        var pct = totalMv > 0 ? (mv/totalMv*100) : 0;
+        var pnl = p.unrealized_pl || 0;
+        var pnlColor = pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.03)">'
+          +'<div style="font-size:12px;font-weight:700;font-family:var(--mono);width:50px">'+p.ticker+'</div>'
+          +'<div style="flex:1"><div class="gauge-bar" style="height:8px"><div class="gauge-fill" style="width:'+pct.toFixed(0)+'%;background:linear-gradient(90deg,var(--teal),var(--purple));border-radius:4px"></div></div></div>'
+          +'<div style="font-size:11px;font-family:var(--mono);width:45px;text-align:right;color:var(--muted)">'+pct.toFixed(1)+'%</div>'
+          +'<div style="font-size:11px;font-family:var(--mono);width:70px;text-align:right;color:'+pnlColor+'">'+(pnl>=0?'+':'')+pnl.toFixed(2)+'</div>'
+          +'</div>';
+      }).join('');
+    }
+  }).catch(function(){});
 }
 
 // ── ALERT PREFS (stub save) ──
