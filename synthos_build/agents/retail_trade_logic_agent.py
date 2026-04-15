@@ -2339,7 +2339,14 @@ def run(session="open"):
             if True:  # Gate 0 already verified account health
                 order = alpaca.close_position(pos['ticker'])
                 if order is not None:
-                    pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason)
+                    _ac = {
+                        'atr_trail_multiplier': C.ATR_TRAIL_MULTIPLIER,
+                        'late_day_tighten_pct': C.LATE_DAY_TIGHTEN_PCT,
+                        'benchmark_corr_widen': C.BENCHMARK_CORR_WIDEN,
+                        'benchmark_corr_tighten': C.BENCHMARK_CORR_TIGHTEN,
+                        'max_holding_days': C.MAX_HOLDING_DAYS,
+                    }
+                    pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason, active_controls=_ac)
                     if exit_reason == "PULSE_EXIT":
                         flag_info = next((f for f in urgent_flags
                                           if f['ticker'] == pos['ticker']), {})

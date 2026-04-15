@@ -599,6 +599,55 @@ class DB:
             # v2.2 — image URL on signals for visual display
             "ALTER TABLE signals ADD COLUMN image_url TEXT",
             "ALTER TABLE signals ADD COLUMN source_url TEXT",
+            # v3.0 — exit performance tracking for trailing stop optimizer
+            """CREATE TABLE IF NOT EXISTS exit_performance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                position_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                sector TEXT,
+                vol_bucket TEXT,
+                entry_price REAL NOT NULL,
+                entry_atr REAL,
+                entry_atr_pct REAL,
+                entry_multiplier REAL,
+                trail_stop_amt_at_entry REAL,
+                trail_stop_amt_at_exit REAL,
+                exit_price REAL NOT NULL,
+                exit_reason TEXT NOT NULL,
+                exit_timestamp TEXT NOT NULL,
+                hold_days INTEGER,
+                pnl_dollar REAL,
+                pnl_pct REAL,
+                peak_price_during_hold REAL,
+                trough_price_during_hold REAL,
+                price_5d_after_exit REAL,
+                price_10d_after_exit REAL,
+                stop_too_tight INTEGER DEFAULT 0,
+                stop_too_loose INTEGER DEFAULT 0,
+                optimal_exit_price REAL,
+                missed_gain_pct REAL,
+                excess_loss_pct REAL,
+                realized_vol_pct REAL,
+                atr_accuracy REAL,
+                atr_trail_multiplier REAL,
+                late_day_tighten_pct REAL,
+                benchmark_corr_widen REAL,
+                benchmark_corr_tighten REAL,
+                max_holding_days INTEGER,
+                last_profit_tier REAL,
+                created_at TEXT NOT NULL)""",
+            "CREATE INDEX IF NOT EXISTS idx_exit_perf_ticker ON exit_performance(ticker)",
+            "CREATE INDEX IF NOT EXISTS idx_exit_perf_bucket ON exit_performance(vol_bucket)",
+            "CREATE INDEX IF NOT EXISTS idx_exit_perf_reason ON exit_performance(exit_reason)",
+            """CREATE TABLE IF NOT EXISTS optimizer_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                sample_size INTEGER NOT NULL,
+                parameters_before TEXT NOT NULL,
+                parameters_after TEXT NOT NULL,
+                adjustments TEXT NOT NULL,
+                applied INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL)""",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -745,7 +794,7 @@ class DB:
         log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
         return pos_id
 
-    def close_position(self, pos_id, exit_price, exit_reason):
+    def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """
         Closes a position. Adds proceeds to cash, records outcome,
         writes ledger entry.
@@ -796,8 +845,57 @@ class DB:
             position_id=pos_id,
         )
         log.info(f"Closed position: {pos['ticker']} {verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f})")
+
+        # Record exit performance for trailing stop optimizer
+        try:
+            self.record_exit_performance(
+                position_id=pos_id, ticker=pos['ticker'],
+                sector=pos.get('sector', ''), vol_bucket=pos.get('vol_bucket', ''),
+                entry_price=float(pos['entry_price']), exit_price=exit_price,
+                exit_reason=exit_reason, hold_days=hold_days,
+                pnl_dollar=pnl_dollar, pnl_pct=pnl_pct,
+                trail_stop_amt_at_entry=float(pos.get('trail_stop_amt') or 0),
+                last_profit_tier=float(pos.get('last_profit_tier') or 0),
+                active_controls=active_controls,
+            )
+        except Exception as _e:
+            log.debug(f"record_exit_performance: {_e}")
+
         return pnl_dollar
 
+    def record_exit_performance(self, position_id, ticker, sector, vol_bucket,
+                                entry_price, exit_price, exit_reason, hold_days,
+                                pnl_dollar, pnl_pct, trail_stop_amt_at_entry=0,
+                                last_profit_tier=0, active_controls=None):
+        """Record exit metrics for the trailing stop optimizer.
+        active_controls is an optional dict of TradingControls values at exit time."""
+        ac = active_controls or {}
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO exit_performance
+                    (position_id, ticker, sector, vol_bucket,
+                     entry_price, exit_price, exit_reason, hold_days,
+                     pnl_dollar, pnl_pct,
+                     trail_stop_amt_at_entry,
+                     atr_trail_multiplier, late_day_tighten_pct,
+                     benchmark_corr_widen, benchmark_corr_tighten,
+                     max_holding_days, entry_multiplier,
+                     last_profit_tier, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                position_id, ticker, sector, vol_bucket,
+                entry_price, exit_price, exit_reason, hold_days,
+                round(pnl_dollar, 2), round(pnl_pct, 2),
+                trail_stop_amt_at_entry,
+                ac.get('atr_trail_multiplier'),
+                ac.get('late_day_tighten_pct'),
+                ac.get('benchmark_corr_widen'),
+                ac.get('benchmark_corr_tighten'),
+                ac.get('max_holding_days'),
+                ac.get('entry_multiplier'),
+                last_profit_tier,
+                self.now(),
+            ))
 
     def reduce_position(self, pos_id, sell_shares, sell_price, exit_reason="PROFIT_TAKE"):
         """
