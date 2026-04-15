@@ -489,6 +489,10 @@ html{font-size:90%;color-scheme:dark}
 }
 body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
+.pw-wrap{position:relative;display:flex;align-items:center}
+.pw-wrap input{flex:1;padding-right:32px!important}
+.pw-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;line-height:1;font-size:14px;opacity:0.5;transition:opacity .15s}
+.pw-eye:hover{opacity:1}
 """
 
 LANDING_HTML = """<!DOCTYPE html>
@@ -863,6 +867,15 @@ function toggleSidebar(){ /* wired in dashboard script */ }
 document.addEventListener('click',function(){
   document.getElementById('auth-drop').classList.remove('open');
 });
+// Auto-attach eye toggles to all password fields
+document.querySelectorAll('input[type="password"]').forEach(function(inp){
+  if(inp.parentElement.classList.contains('pw-wrap'))return;
+  var wrap=document.createElement('div');wrap.className='pw-wrap';
+  inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);
+  var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;
+  btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};
+  wrap.appendChild(btn);
+});
 </script>
 </body>
 </html>"""
@@ -943,6 +956,7 @@ footer{
   </div>
 </div>
 <footer>Algorithmic trading involves risk. Past performance does not guarantee future results.</footer>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
 </body>
 </html>"""
 
@@ -1163,6 +1177,7 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
     <a href="/" class="back-link">&larr; Back to Synthos</a>
   </div>
 </div>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
 </body>
 </html>
 """
@@ -1846,6 +1861,7 @@ _SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
     <button type="submit">ACTIVATE ACCOUNT →</button>
   </form>
 </div>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
 </body>
 </html>"""
 
@@ -8019,6 +8035,8 @@ function timeSince(ts) {
   return Math.floor(sec/86400) + 'd ago';
 }
 setInterval(() => { if (document.getElementById('tab-news') && document.getElementById('tab-news').style.display !== 'none') loadNews(); }, 120000);
+// Auto-attach eye toggles to all password fields
+document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});
 </script>
 </body>
 </html>"""
