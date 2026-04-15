@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-14T10:30:00-04:00",
-    "version": "2.0"
+    "last_updated": "2026-04-15T01:00:00-04:00",
+    "version": "3.0"
   },
   "nodes": [
     {
@@ -25,7 +25,7 @@
         {"name": "company_strongbox.py", "desc": "Encrypt + R2 cloud upload (nightly 2am)", "how": "cron 2am", "status": "cron"},
         {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 5m", "status": "cron"}
       ],
-      "databases": ["company.db", "auditor.db", "login.db"],
+      "databases": ["company.db", "auditor.db", "login.db", "support.db"],
       "services": ["Cloudflare tunnel", "command.synth-cloud.com"]
     },
     {
@@ -39,13 +39,15 @@
       "agents": [
         {"name": "retail_portal.py", "desc": "Customer dashboard + API", "how": "watchdog", "status": "live"},
         {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "@reboot", "status": "live"},
-        {"name": "retail_scheduler.py", "desc": "Session orchestrator + DB locks", "how": "cron", "status": "live"},
+        {"name": "retail_market_daemon.py", "desc": "Continuous trading daemon 9:10-16:00 ET", "how": "cron 9:10", "status": "live"},
+        {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator (overnight news)", "how": "cron", "status": "cron"},
         {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
-        {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution", "how": "scheduler", "status": "cron"},
-        {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "scheduler", "status": "cron"},
-        {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "scheduler", "status": "cron"},
-        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "scheduler", "status": "cron"},
-        {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "cron 1m", "status": "cron"},
+        {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution + screener integration", "how": "daemon", "status": "live"},
+        {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "daemon", "status": "live"},
+        {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "daemon", "status": "live"},
+        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "daemon", "status": "live"},
+        {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "daemon", "status": "live"},
+        {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
         {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b", "how": "per agent", "status": "cron"},
         {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 1m", "status": "cron"},
         {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check", "how": "@reboot", "status": "boot"},
@@ -84,7 +86,7 @@
       "network": "WiFi (SantaMcGuire)",
       "status": "live",
       "agents": [
-        {"name": "sentinel_display.py", "desc": "GeeekPi 3.5\" TFT dashboard", "how": "systemd", "status": "live"},
+        {"name": "sentinel_wave.py", "desc": "Live agent sine wave animation on 3.5\" TFT", "how": "systemd", "status": "live"},
         {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 5m", "status": "cron"}
       ],
       "databases": [],
@@ -93,8 +95,8 @@
     }
   ],
   "data_flow": {
-    "trading_pipeline": "News Agent → 22 gates → signals to shared DB → Sentiment Agent → 27 gates → enriches signals → Trade Logic Agent → 14 gates → BUY / SKIP / WATCH → Alpaca API",
-    "shared_data": "Price Poller → live_prices table → portal reads. News/Sentiment → shared signals → all customers read same intel.",
+    "trading_pipeline": "Market Daemon (9:10-16:00) → Screener → News → Sentiment → Trade Logic (per customer) → 14 gates + screener boost → BUY / SKIP / WATCH → Alpaca API",
+    "shared_data": "Price Poller → live_prices table (every cycle). News/Sentiment → shared signals → all customers read same intel. Screener scores feed into Gate 5.",
     "monitoring": "Auditor → SSH scans pi4b, pi5, pi2w → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts.",
     "backup_chain": "pi5 retail_backup.py (1:30am) → tar.gz → POST to pi4b → Strongbox (2am) → AES-256 encrypt → Cloudflare R2 (30-day retention)"
   },
@@ -110,7 +112,9 @@
       {"agent": "Watchdog (pi2w)", "targets": "pi4b + pi5 + display (ping monitoring)"}
     ]
   },
-  "known_issues": [],
+  "known_issues": [
+    "Sentinel display needs reboot for rotation=0 + wave renderer debugging"
+  ],
   "resolved": [
     "Backup chain pi5→pi4b working",
     "Ghost cron entries removed",
@@ -120,6 +124,18 @@
     "pi2w consolidated to heartbeat + watchdog",
     "Sentinel display WiFi connected",
     "FK constraint fix for multi-tenant signal routing",
-    "Schema migration system + nightly template rebuild"
+    "Schema migration system + nightly template rebuild",
+    "Mode terminology consolidated: AUTOMATIC/MANAGED everywhere",
+    "Admin override system: trading gate + operating mode fleet control",
+    "Market daemon replaces cron-based trading schedule",
+    "support.db separated from company.db (lock contention fix)",
+    "Auto-adopt orphan positions in reconciliation",
+    "Duplicate portfolio row race condition fixed",
+    "busy_timeout added to all company agents",
+    "Screener scores integrated into trade agent Gate 5",
+    "Sentiment data wired into intelligence cards",
+    "Log rotation system (weekly + 30-day archive)",
+    "Security hardening: auth checks on all endpoints",
+    "Password eye toggles on all forms"
   ]
 }
