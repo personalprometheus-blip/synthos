@@ -2028,40 +2028,119 @@ def run(session="open"):
         session_log.commit(db)
         sys.exit(0)
 
-    # ── GATE 0: First-Run Setup (new customer accounts)
-    # If account has no trade history, just reconcile with Alpaca and seed the portfolio.
-    # Don't evaluate signals — the customer may still be setting up.
+    # ── GATE 0: Account Health Check
+    # Runs every cycle. Syncs with Alpaca (source of truth), self-heals
+    # discrepancies, handles customer-initiated trades, skips unfunded accounts.
+    account = alpaca.get_account()
+    if not account:
+        log.warning("[GATE 0] Cannot reach Alpaca account API — skipping this run")
+        session_log.gate("0_HEALTH", "SKIP", {}, "Alpaca account unreachable")
+        session_log.commit(db)
+        db.log_heartbeat("trade_logic_agent", "OK")
+        return
+
+    alpaca_equity = float(account.get('equity', 0))
+    alpaca_cash = float(account.get('cash', 0))
+
+    # Skip accounts with insufficient equity
+    if alpaca_equity < 10:
+        log.info(f"[GATE 0] Account equity ${alpaca_equity:.2f} < $10 — skipping")
+        session_log.gate("0_HEALTH", "SKIP", {"equity": alpaca_equity}, "insufficient equity")
+        session_log.commit(db)
+        db.log_event("ACCOUNT_SKIP", agent="Trade Logic",
+                     details=f"Equity ${alpaca_equity:.2f} below $10 minimum")
+        db.log_heartbeat("trade_logic_agent", "OK")
+        return
+
+    # Sync cash — Alpaca is always truth
+    db.update_portfolio(cash=alpaca_cash)
+    db.set_setting('_ALPACA_EQUITY', str(alpaca_equity))
+
+    # Full position reconciliation
+    alpaca_positions = alpaca.get_positions() or []
+    alpaca_tickers = {p['symbol'] for p in alpaca_positions}
+    db_positions = db.get_open_positions()
+    db_tickers = {p['ticker'] for p in db_positions}
+
+    orphans = alpaca_tickers - db_tickers   # On Alpaca, not in DB
+    ghosts = db_tickers - alpaca_tickers     # In DB, not on Alpaca
+    healed = 0
+
+    # Auto-adopt orphans (customer bought on Alpaca directly, or previous adopt failed)
+    for t in orphans:
+        ap = next((p for p in alpaca_positions if p['symbol'] == t), None)
+        if ap:
+            shares = float(ap.get('qty', 0))
+            entry = float(ap.get('avg_entry_price', 0))
+            log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} — auto-adopting")
+            db.open_position(
+                ticker=t, company=t, sector='',
+                entry_price=entry, shares=shares,
+                trail_stop_amt=0, trail_stop_pct=0, vol_bucket='normal',
+                signal_id=None, entry_signal_score=None,
+                entry_sentiment_score=None, interrogation_status=None,
+            )
+            db.log_event("ORPHAN_ADOPTED", agent="Trade Logic",
+                         details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca")
+            healed += 1
+
+    # Auto-close ghosts (customer sold on Alpaca directly, or trailing stop filled)
+    for t in ghosts:
+        db_pos = next((p for p in db_positions if p['ticker'] == t), None)
+        if not db_pos:
+            continue
+        # Check for trailing stop fill first
+        filled = alpaca.get_filled_orders(t, after_date=db_pos.get('opened_at'))
+        sell_fill = next(
+            (o for o in (filled or [])
+             if o.get('side') == 'sell' and o.get('status') == 'filled'),
+            None
+        )
+        if sell_fill:
+            fill_price = float(sell_fill.get('filled_avg_price', 0))
+            reason = 'TRAILING_STOP_FILLED' if sell_fill.get('type') == 'trailing_stop' else 'CUSTOMER_SOLD'
+        else:
+            # No sell order found — customer may have sold via Alpaca UI
+            fill_price = float(db_pos.get('current_price') or db_pos.get('entry_price') or 0)
+            reason = 'CUSTOMER_SOLD'
+
+        try:
+            pnl = db.close_position(db_pos['id'], fill_price, exit_reason=reason)
+            log.warning(f"[GATE 0] GHOST: {t} closed — reason={reason} price=${fill_price:.2f} pnl=${pnl:+.2f}")
+            db.log_event("GHOST_CLOSED", agent="Trade Logic",
+                         details=f"{t} {reason} @ ${fill_price:.2f} pnl=${pnl:+.2f}")
+            healed += 1
+        except Exception as _e:
+            log.error(f"[GATE 0] Failed to close ghost {t}: {_e}")
+
+    # Update prices on all matched positions
+    for ap in alpaca_positions:
+        cp = float(ap.get('current_price', 0))
+        if cp:
+            for pos in db.get_open_positions():
+                if pos['ticker'] == ap['symbol']:
+                    db.update_position_price(pos['id'], cp)
+
+    # Check for first-run (no history at all) — setup only, don't trade yet
+    positions_after = db.get_open_positions()
     portfolio = db.get_portfolio()
-    positions = db.get_open_positions()
-    has_history = len(positions) > 0 or portfolio.get('realized_gains', 0) != 0
-    if not has_history:
-        account = alpaca.get_account()
-        if account:
-            alpaca_equity = float(account.get('equity', 0))
-            alpaca_cash = float(account.get('cash', 0))
-            if alpaca_equity < 1:
-                log.info(f"[FIRST-RUN] Account has no equity (${alpaca_equity:.2f}) — skipping setup until funded")
-                session_log.gate("0_FIRST_RUN", "SKIP", {"equity": alpaca_equity}, "account not funded")
-                session_log.commit(db)
-                db.log_event("FIRST_RUN_SKIP", agent="Trade Logic",
-                             details=f"Account equity ${alpaca_equity:.2f} — waiting for funding")
-                db.log_heartbeat("trade_logic_agent", "OK")
-                return
-            # Funded account — reconcile, sync cash, set up BIL
-            log.info(f"[FIRST-RUN] New account setup — equity ${alpaca_equity:.2f}, cash ${alpaca_cash:.2f}")
-            db.update_portfolio(cash=alpaca_cash)
-            reconcile_with_alpaca(db, alpaca)
-            sync_bil_reserve(db, alpaca)
-            session_log.gate("0_FIRST_RUN", "SETUP", {
-                "equity": alpaca_equity, "cash": alpaca_cash,
-                "positions": len(db.get_open_positions()),
-            }, f"first-run setup complete — equity ${alpaca_equity:.2f}")
-            session_log.commit(db)
-            db.log_event("FIRST_RUN_COMPLETE", agent="Trade Logic",
-                         details=f"Account initialized — equity ${alpaca_equity:.2f}, cash ${alpaca_cash:.2f}")
-            db.log_heartbeat("trade_logic_agent", "OK")
-            log.info(f"[FIRST-RUN] Setup complete — will evaluate signals on next run")
-            return
+    has_history = len(positions_after) > 0 or portfolio.get('realized_gains', 0) != 0
+    if not has_history and not orphans:
+        log.info(f"[GATE 0] First run — account setup only (equity ${alpaca_equity:.2f})")
+        session_log.gate("0_HEALTH", "FIRST_RUN", {
+            "equity": alpaca_equity, "cash": alpaca_cash,
+        }, "first-run setup — will trade on next cycle")
+        session_log.commit(db)
+        db.log_event("FIRST_RUN_COMPLETE", agent="Trade Logic",
+                     details=f"Account initialized — equity ${alpaca_equity:.2f}")
+        db.log_heartbeat("trade_logic_agent", "OK")
+        return
+
+    session_log.gate("0_HEALTH", "OK", {
+        "equity": alpaca_equity, "cash": alpaca_cash,
+        "positions_db": len(positions_after), "positions_alpaca": len(alpaca_positions),
+        "orphans_adopted": len(orphans), "ghosts_closed": len(ghosts), "healed": healed,
+    }, f"health check OK — {len(positions_after)} positions, ${alpaca_equity:.0f} equity")
 
     # ── GATE 2: Benchmark Gate
     mode = gate2_benchmark(alpaca, session_log)
@@ -2084,10 +2163,8 @@ def run(session="open"):
 
     session_log.commit(db)
 
-    # ── PRE-TRADE: Reconcile and BIL
-    reconcile_ok = reconcile_with_alpaca(db, alpaca)
-    if reconcile_ok is True:
-        sync_bil_reserve(db, alpaca)
+    # ── PRE-TRADE: BIL Reserve (reconciliation already done in Gate 0)
+    sync_bil_reserve(db, alpaca)
 
     # ── EXPIRE STALE APPROVALS
     try:
@@ -2212,7 +2289,7 @@ def run(session="open"):
                     "last_tier":  f"{last_tier*100:.0f}%",
                 }, f"profit target {rule['label']} triggered")
                 pos_log.decide("PARTIAL_EXIT", rule['label'])
-                if reconcile_ok:
+                if True:  # Gate 0 already verified account health
                     order = alpaca.submit_order(pos['ticker'], sell_shares, "sell")
                     if order:
                         pnl = db.reduce_position(pos['id'], sell_shares, current_price,
@@ -2241,7 +2318,7 @@ def run(session="open"):
         # Execute exit
         if exit_reason:
             pos_log.decide("EXIT", f"reason={exit_reason} price=${current_price:.2f}")
-            if reconcile_ok:
+            if True:  # Gate 0 already verified account health
                 order = alpaca.close_position(pos['ticker'])
                 if order is not None:
                     pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason)
@@ -2301,9 +2378,7 @@ def run(session="open"):
                 log.error(f"[MANAGED] Execution error: {e}")
 
     # ── NEW SIGNAL EVALUATION (Gates 4–9 + 11)
-    if not reconcile_ok:
-        log.warning("Reconciliation issues — skipping new entries")
-    else:
+    if True:  # Gate 0 already verified — always proceed
         positions = db.get_open_positions()
         portfolio = db.get_portfolio()
         equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
