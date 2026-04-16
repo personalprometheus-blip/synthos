@@ -5865,6 +5865,8 @@ function applyPreset(name, btn) {
   var bilCb = document.getElementById('cfg-bil-enabled');
   var bilLbl = document.getElementById('cfg-bil-label');
   if (bilCb && bilLbl) bilLbl.textContent = bilCb.checked ? 'Enabled' : 'Disabled';
+  // Auto-save preset values to DB so the trader agent picks them up
+  if (name !== 'custom') { saveCfgPanel(); }
 }
 
 // BIL checkbox label update
@@ -7969,7 +7971,7 @@ async function saveQuickSettings() {
   const g = id => document.getElementById(id);
   const data = {
     min_confidence:    (g('qs-min-confidence') || g('s-min-conf'))?.value    || 'MEDIUM',
-    max_position_pct:  (parseInt((g('qs-max-pos') || g('s-max-pos'))?.value) || 10) / 100,
+    max_position_pct:  parseInt((g('qs-max-pos') || g('s-max-pos'))?.value) || 10,
     close_session_mode:(g('qs-close-mode') || g('s-close-mode'))?.value      || 'conservative',
     max_trade_usd:     parseFloat((g('qs-max-trade') || g('s-max-trade-usd'))?.value) || 0,
     max_sector_pct:    parseFloat((g('qs-max-sector') || g('s-max-sector'))?.value)   || 40,
