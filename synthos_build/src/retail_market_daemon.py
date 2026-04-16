@@ -300,7 +300,7 @@ def run_trade_for_customer(customer_id, session='open'):
              str(_ROOT_DIR / 'agents' / 'retail_trade_logic_agent.py'),
              f'--session={session}',
              f'--customer-id={customer_id}'],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=300,
             cwd=str(_ROOT_DIR / 'agents'),
         )
         return result.returncode == 0
