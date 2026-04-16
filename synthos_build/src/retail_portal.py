@@ -4505,6 +4505,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
 </div>
 
+<!-- ALPACA FUNDING BANNER -->
+<div id="alpaca-funding-banner" style="display:none;background:linear-gradient(90deg,rgba(255,75,110,0.12),rgba(255,75,110,0.04));border-bottom:2px solid var(--pink);padding:12px 24px;align-items:center;gap:12px">
+  <span style="font-size:18px">&#x26A0;&#xFE0F;</span>
+  <div style="flex:1">
+    <span style="font-size:12px;font-weight:700;color:var(--pink)">Alpaca Account Registration Incomplete</span><br>
+    <span style="font-size:11px;color:var(--muted);line-height:1.5">Your API keys are connected to Synthos &mdash; great! However, your Alpaca brokerage account still needs to be funded before trading can begin. Please log in to your Alpaca dashboard at <a href="https://alpaca.markets" target="_blank" style="color:var(--teal);text-decoration:underline">alpaca.markets</a> and complete any remaining registration steps. Paper trading accounts are automatically funded with $100,000 once registration is complete.</span>
+  </div>
+  <button onclick="checkAlpacaFunding(true)" style="background:var(--teal);color:#000;border:none;border-radius:6px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">I&#39;ve Completed Registration &mdash; Check Now</button>
+</div>
+
 
   <!-- hidden compat elements JS writes to -->
   <span id="stat-mode" style="display:none">{{ status.operating_mode }}</span>
@@ -6073,6 +6083,23 @@ async function sendMessageReply(ticketId) {
   toast('Reply sent', 'ok');
 }
 
+
+// Alpaca funding banner — persistent until account has equity
+async function checkAlpacaFunding(manual) {
+  try {
+    var r = await fetch('/api/alpaca-funding-status');
+    var d = await r.json();
+    var banner = document.getElementById('alpaca-funding-banner');
+    if (!banner) return;
+    if (d.has_keys && !d.funded) {
+      banner.style.display = 'flex';
+      if (manual) toast('Alpaca account still shows $0 equity. Please complete registration at alpaca.markets', 'err');
+    } else {
+      banner.style.display = 'none';
+      if (manual && d.funded) toast('Alpaca account funded — $' + d.equity.toLocaleString() + ' equity confirmed!', 'ok');
+    }
+  } catch(e) { console.warn('checkAlpacaFunding', e); }
+}
 
 // New account banner — show until trade agent has run at least once
 async function checkNewAccountBanner() {
@@ -8005,6 +8032,7 @@ loadAudit();
 loadMarketIndices();
 loadTraderActivity();
 checkNewAccountBanner();
+checkAlpacaFunding(false);
 loadCfgPanel();
 // First-time setup guide check
 fetch('/api/customer-settings').then(r=>r.json()).then(function(d){
@@ -8620,6 +8648,34 @@ def api_settings():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+
+
+@app.route('/api/alpaca-funding-status')
+@login_required
+def api_alpaca_funding_status():
+    """Check whether the customer's Alpaca paper account is funded."""
+    try:
+        cid = session.get('customer_id')
+        ak, sk = auth.get_alpaca_credentials(cid)
+        if not ak or not sk:
+            return jsonify({"has_keys": False, "equity": 0, "funded": False, "status": "no_keys"})
+        import requests as _req
+        try:
+            resp = _req.get(
+                'https://paper-api.alpaca.markets/v2/account',
+                headers={'APCA-API-KEY-ID': ak, 'APCA-API-SECRET-KEY': sk},
+                timeout=8
+            )
+            resp.raise_for_status()
+            acct = resp.json()
+            equity = float(acct.get('equity', 0))
+            funded = equity >= 1.0
+            return jsonify({"has_keys": True, "equity": equity, "funded": funded, "status": "ok"})
+        except Exception:
+            return jsonify({"has_keys": True, "equity": 0, "funded": False, "status": "api_error"})
+    except Exception as e:
+        log.error(f"alpaca-funding-status error: {e}")
+        return jsonify({"has_keys": False, "equity": 0, "funded": False, "status": "error"})
 
 
 @app.route('/api/customer-settings')
