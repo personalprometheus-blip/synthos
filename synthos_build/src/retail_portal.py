@@ -4435,6 +4435,46 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </div>
 
 <!-- NEWS ARTICLE MODAL -->
+<!-- PORTFOLIO MODAL -->
+<div class="sig-modal-overlay" id="portfolio-modal-overlay" onclick="closePortfolioModal(event)" style="display:none">
+  <div class="sig-modal" style="max-width:520px;width:94vw">
+    <div class="sig-modal-head" style="flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;width:100%">
+        <div class="sig-modal-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));color:var(--teal)">$$</div>
+        <div style="margin-left:12px;flex:1">
+          <div style="font-size:14px;font-weight:700;color:var(--text)">Portfolio Overview</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px" id="pmod-updated">Last updated: —</div>
+        </div>
+        <span class="sig-modal-close" onclick="closePortfolioModal()">&#x2715;</span>
+      </div>
+    </div>
+    <div class="sig-modal-body" style="padding:0">
+      <!-- Summary row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:rgba(255,255,255,0.03);border-bottom:1px solid var(--border)">
+        <div style="padding:14px 16px;text-align:center">
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim)">Total Value</div>
+          <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--text);margin-top:4px" id="pmod-total">$0.00</div>
+        </div>
+        <div style="padding:14px 16px;text-align:center">
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim)">Cash</div>
+          <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--text);margin-top:4px" id="pmod-cash">$0.00</div>
+        </div>
+        <div style="padding:14px 16px;text-align:center">
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim)">Positions</div>
+          <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--text);margin-top:4px" id="pmod-positions">0</div>
+        </div>
+      </div>
+      <!-- Notifications -->
+      <div id="pmod-notifications" style="padding:14px 18px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:10px">Notifications</div>
+        <div id="pmod-notif-list" style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;color:var(--dim)">Loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="sig-modal-overlay" id="news-modal-overlay" onclick="closeNewsModal(event)" style="display:none">
   <div class="sig-modal" id="news-modal" style="max-width:640px;width:94vw;max-height:88vh;overflow-y:auto">
     <div class="sig-modal-head" style="align-items:flex-start;gap:10px">
@@ -4528,7 +4568,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   <!-- STATUS STRIP -->
   <div class="status-strip">
-    <div class="stat-card teal">
+    <div class="stat-card teal" onclick="openPortfolioModal()" style="cursor:pointer" title="View portfolio details">
       <div class="stat-label">Portfolio</div>
       <div class="stat-val" id="stat-portfolio">$0.00</div>
       <div style="display:flex;align-items:center;gap:6px;margin-top:3px">
@@ -6102,6 +6142,67 @@ async function checkAlpacaFunding(manual) {
       if (manual && d.funded) toast('Alpaca account funded — $' + d.equity.toLocaleString() + ' equity confirmed!', 'ok');
     }
   } catch(e) { console.warn('checkAlpacaFunding', e); }
+}
+
+// ── PORTFOLIO MODAL ──────────────────────────────────────────────────────────
+async function openPortfolioModal() {
+  var overlay = document.getElementById('portfolio-modal-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  // Load data
+  try {
+    var [sr, pr] = await Promise.all([
+      fetch('/api/portfolio-info'),
+      fetch('/api/status')
+    ]);
+    var info = await sr.json();
+    var status = await pr.json();
+    // Summary
+    document.getElementById('pmod-total').textContent = '$' + (status.portfolio_value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    document.getElementById('pmod-cash').textContent = '$' + (status.cash||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    document.getElementById('pmod-positions').textContent = status.open_positions || '0';
+    // Last updated
+    var updTs = info.last_equity_update || info.last_heartbeat || '';
+    if (updTs) {
+      var dt = new Date(updTs);
+      var now = new Date();
+      var diffMs = now - dt;
+      var diffMin = Math.floor(diffMs / 60000);
+      var timeAgo = diffMin < 1 ? 'just now' : diffMin < 60 ? diffMin + 'm ago' : Math.floor(diffMin/60) + 'h ago';
+      document.getElementById('pmod-updated').textContent = 'Last updated: ' + updTs.slice(0,16).replace('T',' ') + ' (' + timeAgo + ')';
+    } else {
+      document.getElementById('pmod-updated').textContent = 'Last updated: Never';
+    }
+    // Build notifications
+    var notifs = info.notifications || [];
+    var html = '';
+    if (notifs.length === 0) {
+      html = '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(0,245,212,0.04);border:1px solid rgba(0,245,212,0.1)"><span style="font-size:14px">\u2705</span><span style="font-size:11px;color:rgba(0,245,212,0.8)">No issues detected. Your account is in good standing.</span></div>';
+    } else {
+      notifs.forEach(function(n) {
+        var colors = {
+          warning: {bg:'rgba(245,166,35,0.06)',border:'rgba(245,166,35,0.15)',text:'rgba(245,166,35,0.9)',icon:'\u26A0\uFE0F'},
+          error:   {bg:'rgba(255,75,110,0.06)',border:'rgba(255,75,110,0.15)',text:'rgba(255,75,110,0.9)',icon:'\u274C'},
+          info:    {bg:'rgba(0,245,212,0.04)',border:'rgba(0,245,212,0.1)',text:'rgba(0,245,212,0.8)',icon:'\u2139\uFE0F'}
+        };
+        var c = colors[n.level] || colors.info;
+        html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:'+c.bg+';border:1px solid '+c.border+'">'
+          + '<span style="font-size:14px;flex-shrink:0;margin-top:1px">'+c.icon+'</span>'
+          + '<div style="flex:1"><div style="font-size:11px;font-weight:600;color:'+c.text+'">'+n.title+'</div>'
+          + '<div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.5">'+n.message+'</div></div></div>';
+      });
+    }
+    document.getElementById('pmod-notif-list').innerHTML = html;
+  } catch(e) {
+    console.warn('openPortfolioModal', e);
+    document.getElementById('pmod-notif-list').innerHTML = '<div style="font-size:11px;color:var(--pink)">Failed to load portfolio info</div>';
+  }
+}
+
+function closePortfolioModal(event) {
+  if (event && event.target !== event.currentTarget) return;
+  var overlay = document.getElementById('portfolio-modal-overlay');
+  if (overlay) overlay.style.display = 'none';
 }
 
 // New account banner — show until trade agent has run at least once
@@ -8651,6 +8752,128 @@ def api_settings():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+
+
+@app.route('/api/portfolio-info')
+@login_required
+def api_portfolio_info():
+    """Portfolio info with notifications for the portfolio modal."""
+    try:
+        db = _customer_db()
+        cid = session.get('customer_id', '')
+
+        # Last equity update timestamp
+        last_eq_ts = None
+        with db.conn() as c:
+            row = c.execute("SELECT updated_at FROM customer_settings WHERE key='_ALPACA_EQUITY'").fetchone()
+            if row:
+                last_eq_ts = row['updated_at'] if hasattr(row, 'keys') else row[0]
+
+        # Last heartbeat
+        hb = db.get_last_heartbeat()
+        last_hb = hb['timestamp'] if hb else None
+
+        # Account created_at from auth
+        account_created = None
+        try:
+            with auth._auth_conn() as c:
+                arow = c.execute("SELECT created_at FROM customers WHERE id=?", (cid,)).fetchone()
+                if arow:
+                    account_created = arow['created_at'] if hasattr(arow, 'keys') else arow[0]
+        except Exception:
+            pass
+
+        # Current equity
+        equity_str = db.get_setting('_ALPACA_EQUITY')
+        equity = float(equity_str) if equity_str else 0.0
+
+        # NEW_CUSTOMER flag
+        nc = db.get_setting('NEW_CUSTOMER')
+        new_customer = nc != 'false'
+
+        # Has Alpaca keys?
+        has_keys = False
+        try:
+            ak, sk = auth.get_alpaca_credentials(cid)
+            has_keys = bool(ak and sk)
+        except Exception:
+            pass
+
+        # Build notifications
+        notifications = []
+
+        if has_keys and equity < 1.0 and new_customer:
+            # Check if account is old enough (2+ market days)
+            stale_paper = False
+            if account_created:
+                try:
+                    from datetime import datetime, timezone
+                    created_dt = datetime.fromisoformat(account_created.replace('Z', '+00:00')) if 'T' in account_created else datetime.strptime(account_created, '%Y-%m-%d %H:%M:%S')
+                    now = datetime.now(timezone.utc) if created_dt.tzinfo else datetime.utcnow()
+                    age_hours = (now - created_dt).total_seconds() / 3600
+                    # 2 market days ~ 48+ hours (conservative: use 36 hours to account for weekends)
+                    if age_hours >= 36:
+                        stale_paper = True
+                except Exception:
+                    stale_paper = True  # If we can't parse date, err on side of showing warning
+
+            if stale_paper:
+                notifications.append({
+                    "level": "warning",
+                    "title": "Paper Account Not Funded",
+                    "message": "Your Alpaca paper account still shows $0 after 2+ market days. "
+                               "This is a known issue with new paper accounts that didn\u0027t initialize properly. "
+                               "You need to create a new paper account on alpaca.markets and generate new API keys, "
+                               "then update them in Settings \u2192 Alpaca Keys."
+                })
+            else:
+                notifications.append({
+                    "level": "info",
+                    "title": "Waiting for Paper Funding",
+                    "message": "Your Alpaca paper account is being set up. Initial $100,000 funding "
+                               "typically appears within 1\u20132 market days. If it hasn\u0027t arrived after 2 days, "
+                               "you may need to create a new paper account."
+                })
+
+        elif has_keys and equity < 1.0 and not new_customer:
+            # Was funded before but now shows $0 — different issue
+            notifications.append({
+                "level": "error",
+                "title": "Account Equity at $0",
+                "message": "Your account previously had equity but is now showing $0. "
+                           "This may indicate an API issue. Check your Alpaca dashboard or contact support."
+            })
+
+        elif not has_keys:
+            notifications.append({
+                "level": "info",
+                "title": "Connect Your Alpaca Account",
+                "message": "To start trading, connect your Alpaca paper trading account in the setup tutorial. "
+                           "Go to Settings \u2192 Alpaca Keys to enter your API credentials."
+            })
+
+        # Kill switch warning
+        ks = db.get_setting('KILL_SWITCH')
+        if ks == '1':
+            notifications.append({
+                "level": "error",
+                "title": "Trading Halted",
+                "message": "The kill switch is active. All trading has been paused. "
+                           "Go to Settings to re-enable trading."
+            })
+
+        return jsonify({
+            "last_equity_update": last_eq_ts,
+            "last_heartbeat": last_hb,
+            "equity": equity,
+            "has_keys": has_keys,
+            "new_customer": new_customer,
+            "account_created": account_created,
+            "notifications": notifications,
+        })
+    except Exception as e:
+        log.error(f"portfolio-info error: {e}")
+        return jsonify({"error": str(e), "notifications": []}), 500
 
 
 @app.route('/api/alpaca-funding-status')
