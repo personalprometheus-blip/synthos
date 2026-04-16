@@ -104,10 +104,13 @@ SESSION_PIPELINES = {
         ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_macro_regime_agent.py',     [],                   300),
         ('retail_market_state_agent.py',     [],                   180),
+        ('retail_bias_detection_agent.py',   [],                   180),
+        ('retail_fault_detection_agent.py',  [],                   120),
         ('retail_validator_stack_agent.py',  [],                   180),
         ('retail_trade_logic_agent.py',      ['--session=midday'], 300),
     ],
     'close': [
+        ('retail_fault_detection_agent.py',  [],                   120),
         ('retail_validator_stack_agent.py',  [],                   180),
         ('retail_trade_logic_agent.py',      ['--session=close'],  300),
     ],

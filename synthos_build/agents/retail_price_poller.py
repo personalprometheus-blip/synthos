@@ -129,6 +129,17 @@ def _fetch_prices_from_alpaca():
         }
         try:
             r = requests.get(f"{alpaca_url}/v2/positions", headers=headers, timeout=8)
+            # Track API call
+            try:
+                _db = sqlite3.connect(_shared_db_path(), timeout=5)
+                _db.execute(
+                    "INSERT INTO api_calls (timestamp, agent, service, endpoint, method, customer_id, status_code) "
+                    "VALUES (datetime('now'), 'price_poller', 'alpaca', '/v2/positions', 'GET', ?, ?)",
+                    (cid, r.status_code))
+                _db.commit()
+                _db.close()
+            except Exception:
+                pass
             if r.status_code != 200:
                 continue
             for pos in r.json():

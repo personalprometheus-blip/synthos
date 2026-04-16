@@ -112,6 +112,10 @@ def fetch_put_call_ratio(ticker):
     """
     url = "https://www.cboe.com/us/options/market_statistics/daily/"
     r = fetch_with_retry(url)
+    try:
+        _master_db().log_api_call('sentiment_agent', '/us/options/market_statistics/daily/', 'GET', 'cboe', status_code=getattr(r, 'status_code', None))
+    except Exception:
+        pass
     if not r:
         return None, None
 
@@ -139,6 +143,10 @@ def fetch_finviz_put_call(ticker):
     url = f"https://finviz.com/quote.ashx?t={ticker}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     r = fetch_with_retry(url, headers=headers)
+    try:
+        _master_db().log_api_call('sentiment_agent', f'/quote.ashx?t={ticker}', 'GET', 'finviz', status_code=getattr(r, 'status_code', None))
+    except Exception:
+        pass
     if not r:
         return None, None
 
@@ -172,6 +180,10 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
         "Accept": "application/json",
     }
     r = fetch_with_retry(url, headers=headers)
+    try:
+        _master_db().log_api_call('sentiment_agent', '/LATEST/search-index', 'GET', 'sec_edgar', status_code=getattr(r, 'status_code', None))
+    except Exception:
+        pass
     if not r:
         return {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
 
@@ -219,6 +231,10 @@ def fetch_volume_profile(ticker, is_position=False):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     fv_url  = f"https://finviz.com/quote.ashx?t={ticker}"
     fv_r    = fetch_with_retry(fv_url, headers=headers)
+    try:
+        _master_db().log_api_call('sentiment_agent', f'/quote.ashx?t={ticker}', 'GET', 'finviz', status_code=getattr(fv_r, 'status_code', None))
+    except Exception:
+        pass
 
     if fv_r:
         try:
@@ -249,6 +265,10 @@ def fetch_volume_profile(ticker, is_position=False):
     if not _yahoo_blocked and (is_position or elevated):
         url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
         r = fetch_with_retry(url)
+        try:
+            _master_db().log_api_call('sentiment_agent', f'/rss/headline?s={ticker}', 'GET', 'yahoo', status_code=getattr(r, 'status_code', None))
+        except Exception:
+            pass
         if r is None:
             _yahoo_blocked = True
             log.info("Yahoo Finance rate-limited — skipping Yahoo for remaining tickers")
@@ -291,6 +311,10 @@ def fetch_alpaca_bars(ticker, days=60):
     }
     try:
         r = fetch_with_retry(url, params=params, headers=headers)
+        try:
+            _master_db().log_api_call('sentiment_agent', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=getattr(r, 'status_code', None))
+        except Exception:
+            pass
         if not r:
             return []
         data = r.json()
@@ -312,6 +336,10 @@ def fetch_vix():
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     try:
         r = fetch_with_retry(url, params=params, headers=headers)
+        try:
+            _master_db().log_api_call('sentiment_agent', '/v8/finance/chart/%5EVIX', 'GET', 'yahoo', status_code=getattr(r, 'status_code', None))
+        except Exception:
+            pass
         if not r:
             return None, []
         data   = r.json()

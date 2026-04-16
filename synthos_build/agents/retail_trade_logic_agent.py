@@ -638,17 +638,35 @@ class AlpacaClient:
     def _request(self, method, endpoint, **kwargs):
         url = f"{self.base_url}{endpoint}"
         last_error = None
+        status_code = None
         for attempt in range(MAX_RETRIES):
             try:
                 r = getattr(requests, method)(
                     url, headers=self.headers, timeout=15, **kwargs
                 )
+                status_code = r.status_code
                 r.raise_for_status()
+                # Track API call
+                try:
+                    _shared_db().log_api_call(
+                        agent='trade_logic', endpoint=endpoint,
+                        method=method.upper(), service='alpaca',
+                        customer_id=_CUSTOMER_ID, status_code=status_code)
+                except Exception:
+                    pass
                 return r.json() if r.text else {}
             except Exception as e:
                 last_error = e
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt)
+        # Track failed call too
+        try:
+            _shared_db().log_api_call(
+                agent='trade_logic', endpoint=endpoint,
+                method=method.upper(), service='alpaca',
+                customer_id=_CUSTOMER_ID, status_code=status_code)
+        except Exception:
+            pass
         log.error(f"Alpaca {method.upper()} {endpoint} failed: {last_error}")
         return None
 
@@ -690,6 +708,13 @@ class AlpacaClient:
                         "limit": days + 10, "feed": "iex"},
                 headers=headers, timeout=20,
             )
+            try:
+                _shared_db().log_api_call(
+                    agent='trade_logic', endpoint=f'/v2/stocks/{ticker}/bars',
+                    method='GET', service='alpaca_data',
+                    customer_id=_CUSTOMER_ID, status_code=r.status_code)
+            except Exception:
+                pass
             if r.status_code == 200:
                 return r.json().get("bars") or []
         except Exception as e:
@@ -749,6 +774,13 @@ class AlpacaClient:
         url = f"{self.base_url}/v2/positions/{ticker}"
         try:
             r = requests.get(url, headers=self.headers, timeout=15)
+            try:
+                _shared_db().log_api_call(
+                    agent='trade_logic', endpoint=f'/v2/positions/{ticker}',
+                    method='GET', service='alpaca',
+                    customer_id=_CUSTOMER_ID, status_code=r.status_code)
+            except Exception:
+                pass
             if r.status_code == 404:
                 return None
             r.raise_for_status()

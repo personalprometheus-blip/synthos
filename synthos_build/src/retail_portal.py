@@ -111,7 +111,11 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger('portal')
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('PORTAL_SECRET_KEY', secrets.token_hex(32))
+_env_secret = os.environ.get('PORTAL_SECRET_KEY', '')
+if not _env_secret:
+    log.warning("PORTAL_SECRET_KEY not set — generating ephemeral key (sessions won't survive restart)")
+    _env_secret = secrets.token_hex(32)
+app.secret_key = _env_secret
 
 # ── SESSION COOKIE SECURITY ────────────────────────────────────────────────
 # Secure=True: browser only sends cookie over HTTPS (Cloudflare Tunnel handles TLS).
@@ -11278,6 +11282,39 @@ tr:hover td{background:rgba(255,255,255,0.02)}
     </table>
   </div>
 
+  <div class="section-title">API Usage</div>
+  <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
+    <!-- Gauge card -->
+    <div class="metric-card" style="text-align:center">
+      <div class="metric-label">Today's API Calls</div>
+      <div style="position:relative;width:160px;height:90px;margin:8px auto 4px">
+        <svg viewBox="0 0 160 90" style="width:160px;height:90px">
+          <path d="M 15 80 A 65 65 0 0 1 145 80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10" stroke-linecap="round"/>
+          <path id="api-gauge-fill" d="M 15 80 A 65 65 0 0 1 145 80" fill="none" stroke="var(--green)" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 204" style="transition:stroke-dasharray 0.8s ease,stroke 0.3s"/>
+        </svg>
+        <div style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);text-align:center">
+          <div id="api-gauge-val" style="font-size:1.6rem;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
+          <div style="font-size:10px;color:var(--muted)">/ 1,000</div>
+        </div>
+      </div>
+      <div id="api-gauge-breakdown" style="font-size:11px;color:var(--muted);margin-top:4px">Loading...</div>
+    </div>
+    <!-- History table card -->
+    <div class="metric-card">
+      <div class="metric-label" style="margin-bottom:8px">Last 5 Market Days</div>
+      <table style="width:100%;font-size:12px">
+        <thead><tr>
+          <th style="text-align:left;padding:2px 6px;color:var(--muted);font-weight:500">Date</th>
+          <th style="text-align:right;padding:2px 6px;color:var(--muted);font-weight:500">Calls</th>
+          <th style="text-align:right;padding:2px 6px;color:var(--muted);font-weight:500">Bar</th>
+        </tr></thead>
+        <tbody id="api-history-table">
+          <tr><td colspan="3" style="color:var(--muted);padding:8px;text-align:center">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <!-- ── SCHEDULER TAB ── -->
@@ -11653,9 +11690,52 @@ function showSchedulerDetail(idx) {
   </div>${rows}`;
 }
 
+// ── API USAGE ──
+async function loadApiUsage() {
+  try {
+    const d = await fetch('/api/admin/api-usage').then(r => r.json());
+    const total = (d.today && d.today.total) || 0;
+    const max = 1000;
+    const pct = Math.min(total / max, 1);
+    // Arc length = 204 (approx semicircle path length)
+    const arc = 204;
+    const fill = document.getElementById('api-gauge-fill');
+    fill.setAttribute('stroke-dasharray', (pct * arc) + ' ' + arc);
+    fill.setAttribute('stroke', pct >= 0.85 ? 'var(--pink)' : pct >= 0.65 ? '#f5a623' : 'var(--green)');
+    document.getElementById('api-gauge-val').textContent = total.toLocaleString();
+    // Breakdown by service
+    if (d.today && d.today.by_service) {
+      const parts = Object.entries(d.today.by_service).map(([k,v]) => k + ': ' + v).join(' · ');
+      document.getElementById('api-gauge-breakdown').textContent = parts || 'No calls today';
+    } else {
+      document.getElementById('api-gauge-breakdown').textContent = 'No calls today';
+    }
+    // History table
+    const tbody = document.getElementById('api-history-table');
+    if (d.history && d.history.length) {
+      const histMax = Math.max(...d.history.map(h => h.total || 0), 1);
+      tbody.innerHTML = d.history.map(h => {
+        const dt = h.date || '—';
+        const ct = h.total || 0;
+        const barW = Math.round((ct / histMax) * 100);
+        const barColor = ct >= 850 ? 'var(--pink)' : ct >= 650 ? '#f5a623' : 'var(--green)';
+        return '<tr>' +
+          '<td style="padding:3px 6px;font-family:var(--mono);color:var(--muted)">' + dt + '</td>' +
+          '<td style="padding:3px 6px;text-align:right;font-family:var(--mono);font-weight:600">' + ct.toLocaleString() + '</td>' +
+          '<td style="padding:3px 6px;width:50%"><div style="height:8px;border-radius:4px;background:rgba(255,255,255,0.04);overflow:hidden"><div style="height:100%;width:' + barW + '%;background:' + barColor + ';border-radius:4px;transition:width 0.6s"></div></div></td>' +
+          '</tr>';
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted);padding:8px;text-align:center">No history yet</td></tr>';
+    }
+  } catch(e) { console.error('api usage error', e); }
+}
+
 // ── INIT ──
 loadMetrics();
+loadApiUsage();
 setInterval(loadMetrics, 12000);
+setInterval(loadApiUsage, 60000);
 </script>
 </body>
 </html>"""
@@ -11986,6 +12066,19 @@ def api_admin_scheduler_history():
         return jsonify({'history': [], 'error': str(e)})
 
 
+@app.route('/api/admin/api-usage')
+@admin_required
+def api_admin_api_usage():
+    """API call tracking — today's usage + last 5 market days."""
+    try:
+        db = _shared_db()
+        today = db.get_api_call_counts()
+        history = db.get_api_call_history(days=5)
+        return jsonify({'today': today, 'history': history})
+    except Exception as e:
+        return jsonify({'today': {'total': 0}, 'history': [], 'error': str(e)})
+
+
 # ── START ──────────────────────────────────────────────────────────────────
 
 
@@ -12052,11 +12145,14 @@ def _session_snapshot_loop():
 _snap_thread = _threading.Thread(target=_session_snapshot_loop, daemon=True)
 _snap_thread.start()
 
+# ── Module-level init (runs on import — required for gunicorn) ────────────
+auth.init_auth_db()
+auth.ensure_admin_account()
+auth.ensure_owner_customer()
+log.info(f"Synthos Portal initialized — port {PORT} | Pi: {PI_ID}")
+
 if __name__ == '__main__':
-    auth.init_auth_db()
-    auth.ensure_admin_account()
-    auth.ensure_owner_customer()
-    log.info(f"Synthos Portal starting on port {PORT}")
-    log.info(f"Pi: {PI_ID} | Mode: {OPERATING_MODE}")
+    # Dev-only fallback (production uses gunicorn)
+    log.info(f"Starting Flask dev server on port {PORT}")
     log.info(f"Kill switch: {'ACTIVE' if kill_switch_active() else 'clear'}")
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)

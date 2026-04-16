@@ -650,6 +650,18 @@ class DB:
                 adjustments TEXT NOT NULL,
                 applied INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL)""",
+            # v3.1 — API call tracking for rate limit monitoring
+            """CREATE TABLE IF NOT EXISTS api_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                agent TEXT NOT NULL,
+                service TEXT NOT NULL DEFAULT 'alpaca',
+                endpoint TEXT NOT NULL,
+                method TEXT NOT NULL DEFAULT 'GET',
+                customer_id TEXT,
+                status_code INTEGER)""",
+            "CREATE INDEX IF NOT EXISTS idx_api_calls_ts ON api_calls(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_api_calls_agent ON api_calls(agent)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1954,6 +1966,71 @@ class DB:
             return dict(row) if row else None
 
     # ── SYSTEM LOG & HEARTBEAT ─────────────────────────────────────────────
+
+    # ── API CALL TRACKING ───────────────────────────────────────────────
+
+    def log_api_call(self, agent, endpoint, method='GET', service='alpaca',
+                     customer_id=None, status_code=None):
+        """Record an external API call for rate limit monitoring."""
+        try:
+            with self.conn() as c:
+                c.execute(
+                    "INSERT INTO api_calls (timestamp, agent, service, endpoint, method, customer_id, status_code) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (self.now(), agent, service, endpoint, method, customer_id, status_code))
+        except Exception:
+            pass  # never let tracking break an agent
+
+    def get_api_call_counts(self, date_str=None):
+        """Get API call counts for a given date (default today). Returns dict with totals and per-agent breakdown."""
+        if not date_str:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        try:
+            with self.conn() as c:
+                total = c.execute(
+                    "SELECT COUNT(*) FROM api_calls WHERE date(timestamp) = ?",
+                    (date_str,)).fetchone()[0]
+                by_agent = c.execute(
+                    "SELECT agent, COUNT(*) FROM api_calls WHERE date(timestamp) = ? GROUP BY agent ORDER BY COUNT(*) DESC",
+                    (date_str,)).fetchall()
+                by_service = c.execute(
+                    "SELECT service, COUNT(*) FROM api_calls WHERE date(timestamp) = ? GROUP BY service ORDER BY COUNT(*) DESC",
+                    (date_str,)).fetchall()
+                recent = c.execute(
+                    "SELECT timestamp, agent, service, endpoint, method FROM api_calls "
+                    "WHERE date(timestamp) = ? ORDER BY id DESC LIMIT 10",
+                    (date_str,)).fetchall()
+                return {
+                    'date': date_str,
+                    'total': total,
+                    'by_agent': [{'agent': r[0], 'count': r[1]} for r in by_agent],
+                    'by_service': [{'service': r[0], 'count': r[1]} for r in by_service],
+                    'recent': [{'timestamp': r[0], 'agent': r[1], 'service': r[2],
+                                'endpoint': r[3], 'method': r[4]} for r in recent],
+                }
+        except Exception:
+            return {'date': date_str, 'total': 0, 'by_agent': [], 'by_service': [], 'recent': []}
+
+    def get_api_call_history(self, days=5):
+        """Get daily API call totals for the last N market days."""
+        try:
+            with self.conn() as c:
+                rows = c.execute(
+                    "SELECT date(timestamp) as d, COUNT(*) FROM api_calls "
+                    "GROUP BY d ORDER BY d DESC LIMIT ?", (days,)).fetchall()
+                return [{'date': r[0], 'total': r[1]} for r in rows]
+        except Exception:
+            return []
+
+    def cleanup_api_calls(self, keep_days=30):
+        """Purge API call records older than keep_days."""
+        try:
+            with self.conn() as c:
+                c.execute(
+                    "DELETE FROM api_calls WHERE date(timestamp) < date('now', ?)",
+                    (f'-{keep_days} days',))
+        except Exception:
+            pass
 
     def log_heartbeat(self, agent_name, status="OK", portfolio_value=None):
         with self.conn() as c:

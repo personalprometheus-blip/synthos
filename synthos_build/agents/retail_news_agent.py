@@ -570,6 +570,10 @@ def _alpaca_bars(ticker, days):
                 "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
     try:
         r = requests.get(url, params=params, headers=headers, timeout=15)
+        try:
+            _db().log_api_call('news_agent', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=r.status_code)
+        except Exception:
+            pass
         if r.status_code == 200:
             return r.json().get("bars", [])
     except Exception as e:
@@ -769,6 +773,10 @@ def fetch_alpaca_news_historical(
                 headers=_ALPACA_HEADERS(),
                 timeout=REQUEST_TIMEOUT,
             )
+            try:
+                _db().log_api_call('news_agent', '/v1beta1/news', 'GET', 'alpaca_news', status_code=r.status_code)
+            except Exception:
+                pass
             r.raise_for_status()
         except Exception as exc:
             log.error(f"Alpaca news fetch error (page {pages_fetched + 1}): {exc}")
@@ -944,8 +952,12 @@ def post_to_company_pi(ticker, signal_id, congress_member, adjusted_score,
         "timestamp": datetime.now(ET).isoformat(),
     }
     try:
-        requests.post(f"{MONITOR_URL}/api/news-feed", json=payload,
-                      headers={"X-Token": MONITOR_TOKEN}, timeout=3)
+        _r = requests.post(f"{MONITOR_URL}/api/news-feed", json=payload,
+                           headers={"X-Token": MONITOR_TOKEN}, timeout=3)
+        try:
+            _db().log_api_call('news_agent', '/api/news-feed', 'POST', 'company_monitor', status_code=_r.status_code)
+        except Exception:
+            pass
         log.debug(f"[COMPANY] Metadata posted for {ticker} signal {signal_id}")
     except Exception as e:
         log.debug(f"[COMPANY] Post failed (non-fatal): {e}")

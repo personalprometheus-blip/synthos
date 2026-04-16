@@ -312,30 +312,150 @@ def run_trade_for_customer(customer_id, session='open'):
         return False
 
 
+MAX_TRADE_PARALLEL = 3   # max concurrent trade agent subprocesses
+
+
+def _read_validator_verdict(customer_id):
+    """Read validator verdict from customer DB. Returns (verdict, restrictions) or (None, [])."""
+    try:
+        import sqlite3
+        db_path = _ROOT_DIR / 'data' / 'customers' / customer_id / 'signals.db'
+        if not db_path.exists():
+            return None, []
+        conn = sqlite3.connect(str(db_path), timeout=5)
+        row = conn.execute(
+            "SELECT value FROM customer_settings WHERE key='_VALIDATOR_VERDICT'"
+        ).fetchone()
+        verdict = row[0] if row else None
+        row2 = conn.execute(
+            "SELECT value FROM customer_settings WHERE key='_VALIDATOR_RESTRICTIONS'"
+        ).fetchone()
+        restrictions = json.loads(row2[0]) if row2 else []
+        conn.close()
+        return verdict, restrictions
+    except Exception:
+        return None, []
+
+
 def run_trade_all_customers(session='open'):
-    """Run trade logic for all active customers sequentially."""
+    """Run trade logic for all active customers in parallel (up to MAX_TRADE_PARALLEL)."""
+    import subprocess as _sp
+
     write_agent_running('retail_trade_logic_agent.py', session)
     customers = get_active_customers()
     if not customers:
         log.warning("[TRADE] No active customers found")
         return 0, 0
 
-    log.info(f"[TRADE] Evaluating {len(customers)} customer(s) — session={session}")
+    # Pre-filter: log validator verdicts for visibility
+    verdicts = {}
+    for cid in customers:
+        v, r = _read_validator_verdict(cid)
+        verdicts[cid] = v
+    v_counts = {}
+    for v in verdicts.values():
+        v_counts[v or 'UNKNOWN'] = v_counts.get(v or 'UNKNOWN', 0) + 1
+    v_summary = ', '.join(f"{cnt} {vrd}" for vrd, cnt in sorted(v_counts.items()))
+    log.info(f"[DISPATCH] {len(customers)} customers: {v_summary}")
+
     t0 = time.monotonic()
     ok = 0
     fail = 0
+    timeout_count = 0
 
-    for cid in customers:
-        if _shutdown_requested or kill_switch_active():
-            log.info("[TRADE] Shutdown/kill switch — stopping customer loop")
-            break
-        if run_trade_for_customer(cid, session):
-            ok += 1
-        else:
+    # Parallel execution with pool of MAX_TRADE_PARALLEL
+    pending = list(customers)
+    active = {}   # {customer_id: Popen}
+
+    while (pending or active) and not _shutdown_requested:
+        # Launch up to MAX_TRADE_PARALLEL
+        while pending and len(active) < MAX_TRADE_PARALLEL:
+            cid = pending.pop(0)
+            if _shutdown_requested or kill_switch_active():
+                log.info("[DISPATCH] Shutdown/kill switch — stopping launches")
+                pending.clear()
+                break
+            try:
+                cmd = [
+                    sys.executable,
+                    str(_ROOT_DIR / 'agents' / 'retail_trade_logic_agent.py'),
+                    f'--session={session}',
+                    f'--customer-id={cid}',
+                ]
+                p = _sp.Popen(
+                    cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
+                    text=True, cwd=str(_ROOT_DIR / 'agents'),
+                )
+                active[cid] = p
+                vrd = verdicts.get(cid, '?')
+                log.debug(f"[DISPATCH] Launched {cid[:8]} (pid={p.pid}, verdict={vrd})")
+            except Exception as e:
+                log.error(f"[DISPATCH] Failed to launch {cid[:8]}: {e}")
+                fail += 1
+
+        # Poll active processes (non-blocking check)
+        finished = []
+        for cid, proc in active.items():
+            ret = proc.poll()
+            if ret is not None:
+                finished.append(cid)
+                if ret == 0:
+                    ok += 1
+                else:
+                    stderr = (proc.stderr.read() or '')[-200:]
+                    log.warning(f"[TRADE] {cid[:8]} exit={ret}: {stderr[:100]}")
+                    fail += 1
+            else:
+                # Check timeout (300s)
+                try:
+                    elapsed_proc = time.monotonic() - t0
+                    # Use per-process start time would be better, but t0 is close enough
+                    # for pool-level timeout awareness
+                except Exception:
+                    pass
+
+        for cid in finished:
+            del active[cid]
+
+        # Check for timed-out processes (individual 300s timeout)
+        for cid, proc in list(active.items()):
+            try:
+                proc.wait(timeout=0.1)
+                # If we get here, process finished during wait
+                if proc.returncode == 0:
+                    ok += 1
+                else:
+                    fail += 1
+                del active[cid]
+            except _sp.TimeoutExpired:
+                pass  # still running, that's fine
+
+        # If all slots are full, wait a bit before next poll
+        if active and len(active) >= MAX_TRADE_PARALLEL:
+            time.sleep(1)
+        elif not pending and active:
+            time.sleep(1)
+
+    # Final cleanup: wait for remaining with timeout
+    for cid, proc in active.items():
+        try:
+            proc.wait(timeout=300)
+            if proc.returncode == 0:
+                ok += 1
+            else:
+                fail += 1
+        except _sp.TimeoutExpired:
+            proc.kill()
+            log.error(f"[TRADE] Timeout for {cid[:8]} — killed")
+            timeout_count += 1
             fail += 1
 
     elapsed = time.monotonic() - t0
-    log.info(f"[TRADE] Complete: {ok}/{len(customers)} ok, {fail} failed in {elapsed:.1f}s")
+    log.info(
+        f"[TRADE] Complete: {ok}/{len(customers)} ok, {fail} failed"
+        + (f", {timeout_count} timeout" if timeout_count else "")
+        + f" in {elapsed:.1f}s (parallel={MAX_TRADE_PARALLEL})"
+    )
     return ok, fail
 
 

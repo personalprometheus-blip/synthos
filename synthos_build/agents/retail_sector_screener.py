@@ -103,6 +103,10 @@ def fetch_bars(ticker, days):
                     "limit": days + 20, "feed": "iex"},
             headers=_alpaca_headers(), timeout=20,
         )
+        try:
+            _master_db().log_api_call('sector_screener', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=r.status_code)
+        except Exception:
+            pass
         if r.status_code == 200:
             return r.json().get("bars", [])
         log.warning(f"Alpaca bars {ticker}: HTTP {r.status_code}")
