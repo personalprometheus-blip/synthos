@@ -1,0 +1,902 @@
+"""
+retail_fault_detection_agent.py — Fault Detection Agent
+Synthos · Agent 6
+
+Runs:
+  Every enrichment cycle (30 min during market hours) via market daemon
+  Also: once at pre-market open, once at close
+
+Responsibilities:
+  - 7-gate deterministic system health analysis spine
+  - Detect agent liveness failures (stale heartbeats, missed runs)
+  - Detect data freshness degradation (stale prices, stale signals)
+  - Verify API connectivity (Alpaca reachability)
+  - Monitor system resources (disk, memory, CPU temp)
+  - Audit per-customer account health (equity anomalies, orphan states)
+  - Verify DB integrity (table bloat, WAL size, stale locks)
+  - Check schedule compliance (did expected agents run today?)
+  - Raise urgent flags for critical faults
+  - Write notifications for actionable findings
+
+No LLM in any decision path. All gate logic is deterministic and traceable.
+
+Data sources:
+  - Internal DB (system_log, positions, customer_settings, signals)
+  - Filesystem (/proc for system metrics, .agent_lock, .agent_running)
+  - Alpaca API (connectivity ping only)
+
+Usage:
+  python3 retail_fault_detection_agent.py
+  python3 retail_fault_detection_agent.py --customer-id <uuid>
+"""
+
+import os
+import sys
+import json
+import logging
+import time
+import argparse
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from pathlib import Path
+from dotenv import load_dotenv
+
+_ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
+load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
+
+from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+
+# ── CONFIG ────────────────────────────────────────────────────────────────
+ET = ZoneInfo("America/New_York")
+
+ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
+ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY', '')
+ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+
+OWNER_CUSTOMER_ID = os.environ.get('OWNER_CUSTOMER_ID', '')
+_CUSTOMER_ID      = None   # set from --customer-id arg
+
+# Thresholds — all in minutes unless noted
+HEARTBEAT_STALE_MINUTES     = 45      # agent heartbeat older than this = stale
+PRICE_STALE_MINUTES         = 10      # live_prices older than this during market hours
+SIGNAL_STALE_HOURS          = 48      # queued signals older than this = warn
+AGENT_LOCK_STALE_MINUTES    = 12      # .agent_lock file older than this = stuck
+DISK_WARN_PCT               = 85      # disk usage % threshold
+DISK_CRITICAL_PCT           = 95
+MEMORY_WARN_PCT             = 85
+CPU_TEMP_WARN_C             = 75.0    # Raspberry Pi thermal throttle starts at 80°C
+CPU_TEMP_CRITICAL_C         = 82.0
+DB_WAL_WARN_MB              = 50      # WAL file larger than this = needs checkpoint
+SYSTEM_LOG_WARN_ROWS        = 50000   # table bloat warning
+POSITIONS_ORPHAN_DAYS       = 14      # open position with no price update in N days
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+log = logging.getLogger('fault_detection_agent')
+
+
+# ── SEVERITY ──────────────────────────────────────────────────────────────
+
+class Severity:
+    OK       = "OK"
+    INFO     = "INFO"
+    WARNING  = "WARNING"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class Finding:
+    gate: str
+    severity: str
+    code: str
+    message: str
+    detail: str = ""
+
+
+@dataclass
+class FaultReport:
+    """Aggregated output of all gates."""
+    findings: list = field(default_factory=list)
+    started_at: str = ""
+    completed_at: str = ""
+
+    def add(self, finding: Finding):
+        self.findings.append(finding)
+
+    @property
+    def worst_severity(self):
+        severities = [Severity.OK, Severity.INFO, Severity.WARNING, Severity.CRITICAL]
+        worst = 0
+        for f in self.findings:
+            idx = severities.index(f.severity) if f.severity in severities else 0
+            worst = max(worst, idx)
+        return severities[worst]
+
+    @property
+    def critical_count(self):
+        return sum(1 for f in self.findings if f.severity == Severity.CRITICAL)
+
+    @property
+    def warning_count(self):
+        return sum(1 for f in self.findings if f.severity == Severity.WARNING)
+
+    def summary(self):
+        return (f"Fault scan complete: {self.critical_count} critical, "
+                f"{self.warning_count} warning, {len(self.findings)} total checks")
+
+
+# ── DB HELPERS ────────────────────────────────────────────────────────────
+
+def _master_db():
+    """Shared intelligence DB (owner customer)."""
+    if OWNER_CUSTOMER_ID:
+        return get_customer_db(OWNER_CUSTOMER_ID)
+    return get_db()
+
+
+def _customer_db(customer_id=None):
+    """Per-customer DB."""
+    cid = customer_id or _CUSTOMER_ID or OWNER_CUSTOMER_ID
+    if cid:
+        return get_customer_db(cid)
+    return get_db()
+
+
+def _now_et():
+    return datetime.now(ET)
+
+
+def _now_str():
+    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _is_market_hours():
+    """True if currently within US market hours (9:30-16:00 ET, weekdays)."""
+    now = _now_et()
+    if now.weekday() >= 5:
+        return False
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 1: AGENT LIVENESS
+#  Check that each core agent has heartbeated recently
+# ══════════════════════════════════════════════════════════════════════════
+
+EXPECTED_AGENTS = [
+    ("market_sentiment_agent", "Market Sentiment"),
+    ("retail_news_agent",      "News"),
+    ("retail_trade_logic",     "Trade Logic"),
+    ("retail_sector_screener", "Sector Screener"),
+    ("price_poller",           "Price Poller"),
+]
+
+
+def gate1_agent_liveness(report: FaultReport, db):
+    """Check last heartbeat timestamp for each known agent."""
+    log.info("[GATE 1] Agent liveness check")
+
+    now = datetime.utcnow()
+
+    for agent_key, agent_label in EXPECTED_AGENTS:
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT timestamp, details FROM system_log "
+                "WHERE event='HEARTBEAT' AND agent LIKE ? "
+                "ORDER BY timestamp DESC LIMIT 1",
+                (f"%{agent_key}%",)
+            ).fetchone()
+
+        if not row:
+            report.add(Finding(
+                gate="GATE1_LIVENESS",
+                severity=Severity.WARNING,
+                code=f"NO_HEARTBEAT_{agent_key.upper()}",
+                message=f"{agent_label}: No heartbeat found",
+                detail="Agent may have never run or DB was cleared"
+            ))
+            continue
+
+        try:
+            last_ts = datetime.fromisoformat(row['timestamp'].replace('Z', ''))
+            age_min = (now - last_ts).total_seconds() / 60.0
+        except (ValueError, TypeError):
+            age_min = 9999
+
+        if age_min > HEARTBEAT_STALE_MINUTES and _is_market_hours():
+            severity = Severity.CRITICAL if age_min > HEARTBEAT_STALE_MINUTES * 3 else Severity.WARNING
+            report.add(Finding(
+                gate="GATE1_LIVENESS",
+                severity=severity,
+                code=f"STALE_HEARTBEAT_{agent_key.upper()}",
+                message=f"{agent_label}: Last heartbeat {int(age_min)}m ago",
+                detail=f"Threshold: {HEARTBEAT_STALE_MINUTES}m | Last: {row['timestamp']}"
+            ))
+        else:
+            report.add(Finding(
+                gate="GATE1_LIVENESS",
+                severity=Severity.OK,
+                code=f"HEARTBEAT_OK_{agent_key.upper()}",
+                message=f"{agent_label}: Alive ({int(age_min)}m ago)"
+            ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 2: DATA FRESHNESS
+#  Verify prices, signals, and news are being refreshed
+# ══════════════════════════════════════════════════════════════════════════
+
+def gate2_data_freshness(report: FaultReport, db):
+    """Check age of live prices, queued signals, and news feed entries."""
+    log.info("[GATE 2] Data freshness check")
+
+    now = datetime.utcnow()
+    today_str = now.strftime('%Y-%m-%d')
+
+    # 2a. Live prices freshness (only matters during market hours)
+    if _is_market_hours():
+        with db.conn() as c:
+            price_row = c.execute(
+                "SELECT MAX(updated_at) as latest FROM live_prices"
+            ).fetchone()
+
+        if price_row and price_row['latest']:
+            try:
+                last_price = datetime.fromisoformat(price_row['latest'].replace('Z', ''))
+                price_age_min = (now - last_price).total_seconds() / 60.0
+            except (ValueError, TypeError):
+                price_age_min = 9999
+
+            if price_age_min > PRICE_STALE_MINUTES:
+                report.add(Finding(
+                    gate="GATE2_FRESHNESS",
+                    severity=Severity.WARNING,
+                    code="STALE_PRICES",
+                    message=f"Live prices are {int(price_age_min)}m stale",
+                    detail=f"Threshold: {PRICE_STALE_MINUTES}m | Last: {price_row['latest']}"
+                ))
+            else:
+                report.add(Finding(
+                    gate="GATE2_FRESHNESS",
+                    severity=Severity.OK,
+                    code="PRICES_FRESH",
+                    message=f"Live prices updated {int(price_age_min)}m ago"
+                ))
+        else:
+            report.add(Finding(
+                gate="GATE2_FRESHNESS",
+                severity=Severity.WARNING,
+                code="NO_PRICES",
+                message="No live price data found"
+            ))
+
+    # 2b. Queued signals freshness
+    with db.conn() as c:
+        stale_signals = c.execute(
+            "SELECT COUNT(*) as cnt FROM signals "
+            "WHERE status='QUEUED' AND created_at < ?",
+            ((now - timedelta(hours=SIGNAL_STALE_HOURS)).strftime('%Y-%m-%d %H:%M:%S'),)
+        ).fetchone()
+
+    stale_count = stale_signals['cnt'] if stale_signals else 0
+    if stale_count > 0:
+        report.add(Finding(
+            gate="GATE2_FRESHNESS",
+            severity=Severity.INFO,
+            code="STALE_SIGNALS",
+            message=f"{stale_count} queued signal(s) older than {SIGNAL_STALE_HOURS}h",
+            detail="May need expiry or manual review"
+        ))
+
+    # 2c. News feed freshness (during market hours, news should be <2h old)
+    if _is_market_hours():
+        with db.conn() as c:
+            news_row = c.execute(
+                "SELECT MAX(created_at) as latest FROM news_feed"
+            ).fetchone()
+
+        if news_row and news_row['latest']:
+            try:
+                last_news = datetime.fromisoformat(news_row['latest'].replace('Z', ''))
+                news_age_min = (now - last_news).total_seconds() / 60.0
+            except (ValueError, TypeError):
+                news_age_min = 9999
+
+            if news_age_min > 120:
+                report.add(Finding(
+                    gate="GATE2_FRESHNESS",
+                    severity=Severity.WARNING,
+                    code="STALE_NEWS",
+                    message=f"News feed is {int(news_age_min)}m stale",
+                    detail=f"Last entry: {news_row['latest']}"
+                ))
+            else:
+                report.add(Finding(
+                    gate="GATE2_FRESHNESS",
+                    severity=Severity.OK,
+                    code="NEWS_FRESH",
+                    message=f"News feed updated {int(news_age_min)}m ago"
+                ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 3: API CONNECTIVITY
+#  Ping Alpaca API to verify connectivity
+# ══════════════════════════════════════════════════════════════════════════
+
+def gate3_api_connectivity(report: FaultReport):
+    """Verify Alpaca API is reachable and credentials are valid."""
+    log.info("[GATE 3] API connectivity check")
+
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        report.add(Finding(
+            gate="GATE3_API",
+            severity=Severity.INFO,
+            code="NO_ALPACA_KEYS",
+            message="No Alpaca credentials configured (owner level)",
+            detail="Per-customer keys checked in Gate 5"
+        ))
+        return
+
+    try:
+        import requests as _req
+        resp = _req.get(
+            f"{ALPACA_BASE_URL}/v2/clock",
+            headers={
+                "APCA-API-KEY-ID": ALPACA_API_KEY,
+                "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            clock = resp.json()
+            is_open = clock.get('is_open', False)
+            report.add(Finding(
+                gate="GATE3_API",
+                severity=Severity.OK,
+                code="ALPACA_OK",
+                message=f"Alpaca API reachable (market {'open' if is_open else 'closed'})"
+            ))
+        elif resp.status_code == 401:
+            report.add(Finding(
+                gate="GATE3_API",
+                severity=Severity.CRITICAL,
+                code="ALPACA_AUTH_FAIL",
+                message="Alpaca API returned 401 — credentials invalid",
+                detail="Check ALPACA_API_KEY and ALPACA_SECRET_KEY in .env"
+            ))
+        else:
+            report.add(Finding(
+                gate="GATE3_API",
+                severity=Severity.WARNING,
+                code="ALPACA_HTTP_ERROR",
+                message=f"Alpaca API returned HTTP {resp.status_code}",
+                detail=resp.text[:200]
+            ))
+    except ImportError:
+        report.add(Finding(
+            gate="GATE3_API",
+            severity=Severity.WARNING,
+            code="REQUESTS_MISSING",
+            message="requests module not available"
+        ))
+    except Exception as e:
+        report.add(Finding(
+            gate="GATE3_API",
+            severity=Severity.CRITICAL,
+            code="ALPACA_UNREACHABLE",
+            message=f"Alpaca API connection failed: {type(e).__name__}",
+            detail=str(e)[:200]
+        ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 4: SYSTEM RESOURCES
+#  Monitor disk, memory, CPU temperature on the Pi
+# ══════════════════════════════════════════════════════════════════════════
+
+def gate4_system_resources(report: FaultReport):
+    """Check disk usage, memory pressure, and CPU temperature."""
+    log.info("[GATE 4] System resources check")
+
+    # 4a. Disk usage
+    try:
+        stat = os.statvfs('/')
+        total = stat.f_blocks * stat.f_frsize
+        free = stat.f_bavail * stat.f_frsize
+        used_pct = round((1 - free / total) * 100, 1)
+
+        if used_pct >= DISK_CRITICAL_PCT:
+            report.add(Finding(
+                gate="GATE4_RESOURCES",
+                severity=Severity.CRITICAL,
+                code="DISK_CRITICAL",
+                message=f"Disk usage at {used_pct}% — critically low",
+                detail=f"Free: {free // (1024**2)}MB / {total // (1024**2)}MB"
+            ))
+        elif used_pct >= DISK_WARN_PCT:
+            report.add(Finding(
+                gate="GATE4_RESOURCES",
+                severity=Severity.WARNING,
+                code="DISK_WARNING",
+                message=f"Disk usage at {used_pct}%",
+                detail=f"Free: {free // (1024**2)}MB / {total // (1024**2)}MB"
+            ))
+        else:
+            report.add(Finding(
+                gate="GATE4_RESOURCES",
+                severity=Severity.OK,
+                code="DISK_OK",
+                message=f"Disk usage at {used_pct}%"
+            ))
+    except Exception as e:
+        log.warning(f"Disk check failed: {e}")
+
+    # 4b. Memory
+    try:
+        meminfo_path = Path('/proc/meminfo')
+        if meminfo_path.exists():
+            lines = meminfo_path.read_text().splitlines()
+            mem = {}
+            for line in lines:
+                parts = line.split(':')
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().split()[0]  # kB value
+                    mem[key] = int(val)
+
+            total_kb = mem.get('MemTotal', 1)
+            avail_kb = mem.get('MemAvailable', total_kb)
+            used_pct = round((1 - avail_kb / total_kb) * 100, 1)
+
+            if used_pct >= MEMORY_WARN_PCT:
+                report.add(Finding(
+                    gate="GATE4_RESOURCES",
+                    severity=Severity.WARNING,
+                    code="MEMORY_WARNING",
+                    message=f"Memory usage at {used_pct}%",
+                    detail=f"Available: {avail_kb // 1024}MB / {total_kb // 1024}MB"
+                ))
+            else:
+                report.add(Finding(
+                    gate="GATE4_RESOURCES",
+                    severity=Severity.OK,
+                    code="MEMORY_OK",
+                    message=f"Memory usage at {used_pct}%"
+                ))
+    except Exception as e:
+        log.warning(f"Memory check failed: {e}")
+
+    # 4c. CPU temperature (Raspberry Pi)
+    try:
+        temp_path = Path('/sys/class/thermal/thermal_zone0/temp')
+        if temp_path.exists():
+            temp_c = int(temp_path.read_text().strip()) / 1000.0
+
+            if temp_c >= CPU_TEMP_CRITICAL_C:
+                report.add(Finding(
+                    gate="GATE4_RESOURCES",
+                    severity=Severity.CRITICAL,
+                    code="CPU_TEMP_CRITICAL",
+                    message=f"CPU temperature {temp_c:.1f}°C — thermal throttling imminent",
+                    detail=f"Critical: {CPU_TEMP_CRITICAL_C}°C | Throttle: 80°C"
+                ))
+            elif temp_c >= CPU_TEMP_WARN_C:
+                report.add(Finding(
+                    gate="GATE4_RESOURCES",
+                    severity=Severity.WARNING,
+                    code="CPU_TEMP_WARNING",
+                    message=f"CPU temperature {temp_c:.1f}°C — elevated",
+                    detail=f"Warning threshold: {CPU_TEMP_WARN_C}°C"
+                ))
+            else:
+                report.add(Finding(
+                    gate="GATE4_RESOURCES",
+                    severity=Severity.OK,
+                    code="CPU_TEMP_OK",
+                    message=f"CPU temperature {temp_c:.1f}°C"
+                ))
+    except Exception as e:
+        log.warning(f"CPU temp check failed: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 5: ACCOUNT HEALTH (per-customer)
+#  Check equity consistency, orphan positions, kill switch
+# ══════════════════════════════════════════════════════════════════════════
+
+def gate5_account_health(report: FaultReport, customer_ids):
+    """Per-customer account health checks."""
+    log.info(f"[GATE 5] Account health check ({len(customer_ids)} customers)")
+
+    for cid in customer_ids:
+        try:
+            db = get_customer_db(cid)
+            short_id = cid[:8]
+
+            # 5a. Equity check — does setting match reasonable value?
+            equity_str = db.get_setting('_ALPACA_EQUITY')
+            equity = float(equity_str) if equity_str else 0.0
+            new_customer = db.get_setting('NEW_CUSTOMER')
+
+            if equity < 1.0 and new_customer != 'true':
+                # Was funded before but now $0 — potential API issue
+                report.add(Finding(
+                    gate="GATE5_ACCOUNT",
+                    severity=Severity.WARNING,
+                    code=f"EQUITY_ZERO_{short_id}",
+                    message=f"Customer {short_id}: Equity $0 but not flagged as new customer",
+                    detail="Possible API credential issue or Alpaca account problem"
+                ))
+
+            # 5b. Kill switch left on
+            kill = db.get_setting('KILL_SWITCH')
+            if kill == '1':
+                report.add(Finding(
+                    gate="GATE5_ACCOUNT",
+                    severity=Severity.INFO,
+                    code=f"KILL_SWITCH_ON_{short_id}",
+                    message=f"Customer {short_id}: Kill switch is active",
+                    detail="Trading halted — verify this is intentional"
+                ))
+
+            # 5c. Orphan positions (open but no price update in N days)
+            positions = db.get_open_positions()
+            now = datetime.utcnow()
+            for pos in positions:
+                updated = pos.get('updated_at') or pos.get('opened_at', '')
+                if updated:
+                    try:
+                        last_update = datetime.fromisoformat(updated.replace('Z', ''))
+                        age_days = (now - last_update).total_seconds() / 86400
+                        if age_days > POSITIONS_ORPHAN_DAYS:
+                            report.add(Finding(
+                                gate="GATE5_ACCOUNT",
+                                severity=Severity.WARNING,
+                                code=f"ORPHAN_POSITION_{short_id}",
+                                message=f"Customer {short_id}: {pos.get('ticker', '?')} not updated in {int(age_days)}d",
+                                detail=f"Position ID {pos.get('id', '?')} | Last update: {updated}"
+                            ))
+                    except (ValueError, TypeError):
+                        pass
+
+            # 5d. Unacknowledged urgent flags
+            flags = db.get_urgent_flags()
+            if len(flags) > 3:
+                report.add(Finding(
+                    gate="GATE5_ACCOUNT",
+                    severity=Severity.WARNING,
+                    code=f"MANY_FLAGS_{short_id}",
+                    message=f"Customer {short_id}: {len(flags)} unacknowledged urgent flags",
+                    detail="Flags may be piling up without resolution"
+                ))
+
+        except Exception as e:
+            report.add(Finding(
+                gate="GATE5_ACCOUNT",
+                severity=Severity.WARNING,
+                code=f"ACCOUNT_CHECK_FAIL_{cid[:8]}",
+                message=f"Customer {cid[:8]}: Health check failed",
+                detail=str(e)[:200]
+            ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 6: DATABASE INTEGRITY
+#  Check table sizes, WAL bloat, stale locks
+# ══════════════════════════════════════════════════════════════════════════
+
+def gate6_db_integrity(report: FaultReport, db):
+    """Check database health indicators."""
+    log.info("[GATE 6] Database integrity check")
+
+    # 6a. System log table size
+    with db.conn() as c:
+        log_count = c.execute("SELECT COUNT(*) as cnt FROM system_log").fetchone()
+        count = log_count['cnt'] if log_count else 0
+
+    if count > SYSTEM_LOG_WARN_ROWS:
+        report.add(Finding(
+            gate="GATE6_DB",
+            severity=Severity.INFO,
+            code="SYSTEM_LOG_LARGE",
+            message=f"system_log has {count:,} rows (threshold: {SYSTEM_LOG_WARN_ROWS:,})",
+            detail="Consider running cleanup to purge old heartbeats"
+        ))
+    else:
+        report.add(Finding(
+            gate="GATE6_DB",
+            severity=Severity.OK,
+            code="SYSTEM_LOG_OK",
+            message=f"system_log table: {count:,} rows"
+        ))
+
+    # 6b. WAL file size
+    db_path = Path(db.path)
+    wal_path = db_path.with_suffix('.db-wal')
+    if wal_path.exists():
+        wal_mb = wal_path.stat().st_size / (1024 * 1024)
+        if wal_mb > DB_WAL_WARN_MB:
+            report.add(Finding(
+                gate="GATE6_DB",
+                severity=Severity.WARNING,
+                code="WAL_BLOAT",
+                message=f"SQLite WAL file is {wal_mb:.1f}MB",
+                detail=f"Threshold: {DB_WAL_WARN_MB}MB — needs PRAGMA wal_checkpoint"
+            ))
+        else:
+            report.add(Finding(
+                gate="GATE6_DB",
+                severity=Severity.OK,
+                code="WAL_OK",
+                message=f"WAL file: {wal_mb:.1f}MB"
+            ))
+
+    # 6c. Stale agent lock file
+    lock_path = Path(os.path.join(_ROOT_DIR, 'src', '.agent_lock'))
+    if lock_path.exists():
+        lock_age_min = (time.time() - lock_path.stat().st_mtime) / 60.0
+        if lock_age_min > AGENT_LOCK_STALE_MINUTES:
+            try:
+                lock_content = lock_path.read_text().strip().split('\n')
+                lock_agent = lock_content[0] if lock_content else 'unknown'
+            except Exception:
+                lock_agent = 'unknown'
+
+            report.add(Finding(
+                gate="GATE6_DB",
+                severity=Severity.WARNING,
+                code="STALE_AGENT_LOCK",
+                message=f"Agent lock held for {int(lock_age_min)}m by {lock_agent}",
+                detail=f"Threshold: {AGENT_LOCK_STALE_MINUTES}m — may be stuck"
+            ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  GATE 7: SCHEDULE COMPLIANCE
+#  Verify expected agents have run today
+# ══════════════════════════════════════════════════════════════════════════
+
+EXPECTED_DAILY_AGENTS = [
+    "Market Sentiment",
+    "News",
+    "Trade Logic",
+]
+
+
+def gate7_schedule_compliance(report: FaultReport, db):
+    """Check that each expected agent has completed at least once today."""
+    log.info("[GATE 7] Schedule compliance check")
+
+    now_et = _now_et()
+
+    # Only check compliance after 10:00 ET on weekdays
+    if now_et.weekday() >= 5 or now_et.hour < 10:
+        report.add(Finding(
+            gate="GATE7_SCHEDULE",
+            severity=Severity.OK,
+            code="SCHEDULE_SKIP",
+            message="Outside compliance window (pre-10am or weekend)"
+        ))
+        return
+
+    today_str = now_et.strftime('%Y-%m-%d')
+
+    for agent_name in EXPECTED_DAILY_AGENTS:
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) as cnt FROM system_log "
+                "WHERE event='AGENT_COMPLETE' AND agent LIKE ? AND timestamp LIKE ?",
+                (f"%{agent_name}%", f"{today_str}%")
+            ).fetchone()
+
+        completions = row['cnt'] if row else 0
+
+        if completions == 0:
+            severity = Severity.WARNING if now_et.hour < 12 else Severity.CRITICAL
+            report.add(Finding(
+                gate="GATE7_SCHEDULE",
+                severity=severity,
+                code=f"NO_RUN_{agent_name.upper().replace(' ', '_')}",
+                message=f"{agent_name}: Has not completed today",
+                detail=f"Expected at least 1 run by {now_et.strftime('%H:%M')} ET"
+            ))
+        else:
+            report.add(Finding(
+                gate="GATE7_SCHEDULE",
+                severity=Severity.OK,
+                code=f"RUN_OK_{agent_name.upper().replace(' ', '_')}",
+                message=f"{agent_name}: {completions} run(s) today"
+            ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  MAIN RUN FUNCTION
+# ══════════════════════════════════════════════════════════════════════════
+
+def _get_active_customer_ids():
+    """Get all active customer IDs from the auth database."""
+    try:
+        sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
+        import auth
+        customers = auth.list_customers()
+        return [c['id'] for c in customers if c.get('is_active', True)]
+    except Exception as e:
+        log.warning(f"Could not load customer list: {e}")
+        # Fallback: scan data/customers directory
+        customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+        if os.path.isdir(customers_dir):
+            return [d for d in os.listdir(customers_dir)
+                    if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
+        return []
+
+
+def run():
+    """Execute the 7-gate fault detection spine."""
+    db = _master_db()
+
+    # ── Lifecycle: START ──────────────────────────────────────────────
+    db.log_event("AGENT_START", agent="Fault Detection", details="fault scan")
+    db.log_heartbeat("fault_detection_agent", "RUNNING")
+    log.info("=" * 70)
+    log.info("FAULT DETECTION AGENT — Starting 7-gate system health scan")
+    log.info("=" * 70)
+
+    report = FaultReport(started_at=_now_str())
+
+    # ── Gate 1: Agent liveness ────────────────────────────────────────
+    try:
+        gate1_agent_liveness(report, db)
+    except Exception as e:
+        log.error(f"Gate 1 failed: {e}", exc_info=True)
+        report.add(Finding("GATE1_LIVENESS", Severity.WARNING, "GATE1_ERROR",
+                           f"Agent liveness check failed: {e}"))
+
+    # ── Gate 2: Data freshness ────────────────────────────────────────
+    try:
+        gate2_data_freshness(report, db)
+    except Exception as e:
+        log.error(f"Gate 2 failed: {e}", exc_info=True)
+        report.add(Finding("GATE2_FRESHNESS", Severity.WARNING, "GATE2_ERROR",
+                           f"Data freshness check failed: {e}"))
+
+    # ── Gate 3: API connectivity ──────────────────────────────────────
+    try:
+        gate3_api_connectivity(report)
+    except Exception as e:
+        log.error(f"Gate 3 failed: {e}", exc_info=True)
+        report.add(Finding("GATE3_API", Severity.WARNING, "GATE3_ERROR",
+                           f"API connectivity check failed: {e}"))
+
+    # ── Gate 4: System resources ──────────────────────────────────────
+    try:
+        gate4_system_resources(report)
+    except Exception as e:
+        log.error(f"Gate 4 failed: {e}", exc_info=True)
+        report.add(Finding("GATE4_RESOURCES", Severity.WARNING, "GATE4_ERROR",
+                           f"System resources check failed: {e}"))
+
+    # ── Gate 5: Account health ────────────────────────────────────────
+    try:
+        customer_ids = _get_active_customer_ids()
+        gate5_account_health(report, customer_ids)
+    except Exception as e:
+        log.error(f"Gate 5 failed: {e}", exc_info=True)
+        report.add(Finding("GATE5_ACCOUNT", Severity.WARNING, "GATE5_ERROR",
+                           f"Account health check failed: {e}"))
+
+    # ── Gate 6: DB integrity ──────────────────────────────────────────
+    try:
+        gate6_db_integrity(report, db)
+    except Exception as e:
+        log.error(f"Gate 6 failed: {e}", exc_info=True)
+        report.add(Finding("GATE6_DB", Severity.WARNING, "GATE6_ERROR",
+                           f"DB integrity check failed: {e}"))
+
+    # ── Gate 7: Schedule compliance ───────────────────────────────────
+    try:
+        gate7_schedule_compliance(report, db)
+    except Exception as e:
+        log.error(f"Gate 7 failed: {e}", exc_info=True)
+        report.add(Finding("GATE7_SCHEDULE", Severity.WARNING, "GATE7_ERROR",
+                           f"Schedule compliance check failed: {e}"))
+
+    # ── Aggregate results ─────────────────────────────────────────────
+    report.completed_at = _now_str()
+
+    # Log each finding
+    for f in report.findings:
+        if f.severity == Severity.CRITICAL:
+            log.error(f"  [{f.gate}] CRITICAL: {f.message}")
+        elif f.severity == Severity.WARNING:
+            log.warning(f"  [{f.gate}] WARNING: {f.message}")
+        elif f.severity == Severity.INFO:
+            log.info(f"  [{f.gate}] INFO: {f.message}")
+        else:
+            log.info(f"  [{f.gate}] OK: {f.message}")
+
+    # ── Raise urgent flags for critical findings ──────────────────────
+    critical_findings = [f for f in report.findings if f.severity == Severity.CRITICAL]
+    if critical_findings:
+        # Write a notification per critical finding
+        for cf in critical_findings:
+            try:
+                db.add_notification(
+                    category='alert',
+                    title=f"System Alert: {cf.code}",
+                    body=f"{cf.message}\n{cf.detail}" if cf.detail else cf.message,
+                    meta=json.dumps({"gate": cf.gate, "code": cf.code, "severity": "CRITICAL"})
+                )
+            except Exception as e:
+                log.warning(f"Failed to write notification: {e}")
+
+    # ── Store scan summary in customer_settings for portal access ─────
+    scan_summary = {
+        "timestamp": report.completed_at,
+        "worst_severity": report.worst_severity,
+        "critical": report.critical_count,
+        "warnings": report.warning_count,
+        "total_checks": len(report.findings),
+        "findings": [
+            {"gate": f.gate, "severity": f.severity, "code": f.code, "message": f.message}
+            for f in report.findings
+            if f.severity in (Severity.CRITICAL, Severity.WARNING)
+        ]
+    }
+    db.set_setting('_FAULT_SCAN_LAST', json.dumps(scan_summary))
+
+    # ── Lifecycle: COMPLETE ───────────────────────────────────────────
+    summary = report.summary()
+    log.info("=" * 70)
+    log.info(f"FAULT DETECTION — {summary}")
+    log.info(f"  Worst severity: {report.worst_severity}")
+    log.info("=" * 70)
+
+    db.log_heartbeat("fault_detection_agent", "OK")
+    db.log_event(
+        "AGENT_COMPLETE",
+        agent="Fault Detection",
+        details=f"severity={report.worst_severity}, critical={report.critical_count}, "
+                f"warn={report.warning_count}, checks={len(report.findings)}"
+    )
+
+    # ── Monitor heartbeat POST ────────────────────────────────────────
+    try:
+        from retail_heartbeat import write_heartbeat
+        write_heartbeat(agent_name="fault_detection_agent", status="OK")
+    except Exception as e:
+        log.warning(f"Monitor heartbeat POST failed: {e}")
+
+    return report
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ENTRY POINT
+# ══════════════════════════════════════════════════════════════════════════
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Synthos — Fault Detection Agent')
+    parser.add_argument('--customer-id', default=None,
+                        help='Customer UUID (for per-customer mode)')
+    args = parser.parse_args()
+
+    if args.customer_id:
+        _CUSTOMER_ID = args.customer_id
+
+    acquire_agent_lock("retail_fault_detection_agent.py")
+    try:
+        run()
+    except KeyboardInterrupt:
+        log.info("Interrupted")
+    except Exception as e:
+        log.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        release_agent_lock()
