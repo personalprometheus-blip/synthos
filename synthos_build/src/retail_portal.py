@@ -1390,7 +1390,8 @@ def api_approve_signup():
     try:
         result = auth.approve_signup(int(signup_id), reviewed_by=session.get('customer_id', 'admin'))
         from retail_database import get_customer_db
-        get_customer_db(result['customer_id'])
+        cdb = get_customer_db(result['customer_id'])
+        cdb.set_setting('NEW_CUSTOMER', 'true')
         log.info(f"Admin approved signup #{signup_id} -> customer {result['customer_id']}")
 
         # Send approval email
@@ -6091,7 +6092,9 @@ async function checkAlpacaFunding(manual) {
     var d = await r.json();
     var banner = document.getElementById('alpaca-funding-banner');
     if (!banner) return;
-    if (d.has_keys && !d.funded) {
+    // Show banner when keys exist but account is unfunded (new_customer=true)
+    var showBanner = d.has_keys && !d.funded && d.new_customer !== false;
+    if (showBanner) {
       banner.style.display = 'flex';
       if (manual) toast('Alpaca account still shows $0 equity. Please complete registration at alpaca.markets', 'err');
     } else {
@@ -8670,7 +8673,11 @@ def api_alpaca_funding_status():
             acct = resp.json()
             equity = float(acct.get('equity', 0))
             funded = equity >= 1.0
-            return jsonify({"has_keys": True, "equity": equity, "funded": funded, "status": "ok"})
+            # Check NEW_CUSTOMER flag from DB
+            db = _customer_db()
+            nc = db.get_setting('NEW_CUSTOMER')
+            new_customer = nc != 'false'  # true if not set or 'true'
+            return jsonify({"has_keys": True, "equity": equity, "funded": funded, "new_customer": new_customer, "status": "ok"})
         except Exception:
             return jsonify({"has_keys": True, "equity": 0, "funded": False, "status": "api_error"})
     except Exception as e:
@@ -11456,7 +11463,10 @@ def api_admin_create_customer():
                                            auto_activate=True)
         if alpaca_key and alpaca_secret:
             auth.set_alpaca_credentials(customer_id, alpaca_key, alpaca_secret)
-        log.info(f"Admin created customer {customer_id} ({email}) — auto-activated")
+        from retail_database import get_customer_db
+        cdb = get_customer_db(customer_id)
+        cdb.set_setting('NEW_CUSTOMER', 'true')
+        log.info(f"Admin created customer {customer_id} ({email}) — auto-activated, NEW_CUSTOMER=true")
         return jsonify({'ok': True, 'id': customer_id})
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)}), 409

@@ -2012,6 +2012,11 @@ def run(session="open"):
     db.update_portfolio(cash=alpaca_cash)
     db.set_setting('_ALPACA_EQUITY', str(alpaca_equity))
 
+    # Clear new-customer flag once account is funded
+    if alpaca_equity >= 1.0 and db.get_setting('NEW_CUSTOMER') != 'false':
+        db.set_setting('NEW_CUSTOMER', 'false')
+        log.info(f"[GATE 0] Account funded (${alpaca_equity:.2f}) — cleared NEW_CUSTOMER flag")
+
     # Full position reconciliation
     alpaca_positions = alpaca.get_positions() or []
     alpaca_tickers = {p['symbol'] for p in alpaca_positions}
