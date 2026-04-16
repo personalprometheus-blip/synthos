@@ -51,7 +51,7 @@ for cid in os.listdir(customers_dir):
         # Check for stale agent activity (no events in 24h during weekdays)
         now = datetime.utcnow()
         if now.weekday() < 5:
-            cutoff = (now - timedelta(hours=24)).isoformat()
+            cutoff = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
             recent = db.execute("SELECT COUNT(*) FROM system_log WHERE timestamp > ?", (cutoff,)).fetchone()[0]
             if recent == 0:
                 results.append({'cid': cid[:12], 'severity': 'medium', 'issue': 'STALE_ACTIVITY', 'detail': 'No agent activity in 24h'})
