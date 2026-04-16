@@ -634,6 +634,55 @@ class AlpacaClient:
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
             "Content-Type":        "application/json",
         }
+        self._bar_cache = {}  # (ticker, days) → [bars]
+
+    def prefetch_bars(self, tickers, days=70):
+        """Batch-fetch daily bars for multiple tickers in one API call.
+        Populates _bar_cache so subsequent get_bars() calls are instant.
+        Uses Alpaca multi-symbol endpoint: /v2/stocks/bars?symbols=A,B,C"""
+        if not tickers:
+            return
+        unique = sorted(set(t.upper() for t in tickers))
+        end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        headers = {
+            "APCA-API-KEY-ID":     ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+        }
+        # Alpaca allows up to ~100 symbols per request; chunk if needed
+        CHUNK = 50
+        for i in range(0, len(unique), CHUNK):
+            chunk = unique[i:i + CHUNK]
+            try:
+                r = requests.get(
+                    f"{ALPACA_DATA_URL}/v2/stocks/bars",
+                    params={
+                        "symbols": ",".join(chunk),
+                        "timeframe": "1Day",
+                        "start": start, "end": end,
+                        "limit": 10000,
+                        "feed": "iex",
+                    },
+                    headers=headers, timeout=15,
+                )
+                try:
+                    _shared_db().log_api_call(
+                        agent='trade_logic',
+                        endpoint=f'/v2/stocks/bars?symbols={len(chunk)}tickers',
+                        method='GET', service='alpaca_data',
+                        customer_id=_CUSTOMER_ID, status_code=r.status_code)
+                except Exception:
+                    pass
+                if r.status_code == 200:
+                    data = r.json().get("bars") or {}
+                    for sym, bars in data.items():
+                        # Cache with the max days requested — get_bars() slices as needed
+                        self._bar_cache[(sym.upper(), days)] = bars
+                    log.info(f"[PREFETCH] {len(data)} tickers cached ({len(chunk)} requested, {days}d)")
+                else:
+                    log.warning(f"[PREFETCH] Alpaca returned {r.status_code}")
+            except Exception as e:
+                log.warning(f"[PREFETCH] Failed: {e}")
 
     def _request(self, method, endpoint, **kwargs):
         url = f"{self.base_url}{endpoint}"
@@ -694,7 +743,14 @@ class AlpacaClient:
         return mid
 
     def get_bars(self, ticker, days=60):
-        """Fetch daily bars for ticker. Returns list of bar dicts."""
+        """Fetch daily bars for ticker. Returns list of bar dicts.
+        Uses cache from prefetch_bars() when available."""
+        t_upper = ticker.upper()
+        # Check cache — return cached bars if we have enough days
+        for (cached_t, cached_d), bars in self._bar_cache.items():
+            if cached_t == t_upper and cached_d >= days and bars:
+                return bars[-days:] if len(bars) > days else bars
+        # Cache miss — fetch individually
         end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
         start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {
@@ -706,7 +762,7 @@ class AlpacaClient:
                 f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
                 params={"timeframe": "1Day", "start": start, "end": end,
                         "limit": days + 10, "feed": "iex"},
-                headers=headers, timeout=20,
+                headers=headers, timeout=10,
             )
             try:
                 _shared_db().log_api_call(
@@ -716,7 +772,10 @@ class AlpacaClient:
             except Exception:
                 pass
             if r.status_code == 200:
-                return r.json().get("bars") or []
+                bars = r.json().get("bars") or []
+                # Cache for reuse within this run
+                self._bar_cache[(t_upper, days)] = bars
+                return bars
         except Exception as e:
             log.warning(f"get_bars({ticker}): {e}")
         return []
@@ -2065,9 +2124,17 @@ def run(session="open"):
         if ap:
             shares = float(ap.get('qty', 0))
             entry = float(ap.get('avg_entry_price', 0))
-            log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} — auto-adopting")
+            # Look up sector from screening data or Alpaca position asset_class
+            _orphan_sector = ''
+            try:
+                scr = _shared_db().get_screening_score(t)
+                if scr and scr.get('sector'):
+                    _orphan_sector = scr['sector']
+            except Exception:
+                pass
+            log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} sector={_orphan_sector or '?'} — auto-adopting")
             db.open_position(
-                ticker=t, company=t, sector='',
+                ticker=t, company=t, sector=_orphan_sector,
                 entry_price=entry, shares=shares,
                 trail_stop_amt=0, trail_stop_pct=0, vol_bucket='normal',
                 signal_id=None, entry_signal_score=None,
@@ -2121,6 +2188,19 @@ def run(session="open"):
                 if pos['ticker'] == ap['symbol']:
                     db.update_position_price(pos['id'], cp)
 
+    # Backfill empty sectors on existing positions from screening data
+    for pos in db.get_open_positions():
+        if not pos.get('sector'):
+            try:
+                scr = _shared_db().get_screening_score(pos['ticker'])
+                if scr and scr.get('sector'):
+                    with db.conn() as _c:
+                        _c.execute("UPDATE positions SET sector=? WHERE id=?",
+                                   (scr['sector'], pos['id']))
+                    log.info(f"[GATE 0] Sector backfill: {pos['ticker']} → {scr['sector']}")
+            except Exception:
+                pass
+
     # Check for first-run (no history at all) — setup only, don't trade yet
     positions_after = db.get_open_positions()
     portfolio = db.get_portfolio()
@@ -2144,6 +2224,27 @@ def run(session="open"):
         "positions_db": len(positions_after), "positions_alpaca": len(alpaca_positions),
         "orphans_adopted": len(orphans), "ghosts_closed": len(ghosts), "healed": healed,
     }, f"health check OK — {len(positions_after)} positions, ${alpaca_equity:.0f} equity")
+
+    # ── PREFETCH: Batch-load bars for all tickers we'll need this run
+    # One multi-symbol API call replaces dozens of individual get_bars() calls
+    _prefetch_tickers = set()
+    _prefetch_tickers.add(C.BENCHMARK_SYMBOL)  # SPY — used in Gates 2,3,5,10,13
+    _prefetch_tickers.add('TLT')               # Gate 3 bond proxy
+    _prefetch_tickers.add('BIL')               # BIL reserve
+    for p in positions_after:
+        _prefetch_tickers.add(p['ticker'])      # All held positions
+    # Collect signal tickers from shared DB
+    try:
+        _sig_tickers = _shared_db().get_queued_signals()
+        for s in (_sig_tickers or []):
+            if s.get('ticker'):
+                _prefetch_tickers.add(s['ticker'])
+    except Exception:
+        pass
+    _prefetch_tickers.discard('')
+    _prefetch_tickers.discard(None)
+    # Fetch 70 days (covers max lookback: Gate 2 uses 60+, Gate 6 uses 40+)
+    alpaca.prefetch_bars(list(_prefetch_tickers), days=70)
 
     # ── GATE 2: Benchmark Gate
     mode = gate2_benchmark(alpaca, session_log)
@@ -2538,7 +2639,6 @@ def run(session="open"):
                         log.error(f"Order failed: {signal['ticker']}")
 
                 sig_log.commit(db)
-                time.sleep(1)
 
     # ── Monthly tax sweep — runs once on last trading day, after 3pm
     if is_last_trading_day_of_month() and now.hour >= 15:

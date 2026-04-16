@@ -1958,7 +1958,8 @@ class DB:
         """Return the most recent screening data for a ticker, or None."""
         with self.conn() as c:
             row = c.execute("""
-                SELECT combined_score, news_signal, sentiment_signal, congressional_flag
+                SELECT combined_score, news_signal, sentiment_signal,
+                       congressional_flag, sector
                 FROM sector_screening
                 WHERE ticker = ?
                 ORDER BY created_at DESC LIMIT 1

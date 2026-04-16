@@ -35,7 +35,6 @@ import re
 import math
 import logging
 import requests
-import feedparser
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -79,7 +78,7 @@ log = logging.getLogger('market_sentiment_agent')
 
 # ── RETRY HELPERS ─────────────────────────────────────────────────────────
 
-_yahoo_blocked = False  # circuit breaker — skip Yahoo after first 429
+# Yahoo RSS removed — only VIX + treasury chart calls retained
 
 def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
     """Fetch URL with exponential backoff. Returns response or None."""
@@ -259,28 +258,7 @@ def fetch_volume_profile(ticker, is_position=False):
         except Exception as e:
             log.warning(f"Finviz parse error ({ticker}): {e}")
 
-    # ── YAHOO LAST (only for positions or elevated volume tickers) ──
-    global _yahoo_blocked
-    elevated = rel_vol is not None and rel_vol > 1.5
-    if not _yahoo_blocked and (is_position or elevated):
-        url = f"https://finance.yahoo.com/rss/headline?s={ticker}"
-        r = fetch_with_retry(url)
-        try:
-            _master_db().log_api_call('sentiment_agent', f'/rss/headline?s={ticker}', 'GET', 'yahoo', status_code=getattr(r, 'status_code', None))
-        except Exception:
-            pass
-        if r is None:
-            _yahoo_blocked = True
-            log.info("Yahoo Finance rate-limited — skipping Yahoo for remaining tickers")
-        elif r:
-            try:
-                feed = feedparser.parse(r.text)
-                recent_articles = len([e for e in feed.entries if e.get("title")])
-                if recent_articles > 5:
-                    volume_data["available"] = True
-                    log.info(f"Yahoo Finance {ticker}: {recent_articles} recent news items")
-            except Exception as e:
-                log.warning(f"Yahoo Finance RSS error ({ticker}): {e}")
+    # Yahoo RSS removed — redundant with Alpaca news. VIX + treasury Yahoo calls retained.
 
     return volume_data
 
