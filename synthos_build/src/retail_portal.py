@@ -9644,6 +9644,8 @@ def api_billing_all_customers():
                 'pricing_tier': c.get('pricing_tier', 'standard'),
                 'created_at': c.get('created_at', ''),
                 'has_alpaca': c.get('has_alpaca', False),
+                'trading_mode': c.get('trading_mode', 'PAPER'),
+                'operating_mode': c.get('operating_mode', 'MANAGED'),
             } for c in customers],
             'summary': summary,
         })
