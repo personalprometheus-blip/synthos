@@ -525,9 +525,10 @@ html{font-size:90%;color-scheme:dark}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 .pw-wrap{position:relative;display:flex;align-items:center}
-.pw-wrap input{flex:1;padding-right:32px!important}
-.pw-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);padding:2px;line-height:1;font-size:14px;opacity:0.5;transition:opacity .15s}
-.pw-eye:hover{opacity:1}
+.pw-wrap input{flex:1;padding-right:36px!important}
+.pw-eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px;line-height:1;opacity:0.4;transition:opacity .15s;display:flex;align-items:center;justify-content:center}
+.pw-eye:hover{opacity:0.8}
+.pw-eye svg{width:18px;height:18px;stroke:currentColor;color:var(--muted);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 """
 
 LANDING_HTML = """<!DOCTYPE html>
@@ -536,6 +537,7 @@ LANDING_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Algorithmic Trading Platform</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <style>
 """ + _SHARED_CSS + """
 
@@ -560,13 +562,13 @@ nav{
 }
 /* portrait dropdown */
 .profile-btn{
-  position:relative;width:30px;height:30px;border-radius:50%;
-  background:var(--surface2);border:1px solid var(--border2);
+  position:relative;width:33px;height:33px;border-radius:50%;
+  background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.25);
   display:flex;align-items:center;justify-content:center;
-  cursor:pointer;transition:border-color .15s;flex-shrink:0;
+  cursor:pointer;transition:border-color .15s,box-shadow .15s;flex-shrink:0;
 }
-.profile-btn:hover{border-color:var(--teal);box-shadow:0 0 10px rgba(0,245,212,0.09)}
-.profile-btn svg{color:rgba(255,255,255,0.45);width:15px;height:15px}
+.profile-btn:hover{border-color:rgba(245,166,35,0.5);box-shadow:0 0 12px rgba(245,166,35,0.15)}
+.profile-btn svg{color:rgba(245,166,35,0.85);width:16.5px;height:16.5px}
 .auth-drop{
   display:none;position:absolute;top:calc(100% + 8px);right:0;
   width:252px;
@@ -907,8 +909,9 @@ document.querySelectorAll('input[type="password"]').forEach(function(inp){
   if(inp.parentElement.classList.contains('pw-wrap'))return;
   var wrap=document.createElement('div');wrap.className='pw-wrap';
   inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);
-  var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;
-  btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};
+  var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;
+  btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';
+  btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};
   wrap.appendChild(btn);
 });
 </script>
@@ -922,6 +925,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Sign In</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <style>
 """ + _SHARED_CSS + """
 body{display:flex;flex-direction:column;min-height:100vh}
@@ -991,7 +995,7 @@ footer{
   </div>
 </div>
 <footer>Algorithmic trading involves risk. Past performance does not guarantee future results.</footer>
-<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
 </body>
 </html>"""
 
@@ -1074,6 +1078,7 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Create Account</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -1212,7 +1217,7 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
     <a href="/" class="back-link">&larr; Back to Synthos</a>
   </div>
 </div>
-<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
 </body>
 </html>
 """
@@ -1257,6 +1262,7 @@ def forgot_password_page():
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Reset Password</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -1603,6 +1609,7 @@ _TERMS_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Terms of Service</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1766,6 +1773,7 @@ _CONSTRUCTION_PAGE_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos — Coming Soon</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
@@ -1809,6 +1817,7 @@ _CHECK_EMAIL_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos — Check Your Email</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
@@ -1851,6 +1860,7 @@ _SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos — Set Your Password</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
@@ -1897,7 +1907,7 @@ _SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
     <button type="submit">ACTIVATE ACCOUNT →</button>
   </form>
 </div>
-<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});</script>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
 </body>
 </html>"""
 
@@ -1908,6 +1918,7 @@ _SUBSCRIBE_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos — Subscribe</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
@@ -1955,6 +1966,7 @@ _CONSTRUCTION_VERIFY_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos — Construction Access</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
@@ -3049,7 +3061,8 @@ PORTAL_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos — {{ pi_id }}</title>
+<title>Synthos — Systematically Managed</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -4566,6 +4579,49 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div id="market-indices-bar" style="display:none"></div>
   <!-- market-chart moved to visible panel below -->
 
+  <!-- AGENT STATUS -->
+  <div class="glass" style="overflow:hidden;margin-bottom:14px">
+    <div class="dash-panel-head">
+      <div class="dash-panel-title">Agent Status</div>
+      <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">IDLE</div>
+    </div>
+    <!-- SINE WAVE CANVAS -->
+    <div style="position:relative;height:100px;overflow:hidden">
+      <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
+    </div>
+    <!-- STATUS DETAILS -->
+    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div style="text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-decisions">0</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
+      </div>
+    </div>
+    <!-- LAST ACTIVITY -->
+    <div style="padding:0 14px 12px">
+      <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
+    </div>
+  </div>
+
+  <!-- OPEN POSITIONS -->
+  <div class="glass teal-glow" style="margin-bottom:14px">
+    <div class="dash-panel-head">
+      <div class="dash-panel-title">Open Positions</div>
+      <div id="positions-count" class="dash-panel-sub">0 open</div>
+      <div class="dash-panel-right" id="positions-refresh-ts"></div>
+    </div>
+    <div id="positions-list" style="height:300px;overflow-y:auto">
+      <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
+    </div>
+  </div>
+
   <!-- STATUS STRIP -->
   <div class="status-strip">
     <div class="stat-card teal" onclick="openPortfolioModal()" style="cursor:pointer" title="View portfolio details">
@@ -4597,51 +4653,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
 
 
-  <!-- POSITIONS + CHART ROW -->
-  <div class="dash-row">
-
-    <!-- OPEN POSITIONS -->
-    <div class="glass teal-glow">
-      <div class="dash-panel-head">
-        <div class="dash-panel-title">Open Positions</div>
-        <div id="positions-count" class="dash-panel-sub">0 open</div>
-        <div class="dash-panel-right" id="positions-refresh-ts"></div>
-      </div>
-      <div id="positions-list" style="height:300px;overflow-y:auto">
-        <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
-      </div>
-    </div>
-
-    <!-- AGENT STATUS -->
-    <div class="glass" style="overflow:hidden">
-      <div class="dash-panel-head">
-        <div class="dash-panel-title">Agent Status</div>
-        <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">IDLE</div>
-      </div>
-      <!-- SINE WAVE CANVAS -->
-      <div style="position:relative;height:100px;overflow:hidden">
-        <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
-      </div>
-      <!-- STATUS DETAILS -->
-      <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div style="text-align:center">
-          <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
-          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-decisions">0</div>
-          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
-          <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
-        </div>
-      </div>
-      <!-- LAST ACTIVITY -->
-      <div style="padding:0 14px 12px">
-        <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
-      </div>
-    </div>
+  <!-- WAVE SCRIPT CONTAINER (no dash-row wrapper needed) -->
+  <div style="display:none">
     <script>
     // ── AGENT PULSE WAVE (isolated script — runs independently of main JS) ──
     // ── AGENT PULSE WAVE ──
@@ -4802,7 +4815,6 @@ setTimeout(function() { _apDrawWave(); }, 500);
 loadAgentPulse();
 setInterval(loadAgentPulse, 10000);
     </script>
-
   </div>
 
   <!-- 4-PANEL AGENT GRID -->
@@ -8282,7 +8294,7 @@ function timeSince(ts) {
 }
 setInterval(() => { if (document.getElementById('tab-news') && document.getElementById('tab-news').style.display !== 'none') loadNews(); }, 120000);
 // Auto-attach eye toggles to all password fields
-document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.innerHTML='&#x1F441;';btn.tabIndex=-1;btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.style.opacity=t==='text'?'1':'0.5';};wrap.appendChild(btn);});
+document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});
 </script>
 </body>
 </html>"""
