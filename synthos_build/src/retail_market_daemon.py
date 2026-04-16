@@ -6,9 +6,11 @@ Replaces cron-based trading schedule with a single daemon process that owns
 market hours. Runs continuously from 9:10 AM to 4:00 PM ET.
 
 Architecture:
-    1. Pre-market prep (9:15): news → screener → sentiment → price poll → trade
+    1. Pre-market prep (9:15): news → screener → sentiment → macro_regime →
+       market_state → bias_detection → fault_detection → validator_stack →
+       price poll → trade
     2. Market open (9:30): first trade evaluation (signals from prep)
-    3. Every 30 min: enrichment (news → screener → sentiment) → full trade eval
+    3. Every 30 min: full enrichment pipeline → validator → trade eval
     4. Every 10 min: lightweight reconciliation + exit checks only (no new signal eval)
     5. Every 60 sec: price poller (keeps live_prices fresh for portal)
     6. Market close (4:00): final close-session trade evaluation, then exit
@@ -399,15 +401,131 @@ def run_screener():
         return False
 
 
+def run_macro_regime():
+    """Run macro regime classifier — shared agent, writes to master DB."""
+    log.info("[MACRO REGIME] Starting")
+    write_agent_running('Macro Regime')
+    t0 = time.monotonic()
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_macro_regime_agent.py')],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        elapsed = time.monotonic() - t0
+        if result.returncode == 0:
+            log.info(f"[MACRO REGIME] Complete in {elapsed:.1f}s")
+        else:
+            log.warning(f"[MACRO REGIME] Exit code {result.returncode} in {elapsed:.1f}s")
+            if result.stderr:
+                log.warning(f"[MACRO REGIME] stderr: {result.stderr[-300:]}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log.error("[MACRO REGIME] Timeout after 300s")
+        return False
+    except Exception as e:
+        log.error(f"[MACRO REGIME] Error: {e}")
+        return False
+
+
+def run_market_state():
+    """Run market state synthesizer — shared agent, writes to master DB."""
+    log.info("[MARKET STATE] Starting")
+    write_agent_running('Market State')
+    t0 = time.monotonic()
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_market_state_agent.py')],
+            capture_output=True, text=True, timeout=180,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        elapsed = time.monotonic() - t0
+        if result.returncode == 0:
+            log.info(f"[MARKET STATE] Complete in {elapsed:.1f}s")
+        else:
+            log.warning(f"[MARKET STATE] Exit code {result.returncode} in {elapsed:.1f}s")
+            if result.stderr:
+                log.warning(f"[MARKET STATE] stderr: {result.stderr[-300:]}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log.error("[MARKET STATE] Timeout after 180s")
+        return False
+    except Exception as e:
+        log.error(f"[MARKET STATE] Error: {e}")
+        return False
+
+
+def run_bias_detection():
+    """Run bias detection agent — handles all customers internally."""
+    log.info("[BIAS DETECTION] Starting")
+    write_agent_running('Bias Detection')
+    t0 = time.monotonic()
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_bias_detection_agent.py')],
+            capture_output=True, text=True, timeout=180,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        elapsed = time.monotonic() - t0
+        if result.returncode == 0:
+            log.info(f"[BIAS DETECTION] Complete in {elapsed:.1f}s")
+        else:
+            log.warning(f"[BIAS DETECTION] Exit code {result.returncode} in {elapsed:.1f}s")
+            if result.stderr:
+                log.warning(f"[BIAS DETECTION] stderr: {result.stderr[-300:]}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log.error("[BIAS DETECTION] Timeout after 180s")
+        return False
+    except Exception as e:
+        log.error(f"[BIAS DETECTION] Error: {e}")
+        return False
+
+
+def run_validator_stack():
+    """Run validator stack — pre-trade gatekeeper, handles all customers internally."""
+    log.info("[VALIDATOR STACK] Starting")
+    write_agent_running('Validator Stack')
+    t0 = time.monotonic()
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_validator_stack_agent.py')],
+            capture_output=True, text=True, timeout=180,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        elapsed = time.monotonic() - t0
+        if result.returncode == 0:
+            log.info(f"[VALIDATOR STACK] Complete in {elapsed:.1f}s")
+        else:
+            log.warning(f"[VALIDATOR STACK] Exit code {result.returncode} in {elapsed:.1f}s")
+            if result.stderr:
+                log.warning(f"[VALIDATOR STACK] stderr: {result.stderr[-300:]}")
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        log.error("[VALIDATOR STACK] Timeout after 180s")
+        return False
+    except Exception as e:
+        log.error(f"[VALIDATOR STACK] Error: {e}")
+        return False
+
+
 # ── Main Daemon Loop ──
 
 def run_premarket_prep():
-    """9:15 AM: Sequential prep block — news → screener → sentiment → trade."""
+    """9:15 AM: Sequential prep block — full enrichment pipeline → trade."""
     log.info("=" * 60)
-    log.info("PRE-MARKET PREP — news → screener → sentiment → trade")
+    log.info("PRE-MARKET PREP — news → screener → sentiment → macro → state → bias → fault → validator → trade")
     log.info("=" * 60)
 
-    # reuse-news-first-sentinel
+    # Phase 1: Data collection
     run_news(session='market')
     if _shutdown_requested:
         return
@@ -417,9 +535,30 @@ def run_premarket_prep():
     run_sentiment()
     if _shutdown_requested:
         return
+
+    # Phase 2: Analysis & classification
+    run_macro_regime()
+    if _shutdown_requested:
+        return
+    run_market_state()
+    if _shutdown_requested:
+        return
+
+    # Phase 3: Per-customer checks
+    run_bias_detection()
+    if _shutdown_requested:
+        return
+
+    # Phase 4: System health & validation
+    run_fault_detection()
+    if _shutdown_requested:
+        return
+    run_validator_stack()
+    if _shutdown_requested:
+        return
+
+    # Phase 5: Price poll + trade
     run_price_poller()
-    if not _shutdown_requested:
-        run_fault_detection()
     run_trade_all_customers(session='open')
     clear_agent_running()
 
@@ -463,19 +602,31 @@ def run_market_loop():
         since_price = now_mono - last_price_poll
 
         # ── ENRICHMENT CYCLE (every 30 min) ──
-        # news → screener → sentiment → trade (news first so downstream agents have fresh data)
+        # Full pipeline: data → analysis → checks → validation → trade
         if since_enrichment >= enrichment_interval:
-            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — running news → screener → sentiment → trade")
+            log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — full pipeline")
+            # Data collection
             run_news(session='market')
             if not _shutdown_requested:
                 run_screener()
             if not _shutdown_requested:
                 run_sentiment()
-            if not _shutdown_requested and not kill_switch_active():
-                run_trade_all_customers(session='open')
-            # Fault detection scan after enrichment
+            # Analysis & classification
+            if not _shutdown_requested:
+                run_macro_regime()
+            if not _shutdown_requested:
+                run_market_state()
+            # Per-customer checks
+            if not _shutdown_requested:
+                run_bias_detection()
+            # System health & validation
             if not _shutdown_requested:
                 run_fault_detection()
+            if not _shutdown_requested:
+                run_validator_stack()
+            # Trade execution (validator verdict gates decisions)
+            if not _shutdown_requested and not kill_switch_active():
+                run_trade_all_customers(session='open')
             last_enrichment = time.monotonic()
             last_recon = time.monotonic()  # enrichment includes reconciliation
             clear_agent_running()

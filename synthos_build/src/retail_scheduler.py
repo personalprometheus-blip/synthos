@@ -6,11 +6,13 @@ Called by systemd timers at scheduled trading sessions.
 Runs the correct agent pipeline for every active customer in parallel.
 
 Sessions:
-    open       9:30am ET  — Sentiment → News → Trade Logic (open)
-    midday    12:30pm ET  — Sentiment → Trade Logic (midday)
-    close      3:30pm ET  — Trade Logic (close)
+    open       9:30am ET  — Full pipeline → Trade Logic (open)
+    midday    12:30pm ET  — Sentiment → Macro → State → Validator → Trade (midday)
+    close      3:30pm ET  — Validator → Trade Logic (close)
     news       hourly     — News agent only (market or overnight based on time)
     sentiment  30-min     — Market Sentiment only
+    validate   on-demand  — Full validation stack (macro → state → bias → fault → validator)
+    fault      on-demand  — System health check only
 
 Design notes:
   - Each session fires once via systemd timer and exits cleanly
@@ -83,17 +85,30 @@ _PER_CUSTOMER_AGENTS = {'retail_trade_logic_agent.py'}  # Only trade logic runs 
 
 SESSION_PIPELINES = {
     'open': [
+        # Data collection
         ('retail_sector_screener.py',        ['--sector=Energy'],  180),
         ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_news_agent.py',             ['--session=market'], 420),
+        # Analysis & classification
+        ('retail_macro_regime_agent.py',     [],                   300),
+        ('retail_market_state_agent.py',     [],                   180),
+        # Per-customer checks
+        ('retail_bias_detection_agent.py',   [],                   180),
+        # System health & validation
         ('retail_fault_detection_agent.py',  [],                   120),
+        ('retail_validator_stack_agent.py',  [],                   180),
+        # Trade execution
         ('retail_trade_logic_agent.py',      ['--session=open'],   300),
     ],
     'midday': [
         ('retail_market_sentiment_agent.py', [],                   600),
+        ('retail_macro_regime_agent.py',     [],                   300),
+        ('retail_market_state_agent.py',     [],                   180),
+        ('retail_validator_stack_agent.py',  [],                   180),
         ('retail_trade_logic_agent.py',      ['--session=midday'], 300),
     ],
     'close': [
+        ('retail_validator_stack_agent.py',  [],                   180),
         ('retail_trade_logic_agent.py',      ['--session=close'],  300),
     ],
     'news': [
@@ -108,11 +123,15 @@ SESSION_PIPELINES = {
     ],
     'prep': [
         # Sunday evening prep — builds Monday context
-        # Screener picks top sector + candidates, news scores them, sentiment sets baseline
+        # Full pipeline: data → analysis → checks → validation
         ('retail_sector_screener.py',        [],                     300),
         ('retail_news_agent.py',             ['--session=overnight'], 420),
         ('retail_market_sentiment_agent.py', [],                     600),
+        ('retail_macro_regime_agent.py',     [],                     300),
+        ('retail_market_state_agent.py',     [],                     180),
+        ('retail_bias_detection_agent.py',   [],                     180),
         ('retail_fault_detection_agent.py',  [],                     120),
+        ('retail_validator_stack_agent.py',  [],                     180),
     ],
     'trade': [
         # Hourly trader evaluation + execution.
@@ -122,6 +141,14 @@ SESSION_PIPELINES = {
     'fault': [
         # Manual / on-demand system health check
         ('retail_fault_detection_agent.py',  [],                   120),
+    ],
+    'validate': [
+        # On-demand full validation stack
+        ('retail_macro_regime_agent.py',     [],                   300),
+        ('retail_market_state_agent.py',     [],                   180),
+        ('retail_bias_detection_agent.py',   [],                   180),
+        ('retail_fault_detection_agent.py',  [],                   120),
+        ('retail_validator_stack_agent.py',  [],                   180),
     ],
 }
 
