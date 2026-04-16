@@ -412,6 +412,41 @@ def set_operating_mode(customer_id: str, mode: str):
         )
 
 
+def _migrate_trading_mode():
+    """Add trading_mode column to customers if missing."""
+    with _auth_conn() as c:
+        cols = {r[1] for r in c.execute('PRAGMA table_info(customers)').fetchall()}
+        if 'trading_mode' not in cols:
+            c.execute("ALTER TABLE customers ADD COLUMN trading_mode TEXT NOT NULL DEFAULT 'PAPER'")
+            log.info('Migration: added trading_mode column to customers')
+
+try:
+    _migrate_trading_mode()
+except Exception as _e:
+    log.debug(f'trading_mode migration: {_e}')
+
+
+def get_trading_mode(customer_id: str) -> str:
+    """Return the trading mode for a customer: 'PAPER' or 'LIVE'."""
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT trading_mode FROM customers WHERE id = ?", (customer_id,)
+        ).fetchone()
+    return row['trading_mode'] if row and row['trading_mode'] else 'PAPER'
+
+
+def set_trading_mode(customer_id: str, mode: str):
+    """Set trading mode for a customer. Mode must be 'PAPER' or 'LIVE'."""
+    if mode not in ('PAPER', 'LIVE'):
+        raise ValueError(f"Invalid trading mode: {mode}")
+    with _auth_conn() as c:
+        c.execute(
+            "UPDATE customers SET trading_mode = ? WHERE id = ?",
+            (mode, customer_id)
+        )
+    log.info(f'Trading mode set: {customer_id[:8]} -> {mode}')
+
+
 def customer_count() -> int:
     """Return count of active customer accounts."""
     with _auth_conn() as c:
@@ -428,7 +463,7 @@ def list_customers() -> list:
     with _auth_conn() as c:
         rows = c.execute(
             """SELECT id, email_enc, display_name_enc, role, is_active,
-                      operating_mode, created_at, last_login,
+                      operating_mode, trading_mode, created_at, last_login,
                       CASE WHEN alpaca_key_enc IS NOT NULL AND length(alpaca_key_enc) > 0
                            THEN 1 ELSE 0 END AS has_alpaca,
                       email_verified, subscription_status, pricing_tier,
@@ -446,6 +481,7 @@ def list_customers() -> list:
             'role':                row['role'],
             'is_active':           bool(row['is_active']),
             'operating_mode':      row['operating_mode'],
+            'trading_mode':        row['trading_mode'] if 'trading_mode' in row.keys() else 'PAPER',
             'created_at':          row['created_at'],
             'last_login':          row['last_login'],
             'has_alpaca':          bool(row['has_alpaca']),

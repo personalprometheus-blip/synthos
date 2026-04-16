@@ -11177,6 +11177,7 @@ async function loadCustomers() {
         <td><span class="badge ${c.operating_mode === 'AUTOMATIC' ? 'badge-auto' : 'badge-managed'}">${c.operating_mode}</span></td>
         <td><span class="badge ${c.role === 'admin' ? 'badge-admin' : 'badge-off'}">${c.role}</span></td>
         <td><span class="badge ${c.has_alpaca ? 'badge-ok' : 'badge-off'}">${c.has_alpaca ? '✓' : 'Not Set'}</span></td>
+        <td><span class="badge ${(c.trading_mode||'PAPER')==='LIVE' ? 'badge-auto' : 'badge-managed'}" style="cursor:pointer" onclick="toggleTradingMode('${c.id}','${c.trading_mode||'PAPER'}','${esc(c.display_name)}')">${c.trading_mode||'PAPER'}</span></td>
         <td><span class="badge ${c.email_verified ? 'badge-ok' : 'badge-off'}">${c.email_verified ? '✓' : 'Pending'}</span></td>
         <td><span class="badge ${subBadge}">${subStatus}</span></td>
         <td style="font-size:12px;color:var(--muted)">${tierLabel}</td>
@@ -11253,6 +11254,22 @@ async function deactivateCustomer(id, name) {
   const r = await fetch(`/api/admin/customers/${id}/deactivate`, {method:'POST'});
   const d = await r.json();
   if (d.ok) { toast('Customer deactivated'); loadCustomers(); }
+  else       { toast(d.error || 'Failed', 'err'); }
+}
+
+// ── TRADING MODE TOGGLE ──
+async function toggleTradingMode(id, current, name) {
+  const next = current === 'LIVE' ? 'PAPER' : 'LIVE';
+  const warning = next === 'LIVE'
+    ? `Switch ${name} to LIVE trading? Real money will be used.`
+    : `Switch ${name} back to PAPER trading?`;
+  if (!confirm(warning)) return;
+  const r = await fetch(`/api/admin/customers/${id}/trading-mode`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mode: next})
+  });
+  const d = await r.json();
+  if (d.ok) { toast('Trading mode: ' + next); loadCustomers(); }
   else       { toast(d.error || 'Failed', 'err'); }
 }
 
@@ -11402,6 +11419,22 @@ def api_admin_deactivate_customer(customer_id):
     try:
         auth.deactivate_customer(customer_id)
         return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/customers/<customer_id>/trading-mode', methods=['POST'])
+@admin_required
+def api_admin_set_trading_mode(customer_id):
+    """Toggle trading mode between PAPER and LIVE for a customer."""
+    data = request.get_json(silent=True) or {}
+    mode = data.get('mode', '').strip().upper()
+    if mode not in ('PAPER', 'LIVE'):
+        return jsonify({'ok': False, 'error': 'mode must be PAPER or LIVE'}), 400
+    try:
+        import auth as _auth
+        _auth.set_trading_mode(customer_id, mode)
+        return jsonify({'ok': True, 'mode': mode})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
 

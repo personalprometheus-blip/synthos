@@ -2589,7 +2589,14 @@ if __name__ == '__main__':
             ALPACA_API_KEY = _ak
             ALPACA_SECRET_KEY  = _sk
             OPERATING_MODE = _auth.get_operating_mode(args.customer_id)
-            log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE}")
+            _cust_trading_mode = _auth.get_trading_mode(args.customer_id)
+            if _cust_trading_mode in ('PAPER', 'LIVE'):
+                TRADING_MODE = _cust_trading_mode
+                if TRADING_MODE == 'LIVE':
+                    ALPACA_BASE_URL = 'https://api.alpaca.markets'
+                else:
+                    ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
+            log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE} trading={TRADING_MODE}")
         except SystemExit:
             raise  # let exit(0) from gate above propagate
         except Exception as _e:
