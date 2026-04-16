@@ -5603,8 +5603,19 @@ async function loadBellNotifs() {
 function _esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function _relTime(iso) {
-  var d = new Date(iso + (iso.includes('Z') || iso.includes('+') ? '' : 'Z'));
+  if (!iso) return '';
+  // DB stores bare timestamps in America/New_York (no TZ marker).
+  // Append ET offset so JS doesn't assume UTC.
+  var s = String(iso);
+  if (!s.includes('Z') && !s.includes('+') && !s.includes('-', 10)) {
+    // Determine EDT (-04:00) vs EST (-05:00) from the timestamp itself
+    var probe = new Date(s + ' EDT');
+    if (isNaN(probe.getTime())) probe = new Date(s + 'Z');  // fallback
+    s = probe.toISOString();
+  }
+  var d = new Date(s);
   var secs = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (secs < 0) secs = 0;
   if (secs < 60) return 'just now';
   if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
   if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
