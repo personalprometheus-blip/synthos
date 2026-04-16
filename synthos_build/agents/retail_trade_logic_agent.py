@@ -103,6 +103,25 @@ def _shared_db():
     return get_customer_db(_OWNER_CID)
 
 
+def _mark_signal_evaluated(signal_id, reason: str = ''):
+    """Mark a QUEUED signal as EVALUATED so it is not re-processed on future runs.
+
+    Called after Gates 4/5/6/11 decide SKIP or WATCH — the signal was seen,
+    evaluated, and intentionally not acted on.  The 72-hour expiry (auto-expire
+    in get_queued_signals) serves as a backstop for any signals that slip through.
+    """
+    try:
+        sdb = _shared_db()
+        with sdb.conn() as c:
+            c.execute(
+                "UPDATE signals SET status='EVALUATED', updated_at=? WHERE id=? AND status='QUEUED'",
+                (sdb.now(), signal_id),
+            )
+        log.debug(f"Signal {signal_id} → EVALUATED ({reason})")
+    except Exception as exc:
+        log.warning(f"Failed to mark signal {signal_id} as EVALUATED: {exc}")
+
+
 def _customer_email() -> str:
     """Resolve the notification email for this run.
 
@@ -2539,12 +2558,7 @@ def run(session="open"):
                 pass
 
             signals = _shared_db().get_queued_signals()
-            # Cap evaluation to most recent 50 — prevents runaway iteration on large queues
-            if len(signals) > 50:
-                log.info(f"Evaluating 50 of {len(signals)} queued signals (most recent first)")
-                signals = signals[:50]
-            else:
-                log.info(f"Evaluating {len(signals)} queued signal(s)")
+            log.info(f"Evaluating {len(signals)} queued signal(s)")
 
             for signal in signals:
                 positions = db.get_open_positions()
@@ -2578,6 +2592,7 @@ def run(session="open"):
                 if not gate4_eligibility(signal, positions, alpaca, sig_log):
                     sig_log.decide("SKIP", "failed eligibility gate")
                     sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_ELIGIBILITY')
                     continue
 
                 # Gate 5: Signal score
@@ -2585,6 +2600,7 @@ def run(session="open"):
                 if score == 0.0:
                     sig_log.decide("SKIP", f"score below threshold {C.MIN_CONFIDENCE_SCORE}")
                     sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_SCORE')
                     continue
 
                 # Gate 6: Entry decision
@@ -2592,6 +2608,7 @@ def run(session="open"):
                 if candidate is None:
                     sig_log.decide("WATCH", "no entry condition met — signal retained in queue")
                     sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'NO_ENTRY')
                     continue
 
                 # Get ATR for sizing and risk
@@ -2609,6 +2626,7 @@ def run(session="open"):
                 if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log):
                     sig_log.decide("SKIP", "portfolio limits block entry")
                     sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_PORTFOLIO')
                     continue
 
                 # Entry approved — MIRROR
