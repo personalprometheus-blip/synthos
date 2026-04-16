@@ -364,6 +364,41 @@ def _send_approval_email(email, name):
         return False
 
 
+def _notify_admin_new_customer(name, email):
+    """Push NEW_CUSTOMER event to monitor scoop queue so admin gets a bell/toast."""
+    monitor_url   = os.environ.get('MONITOR_URL', '').rstrip('/')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_url:
+        log.debug("MONITOR_URL not set — new-customer notification skipped")
+        return False
+    try:
+        import requests as _req
+        payload = {
+            "event_type":   "NEW_CUSTOMER",
+            "priority":     1,
+            "subject":      f"{name or 'New customer'} joined Synthos",
+            "body":         f"{name or 'Someone'} ({email or 'no email'}) verified their email and was auto-approved.",
+            "source_agent": "portal",
+            "pi_id":        os.environ.get('PI_ID', 'synthos-retail'),
+            "audience":     "internal",
+            "payload":      "{}",
+        }
+        r = _req.post(
+            f"{monitor_url}/api/enqueue",
+            json=payload,
+            headers={"X-Token": monitor_token, "Content-Type": "application/json"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            log.info(f"Admin notified: new customer {name} ({email})")
+            return True
+        log.warning(f"Admin notify returned {r.status_code}")
+        return False
+    except Exception as e:
+        log.warning(f"Admin new-customer notify failed: {e}")
+        return False
+
+
 def timestamp_to_date(ts):
     from datetime import datetime
     try:
@@ -2070,6 +2105,10 @@ def verify_email(token):
                 _send_approval_email(result.get("email", ""), result.get("name", ""))
             except Exception as _ae:
                 log.warning(f"Approval email after verify failed: {_ae}")
+            try:
+                _notify_admin_new_customer(result.get("name", ""), result.get("email", ""))
+            except Exception as _ne:
+                log.warning(f"Admin notification after verify failed: {_ne}")
         return _VERIFY_SUCCESS_HTML
     except ValueError as e:
         # Not a signup verification token — try setup-account redirect (legacy)
