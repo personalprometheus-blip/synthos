@@ -748,8 +748,13 @@ class AlpacaClient:
         t_upper = ticker.upper()
         # Check cache — return cached bars if we have enough days
         for (cached_t, cached_d), bars in self._bar_cache.items():
-            if cached_t == t_upper and cached_d >= days and bars:
+            if cached_t == t_upper and cached_d >= days:
+                if not bars:
+                    return []  # Negative cache — ticker has no bars
                 return bars[-days:] if len(bars) > days else bars
+        # Check negative cache (ticker returned empty before)
+        if (t_upper, 0) in self._bar_cache:
+            return []
         # Cache miss — fetch individually
         end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
         start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -773,11 +778,15 @@ class AlpacaClient:
                 pass
             if r.status_code == 200:
                 bars = r.json().get("bars") or []
-                # Cache for reuse within this run
+                # Cache for reuse within this run (including empty = negative cache)
                 self._bar_cache[(t_upper, days)] = bars
+                if not bars:
+                    self._bar_cache[(t_upper, 0)] = []  # Negative cache marker
                 return bars
         except Exception as e:
             log.warning(f"get_bars({ticker}): {e}")
+            # Negative cache on timeout/error — don't retry this ticker
+            self._bar_cache[(t_upper, 0)] = []
         return []
 
     def get_atr(self, ticker, period=14):
@@ -2517,8 +2526,25 @@ def run(session="open"):
                               portfolio, tradeable, session, now)
 
         if can_enter:
+            # Expire stale QUEUED signals (>72h old — congressional data decays fast)
+            try:
+                with _shared_db().conn() as _c:
+                    _expired = _c.execute(
+                        "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
+                        "WHERE status='QUEUED' AND created_at < datetime('now', '-3 days')"
+                    ).rowcount
+                    if _expired:
+                        log.info(f"[SIGNALS] Expired {_expired} stale QUEUED signals (>72h)")
+            except Exception:
+                pass
+
             signals = _shared_db().get_queued_signals()
-            log.info(f"Evaluating {len(signals)} queued signal(s)")
+            # Cap evaluation to most recent 50 — prevents runaway iteration on large queues
+            if len(signals) > 50:
+                log.info(f"Evaluating 50 of {len(signals)} queued signals (most recent first)")
+                signals = signals[:50]
+            else:
+                log.info(f"Evaluating {len(signals)} queued signal(s)")
 
             for signal in signals:
                 positions = db.get_open_positions()
