@@ -152,7 +152,7 @@ def _now_et():
 
 
 def _now_str():
-    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now(tz=ZoneInfo("UTC")).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _is_market_hours():
@@ -170,12 +170,14 @@ def _is_market_hours():
 #  Check that each core agent has heartbeated recently
 # ══════════════════════════════════════════════════════════════════════════
 
+# Heartbeat agent names (as written by each agent's db.log_heartbeat call)
+# and AGENT_COMPLETE names (as written by db.log_event)
 EXPECTED_AGENTS = [
-    ("market_sentiment_agent", "Market Sentiment"),
-    ("retail_news_agent",      "News"),
-    ("retail_trade_logic",     "Trade Logic"),
-    ("retail_sector_screener", "Sector Screener"),
-    ("price_poller",           "Price Poller"),
+    ("market_sentiment_agent", "The Pulse",      "Market Sentiment"),
+    ("news_agent",             "News",            "News"),
+    ("trade_logic_agent",      "Trade Logic",     "Trade Logic"),
+    ("sector_screener",        "Sector Screener", "Sector Screener"),
+    ("price_poller",           "Price Poller",    "Price Poller"),
 ]
 
 
@@ -183,22 +185,25 @@ def gate1_agent_liveness(report: FaultReport, db):
     """Check last heartbeat timestamp for each known agent."""
     log.info("[GATE 1] Agent liveness check")
 
-    now = datetime.utcnow()
+    now = datetime.now(tz=ZoneInfo("UTC"))
 
-    for agent_key, agent_label in EXPECTED_AGENTS:
+    for hb_name, complete_name, agent_label in EXPECTED_AGENTS:
         with db.conn() as c:
+            # Match exact heartbeat agent name
             row = c.execute(
                 "SELECT timestamp, details FROM system_log "
-                "WHERE event='HEARTBEAT' AND agent LIKE ? "
+                "WHERE event='HEARTBEAT' AND agent=? "
                 "ORDER BY timestamp DESC LIMIT 1",
-                (f"%{agent_key}%",)
+                (hb_name,)
             ).fetchone()
+
+        code_key = hb_name.upper().replace(' ', '_')
 
         if not row:
             report.add(Finding(
                 gate="GATE1_LIVENESS",
                 severity=Severity.WARNING,
-                code=f"NO_HEARTBEAT_{agent_key.upper()}",
+                code=f"NO_HEARTBEAT_{code_key}",
                 message=f"{agent_label}: No heartbeat found",
                 detail="Agent may have never run or DB was cleared"
             ))
@@ -206,6 +211,9 @@ def gate1_agent_liveness(report: FaultReport, db):
 
         try:
             last_ts = datetime.fromisoformat(row['timestamp'].replace('Z', ''))
+            # Make naive timestamps UTC-aware for comparison
+            if last_ts.tzinfo is None:
+                last_ts = last_ts.replace(tzinfo=ZoneInfo("UTC"))
             age_min = (now - last_ts).total_seconds() / 60.0
         except (ValueError, TypeError):
             age_min = 9999
@@ -215,7 +223,7 @@ def gate1_agent_liveness(report: FaultReport, db):
             report.add(Finding(
                 gate="GATE1_LIVENESS",
                 severity=severity,
-                code=f"STALE_HEARTBEAT_{agent_key.upper()}",
+                code=f"STALE_HEARTBEAT_{code_key}",
                 message=f"{agent_label}: Last heartbeat {int(age_min)}m ago",
                 detail=f"Threshold: {HEARTBEAT_STALE_MINUTES}m | Last: {row['timestamp']}"
             ))
@@ -223,7 +231,7 @@ def gate1_agent_liveness(report: FaultReport, db):
             report.add(Finding(
                 gate="GATE1_LIVENESS",
                 severity=Severity.OK,
-                code=f"HEARTBEAT_OK_{agent_key.upper()}",
+                code=f"HEARTBEAT_OK_{code_key}",
                 message=f"{agent_label}: Alive ({int(age_min)}m ago)"
             ))
 
@@ -237,7 +245,7 @@ def gate2_data_freshness(report: FaultReport, db):
     """Check age of live prices, queued signals, and news feed entries."""
     log.info("[GATE 2] Data freshness check")
 
-    now = datetime.utcnow()
+    now = datetime.now(tz=ZoneInfo("UTC"))
     today_str = now.strftime('%Y-%m-%d')
 
     # 2a. Live prices freshness (only matters during market hours)
@@ -250,6 +258,8 @@ def gate2_data_freshness(report: FaultReport, db):
         if price_row and price_row['latest']:
             try:
                 last_price = datetime.fromisoformat(price_row['latest'].replace('Z', ''))
+                if last_price.tzinfo is None:
+                    last_price = last_price.replace(tzinfo=ZoneInfo("UTC"))
                 price_age_min = (now - last_price).total_seconds() / 60.0
             except (ValueError, TypeError):
                 price_age_min = 9999
@@ -305,6 +315,8 @@ def gate2_data_freshness(report: FaultReport, db):
         if news_row and news_row['latest']:
             try:
                 last_news = datetime.fromisoformat(news_row['latest'].replace('Z', ''))
+                if last_news.tzinfo is None:
+                    last_news = last_news.replace(tzinfo=ZoneInfo("UTC"))
                 news_age_min = (now - last_news).total_seconds() / 60.0
             except (ValueError, TypeError):
                 news_age_min = 9999
@@ -549,7 +561,7 @@ def gate5_account_health(report: FaultReport, customer_ids):
 
             # 5c. Orphan positions (open but no price update in N days)
             positions = db.get_open_positions()
-            now = datetime.utcnow()
+            now = datetime.now(tz=ZoneInfo("UTC"))
             for pos in positions:
                 updated = pos.get('updated_at') or pos.get('opened_at', '')
                 if updated:
@@ -664,10 +676,11 @@ def gate6_db_integrity(report: FaultReport, db):
 #  Verify expected agents have run today
 # ══════════════════════════════════════════════════════════════════════════
 
-EXPECTED_DAILY_AGENTS = [
-    "Market Sentiment",
-    "News",
-    "Trade Logic",
+# Use AGENT_COMPLETE names (as written by each agent's db.log_event call)
+EXPECTED_DAILY_COMPLETIONS = [
+    ("The Pulse",    "Market Sentiment"),
+    ("News",         "News"),
+    ("Trade Logic",  "Trade Logic"),
 ]
 
 
@@ -689,12 +702,12 @@ def gate7_schedule_compliance(report: FaultReport, db):
 
     today_str = now_et.strftime('%Y-%m-%d')
 
-    for agent_name in EXPECTED_DAILY_AGENTS:
+    for complete_name, display_label in EXPECTED_DAILY_COMPLETIONS:
         with db.conn() as c:
             row = c.execute(
                 "SELECT COUNT(*) as cnt FROM system_log "
-                "WHERE event='AGENT_COMPLETE' AND agent LIKE ? AND timestamp LIKE ?",
-                (f"%{agent_name}%", f"{today_str}%")
+                "WHERE event='AGENT_COMPLETE' AND agent=? AND timestamp LIKE ?",
+                (complete_name, f"{today_str}%")
             ).fetchone()
 
         completions = row['cnt'] if row else 0
@@ -704,16 +717,16 @@ def gate7_schedule_compliance(report: FaultReport, db):
             report.add(Finding(
                 gate="GATE7_SCHEDULE",
                 severity=severity,
-                code=f"NO_RUN_{agent_name.upper().replace(' ', '_')}",
-                message=f"{agent_name}: Has not completed today",
+                code=f"NO_RUN_{display_label.upper().replace(' ', '_')}",
+                message=f"{display_label}: Has not completed today",
                 detail=f"Expected at least 1 run by {now_et.strftime('%H:%M')} ET"
             ))
         else:
             report.add(Finding(
                 gate="GATE7_SCHEDULE",
                 severity=Severity.OK,
-                code=f"RUN_OK_{agent_name.upper().replace(' ', '_')}",
-                message=f"{agent_name}: {completions} run(s) today"
+                code=f"RUN_OK_{display_label.upper().replace(' ', '_')}",
+                message=f"{display_label}: {completions} run(s) today"
             ))
 
 
