@@ -355,6 +355,30 @@ def run_price_poller():
         return False
 
 
+def run_fault_detection():
+    """Run fault detection agent — system health scan."""
+    log.info("[FAULT DETECTION] Starting")
+    write_agent_running('retail_fault_detection_agent.py')
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_fault_detection_agent.py')],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        if result.returncode == 0:
+            log.info("[FAULT DETECTION] Complete")
+        else:
+            log.warning(f"[FAULT DETECTION] Non-zero exit: {result.returncode}")
+            if result.stderr:
+                log.warning(f"[FAULT DETECTION] stderr: {result.stderr[-500:]}")
+        return result.returncode == 0
+    except Exception as e:
+        log.error(f"[FAULT DETECTION] Error: {e}")
+        return False
+
+
 def run_screener():
     """Run sector screener once."""
     log.info("[SCREENER] Starting")
@@ -394,6 +418,8 @@ def run_premarket_prep():
     if _shutdown_requested:
         return
     run_price_poller()
+    if not _shutdown_requested:
+        run_fault_detection()
     run_trade_all_customers(session='open')
     clear_agent_running()
 
@@ -447,6 +473,9 @@ def run_market_loop():
                 run_sentiment()
             if not _shutdown_requested and not kill_switch_active():
                 run_trade_all_customers(session='open')
+            # Fault detection scan after enrichment
+            if not _shutdown_requested:
+                run_fault_detection()
             last_enrichment = time.monotonic()
             last_recon = time.monotonic()  # enrichment includes reconciliation
             clear_agent_running()

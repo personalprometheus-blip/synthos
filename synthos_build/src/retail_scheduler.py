@@ -86,6 +86,7 @@ SESSION_PIPELINES = {
         ('retail_sector_screener.py',        ['--sector=Energy'],  180),
         ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_news_agent.py',             ['--session=market'], 420),
+        ('retail_fault_detection_agent.py',  [],                   120),
         ('retail_trade_logic_agent.py',      ['--session=open'],   300),
     ],
     'midday': [
@@ -111,11 +112,16 @@ SESSION_PIPELINES = {
         ('retail_sector_screener.py',        [],                     300),
         ('retail_news_agent.py',             ['--session=overnight'], 420),
         ('retail_market_sentiment_agent.py', [],                     600),
+        ('retail_fault_detection_agent.py',  [],                     120),
     ],
     'trade': [
         # Hourly trader evaluation + execution.
         # Session type (open/midday/close) auto-resolved based on time of day.
         ('retail_trade_logic_agent.py',      None,                 300),
+    ],
+    'fault': [
+        # Manual / on-demand system health check
+        ('retail_fault_detection_agent.py',  [],                   120),
     ],
 }
 
