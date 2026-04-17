@@ -1359,31 +1359,52 @@ class DB:
         'validator_stamped_at',
     )
 
+    # interrogation_status values that are considered genuinely promotable.
+    # VALIDATED    = peer corroborated via UDP broadcast.
+    # CORROBORATED = multiple independent sources confirmed the signal.
+    # SKIPPED      = news agent set this for WATCH-routed signals that were
+    #                never sent for interrogation (they weren't trade
+    #                candidates at news-classification time but still carry
+    #                useful context; trader scores them low on Gate 5).
+    # UNVALIDATED  = interrogation attempted but no peer responded — this
+    #                is the degraded-pipeline case and is explicitly NOT in
+    #                this set. If the interrogation listener dies, new news
+    #                signals land here and stop promoting, triggering both
+    #                the fault detector's STUCK_SIGNALS gate and the
+    #                watchdog's pipeline-stall alert.
+    PROMOTABLE_INTERROGATION_STATUSES = ('VALIDATED', 'CORROBORATED', 'SKIPPED')
+
     def promote_validated_signals(self, cycle_id=None):
         """The last link in the validation chain.
 
-        Transitions QUEUED signals to VALIDATED if they have ALL required
-        stamps. Trader reads only VALIDATED signals. Anything stuck at
-        QUEUED is still unvalidated noise and will age out via expiry.
+        Transitions QUEUED signals to VALIDATED if they have all required
+        stamps AND their interrogation_status is a promotable value (not
+        UNVALIDATED, which means the peer-corroboration broadcast got no
+        response). Trader reads only VALIDATED signals.
 
         For every promotion, writes a PROMOTED row to signal_decisions.
-        For every still-QUEUED signal, writes a STUCK row listing which
-        stamps are missing — this tells the fault detector which upstream
-        agent is the bottleneck.
+        For every still-QUEUED signal, writes a STUCK row that distinguishes
+        "missing stamp X" from "stamp present but non-promotable value"
+        (currently only applies to interrogation_status=UNVALIDATED) so the
+        fault detector can name the exact bottleneck.
 
         Returns (promoted_count, stuck_count).
         """
-        stamp_cols = self.REQUIRED_STAMPS
+        stamp_cols    = self.REQUIRED_STAMPS
+        ok_statuses   = self.PROMOTABLE_INTERROGATION_STATUSES
+        placeholders  = ','.join('?' * len(ok_statuses))
+
         # 1) Find candidates BEFORE the update so we know which IDs were promoted.
         with self.conn() as c:
             promotable = c.execute(
-                "SELECT id, ticker FROM signals "
-                "WHERE status='QUEUED' "
-                "AND interrogation_status IS NOT NULL "
-                "AND sentiment_evaluated_at IS NOT NULL "
-                "AND macro_regime_at_validation IS NOT NULL "
-                "AND market_state_at_validation IS NOT NULL "
-                "AND validator_stamped_at IS NOT NULL"
+                f"SELECT id, ticker FROM signals "
+                f"WHERE status='QUEUED' "
+                f"AND interrogation_status IN ({placeholders}) "
+                f"AND sentiment_evaluated_at IS NOT NULL "
+                f"AND macro_regime_at_validation IS NOT NULL "
+                f"AND market_state_at_validation IS NOT NULL "
+                f"AND validator_stamped_at IS NOT NULL",
+                ok_statuses,
             ).fetchall()
             promoted_ids = [(r[0], r[1]) for r in promotable]
 
@@ -1408,28 +1429,60 @@ class DB:
                 agent='promoter', action='PROMOTED',
                 ticker=ticker, signal_id=sid,
                 value='QUEUED→VALIDATED',
-                reason='all 5 required stamps present',
+                reason='all required stamps present, interrogation promotable',
                 cycle_id=cycle_id,
             )
 
-        # 5) Write per-signal STUCK rows listing missing stamps.
-        # Only log for signals that have progressed partially (at least one
-        # stamp present). A freshly-QUEUED signal with zero stamps is 'new',
-        # not stuck — logging every fresh arrival would swamp the table.
+        # 5) Write per-signal STUCK rows.
+        # Two shapes of "stuck":
+        #   (a) a stamp is NULL — upstream agent hasn't touched this signal
+        #       yet. reason: "missing: <column>, ..."
+        #   (b) all stamps present but interrogation_status is a non-promotable
+        #       value (e.g. UNVALIDATED). reason names the exact blocker so
+        #       the fault detector doesn't misattribute this to a stamp miss.
+        # Freshly-QUEUED signals with zero progress ("new" rather than "stuck")
+        # are skipped to keep signal_decisions from being swamped by arrivals.
+        interrogation_col_idx = stamp_cols.index('interrogation_status')
         stuck_logged = 0
         for row in stuck_rows:
             sid       = row[0]
             ticker    = row[1]
             created   = row[2]
-            missing   = [stamp_cols[i] for i, v in enumerate(row[3:]) if v is None]
+            stamps    = row[3:]
+            missing   = [stamp_cols[i] for i, v in enumerate(stamps) if v is None]
             present   = len(stamp_cols) - len(missing)
             if present == 0:
                 continue
+
+            reason_bits = []
+            value_summary = None
+            if missing:
+                reason_bits.append(f"missing: {','.join(missing)}")
+                value_summary = f"missing={len(missing)}/{len(stamp_cols)}"
+
+            # Stamp-present-but-not-promotable cases. Today only one —
+            # interrogation_status=UNVALIDATED / ABSTAINED / other. The
+            # check is written to extend to any future promotability rule.
+            interrog_value = stamps[interrogation_col_idx]
+            if interrog_value is not None and interrog_value not in ok_statuses:
+                reason_bits.append(
+                    f"interrogation_status={interrog_value!r} not in "
+                    f"promotable set {list(ok_statuses)}"
+                )
+                if value_summary is None:
+                    value_summary = f"interrogation={interrog_value}"
+
+            if not reason_bits:
+                # All stamps present and promotable, but the signal wasn't
+                # in the promoted set for some other reason we don't know
+                # about. Fall through — don't pretend we understand why.
+                continue
+
             self.log_signal_decision(
                 agent='promoter', action='STUCK',
                 ticker=ticker, signal_id=sid,
-                value=f"missing={len(missing)}/{len(stamp_cols)}",
-                reason=f"missing: {','.join(missing)} (created={created})",
+                value=value_summary,
+                reason=f"{' | '.join(reason_bits)} (created={created})",
                 cycle_id=cycle_id,
             )
             stuck_logged += 1

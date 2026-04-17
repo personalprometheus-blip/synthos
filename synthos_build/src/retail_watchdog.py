@@ -992,16 +992,28 @@ def check_pipeline_health() -> None:
             stall_mins = None
 
     if stall_mins is not None and stall_mins >= PIPELINE_STALL_MINS:
-        # Categorize most-common missing stamp to point at the likely culprit.
+        # Categorize stuck reasons to name the likely culprit. Two shapes
+        # of reason string coming from the promoter:
+        #   "missing: X,Y (created=...)"             — stamp X / stamp Y absent
+        #   "interrogation_status='UNVALIDATED' ..." — stamp present but
+        #                                              non-promotable value
+        # The first maps to an upstream agent that didn't stamp; the second
+        # typically means the interrogation listener is dead.
         missing_counts: dict = {}
         for _, reason in stuck_rows:
-            if reason and 'missing:' in reason:
+            if not reason:
+                continue
+            if 'missing:' in reason:
                 try:
-                    tag = reason.split('missing:', 1)[1].split('(')[0].strip()
+                    tag = reason.split('missing:', 1)[1].split('(')[0].split('|')[0].strip()
                     for s in (x.strip() for x in tag.split(',') if x.strip()):
                         missing_counts[s] = missing_counts.get(s, 0) + 1
                 except Exception:
-                    continue
+                    pass
+            if 'interrogation_status=' in reason and 'not in promotable' in reason:
+                # Synthetic bucket that names the listener as the bottleneck.
+                missing_counts['interrogation_listener(UNVALIDATED)'] = \
+                    missing_counts.get('interrogation_listener(UNVALIDATED)', 0) + 1
         top_miss = sorted(missing_counts.items(), key=lambda x: -x[1])[:3]
         bottleneck = ', '.join(f"{k}={v}" for k, v in top_miss) or 'unknown'
 

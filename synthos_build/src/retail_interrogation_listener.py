@@ -75,6 +75,11 @@ try:
 except (ValueError, TypeError):
     RATE_LIMIT_HOUR  = 3
 
+# Heartbeat cadence — fault detection's GATE1_LIVENESS uses the default
+# HEARTBEAT_STALE_MINUTES=45 threshold, so 60s cadence gives us 45× headroom
+# and keeps DB writes light (one row per minute in system_log).
+HEARTBEAT_INTERVAL_SEC = 60
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s interrogation: %(message)s',
@@ -90,6 +95,26 @@ log = logging.getLogger('interrogation_listener')
 # In-process rate limit: track ACK timestamps per ticker.
 # Prevents runaway ACKs if Scout somehow broadcasts repeatedly.
 _ack_history = defaultdict(list)   # ticker → [timestamp, ...]
+
+
+# ── HEARTBEAT WRITER ──────────────────────────────────────────────────────
+def _post_heartbeat(accepted: int, rejected: int) -> None:
+    """Write a HEARTBEAT row to the owner customer DB (where fault detection
+    reads from). Silent on failure — heartbeat is a diagnostic signal, not
+    a business rule, so a brief DB hiccup shouldn't crash the listener."""
+    try:
+        sys.path.insert(0, str(BASE_DIR))
+        from retail_database import get_db, get_customer_db
+        owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+        target = get_customer_db(owner_id) if owner_id else get_db()
+        target.log_heartbeat(
+            "interrogation_listener",
+            "OK",
+            portfolio_value=None,
+        )
+        log.debug(f"[HB] posted — accepted={accepted} rejected={rejected}")
+    except Exception as e:
+        log.debug(f"[HB] write failed (non-fatal): {e}")
 
 
 def _rate_ok(ticker):
@@ -190,8 +215,20 @@ def run():
 
     accepted = 0
     rejected = 0
+    last_heartbeat = 0.0
+
+    # Emit one heartbeat at startup so fault detection sees us immediately
+    # rather than waiting a full HEARTBEAT_INTERVAL_SEC after boot.
+    _post_heartbeat(accepted, rejected)
+    last_heartbeat = time.monotonic()
 
     while running:
+        # Heartbeat cadence check — fires between recvfrom calls so a quiet
+        # UDP channel doesn't mean a "dead" agent to the fault detector.
+        if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SEC:
+            _post_heartbeat(accepted, rejected)
+            last_heartbeat = time.monotonic()
+
         try:
             data, addr = sock.recvfrom(65535)
         except socket.timeout:

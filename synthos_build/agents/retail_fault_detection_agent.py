@@ -193,11 +193,16 @@ def _is_market_hours():
 # (like the sector screener) get a 30h window so a successful prep run
 # counts as healthy until the next day's prep.
 EXPECTED_AGENTS = [
-    ("market_sentiment_agent", "The Pulse",      "Market Sentiment"),
-    ("news_agent",             "News",            "News"),
-    ("trade_logic_agent",      "Trade Logic",     "Trade Logic"),
-    ("sector_screener",        "Sector Screener", "Sector Screener", 1800),  # 30h
-    ("price_poller",           "Price Poller",    "Price Poller"),
+    ("market_sentiment_agent",   "The Pulse",               "Market Sentiment"),
+    ("news_agent",               "News",                    "News"),
+    ("trade_logic_agent",        "Trade Logic",             "Trade Logic"),
+    ("sector_screener",          "Sector Screener",         "Sector Screener", 1800),  # 30h
+    ("price_poller",             "Price Poller",            "Price Poller"),
+    # Interrogation listener posts heartbeat every 60s while running. If it
+    # dies, new news signals get interrogation_status='UNVALIDATED' and —
+    # with the tightened promoter check — stop promoting, so a dead listener
+    # degrades the signal pipeline silently unless we catch it here.
+    ("interrogation_listener",   "Interrogation Listener",  "Interrogation Listener"),
 ]
 
 
