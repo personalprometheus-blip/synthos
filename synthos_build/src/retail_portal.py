@@ -11661,6 +11661,19 @@ tr:hover td{background:rgba(255,255,255,0.02)}
     </table>
   </div>
 
+  <div class="section-title">Admin Alerts <span id="admin-alerts-badge" style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:8px;background:rgba(255,75,110,0.1);color:var(--pink);display:none"></span></div>
+  <div class="glass" style="margin-bottom:16px">
+    <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)">
+      <div style="font-size:10px;color:var(--muted)">System / validator / bias alerts — customer-hidden</div>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="filter-btn" id="admin-alerts-show-resolved" onclick="toggleAdminAlertsResolved()" style="background:transparent;border:1px solid var(--border);color:var(--muted);font-size:10px;padding:4px 10px;border-radius:99px;cursor:pointer">Show resolved</button>
+      </div>
+    </div>
+    <div id="admin-alerts-list" style="padding:4px 0">
+      <div style="font-size:10px;color:var(--dim);text-align:center;padding:16px 0">Loading…</div>
+    </div>
+  </div>
+
   <div class="section-title">API Usage</div>
   <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
     <!-- Gauge card — surfaces rate-limit proximity, not a fake daily cap -->
@@ -12117,11 +12130,88 @@ async function loadApiUsage() {
   } catch(e) { console.error('api usage error', e); }
 }
 
+// ── ADMIN ALERTS ──
+var _adminAlertsShowResolved = false;
+function toggleAdminAlertsResolved() {
+  _adminAlertsShowResolved = !_adminAlertsShowResolved;
+  var btn = document.getElementById('admin-alerts-show-resolved');
+  if (btn) {
+    btn.textContent = _adminAlertsShowResolved ? 'Hide resolved' : 'Show resolved';
+    btn.style.color = _adminAlertsShowResolved ? 'var(--teal)' : 'var(--muted)';
+  }
+  loadAdminAlerts();
+}
+
+async function resolveAdminAlert(id) {
+  try {
+    await fetch('/api/admin/alerts/resolve', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({id: id})
+    });
+    loadAdminAlerts();
+  } catch(e) { console.warn('resolveAdminAlert', e); }
+}
+
+async function loadAdminAlerts() {
+  var list = document.getElementById('admin-alerts-list');
+  var badge = document.getElementById('admin-alerts-badge');
+  if (!list) return;
+  try {
+    var qs = _adminAlertsShowResolved ? '?unresolved_only=0' : '';
+    var r = await fetch('/api/admin/alerts' + qs);
+    var d = await r.json();
+    var alerts = d.alerts || [];
+    var unresolved = d.unresolved_count || 0;
+    if (badge) {
+      if (unresolved > 0) {
+        badge.textContent = unresolved + ' open';
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    if (!alerts.length) {
+      list.innerHTML = '<div style="font-size:11px;color:var(--teal);text-align:center;padding:16px 0">✓ No '+(_adminAlertsShowResolved?'':'unresolved ')+'alerts</div>';
+      return;
+    }
+    var sevColor = s => s === 'CRITICAL' ? 'var(--pink)' : s === 'WARNING' ? 'var(--signal)' : 'var(--muted)';
+    var catPill = c => {
+      var colors = {validator:'var(--pink)', fault:'var(--pink)', bias:'var(--signal)', system:'var(--violet)'};
+      return '<span style="font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:rgba(255,255,255,0.04);color:'+(colors[c]||'var(--muted)')+'">'+c+'</span>';
+    };
+    list.innerHTML = alerts.map(function(a) {
+      var ts = _relTime(a.created_at);
+      var isResolved = a.resolved ? 'opacity:0.45;' : '';
+      var customer = a.source_customer_id ? ' · <span style="font-family:var(--mono)">'+(a.source_customer_id||'').slice(0,12)+'</span>' : '';
+      return '<div style="padding:10px 14px;border-bottom:1px solid var(--border);'+isResolved+'">'
+        + '<div style="display:flex;gap:10px;align-items:flex-start">'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">'
+        + '<span style="font-size:9px;font-weight:700;color:'+sevColor(a.severity)+'">'+a.severity+'</span>'
+        + catPill(a.category||'system')
+        + '<span style="font-size:9px;color:var(--dim);font-family:var(--mono)">'+ts+customer+'</span>'
+        + '</div>'
+        + '<div style="font-size:12px;font-weight:600;color:var(--text)">'+_esc(a.title)+'</div>'
+        + (a.body ? '<div style="font-size:10px;color:var(--muted);margin-top:3px;white-space:pre-line">'+_esc(a.body)+'</div>' : '')
+        + '</div>'
+        + (a.resolved ? '<div style="font-size:9px;color:var(--teal)">✓ resolved</div>' :
+           '<button onclick="resolveAdminAlert('+a.id+')" style="background:transparent;border:1px solid var(--border);color:var(--muted);font-size:10px;padding:4px 10px;border-radius:99px;cursor:pointer;flex-shrink:0">Resolve</button>')
+        + '</div></div>';
+    }).join('');
+  } catch(e) {
+    console.warn('loadAdminAlerts', e);
+    list.innerHTML = '<div style="font-size:10px;color:var(--pink);text-align:center;padding:16px 0">Failed to load</div>';
+  }
+}
+
 // ── INIT ──
 loadMetrics();
 loadApiUsage();
+loadAdminAlerts();
 setInterval(loadMetrics, 12000);
 setInterval(loadApiUsage, 60000);
+setInterval(loadAdminAlerts, 45000);
 </script>
 </body>
 </html>"""
