@@ -341,33 +341,47 @@ CREATE TABLE IF NOT EXISTS urgent_flags (
 );
 
 -- ── PENDING APPROVALS ─────────────────────────────────────────────────
--- Supervised mode trade approval queue.
+-- Supervised mode trade approval queue + overnight-queue holding area.
 -- Full lifecycle preserved — rows are never deleted.
--- Active queue: filter WHERE status = 'PENDING_APPROVAL'
--- Statuses: PENDING_APPROVAL / APPROVED / REJECTED / EXECUTED / EXPIRED
+-- Active queue: filter WHERE status IN ('PENDING_APPROVAL','QUEUED_FOR_OPEN')
+-- Statuses:
+--   PENDING_APPROVAL      — supervised-mode trade awaiting user decision
+--   QUEUED_FOR_OPEN       — automatic-mode decision made outside market hours;
+--                           awaits pre-open re-evaluation before execution
+--   APPROVED              — user approved / re-eval passed, ready to execute
+--   REJECTED              — user rejected
+--   CANCELLED_PROTECTIVE  — pre-open re-eval determined the trade is no longer
+--                           valid; shown to user with an explicit reason
+--   EXECUTED              — order placed on Alpaca
+--   EXPIRED               — queued > max_age_hours, never acted on
+-- queue_origin: 'market' (default, generated during market hours) or
+--               'overnight' (generated outside hours, needs pre-open re-eval).
 CREATE TABLE IF NOT EXISTS pending_approvals (
-    id              TEXT    PRIMARY KEY,   -- signal id (e.g. "42" or "sig_AAPL_...")
-    ticker          TEXT    NOT NULL,
-    company         TEXT,
-    sector          TEXT,
-    politician      TEXT,
-    confidence      TEXT,                  -- HIGH / MEDIUM / LOW
-    staleness       TEXT,                  -- Fresh / Aging / Stale / Expired
-    headline        TEXT,
-    price           REAL,
-    shares          REAL,
-    max_trade       REAL,
-    trail_amt       REAL,
-    trail_pct       REAL,
-    vol_label       TEXT,
-    reasoning       TEXT,
-    session         TEXT,
-    status          TEXT    NOT NULL DEFAULT 'PENDING_APPROVAL',
-    queued_at       TEXT    NOT NULL,
-    decided_at      TEXT,
-    decided_by      TEXT,                  -- 'portal' or agent name
-    executed_at     TEXT,
-    decision_note   TEXT
+    id                TEXT    PRIMARY KEY,   -- signal id (e.g. "42" or "sig_AAPL_...")
+    ticker            TEXT    NOT NULL,
+    company           TEXT,
+    sector            TEXT,
+    politician        TEXT,
+    confidence        TEXT,                  -- HIGH / MEDIUM / LOW
+    staleness         TEXT,                  -- Fresh / Aging / Stale / Expired
+    headline          TEXT,
+    price             REAL,
+    shares            REAL,
+    max_trade         REAL,
+    trail_amt         REAL,
+    trail_pct         REAL,
+    vol_label         TEXT,
+    reasoning         TEXT,
+    session           TEXT,
+    status            TEXT    NOT NULL DEFAULT 'PENDING_APPROVAL',
+    queued_at         TEXT    NOT NULL,
+    decided_at        TEXT,
+    decided_by        TEXT,                  -- 'portal' or agent name
+    executed_at       TEXT,
+    decision_note     TEXT,
+    queue_origin      TEXT    DEFAULT 'market',  -- 'market' | 'overnight'
+    reevaluated_at    TEXT,                      -- when pre-open re-eval ran
+    cancelled_reason  TEXT                       -- why CANCELLED_PROTECTIVE fired
 );
 
 -- ── MEMBER WEIGHTS ──────────────────────────────────────────────────────
@@ -760,6 +774,16 @@ class DB:
             "CREATE INDEX IF NOT EXISTS idx_sd_signal   ON signal_decisions(signal_id)",
             "CREATE INDEX IF NOT EXISTS idx_sd_ticker   ON signal_decisions(ticker)",
             "CREATE INDEX IF NOT EXISTS idx_sd_ts       ON signal_decisions(ts DESC)",
+
+            # v3.8 — overnight queue + pre-open re-evaluation extension to
+            # pending_approvals. Decisions generated outside market hours
+            # land here as QUEUED_FOR_OPEN, get re-evaluated at the next
+            # market open, and either execute or flip to CANCELLED_PROTECTIVE
+            # with a visible reason. See docs/overnight_queue_plan.md.
+            "ALTER TABLE pending_approvals ADD COLUMN queue_origin TEXT DEFAULT 'market'",
+            "ALTER TABLE pending_approvals ADD COLUMN reevaluated_at TEXT",
+            "ALTER TABLE pending_approvals ADD COLUMN cancelled_reason TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_approvals_queue_origin ON pending_approvals(queue_origin, status)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -2829,12 +2853,25 @@ class DB:
                        politician='', confidence='', staleness='',
                        headline='', price=None, shares=None, max_trade=None,
                        trail_amt=None, trail_pct=None, vol_label='',
-                       reasoning='', session=''):
+                       reasoning='', session='',
+                       queue_origin='market', status='PENDING_APPROVAL'):
         """
         Insert or replace a pending approval entry.
         Deduplicates by signal_id — re-queuing the same signal id
-        replaces the existing row only if it is still PENDING_APPROVAL.
+        replaces the existing row only if it is still
+        PENDING_APPROVAL or QUEUED_FOR_OPEN (i.e. not yet acted on).
+
+        queue_origin = 'market' (default) | 'overnight'
+        status       = 'PENDING_APPROVAL' | 'QUEUED_FOR_OPEN'
+          MANAGED/SUPERVISED + overnight → ('overnight', 'PENDING_APPROVAL')
+          AUTOMATIC + overnight          → ('overnight', 'QUEUED_FOR_OPEN')
+          Anything during market hours   → ('market',   'PENDING_APPROVAL')
         """
+        if status not in ('PENDING_APPROVAL', 'QUEUED_FOR_OPEN'):
+            raise ValueError(f"queue_approval: invalid initial status {status!r}")
+        if queue_origin not in ('market', 'overnight'):
+            raise ValueError(f"queue_approval: invalid queue_origin {queue_origin!r}")
+
         now = self.now()
         with self.conn() as c:
             c.execute("""
@@ -2843,41 +2880,113 @@ class DB:
                     confidence, staleness, headline,
                     price, shares, max_trade, trail_amt, trail_pct,
                     vol_label, reasoning, session,
-                    status, queued_at
+                    status, queued_at, queue_origin
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 ON CONFLICT(id) DO UPDATE SET
-                    ticker        = excluded.ticker,
-                    company       = excluded.company,
-                    sector        = excluded.sector,
-                    politician    = excluded.politician,
-                    confidence    = excluded.confidence,
-                    staleness     = excluded.staleness,
-                    headline      = excluded.headline,
-                    price         = excluded.price,
-                    shares        = excluded.shares,
-                    max_trade     = excluded.max_trade,
-                    trail_amt     = excluded.trail_amt,
-                    trail_pct     = excluded.trail_pct,
-                    vol_label     = excluded.vol_label,
-                    reasoning     = excluded.reasoning,
-                    session       = excluded.session,
-                    status        = 'PENDING_APPROVAL',
-                    queued_at     = excluded.queued_at,
-                    decided_at    = NULL,
-                    decided_by    = NULL,
-                    executed_at   = NULL,
-                    decision_note = NULL
-                WHERE pending_approvals.status = 'PENDING_APPROVAL'
+                    ticker          = excluded.ticker,
+                    company         = excluded.company,
+                    sector          = excluded.sector,
+                    politician      = excluded.politician,
+                    confidence      = excluded.confidence,
+                    staleness       = excluded.staleness,
+                    headline        = excluded.headline,
+                    price           = excluded.price,
+                    shares          = excluded.shares,
+                    max_trade       = excluded.max_trade,
+                    trail_amt       = excluded.trail_amt,
+                    trail_pct       = excluded.trail_pct,
+                    vol_label       = excluded.vol_label,
+                    reasoning       = excluded.reasoning,
+                    session         = excluded.session,
+                    status          = excluded.status,
+                    queued_at       = excluded.queued_at,
+                    queue_origin    = excluded.queue_origin,
+                    decided_at      = NULL,
+                    decided_by      = NULL,
+                    executed_at     = NULL,
+                    decision_note   = NULL,
+                    reevaluated_at  = NULL,
+                    cancelled_reason= NULL
+                WHERE pending_approvals.status IN ('PENDING_APPROVAL','QUEUED_FOR_OPEN')
             """, (
                 str(signal_id), ticker, company, sector, politician,
                 confidence, staleness, headline,
                 price, shares, max_trade, trail_amt, trail_pct,
                 vol_label, reasoning, session,
-                'PENDING_APPROVAL', now
+                status, now, queue_origin,
             ))
-        log.info(f"[DB] Approval queued: {ticker} id={signal_id}")
+        log.info(f"[DB] Approval queued: {ticker} id={signal_id} "
+                 f"status={status} origin={queue_origin}")
+
+    # ── OVERNIGHT QUEUE HELPERS ────────────────────────────────────────
+    def get_overnight_queue(self, origin='overnight'):
+        """Return all rows awaiting execution/approval that originated
+        outside market hours. Used by the pre-open re-evaluation step
+        and the dashboard 'pending' card. Sorted oldest first so the
+        re-eval cycle processes in stable order."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pending_approvals "
+                "WHERE queue_origin=? "
+                "AND status IN ('QUEUED_FOR_OPEN','PENDING_APPROVAL') "
+                "ORDER BY queued_at ASC",
+                (origin,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def mark_reevaluated(self, signal_id):
+        """Stamp a row as having been re-evaluated by the pre-open step.
+        Does not change status — that's the caller's job based on whether
+        the re-eval passed (approve) or failed (cancel_protective)."""
+        with self.conn() as c:
+            c.execute(
+                "UPDATE pending_approvals SET reevaluated_at=? WHERE id=?",
+                (self.now(), str(signal_id))
+            )
+
+    def cancel_protective(self, signal_id, reason: str):
+        """Flip a row to CANCELLED_PROTECTIVE with a human-readable reason
+        the portal surfaces on the trade-history overlay. Also sets
+        reevaluated_at if not already populated so audit trail is
+        complete. Returns True if a row was updated."""
+        now = self.now()
+        with self.conn() as c:
+            result = c.execute("""
+                UPDATE pending_approvals
+                SET status           = 'CANCELLED_PROTECTIVE',
+                    cancelled_reason = ?,
+                    reevaluated_at   = COALESCE(reevaluated_at, ?),
+                    decided_at       = ?,
+                    decided_by       = 'pre_open_reeval'
+                WHERE id = ?
+                  AND status IN ('QUEUED_FOR_OPEN','PENDING_APPROVAL','APPROVED')
+            """, (reason, now, now, str(signal_id)))
+            updated = result.rowcount > 0
+        if updated:
+            log.info(f"[DB] CANCELLED_PROTECTIVE: id={signal_id} reason={reason[:80]}")
+        else:
+            log.warning(
+                f"[DB] cancel_protective: no actionable row for id={signal_id}"
+            )
+        return updated
+
+    def get_cancelled_protective(self, since_days: int = 14):
+        """Return recent CANCELLED_PROTECTIVE rows for the trade-history
+        overlay. Default window 14 days — covers a typical review
+        period without dragging in years of history."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=since_days)
+        ).strftime('%Y-%m-%d %H:%M:%S')
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM pending_approvals "
+                "WHERE status='CANCELLED_PROTECTIVE' AND queued_at > ? "
+                "ORDER BY queued_at DESC",
+                (cutoff,)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def get_pending_approvals(self, status_filter=None):
         """
