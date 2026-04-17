@@ -213,10 +213,17 @@ def run():
 
     # Post a heartbeat so fault detection's GATE1_LIVENESS check can see us.
     # Price poller runs every 60s from the daemon, so the default
-    # HEARTBEAT_STALE_MINUTES (45) is comfortable.
+    # HEARTBEAT_STALE_MINUTES (45) is comfortable. Fault detection reads
+    # heartbeats from the OWNER customer DB (not master signals.db) — write
+    # to both in case the env is set up differently in dev vs prod.
     try:
-        from retail_database import get_db
-        get_db().log_heartbeat("price_poller", "OK")
+        import os as _os
+        from retail_database import get_db, get_customer_db
+        owner_id = _os.environ.get('OWNER_CUSTOMER_ID', '')
+        if owner_id:
+            get_customer_db(owner_id).log_heartbeat("price_poller", "OK")
+        else:
+            get_db().log_heartbeat("price_poller", "OK")
     except Exception as _e:
         log.debug(f"price_poller heartbeat write failed: {_e}")
 
