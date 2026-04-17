@@ -338,8 +338,19 @@ def _read_validator_verdict(customer_id):
         return None, []
 
 
+TRADE_INDIVIDUAL_TIMEOUT_SEC = 240   # kill any trader subprocess stuck longer than this
+
+
 def run_trade_all_customers(session='open'):
-    """Run trade logic for all active customers in parallel (up to MAX_TRADE_PARALLEL)."""
+    """Run trade logic for all active customers in parallel (up to MAX_TRADE_PARALLEL).
+
+    Each subprocess gets its own TRADE_INDIVIDUAL_TIMEOUT_SEC deadline; any
+    trader that exceeds it is killed and counted as a failure, so one hung
+    customer cannot stall the entire dispatch pool. Previously the main
+    polling loop had no per-process deadline — a hang would pin all slots
+    until external intervention, causing the 1-hour DISPATCH stalls we saw
+    on 2026-04-17.
+    """
     import subprocess as _sp
 
     write_agent_running('retail_trade_logic_agent.py', session)
@@ -349,24 +360,41 @@ def run_trade_all_customers(session='open'):
         return 0, 0
 
     # Pre-filter: log validator verdicts for visibility
-    verdicts = {}
-    for cid in customers:
-        v, r = _read_validator_verdict(cid)
-        verdicts[cid] = v
-    v_counts = {}
+    verdicts = {cid: _read_validator_verdict(cid)[0] for cid in customers}
+    v_counts: dict = {}
     for v in verdicts.values():
         v_counts[v or 'UNKNOWN'] = v_counts.get(v or 'UNKNOWN', 0) + 1
     v_summary = ', '.join(f"{cnt} {vrd}" for vrd, cnt in sorted(v_counts.items()))
     log.info(f"[DISPATCH] {len(customers)} customers: {v_summary}")
 
-    t0 = time.monotonic()
-    ok = 0
-    fail = 0
+    t0            = time.monotonic()
+    ok            = 0
+    fail          = 0
     timeout_count = 0
 
-    # Parallel execution with pool of MAX_TRADE_PARALLEL
-    pending = list(customers)
-    active = {}   # {customer_id: Popen}
+    pending        = list(customers)
+    active: dict   = {}   # {customer_id: Popen}
+    proc_started: dict = {}  # {customer_id: monotonic start ts}
+
+    def _retire(cid: str, proc, status: str, note: str = "") -> None:
+        """Close streams, count the result, and drop from active.
+        status is 'ok' | 'fail' | 'timeout'."""
+        nonlocal ok, fail, timeout_count
+        try:
+            if proc.stdout: proc.stdout.close()
+            if proc.stderr: proc.stderr.close()
+        except Exception:
+            pass
+        if status == 'ok':
+            ok += 1
+        else:
+            fail += 1
+            if status == 'timeout':
+                timeout_count += 1
+        if note:
+            log.warning(f"[TRADE] {cid[:8]} {status}: {note}")
+        active.pop(cid, None)
+        proc_started.pop(cid, None)
 
     while (pending or active) and not _shutdown_requested:
         # Launch up to MAX_TRADE_PARALLEL
@@ -387,69 +415,67 @@ def run_trade_all_customers(session='open'):
                     cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
                     text=True, cwd=str(_ROOT_DIR / 'agents'),
                 )
-                active[cid] = p
+                active[cid]       = p
+                proc_started[cid] = time.monotonic()
                 vrd = verdicts.get(cid, '?')
                 log.debug(f"[DISPATCH] Launched {cid[:8]} (pid={p.pid}, verdict={vrd})")
             except Exception as e:
                 log.error(f"[DISPATCH] Failed to launch {cid[:8]}: {e}")
                 fail += 1
 
-        # Poll active processes (non-blocking check)
-        finished = []
-        for cid, proc in active.items():
-            ret = proc.poll()
+        # Poll + enforce per-process deadline in one pass.
+        now_mono = time.monotonic()
+        for cid in list(active.keys()):
+            proc = active[cid]
+            ret  = proc.poll()
             if ret is not None:
-                finished.append(cid)
                 if ret == 0:
-                    ok += 1
+                    _retire(cid, proc, 'ok')
                 else:
-                    stderr = (proc.stderr.read() or '')[-200:]
-                    log.warning(f"[TRADE] {cid[:8]} exit={ret}: {stderr[:100]}")
-                    fail += 1
-            else:
-                # Check timeout (300s)
+                    stderr = ''
+                    try:
+                        stderr = (proc.stderr.read() or '')[-200:]
+                    except Exception:
+                        pass
+                    _retire(cid, proc, 'fail', note=f"exit={ret} {stderr[:100]}")
+            elif now_mono - proc_started[cid] > TRADE_INDIVIDUAL_TIMEOUT_SEC:
+                # Individual deadline exceeded — this is the fix for the
+                # 1-hour DISPATCH hangs. Kill, reap, and move on so the pool
+                # stays responsive.
+                log.error(
+                    f"[TRADE] {cid[:8]} exceeded {TRADE_INDIVIDUAL_TIMEOUT_SEC}s — killing"
+                )
                 try:
-                    elapsed_proc = time.monotonic() - t0
-                    # Use per-process start time would be better, but t0 is close enough
-                    # for pool-level timeout awareness
+                    proc.kill()
+                    proc.wait(timeout=5)
                 except Exception:
-                    pass
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                _retire(cid, proc, 'timeout',
+                        note=f"killed after {TRADE_INDIVIDUAL_TIMEOUT_SEC}s")
 
-        for cid in finished:
-            del active[cid]
-
-        # Check for timed-out processes (individual 300s timeout)
-        for cid, proc in list(active.items()):
-            try:
-                proc.wait(timeout=0.1)
-                # If we get here, process finished during wait
-                if proc.returncode == 0:
-                    ok += 1
-                else:
-                    fail += 1
-                del active[cid]
-            except _sp.TimeoutExpired:
-                pass  # still running, that's fine
-
-        # If all slots are full, wait a bit before next poll
-        if active and len(active) >= MAX_TRADE_PARALLEL:
-            time.sleep(1)
-        elif not pending and active:
+        # Short sleep when we have no launches to do, so we don't spin.
+        if active and (not pending or len(active) >= MAX_TRADE_PARALLEL):
             time.sleep(1)
 
-    # Final cleanup: wait for remaining with timeout
-    for cid, proc in active.items():
+    # Final sweep: anything still alive (typically because shutdown was
+    # requested mid-loop) gets a short grace period then a hard kill.
+    for cid in list(active.keys()):
+        proc = active[cid]
         try:
-            proc.wait(timeout=300)
+            proc.wait(timeout=30)
             if proc.returncode == 0:
-                ok += 1
+                _retire(cid, proc, 'ok')
             else:
-                fail += 1
+                _retire(cid, proc, 'fail', note=f"exit={proc.returncode} (shutdown sweep)")
         except _sp.TimeoutExpired:
-            proc.kill()
-            log.error(f"[TRADE] Timeout for {cid[:8]} — killed")
-            timeout_count += 1
-            fail += 1
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            _retire(cid, proc, 'timeout', note="killed in shutdown sweep")
 
     elapsed = time.monotonic() - t0
     log.info(

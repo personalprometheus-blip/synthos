@@ -2513,10 +2513,12 @@ def _handle_screening_requests(db):
         run_id = req['run_id']
 
         try:
+            # EDGAR + Finviz each have per-run caches and fetch_with_retry()
+            # already does exponential backoff on 429/5xx — the 1s courtesy
+            # sleep was just wasted wall time.
             put_call, put_call_avg = fetch_put_call_ratio(ticker)
             insider                = fetch_sec_insider_transactions(ticker, days_back=30)
             volume                 = fetch_volume_profile(ticker)
-            time.sleep(1)  # rate limit courtesy pause
 
             tier, tier_label, cascade, summary = detect_cascade(
                 put_call, put_call_avg, insider, volume
@@ -2788,11 +2790,37 @@ def run():
         )
 
     # ── Phase 3: Pre-trade queue check ───────────────────────────────────
+    # Dedup by ticker — the per-ticker HTTP results (EDGAR insider + Finviz
+    # volume) apply to every QUEUED signal for that ticker, but the tier
+    # annotation still needs to be written to each individual signal row.
+    # A time budget prevents the daemon's 600s hard kill from leaving the
+    # agent with a half-written state (old behavior: 268 signals × sleep(1)
+    # +2 HTTP each → exceeded timeout at ticker 119, blocking the promoter).
+    PHASE3_BUDGET_SEC = 480
     queued_signals = db.get_queued_signals()
     if queued_signals:
-        log.info(f"Checking sentiment for {len(queued_signals)} queued signal(s)")
+        by_ticker: dict = {}
         for sig in queued_signals:
-            ticker = sig['ticker']
+            by_ticker.setdefault(sig['ticker'], []).append(sig)
+        log.info(
+            f"Checking sentiment for {len(queued_signals)} queued signal(s) "
+            f"across {len(by_ticker)} unique ticker(s)"
+        )
+
+        phase3_start  = time.monotonic()
+        processed     = 0
+        stopped_early = False
+
+        for ticker, sigs in by_ticker.items():
+            if time.monotonic() - phase3_start > PHASE3_BUDGET_SEC:
+                log.warning(
+                    f"Phase 3 time budget exceeded ({PHASE3_BUDGET_SEC}s) — "
+                    f"processed {processed}/{len(by_ticker)} tickers, "
+                    f"skipping remainder so the agent can commit cleanly"
+                )
+                stopped_early = True
+                break
+
             # Quick check only — full scan done on open positions
             qs_put_call, qs_put_call_avg = put_call, put_call_avg  # reuse market-wide put/call from Phase 1
             qs_insider_data              = fetch_sec_insider_transactions(ticker, days_back=7)
@@ -2811,23 +2839,50 @@ def run():
                 tier=tier,
                 event_summary=f"PRE-TRADE CHECK: {summary}",
             )
+
+            # Per-signal annotation: same tier/summary from the ticker-level
+            # scan gets stamped onto every individual signal row.
             if tier <= 2:
-                log.warning(
-                    f"Pre-trade warning: {ticker} (signal {sig['id']}) — {tier_label}: {summary}"
-                )
-                # Write finding back to signal so Agent 1 reads it in Gate 5 signal scoring
-                db.annotate_signal_pulse(sig['id'], tier, summary)
-            # Stamp sentiment_score on ALL matching QUEUED signals. Tier → score
-            # is the same mapping used for screening-request fulfillment:
-            # tier 1 (critical bearish) = 0.10, 2 = 0.35, 3 (neutral) = 0.60,
-            # 4 (quiet/bullish) = 0.85. Trader reads this as an optional Gate 5
-            # scoring input (not a hard filter).
+                for sig in sigs:
+                    log.warning(
+                        f"Pre-trade warning: {ticker} (signal {sig['id']}) — "
+                        f"{tier_label}: {summary}"
+                    )
+                    # Write finding back to signal so Agent 1 reads it in Gate 5 signal scoring
+                    db.annotate_signal_pulse(sig['id'], tier, summary)
+
+            # Stamp sentiment_score once per ticker — applies to every
+            # QUEUED/VALIDATED signal for that ticker (ticker-level UPDATE).
+            # Tier → score: tier 1 (critical bearish) = 0.10, 2 = 0.35,
+            # 3 (neutral) = 0.60, 4 (quiet/bullish) = 0.85. Trader reads
+            # this as an optional Gate 5 scoring input (not a hard filter).
             sentiment_score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
             try:
                 db.stamp_signals_sentiment(ticker, sentiment_score)
             except Exception as _e:
                 log.debug(f"sentiment stamp failed for {ticker}: {_e}")
-            time.sleep(1)
+
+            processed += 1
+
+        elapsed = time.monotonic() - phase3_start
+        log.info(
+            f"Phase 3 complete — {processed}/{len(by_ticker)} tickers in {elapsed:.1f}s"
+            + (" (stopped on budget)" if stopped_early else "")
+        )
+
+        # Surface budget exhaustion in the decision log so the promoter's
+        # STUCK rows and the fault detector's bottleneck reading both show
+        # 'sentiment time budget' rather than a silent miss.
+        if stopped_early:
+            try:
+                db.log_signal_decision(
+                    agent='sentiment', action='TIME_BUDGET',
+                    value=f"{processed}/{len(by_ticker)}",
+                    reason=(f"budget {PHASE3_BUDGET_SEC}s exceeded after {elapsed:.0f}s; "
+                            f"remaining tickers left unstamped this cycle")
+                )
+            except Exception as _e:
+                log.debug(f"TIME_BUDGET decision-log write failed: {_e}")
 
     portfolio = db.get_portfolio()
     log.info(
