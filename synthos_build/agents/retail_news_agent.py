@@ -71,6 +71,17 @@ def _db():
 ET                   = ZoneInfo("America/New_York")
 MAX_RETRIES          = 3
 REQUEST_TIMEOUT      = 10
+# (connect_timeout, read_timeout) — mirror the pattern added to
+# AlpacaClient in the trader. Slow connect / DNS fails in 5s instead of
+# eating the full REQUEST_TIMEOUT budget. Read timeout stays at
+# REQUEST_TIMEOUT so streaming/slow-response servers still complete.
+REQUEST_TIMEOUT_TUPLE = (5, REQUEST_TIMEOUT)
+# Circuit breaker on fetch_with_retry — after this many consecutive
+# failures, subsequent calls short-circuit to None for the rest of the
+# run. Prevents the news-agent death march we fixed in the trader:
+# 50 signals × 3 retries × backoff = multi-minute hang when Alpaca News
+# goes slow.
+FETCH_CIRCUIT_BREAKER_N = 3
 
 COMPANY_SUBSCRIPTION = os.environ.get('COMPANY_SUBSCRIPTION', 'true').lower() == 'true'
 MONITOR_URL          = os.environ.get('MONITOR_URL', '').rstrip('/')
@@ -426,38 +437,13 @@ class NewsDecisionLog:
             log.debug(f"NewsDecisionLog.commit failed (non-fatal): {e}")
 
 
-# ── TEMP PATCH: PER-SOURCE DAILY FETCH GUARD ──────────────────────────────
-# Prevents the News agent from hitting any external source more than once per day.
-# Remove this block once a proper rate-limiting layer is in place.
-
-_FETCH_GUARD_EVENT      = "SCOUT_SOURCE_FETCH"
-_FETCH_GUARD_RESET_HOUR = 8    # daily reset at 08:00 ET — fetches before this are discarded
-
-
-def _fetch_guard_cutoff() -> str:
-    """
-    Return the ISO timestamp of today's 08:00 ET reset point.
-    If it's currently before 08:00 ET, use yesterday's 08:00 ET —
-    so the window always covers the period since the last 08:00 reset.
-    """
-    now   = datetime.now(ET)
-    reset = now.replace(hour=_FETCH_GUARD_RESET_HOUR, minute=0, second=0, microsecond=0)
-    if now < reset:
-        reset -= timedelta(days=1)
-    return reset.isoformat()
-
-
-def _source_fetched_recently(source_name: str, db) -> bool:
-    """Return True if this source was fetched since the most recent 08:00 ET reset."""
-    try:
-        cutoff = _fetch_guard_cutoff()
-        rows = db.query(
-            "SELECT id FROM event_log WHERE event_type = ? AND details LIKE ? AND created_at > ? LIMIT 1",
-            (_FETCH_GUARD_EVENT, f"%{source_name}%", cutoff),
-        )
-        return bool(rows)
-    except Exception:
-        return False   # fail open — allow fetch if DB check errors
+# ── INCREMENTAL FETCH CURSORS ─────────────────────────────────────────────
+# News agent was once gated by a once-per-day per-source guard. That
+# approach was replaced by cursor-based incremental fetch (below): we
+# fetch every session and only pull articles newer than the stored
+# cursor. The old guard's helpers
+# (_fetch_guard_cutoff, _source_fetched_recently, _record_source_fetch,
+# _FETCH_GUARD_EVENT, _FETCH_GUARD_RESET_HOUR) were unused and removed.
 
 
 def _get_incremental_start(db, cursor_name: str,
@@ -477,7 +463,8 @@ def _get_incremental_start(db, cursor_name: str,
     """
     try:
         cursor = db.get_fetch_cursor(cursor_name)
-    except Exception:
+    except Exception as e:
+        log.debug(f"get_fetch_cursor({cursor_name}) failed — falling back to default: {e}")
         cursor = None
 
     if cursor and cursor.get('cursor_value'):
@@ -521,7 +508,8 @@ def _advance_cursor(db, cursor_name: str, articles: list) -> int:
     try:
         latest_dt = datetime.fromisoformat(latest.replace('Z', ''))
         next_start = (latest_dt + timedelta(seconds=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    except Exception:
+    except Exception as e:
+        log.debug(f"Cursor {cursor_name}: raw timestamp {latest!r} unparseable — storing as-is: {e}")
         next_start = latest
     try:
         db.set_fetch_cursor(cursor_name, next_start, articles_seen=len(articles))
@@ -531,24 +519,44 @@ def _advance_cursor(db, cursor_name: str, articles: list) -> int:
     return len(articles)
 
 
-def _record_source_fetch(source_name: str, db) -> None:
-    """Record a successful fetch so the guard fires until the next 08:00 ET reset."""
-    try:
-        db.log_event(_FETCH_GUARD_EVENT, agent="News", details=f"source={source_name}")
-    except Exception:
-        pass
-
-
 # ── RETRY HELPERS ─────────────────────────────────────────────────────────
 
+# Circuit-breaker state for fetch_with_retry. Module-level so every caller
+# shares the same breaker within a single news-agent run. Resets on every
+# successful fetch. A fresh python process = fresh breaker, so each
+# scheduled run starts with a clean slate.
+_fetch_consecutive_failures = 0
+_fetch_circuit_open         = False
+
+
+def _fetch_circuit_ok() -> bool:
+    """Short-circuit hook for callers that want to skip work when the
+    upstream is known-unreachable. Matches AlpacaClient._circuit_check
+    in the trader."""
+    return not _fetch_circuit_open
+
+
 def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
-    """Fetch a URL with exponential backoff. Returns response or None."""
+    """Fetch a URL with exponential backoff. Returns response or None.
+
+    Tuple timeout (5s connect, REQUEST_TIMEOUT read) fails fast on slow
+    DNS/SYN but still allows a stalled server to complete a partial
+    response. Module-level circuit breaker opens after
+    FETCH_CIRCUIT_BREAKER_N consecutive failures so a news run can't chew
+    minutes of wall-clock on a flaky upstream.
+    """
+    global _fetch_consecutive_failures, _fetch_circuit_open
+
+    if _fetch_circuit_open:
+        return None
+
     last_error = None
     for attempt in range(max_retries):
         try:
             r = requests.get(url, params=params, headers=headers,
-                             timeout=REQUEST_TIMEOUT)
+                             timeout=REQUEST_TIMEOUT_TUPLE)
             r.raise_for_status()
+            _fetch_consecutive_failures = 0
             return r
         except Exception as e:
             last_error = e
@@ -557,6 +565,17 @@ def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
                 log.warning(f"Fetch failed ({url[:60]}) attempt {attempt+1}/{max_retries}"
                             f" — retrying in {wait}s: {e}")
                 time.sleep(wait)
+
+    # All retries exhausted — tick the breaker and log.
+    _fetch_consecutive_failures += 1
+    if (_fetch_consecutive_failures >= FETCH_CIRCUIT_BREAKER_N
+            and not _fetch_circuit_open):
+        _fetch_circuit_open = True
+        log.warning(
+            f"[CIRCUIT] fetch_with_retry circuit breaker opened after "
+            f"{_fetch_consecutive_failures} consecutive failures — "
+            f"remaining fetches this run will short-circuit to None"
+        )
     log.error(f"Fetch permanently failed after {max_retries} attempts: "
               f"{url[:80]} — {last_error}")
     return None
@@ -597,7 +616,8 @@ def get_staleness(tx_date_str, disc_date_str):
         tx   = datetime.strptime(tx_date_str,   '%Y-%m-%d')
         disc = datetime.strptime(disc_date_str, '%Y-%m-%d')
         days = (disc - tx).days
-    except Exception:
+    except Exception as e:
+        log.debug(f"get_staleness: bad date(s) tx={tx_date_str!r} disc={disc_date_str!r}: {e}")
         return "Unknown", 0.0
 
     if days <= 3:  return "Fresh",   0.0
@@ -641,16 +661,16 @@ def _alpaca_bars(ticker, days):
                "limit": min(days, 365), "feed": "iex"}
     headers = {"APCA-API-KEY-ID": ALPACA_API_KEY,
                 "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
+    r = fetch_with_retry(url, params=params, headers=headers)
+    if r is None:
+        return []
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
-        try:
-            _db().log_api_call('news_agent', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=r.status_code)
-        except Exception:
-            pass
-        if r.status_code == 200:
-            return r.json().get("bars", [])
+        _db().log_api_call('news_agent', f'/v2/stocks/{ticker}/bars',
+                           'GET', 'alpaca_data', status_code=r.status_code)
     except Exception as e:
-        log.debug(f"Alpaca bars fetch failed ({ticker}): {e}")
+        log.debug(f"api_call log failed for {ticker} bars: {e}")
+    if r.status_code == 200:
+        return r.json().get("bars", [])
     return []
 
 
@@ -846,21 +866,18 @@ def fetch_alpaca_news_historical(
     while pages_fetched < max_pages:
         if page_token:
             params["page_token"] = page_token
-        try:
-            r = requests.get(
-                _ALPACA_NEWS_URL,
-                params=params,
-                headers=_ALPACA_HEADERS(),
-                timeout=REQUEST_TIMEOUT,
-            )
-            try:
-                _db().log_api_call('news_agent', '/v1beta1/news', 'GET', 'alpaca_news', status_code=r.status_code)
-            except Exception:
-                pass
-            r.raise_for_status()
-        except Exception as exc:
-            log.error(f"Alpaca news fetch error (page {pages_fetched + 1}): {exc}")
+        # Route through fetch_with_retry so the circuit breaker and
+        # tuple-timeout both apply — previously this path bypassed them.
+        r = fetch_with_retry(_ALPACA_NEWS_URL, params=params,
+                             headers=_ALPACA_HEADERS())
+        if r is None:
+            log.error(f"Alpaca news fetch failed (page {pages_fetched + 1}) — stopping pagination")
             break
+        try:
+            _db().log_api_call('news_agent', '/v1beta1/news', 'GET',
+                               'alpaca_news', status_code=r.status_code)
+        except Exception as e:
+            log.debug(f"api_call log failed for alpaca news: {e}")
 
         data       = r.json()
         articles   = data.get("news", [])
@@ -919,8 +936,10 @@ def fetch_and_store_alpaca_display_news(db) -> int:
             """).fetchall()
         stored_keys = [re.sub(r'[^a-z0-9 ]', '', (r[0] or "").lower()).strip()
                        for r in rows if r[0]]
-    except Exception:
-        pass
+    except Exception as e:
+        # If dedup lookup fails we'll re-store duplicates this run —
+        # surface the reason so we notice if it starts happening.
+        log.debug(f"display-dedup lookup failed (will allow duplicates this run): {e}")
 
     # Incremental via fetch_cursors — "alpaca_news_display" tracks the most
     # recent display headline we've stored. First-run fallback: last 6 h.
@@ -992,8 +1011,8 @@ def announce_for_interrogation(signal_id, ticker, price_summary_json):
         reply_sock.settimeout(INTERROGATION_TIMEOUT)
         try:
             reply_sock.bind(('', INTERROGATION_PORT + 1))
-        except OSError:
-            pass
+        except OSError as e:
+            log.debug(f"[INTERROGATION] reply_sock bind failed — using ephemeral port: {e}")
         sock.sendto(message, ('<broadcast>', INTERROGATION_PORT))
         log.info(f"[INTERROGATION] Announced {ticker} (signal {signal_id})"
                  f" — waiting {INTERROGATION_TIMEOUT}s for peer")
@@ -1007,7 +1026,14 @@ def announce_for_interrogation(signal_id, ticker, price_summary_json):
                     log.info(f"[INTERROGATION] Peer {addr[0]} acknowledged — VALIDATED")
                     response_received = True
                     break
-            except (socket.timeout, Exception):
+            # Narrowed from bare Exception to the expected recv failure modes.
+            # OSError covers socket-level issues (closed, reset) that are
+            # genuinely recoverable by exiting the wait loop. JSONDecodeError
+            # covers peers sending malformed payloads. Anything else bubbles
+            # up to the outer except for visibility instead of being silently
+            # treated as "no peer responded."
+            except (socket.timeout, OSError, json.JSONDecodeError) as e:
+                log.debug(f"[INTERROGATION] recv ended early: {e}")
                 break
     except Exception as e:
         log.debug(f"[INTERROGATION] Socket error (non-fatal): {e}")
@@ -1016,20 +1042,39 @@ def announce_for_interrogation(signal_id, ticker, price_summary_json):
             try:
                 if s:
                     s.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"[INTERROGATION] socket close failed: {e}")
     if not response_received:
         log.info(f"[INTERROGATION] No peer response for {ticker} — UNVALIDATED")
     return response_received
 
 
 # ── COMPANY POST ──────────────────────────────────────────────────────────
+# Circuit-breaker state. Same shape as the fetch_with_retry breaker so a
+# flaky company node can't silently eat wall-clock on every signal — one
+# log.warning names the problem, subsequent posts no-op until next run.
+_company_post_failures    = 0
+_company_post_circuit_open = False
+COMPANY_POST_CIRCUIT_BREAKER_N = 3
+
 
 def post_to_company_pi(ticker, signal_id, congress_member, adjusted_score,
                        headline, price_summary, interrogation_status):
-    """Fire-and-forget POST of signal metadata to company Pi news intake."""
+    """Fire-and-forget POST of signal metadata to company Pi news intake.
+
+    Previously swallowed every error silently — a dead company node could
+    have cost us visibility into every signal for days with nobody
+    noticing. Now: one WARNING on first failure, one WARNING on circuit
+    open, complete silence after that until the run ends. A run summary
+    is logged at end-of-pipeline if non-zero (TODO: wire into run() tail).
+    """
+    global _company_post_failures, _company_post_circuit_open
+
     if not COMPANY_SUBSCRIPTION or not MONITOR_URL:
         return
+    if _company_post_circuit_open:
+        return
+
     payload = {
         "event": "SCOUT_SIGNAL", "ticker": ticker, "signal_id": signal_id,
         "congress_member": congress_member, "adjusted_score": adjusted_score,
@@ -1039,14 +1084,42 @@ def post_to_company_pi(ticker, signal_id, congress_member, adjusted_score,
     }
     try:
         _r = requests.post(f"{MONITOR_URL}/api/news-feed", json=payload,
-                           headers={"X-Token": MONITOR_TOKEN}, timeout=3)
+                           headers={"X-Token": MONITOR_TOKEN}, timeout=(3, 3))
         try:
-            _db().log_api_call('news_agent', '/api/news-feed', 'POST', 'company_monitor', status_code=_r.status_code)
-        except Exception:
-            pass
-        log.debug(f"[COMPANY] Metadata posted for {ticker} signal {signal_id}")
+            _db().log_api_call('news_agent', '/api/news-feed', 'POST',
+                               'company_monitor', status_code=_r.status_code)
+        except Exception as e:
+            log.debug(f"api_call log failed for company post: {e}")
+
+        # Treat non-2xx as a failure too — a 500 from the company node is
+        # just as blind as a network error for our purposes.
+        if 200 <= _r.status_code < 300:
+            _company_post_failures = 0
+            log.debug(f"[COMPANY] Metadata posted for {ticker} signal {signal_id}")
+        else:
+            _record_company_post_failure(
+                f"HTTP {_r.status_code} from {MONITOR_URL}/api/news-feed"
+            )
     except Exception as e:
-        log.debug(f"[COMPANY] Post failed (non-fatal): {e}")
+        _record_company_post_failure(str(e))
+
+
+def _record_company_post_failure(detail: str) -> None:
+    """Increment the failure counter, log WARNING on first failure of a
+    run, and open the breaker after COMPANY_POST_CIRCUIT_BREAKER_N
+    consecutive failures. Silent otherwise."""
+    global _company_post_failures, _company_post_circuit_open
+    _company_post_failures += 1
+    if _company_post_failures == 1:
+        log.warning(f"[COMPANY] First post failure this run — {detail}")
+    if (_company_post_failures >= COMPANY_POST_CIRCUIT_BREAKER_N
+            and not _company_post_circuit_open):
+        _company_post_circuit_open = True
+        log.warning(
+            f"[COMPANY] Circuit breaker opened after "
+            f"{_company_post_failures} consecutive failures — remaining "
+            f"posts this run will short-circuit silently"
+        )
 
 
 # ── SPX BENCHMARK HELPERS ─────────────────────────────────────────────────
@@ -1569,7 +1642,8 @@ def gate8_novelty(item, sentiment, ctrl, ndl, db, seen_headlines, state):
         db_headlines = [r["headline"] for r in rows if r.get("headline")]
         db_sims      = [_jaccard(headline, h) for h in db_headlines]
         max_db_sim   = max(db_sims, default=0.0)
-    except Exception:
+    except Exception as e:
+        log.debug(f"novelty DB headline lookup failed — treating as novel: {e}")
         max_db_sim = 0.0
 
     max_sim       = max(max_batch_sim, max_db_sim)
@@ -1776,8 +1850,8 @@ def gate12_confirmation(item, ctrl, ndl, db, state):
                     WHERE ticker = ? AND created_at > ?
                 """, (ticker, cutoff)).fetchone()
             source_count = (row["cnt"] if row else 0) + 1
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"confirmation-count DB lookup failed for {ticker}: {e}")
 
     confirmed = source_count >= ctrl.MIN_CONFIRMATIONS
 
@@ -1920,8 +1994,8 @@ def gate14_crowding(item, ctrl, ndl, db, state):
                 h_tokens = set(_tokenize(row["headline"]))
                 if len(tokens & h_tokens) >= 3:
                     cluster_volume += 1
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug(f"crowding cluster-volume lookup failed: {e}")
 
     exhausted_threshold = int(ctrl.EXTREME_ATTENTION_MULT * ctrl.CLUSTER_VOL_THRESHOLD)
 
@@ -2361,8 +2435,8 @@ def gate20_evaluation(item, action, ctrl, ndl, db, state):
                     LIMIT 1
                 """, (ticker, datetime.now(ET).isoformat())).fetchone()
             ticker_active = row is not None
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"active-ticker lookup failed for {ticker}: {e}")
 
     # If same article type has historically been noisy, note it
     # TODO: DATA_DEPENDENCY — event_class accuracy tracking not yet implemented
@@ -2771,8 +2845,8 @@ def run(session="market"):
                     },
                     source = "ALPACA",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"stale-signal insert skipped: {e}")
             skipped += 1
             continue
         ndl.ticker = ticker
@@ -2843,8 +2917,8 @@ def run(session="market"):
                     },
                     source = "ALPACA",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug(f"timing-discard insert skipped: {e}")
             ndl.decide("DISCARD", "NOISE", "gate13_timing: article too old / not tradeable")
             ndl.commit(db)
             skipped += 1
