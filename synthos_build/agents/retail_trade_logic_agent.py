@@ -2799,6 +2799,10 @@ if __name__ == '__main__':
     parser.add_argument('--session', choices=['open', 'midday', 'close', 'hourly'], default='hourly')
     parser.add_argument('--customer-id', default=None,
                         help='Customer UUID — routes DB and Alpaca credentials to per-customer sources')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Force MANAGED mode — trades queue as pending_approvals instead '
+                             'of executing. Used by retail_dry_run.py so pipeline tests do '
+                             'not submit real paper orders on AUTOMATIC customers.')
     args = parser.parse_args()
 
     # ── Multi-tenant: load per-customer credentials if --customer-id is given ──
@@ -2829,6 +2833,16 @@ if __name__ == '__main__':
             sys.exit(1)  # fail closed — do not fall back to global key
         # Apply per-customer trading parameters from customer_settings DB
         _apply_customer_settings()
+
+    # ── Dry-run: force MANAGED so trades queue for approval, not execute ──
+    # Applied AFTER _apply_customer_settings() so it overrides the customer's
+    # configured mode. Trades will be written to pending_approvals for the
+    # admin to inspect/approve, instead of being submitted to Alpaca.
+    if args.dry_run:
+        if OPERATING_MODE != 'MANAGED':
+            log.info(f"--dry-run: overriding OPERATING_MODE {OPERATING_MODE} → MANAGED "
+                     f"(trades will queue for approval, no paper orders submitted)")
+        OPERATING_MODE = 'MANAGED'
 
     if not ALPACA_API_KEY:
         log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")
