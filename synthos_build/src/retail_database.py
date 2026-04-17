@@ -1217,19 +1217,25 @@ class DB:
     # processes. No agent reads another agent's tag as a hard filter — the
     # trader uses these as Gate 5 scoring inputs only.
 
+    # All stamp_signals_* methods update both QUEUED and VALIDATED rows so a
+    # promoted signal's context stays fresh if the agent re-runs during its
+    # validity window. Terminal statuses (ACTED_ON, EVALUATED, EXPIRED) are
+    # never re-stamped.
+    _STAMPABLE_STATUSES = "('QUEUED','VALIDATED')"
+
     def stamp_signals_sentiment(self, ticker, sentiment_score):
-        """Sentiment agent marks all QUEUED signals for `ticker` as evaluated,
-        attaching its numeric sentiment score (0.0-1.0). Returns count stamped."""
+        """Sentiment agent attaches a numeric score (0.0-1.0) and timestamp to
+        all in-flight signals for `ticker`. Returns count stamped."""
         with self.conn() as c:
             result = c.execute(
-                "UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
-                "WHERE ticker=? AND status IN ('QUEUED','VALIDATED')",
+                f"UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
+                f"WHERE ticker=? AND status IN {self._STAMPABLE_STATUSES}",
                 (float(sentiment_score), self.now(), ticker.upper())
             )
             return result.rowcount
 
     def stamp_signals_screener(self, tickers):
-        """Sector screener marks all QUEUED signals for the given tickers as
+        """Sector screener marks all in-flight signals for the given tickers as
         screener-evaluated. Returns count stamped."""
         if not tickers:
             return 0
@@ -1237,45 +1243,44 @@ class DB:
             placeholders = ','.join('?' * len(tickers))
             result = c.execute(
                 f"UPDATE signals SET screener_evaluated_at=? "
-                f"WHERE ticker IN ({placeholders}) AND status IN ('QUEUED','VALIDATED')",
+                f"WHERE ticker IN ({placeholders}) AND status IN {self._STAMPABLE_STATUSES}",
                 (self.now(), *[t.upper() for t in tickers])
             )
             return result.rowcount
 
     def stamp_signals_macro(self, regime_label):
         """Macro regime agent snapshots the current market regime onto all
-        QUEUED signals. One SQL call, stamps every queued signal at once."""
+        in-flight signals. One SQL call; O(1) regardless of queue size.
+        Stamp format: 'timestamp|regime_label'."""
         with self.conn() as c:
-            stamp = f"{self.now()}|{regime_label}"
             result = c.execute(
-                "UPDATE signals SET macro_regime_at_validation=? "
-                "WHERE status IN ('QUEUED','VALIDATED')",
-                (stamp,)
+                f"UPDATE signals SET macro_regime_at_validation=? "
+                f"WHERE status IN {self._STAMPABLE_STATUSES}",
+                (f"{self.now()}|{regime_label}",)
             )
             return result.rowcount
 
     def stamp_signals_market_state(self, state_label):
         """Market state agent snapshots the current aggregate state onto all
-        QUEUED signals."""
+        in-flight signals. Stamp format: 'timestamp|state_label'."""
         with self.conn() as c:
-            stamp = f"{self.now()}|{state_label}"
             result = c.execute(
-                "UPDATE signals SET market_state_at_validation=? "
-                "WHERE status='QUEUED'",
-                (stamp,)
+                f"UPDATE signals SET market_state_at_validation=? "
+                f"WHERE status IN {self._STAMPABLE_STATUSES}",
+                (f"{self.now()}|{state_label}",)
             )
             return result.rowcount
 
     def stamp_signals_validator(self, verdict='OK'):
-        """Validator stack stamps completion of its pass on all QUEUED
+        """Validator stack stamps completion of its pass on all in-flight
         signals. Called once per pipeline cycle (not per-customer) from the
-        daemon, immediately before the promoter step."""
+        daemon, immediately before the promoter step.
+        Stamp format: 'timestamp|verdict'."""
         with self.conn() as c:
-            stamp = f"{self.now()}|{verdict}"
             result = c.execute(
-                "UPDATE signals SET validator_stamped_at=? "
-                "WHERE status IN ('QUEUED','VALIDATED')",
-                (stamp,)
+                f"UPDATE signals SET validator_stamped_at=? "
+                f"WHERE status IN {self._STAMPABLE_STATUSES}",
+                (f"{self.now()}|{verdict}",)
             )
             return result.rowcount
 

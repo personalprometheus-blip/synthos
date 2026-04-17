@@ -9358,10 +9358,13 @@ def api_agent_pulse():
         shared = _shared_db()
         lock = get_wave_status()
 
-        # Signal queue from shared DB (all customers see same intel)
+        # Signal queue from shared DB (all customers see same intel).
+        # `queued` reported is total in-flight (QUEUED awaiting validation +
+        # VALIDATED awaiting trader action) — matches user expectation of
+        # "signals currently in the pipeline."
         with shared.conn() as c:
-            queued = c.execute("SELECT COUNT(*) FROM signals WHERE status='QUEUED'").fetchone()[0]
-            watching = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','WATCHING')").fetchone()[0]
+            queued = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','VALIDATED')").fetchone()[0]
+            watching = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','VALIDATED','WATCHING')").fetchone()[0]
 
         # Last 8 agent events from customer DB
         with db.conn() as c:

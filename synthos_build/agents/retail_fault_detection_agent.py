@@ -297,11 +297,13 @@ def gate2_data_freshness(report: FaultReport, db):
                 message="No live price data found"
             ))
 
-    # 2b. Queued signals freshness
+    # 2b. In-flight signal freshness — any signal that hasn't reached a
+    # terminal status (QUEUED awaiting validation, or VALIDATED awaiting
+    # trader action) is "in flight" and eligible for staleness flagging.
     with db.conn() as c:
         stale_signals = c.execute(
             "SELECT COUNT(*) as cnt FROM signals "
-            "WHERE status='QUEUED' AND created_at < ?",
+            "WHERE status IN ('QUEUED','VALIDATED') AND created_at < ?",
             ((now - timedelta(hours=SIGNAL_STALE_HOURS)).strftime('%Y-%m-%d %H:%M:%S'),)
         ).fetchone()
 
@@ -311,7 +313,7 @@ def gate2_data_freshness(report: FaultReport, db):
             gate="GATE2_FRESHNESS",
             severity=Severity.INFO,
             code="STALE_SIGNALS",
-            message=f"{stale_count} queued signal(s) older than {SIGNAL_STALE_HOURS}h",
+            message=f"{stale_count} in-flight signal(s) older than {SIGNAL_STALE_HOURS}h",
             detail="May need expiry or manual review"
         ))
 

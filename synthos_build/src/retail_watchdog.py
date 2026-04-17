@@ -757,8 +757,11 @@ def collect_system_snapshot() -> dict:
             snapshot["open_positions"] = conn.execute(
                 "SELECT COUNT(*) FROM positions WHERE status='OPEN'"
             ).fetchone()[0]
+            # Count in-flight signals (QUEUED awaiting validation +
+            # VALIDATED awaiting trader action). Preserves the "queued_signals"
+            # key for schema compatibility with existing snapshot consumers.
             snapshot["queued_signals"] = conn.execute(
-                "SELECT COUNT(*) FROM signals WHERE status='QUEUED'"
+                "SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','VALIDATED')"
             ).fetchone()[0]
             cash = conn.execute(
                 "SELECT cash FROM portfolio ORDER BY id DESC LIMIT 1"
