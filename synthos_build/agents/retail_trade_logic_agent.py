@@ -2778,18 +2778,30 @@ def run(session="open"):
                               portfolio, tradeable, session, now)
 
         if can_enter:
-            # Expire stale signals (>72h old — data decays fast). Covers both
-            # QUEUED (never validated) and VALIDATED (validated but not acted
-            # on within the window).
+            # Expire stale signals on different windows per status:
+            #   QUEUED     — 72h (never made it through validation; keep
+            #                around long enough for a slow agent to catch up)
+            #   VALIDATED  — 12h (news-driven trade signals decay in hours;
+            #                anything validated but unacted after 12h is
+            #                noise, and letting it linger pushes the cap's
+            #                quota against younger, still-actionable signals)
             try:
                 with _shared_db().conn() as _c:
-                    _expired = _c.execute(
+                    _q_expired = _c.execute(
                         "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
-                        "WHERE status IN ('QUEUED','VALIDATED') "
+                        "WHERE status='QUEUED' "
                         "AND created_at < datetime('now', '-3 days')"
                     ).rowcount
-                    if _expired:
-                        log.info(f"[SIGNALS] Expired {_expired} stale signal(s) (>72h)")
+                    _v_expired = _c.execute(
+                        "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
+                        "WHERE status='VALIDATED' "
+                        "AND created_at < datetime('now', '-12 hours')"
+                    ).rowcount
+                    if _q_expired or _v_expired:
+                        log.info(
+                            f"[SIGNALS] Expired {_q_expired} QUEUED (>72h) + "
+                            f"{_v_expired} VALIDATED (>12h) stale signal(s)"
+                        )
             except Exception:
                 pass
 

@@ -1496,17 +1496,69 @@ class DB:
         except Exception as e:
             log.debug(f"log_signal_decision failed (non-fatal): {e}")
 
-    def get_validated_signals(self):
+    # ── VALIDATED POOL CAP ─────────────────────────────────────────────────
+    # Tier-weighted quotas prevent a low-quality signal flood from crowding
+    # out the trader's time on high-conviction trades AND cap per-trader
+    # runtime at roughly N signals * ~0.5s/signal ≈ 50s of evaluation work.
+    # 60+25+10+5 = 100 (the user-chosen global cap). Tier 1 gets the most
+    # slots because those are the highest-conviction signals (political
+    # trades, SEC filings); tier 4 gets a few slots so occasional weak
+    # signals still have a path to execution but can't flood the pool.
+    VALIDATED_TIER_QUOTAS = {1: 60, 2: 25, 3: 10, 4: 5}
+
+    def get_validated_signals(self, tier_quotas=None):
         """Signals that have passed the full validation chain and are ready
         for the trader. Trader reads ONLY from this view — the unvalidated
-        QUEUED pool is invisible."""
+        QUEUED pool is invisible.
+
+        Applies tier-weighted quotas (VALIDATED_TIER_QUOTAS) so a flood of
+        low-tier signals can't dilute the trader's evaluation budget away
+        from high-conviction trades. Pass tier_quotas={} to disable the
+        cap (returns the full unfiltered pool — useful for portal views
+        and tests)."""
+        quotas = self.VALIDATED_TIER_QUOTAS if tier_quotas is None else tier_quotas
         with self.conn() as c:
             rows = c.execute("""
                 SELECT * FROM signals
                 WHERE status='VALIDATED'
                 ORDER BY source_tier ASC, created_at ASC
             """).fetchall()
+
+        # No cap requested, or no signals at all — fast path
+        if not quotas or not rows:
             return [dict(r) for r in rows]
+
+        # Apply per-tier quotas. Input is already sorted (tier ASC, then
+        # oldest first within a tier) so taking the first N per tier yields
+        # the highest-conviction, oldest-acting signals in each tier.
+        kept = []
+        used = {t: 0 for t in quotas}
+        dropped = {t: 0 for t in quotas}
+        unknown_dropped = 0
+        for r in rows:
+            tier = r['source_tier']
+            if tier not in quotas:
+                # Unknown tier — don't trust it into the pool. Logged below.
+                unknown_dropped += 1
+                continue
+            if used[tier] < quotas[tier]:
+                kept.append(dict(r))
+                used[tier] += 1
+            else:
+                dropped[tier] += 1
+
+        # Only log when the cap actually kicked in. Normal runs with a
+        # small validated pool will produce zero extra log lines.
+        if any(dropped.values()) or unknown_dropped:
+            drop_summary = ' '.join(f"t{t}={dropped[t]}" for t in sorted(dropped))
+            log.info(
+                f"[SIGNAL_POOL] {len(rows)} validated available, capped to "
+                f"{len(kept)} via tier quotas "
+                f"(quotas: {quotas}, dropped: {drop_summary}"
+                + (f", unknown_tier={unknown_dropped}" if unknown_dropped else "")
+                + ")"
+            )
+        return kept
 
     def queue_signal_for_trader(self, signal_id):
         """Mark signal as QUEUED and create handshake record."""
