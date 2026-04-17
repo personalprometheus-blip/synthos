@@ -671,6 +671,10 @@ class DB:
                 confidence  TEXT,
                 updated_at  TEXT NOT NULL)""",
             "CREATE INDEX IF NOT EXISTS idx_ticker_sectors_updated ON ticker_sectors(updated_at)",
+            # v3.3 — notification deduplication (suppress repeated 'Account Ready',
+            # 'Session Complete', etc.). Null dedup_key = legacy blind insert.
+            "ALTER TABLE notifications ADD COLUMN dedup_key TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_notif_dedup ON notifications(dedup_key, created_at DESC)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -2335,21 +2339,54 @@ class DB:
 
     # ── NOTIFICATIONS ─────────────────────────────────────────────────────
 
-    def add_notification(self, category, title, body='', meta=None):
-        """Insert a notification. Returns the new notification ID."""
+    # Categories considered "high-signal" — surfaced in the dashboard widget
+    # and the bell dropdown. All other categories go to the /notifications
+    # full-page archive only (routine 'system' / 'daily' status pings).
+    WIDGET_CATEGORIES = ('trade', 'alert', 'account', 'approval')
+
+    def add_notification(self, category, title, body='', meta=None,
+                         dedup_key=None, dedup_window_minutes=None):
+        """Insert a notification. Returns the new ID, or the existing ID if a
+        duplicate was suppressed via dedup_key.
+
+        dedup_key           — if set, suppresses inserts that collide on this key.
+                              Typical values: 'account_ready_bootstrap',
+                              'session_complete:open:2026-04-16'.
+        dedup_window_minutes — if None, dedup is global (fire once ever).
+                              If set, dedup only within the trailing window.
+        """
         import json as _json
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         meta_str = _json.dumps(meta) if meta else None
         with self.conn() as c:
+            if dedup_key:
+                sql = "SELECT id FROM notifications WHERE dedup_key=?"
+                params = [dedup_key]
+                if dedup_window_minutes:
+                    cutoff = (datetime.now()
+                              - timedelta(minutes=dedup_window_minutes)
+                              ).strftime('%Y-%m-%d %H:%M:%S')
+                    sql += " AND created_at >= ?"
+                    params.append(cutoff)
+                sql += " ORDER BY created_at DESC LIMIT 1"
+                existing = c.execute(sql, params).fetchone()
+                if existing:
+                    return existing['id']  # suppressed — caller should treat as success
+
             c.execute(
-                "INSERT INTO notifications (category, title, body, created_at, meta) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (category, title, body, now, meta_str)
+                "INSERT INTO notifications (category, title, body, created_at, meta, dedup_key) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (category, title, body, now, meta_str, dedup_key)
             )
             return c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    def get_notifications(self, limit=50, unread_only=False, category=None):
-        """Fetch notifications, newest first."""
+    def get_notifications(self, limit=50, unread_only=False, category=None,
+                          widget_only=False, offset=0):
+        """Fetch notifications, newest first.
+
+        widget_only — restrict to WIDGET_CATEGORIES (dashboard + bell dropdown).
+        offset      — pagination support for the /notifications full page.
+        """
         import json as _json
         sql = "SELECT * FROM notifications WHERE 1=1"
         params = []
@@ -2358,8 +2395,12 @@ class DB:
         if category:
             sql += " AND category = ?"
             params.append(category)
-        sql += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+        elif widget_only:
+            placeholders = ','.join('?' * len(self.WIDGET_CATEGORIES))
+            sql += f" AND category IN ({placeholders})"
+            params.extend(self.WIDGET_CATEGORIES)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         with self.conn() as c:
             rows = c.execute(sql, params).fetchall()
         result = []
@@ -2373,12 +2414,34 @@ class DB:
             result.append(d)
         return result
 
-    def get_unread_count(self):
-        """Fast unread notification count."""
+    def count_notifications(self, unread_only=False, category=None, widget_only=False):
+        """Total row count matching the same filters as get_notifications —
+        used by the full-page view for pagination."""
+        sql = "SELECT COUNT(*) FROM notifications WHERE 1=1"
+        params = []
+        if unread_only:
+            sql += " AND is_read = 0"
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+        elif widget_only:
+            placeholders = ','.join('?' * len(self.WIDGET_CATEGORIES))
+            sql += f" AND category IN ({placeholders})"
+            params.extend(self.WIDGET_CATEGORIES)
         with self.conn() as c:
-            return c.execute(
-                "SELECT COUNT(*) FROM notifications WHERE is_read = 0"
-            ).fetchone()[0]
+            return c.execute(sql, params).fetchone()[0]
+
+    def get_unread_count(self, widget_only=False):
+        """Fast unread notification count.
+        widget_only — restrict to WIDGET_CATEGORIES (what the bell actually shows)."""
+        sql = "SELECT COUNT(*) FROM notifications WHERE is_read = 0"
+        params = []
+        if widget_only:
+            placeholders = ','.join('?' * len(self.WIDGET_CATEGORIES))
+            sql += f" AND category IN ({placeholders})"
+            params.extend(self.WIDGET_CATEGORIES)
+        with self.conn() as c:
+            return c.execute(sql, params).fetchone()[0]
 
     def mark_notification_read(self, notification_id):
         """Mark a single notification as read."""

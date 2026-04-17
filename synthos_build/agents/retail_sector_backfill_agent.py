@@ -251,7 +251,10 @@ def run(dry_run=False, single_ticker=None):
         )
         return 0
     finally:
-        release_agent_lock('retail_sector_backfill_agent')
+        try:
+            release_agent_lock()
+        except Exception:
+            pass
 
 
 def main():

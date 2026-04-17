@@ -1464,21 +1464,39 @@ def api_invite_codes():
 @app.route('/api/notifications', methods=['GET'])
 @login_required
 def api_notifications():
-    """Fetch notifications for the current customer."""
+    """Fetch notifications for the current customer.
+
+    Query params:
+      widget_only=1  — dashboard widget / bell dropdown view; hides routine
+                       'daily' / 'system' status pings.
+      category=X     — explicit single-category filter (overrides widget_only).
+      offset=N       — pagination (used by /notifications full-page view).
+    """
     db = _customer_db()
     unread_only = request.args.get('unread_only') == '1'
+    widget_only = request.args.get('widget_only') == '1'
     category = request.args.get('category')
     limit = min(int(request.args.get('limit', 50)), 200)
-    notifs = db.get_notifications(limit=limit, unread_only=unread_only, category=category)
-    return jsonify({"notifications": notifs})
+    offset = max(int(request.args.get('offset', 0)), 0)
+    notifs = db.get_notifications(
+        limit=limit, unread_only=unread_only, category=category,
+        widget_only=widget_only, offset=offset,
+    )
+    total = db.count_notifications(
+        unread_only=unread_only, category=category, widget_only=widget_only,
+    )
+    return jsonify({"notifications": notifs, "total": total,
+                    "offset": offset, "limit": limit})
 
 
 @app.route('/api/notifications/unread-count', methods=['GET'])
 @login_required
 def api_notifications_unread_count():
-    """Lightweight unread count for badge polling."""
+    """Lightweight unread count for badge polling.
+    widget_only=1 restricts to the categories the bell actually displays."""
     db = _customer_db()
-    count = db.get_unread_count()
+    widget_only = request.args.get('widget_only') == '1'
+    count = db.get_unread_count(widget_only=widget_only)
     return jsonify({"count": count})
 
 
@@ -1546,6 +1564,187 @@ def api_notifications_broadcast():
     log.info(f"Broadcast notification to {sent} customers: {title[:60]}")
     return jsonify({"ok": True, "sent": sent})
 
+
+@app.route('/notifications', methods=['GET'])
+@login_required
+def notifications_page():
+    """Full-page notification archive. Shows all categories (including the
+    routine 'daily' / 'system' pings filtered out of the dashboard widget and
+    bell dropdown). Supports category filter, unread-only toggle, pagination."""
+    return render_template_string(NOTIFICATIONS_PAGE_HTML)
+
+
+NOTIFICATIONS_PAGE_HTML = r"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><title>Notifications · Synthos</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --bg:#0a0b0f; --panel:rgba(20,22,30,0.7); --text:#e8ebf2; --muted:#9ba0ad;
+  --dim:#5a5f6b; --border:rgba(255,255,255,0.08); --teal:#00f5d4; --signal:#f5a623;
+  --violet:#7b61ff; --pink:#ff4b6e; --mono:'SF Mono','Menlo',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;min-height:100vh;padding:32px 16px}
+.wrap{max-width:880px;margin:0 auto}
+header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+h1{font-size:22px;font-weight:700;letter-spacing:-0.01em}
+.back{color:var(--teal);text-decoration:none;font-size:12px;font-weight:600}
+.back:hover{color:var(--signal)}
+.glass{background:var(--panel);border:1px solid var(--border);border-radius:12px;backdrop-filter:blur(12px)}
+.filters{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
+.filter-btn{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:600;letter-spacing:0.04em;padding:6px 12px;border-radius:99px;cursor:pointer;transition:all 0.15s}
+.filter-btn:hover{color:var(--text);border-color:rgba(255,255,255,0.16)}
+.filter-btn.active{background:rgba(0,245,212,0.08);border-color:var(--teal);color:var(--teal)}
+.mark-read{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:10px;padding:6px 10px;border-radius:99px;cursor:pointer}
+.mark-read:hover{color:var(--signal);border-color:var(--signal)}
+.list{padding:4px 0}
+.item{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;cursor:pointer;transition:background 0.1s}
+.item:hover{background:rgba(255,255,255,0.02)}
+.item:last-child{border-bottom:none}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--signal);flex-shrink:0;margin-top:7px;box-shadow:0 0 6px rgba(245,166,35,0.3)}
+.dot.read{background:transparent}
+.body{flex:1;min-width:0}
+.title{font-size:13px;font-weight:600;color:var(--text)}
+.preview{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}
+.meta{display:flex;gap:8px;align-items:center;margin-top:6px}
+.pill{font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px;border-radius:99px}
+.pill.system{background:rgba(123,97,255,0.1);color:var(--violet)}
+.pill.daily{background:rgba(0,245,212,0.08);color:var(--teal)}
+.pill.account{background:rgba(245,166,35,0.08);color:var(--signal)}
+.pill.trade{background:rgba(0,245,212,0.08);color:var(--teal)}
+.pill.alert{background:rgba(255,75,110,0.08);color:var(--pink)}
+.pill.approval{background:rgba(245,166,35,0.12);color:var(--signal)}
+.time{font-size:9px;color:var(--dim);font-family:var(--mono)}
+.empty{text-align:center;padding:48px 16px;color:var(--dim);font-size:12px}
+.pager{padding:16px;display:flex;gap:10px;align-items:center;justify-content:center;border-top:1px solid var(--border)}
+.pager button{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:6px 14px;border-radius:99px;cursor:pointer}
+.pager button:disabled{opacity:0.3;cursor:not-allowed}
+.pager button:not(:disabled):hover{color:var(--teal);border-color:var(--teal)}
+.pager-status{font-size:11px;color:var(--dim);font-family:var(--mono)}
+</style></head>
+<body><div class="wrap">
+<header>
+  <a class="back" href="/">← Dashboard</a>
+  <h1>Notifications</h1>
+</header>
+<div class="glass">
+  <div class="filters">
+    <button class="filter-btn active" data-cat="" onclick="setFilter(this,'')">All</button>
+    <button class="filter-btn" data-cat="trade" onclick="setFilter(this,'trade')">Trades</button>
+    <button class="filter-btn" data-cat="alert" onclick="setFilter(this,'alert')">Alerts</button>
+    <button class="filter-btn" data-cat="account" onclick="setFilter(this,'account')">Account</button>
+    <button class="filter-btn" data-cat="daily" onclick="setFilter(this,'daily')">Sessions</button>
+    <button class="filter-btn" data-cat="system" onclick="setFilter(this,'system')">System</button>
+    <button class="filter-btn" id="unread-toggle" onclick="toggleUnread(this)">Unread only</button>
+    <button class="mark-read" onclick="markAllRead()">Mark all read</button>
+  </div>
+  <div class="list" id="list"><div class="empty">Loading…</div></div>
+  <div class="pager" id="pager" style="display:none">
+    <button id="prev" onclick="prevPage()">← Prev</button>
+    <span class="pager-status" id="pager-status">—</span>
+    <button id="next" onclick="nextPage()">Next →</button>
+  </div>
+</div>
+</div>
+<script>
+var _cat = '';
+var _unread = false;
+var _offset = 0;
+var _limit = 25;
+
+function _esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function _relTime(iso){
+  if(!iso)return'';
+  var s=String(iso);
+  if(!s.includes('Z')&&!s.includes('+')&&!s.includes('-',10)){
+    var p=new Date(s+' EDT');if(isNaN(p.getTime()))p=new Date(s+'Z');
+    s=p.toISOString();
+  }
+  var d=new Date(s);
+  var secs=Math.floor((Date.now()-d.getTime())/1000);
+  if(secs<0)secs=0;
+  if(secs<60)return'just now';
+  if(secs<3600)return Math.floor(secs/60)+'m ago';
+  if(secs<86400)return Math.floor(secs/3600)+'h ago';
+  if(secs<604800)return Math.floor(secs/86400)+'d ago';
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+}
+function setFilter(btn, cat){
+  document.querySelectorAll('.filter-btn[data-cat]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  _cat = cat; _offset = 0; load();
+}
+function toggleUnread(btn){
+  _unread = !_unread; _offset = 0;
+  btn.classList.toggle('active', _unread);
+  load();
+}
+function prevPage(){_offset=Math.max(0,_offset-_limit);load();}
+function nextPage(){_offset+=_limit;load();}
+async function markAllRead(){
+  var body = {all: true};
+  if (_cat) body.category = _cat;
+  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  load();
+}
+async function markOne(id){
+  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+  load();
+}
+async function load(){
+  var list = document.getElementById('list');
+  list.innerHTML = '<div class="empty">Loading…</div>';
+  try{
+    var qs = '?limit='+_limit+'&offset='+_offset;
+    if (_cat) qs += '&category='+_cat;
+    if (_unread) qs += '&unread_only=1';
+    var r = await fetch('/api/notifications'+qs);
+    var d = await r.json();
+    var items = d.notifications || [];
+    var total = d.total || 0;
+    if (!items.length){
+      list.innerHTML = '<div class="empty">'+(_unread?'No unread notifications':'No notifications')+'</div>';
+    } else {
+      list.innerHTML = items.map(function(n){
+        var pillCls = 'pill ' + (n.category||'system');
+        var dotCls = 'dot' + (n.is_read ? ' read' : '');
+        return '<div class="item" onclick="markOne('+n.id+')">'
+          + '<div class="'+dotCls+'"></div>'
+          + '<div class="body">'
+          + '<div class="title">'+_esc(n.title)+'</div>'
+          + (n.body ? '<div class="preview">'+_esc(n.body)+'</div>' : '')
+          + '<div class="meta">'
+          + '<span class="'+pillCls+'">'+(n.category||'system')+'</span>'
+          + '<span class="time">'+_relTime(n.created_at)+'</span>'
+          + '</div></div></div>';
+      }).join('');
+    }
+    // Pager
+    var pager = document.getElementById('pager');
+    var status = document.getElementById('pager-status');
+    var prev = document.getElementById('prev');
+    var next = document.getElementById('next');
+    if (total > _limit) {
+      pager.style.display = 'flex';
+      var shown_start = total ? _offset + 1 : 0;
+      var shown_end = Math.min(_offset + _limit, total);
+      status.textContent = shown_start + '–' + shown_end + ' of ' + total;
+      prev.disabled = _offset === 0;
+      next.disabled = (_offset + _limit) >= total;
+    } else {
+      pager.style.display = 'none';
+    }
+  }catch(e){
+    console.warn(e);
+    list.innerHTML = '<div class="empty">Failed to load notifications</div>';
+  }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body></html>
+"""
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -3304,6 +3503,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .bell-cat-trade{background:rgba(0,245,212,0.08);color:var(--teal)}
 .bell-cat-alert{background:rgba(255,75,110,0.08);color:var(--pink)}
 .bell-empty{text-align:center;padding:30px 14px;color:var(--dim);font-size:11px}
+.bell-viewall{text-align:center;padding:10px 14px;border-top:1px solid rgba(255,255,255,0.06);margin-top:4px}
+.bell-viewall a{color:var(--teal);font-size:11px;font-weight:600;text-decoration:none}
+.bell-viewall a:hover{color:var(--signal)}
 
 /* ── Preserve .nav-btn for non-header uses (kill switch, command portal etc.) ── */
 .nav-btn{
@@ -5512,11 +5714,14 @@ setInterval(loadAgentPulse, 10000);
   <div class="section-title">Notification Center</div>
   <div class="glass" style="margin-bottom:16px">
     <div style="padding:10px 14px 8px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)">
-      <div style="font-size:10px;color:var(--muted)">Recent system notifications</div>
+      <div style="font-size:10px;color:var(--muted)">Recent trades & alerts</div>
       <div style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="notif-ts"></div>
     </div>
     <div id="notif-list" style="padding:8px 14px 10px">
-      <div style="font-size:10px;color:var(--dim);text-align:center;padding:12px 0">No notifications</div>
+      <div style="font-size:10px;color:var(--dim);text-align:center;padding:12px 0">Loading…</div>
+    </div>
+    <div style="padding:8px 14px 12px;border-top:1px solid var(--border);text-align:center">
+      <a href="/notifications" style="color:var(--teal);font-size:11px;font-weight:600;text-decoration:none">View all notifications →</a>
     </div>
   </div>
 
@@ -5638,14 +5843,17 @@ function switchBellTab(btn) {
 
 async function loadBellNotifs() {
   try {
-    let url = '/api/notifications?limit=30';
+    // Bell dropdown is high-signal only — routine session-complete / system
+    // status pings live on the /notifications full-page archive instead.
+    let url = '/api/notifications?limit=30&widget_only=1';
     if (_bellCategory) url += '&category=' + _bellCategory;
     const r = await fetch(url);
     const d = await r.json();
     _bellCache = d.notifications || [];
     const list = document.getElementById('bell-list');
     if (!_bellCache.length) {
-      list.innerHTML = '<div class="bell-empty">No notifications</div>';
+      list.innerHTML = '<div class="bell-empty">No notifications</div>'
+        + '<div class="bell-viewall"><a href="/notifications">View all notifications →</a></div>';
       return;
     }
     list.innerHTML = _bellCache.map(function(n) {
@@ -5663,7 +5871,8 @@ async function loadBellNotifs() {
         + '<span class="' + catCls + '">' + (n.category || 'system') + '</span>'
         + '<span class="bell-item-time">' + ts + '</span>'
         + '</div></div></div>';
-    }).join('');
+    }).join('')
+      + '<div class="bell-viewall"><a href="/notifications">View all notifications →</a></div>';
   } catch(e) { console.warn('loadBellNotifs', e); }
 }
 
@@ -5692,7 +5901,9 @@ function _relTime(iso) {
 
 async function pollUnreadCount() {
   try {
-    var r = await fetch('/api/notifications/unread-count');
+    // Badge counts only widget-visible categories — bell dropdown shows
+    // those, so the badge number matches what the user can see.
+    var r = await fetch('/api/notifications/unread-count?widget_only=1');
     var d = await r.json();
     var badge = document.getElementById('bell-badge');
     if (d.count > 0) {
@@ -5705,6 +5916,42 @@ async function pollUnreadCount() {
 }
 pollUnreadCount();
 setInterval(pollUnreadCount, 30000);
+
+// Dashboard Notification Center widget — widget-only categories, top 10.
+async function loadNotifCenter() {
+  var list = document.getElementById('notif-list');
+  if (!list) return;
+  try {
+    var r = await fetch('/api/notifications?limit=10&widget_only=1');
+    var d = await r.json();
+    var items = d.notifications || [];
+    if (!items.length) {
+      list.innerHTML = '<div style="font-size:10px;color:var(--dim);text-align:center;padding:12px 0">No recent activity</div>';
+    } else {
+      list.innerHTML = items.map(function(n) {
+        var catCls = 'bell-cat-pill bell-cat-' + (n.category || 'system');
+        var ts = n.created_at ? _relTime(n.created_at) : '';
+        var preview = (n.body || '').substring(0, 80);
+        if (n.body && n.body.length > 80) preview += '...';
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start">'
+          + '<div style="flex:1;min-width:0">'
+          + '<div style="font-size:12px;font-weight:600;color:var(--text)">' + _esc(n.title) + '</div>'
+          + (preview ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + _esc(preview) + '</div>' : '')
+          + '<div style="display:flex;gap:8px;align-items:center;margin-top:4px">'
+          + '<span class="' + catCls + '">' + (n.category || 'system') + '</span>'
+          + '<span style="font-size:9px;color:var(--dim);font-family:var(--mono)">' + ts + '</span>'
+          + '</div></div></div>';
+      }).join('');
+    }
+    var tsEl = document.getElementById('notif-ts');
+    if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'});
+  } catch(e) {
+    console.warn('loadNotifCenter', e);
+    list.innerHTML = '<div style="font-size:10px;color:var(--pink);text-align:center;padding:12px 0">Failed to load</div>';
+  }
+}
+loadNotifCenter();
+setInterval(loadNotifCenter, 60000);
 
 async function markAllNotifRead() {
   await fetch('/api/notifications/read', {
