@@ -57,7 +57,7 @@ def run():
             result = c.execute("""
                 UPDATE signals SET status='INTERRUPTED', updated_at=?
                 WHERE status='PROCESSING'
-            """, (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+            """, (datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),))
             if result.rowcount:
                 log.info(f"Marked {result.rowcount} in-progress signal(s) as INTERRUPTED")
             c.commit()

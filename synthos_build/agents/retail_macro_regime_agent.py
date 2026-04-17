@@ -137,9 +137,12 @@ def _fetch_alpaca_bars(ticker, days=10):
     if not ALPACA_API_KEY:
         log.warning("ALPACA_API_KEY not set — skipping Alpaca fetch")
         return []
-    now = datetime.now(ET)
-    start = (now - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    end = now.strftime('%Y-%m-%dT%H:%M:%SZ')
+    # UTC — Alpaca reads the 'Z' suffix as UTC. Using datetime.now(ET) here
+    # would encode ET-local time but label it UTC, yielding a 4-5 hour
+    # offset and either missed or duplicated bars around market boundaries.
+    now_utc = datetime.utcnow()
+    start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    end = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
     try:
         r = _req.get(
             f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",

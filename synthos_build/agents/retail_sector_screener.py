@@ -252,9 +252,12 @@ def _alpaca_headers():
 
 
 def fetch_bars(ticker, days):
-    """Fetch daily OHLCV bars for ticker going back `days` calendar days."""
-    end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
-    start = (datetime.now(ET) - timedelta(days=days + 10)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    """Fetch daily OHLCV bars for ticker going back `days` calendar days.
+    Timestamps passed to Alpaca are UTC — the 'Z' suffix means UTC.
+    datetime.now(ET) labeled as Z was a 4-5 hour silent offset."""
+    now_utc = datetime.utcnow()
+    end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+    start = (now_utc - timedelta(days=days + 10)).strftime('%Y-%m-%dT%H:%M:%SZ')
     try:
         r = requests.get(
             f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",

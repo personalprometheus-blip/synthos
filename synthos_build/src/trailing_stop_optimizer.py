@@ -84,8 +84,8 @@ def run_optimization(db, min_sample=20, max_adj=0.20):
         db.set_setting(key, str(a['new_value']))
         log.info(f"Optimizer: {key} {a['old_value']:.4f} → {a['new_value']:.4f} ({a['reason']})")
 
-    # Log to optimizer_log
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # Log to optimizer_log (UTC — matches DB convention)
+    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     try:
         with db.conn() as c:
             c.execute("""

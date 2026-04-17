@@ -632,8 +632,10 @@ def _alpaca_bars(ticker, days):
     """Fetch daily OHLCV bars from Alpaca Data API. Returns list or []."""
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return []
-    end   = datetime.now(ET).strftime('%Y-%m-%dT00:00:00Z')
-    start = (datetime.now(ET) - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00Z')
+    # UTC for Alpaca — 'Z' suffix means UTC, not local ET.
+    now_utc = datetime.utcnow()
+    end   = now_utc.strftime('%Y-%m-%dT00:00:00Z')
+    start = (now_utc - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00Z')
     url   = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"
     params = {"timeframe": "1Day", "start": start, "end": end,
                "limit": min(days, 365), "feed": "iex"}
@@ -1110,8 +1112,9 @@ def gate1_system(item, ctrl, ndl, seen_headlines, state):
     news_age_ok   = True
     if disc_date_str:
         try:
+            # disc_date comes from Alpaca's UTC created_at — compare in UTC.
             disc_dt   = datetime.strptime(disc_date_str, '%Y-%m-%d')
-            age_hours = (datetime.now() - disc_dt).total_seconds() / 3600
+            age_hours = (datetime.utcnow() - disc_dt).total_seconds() / 3600
             if age_hours > ctrl.MAX_NEWS_AGE_HOURS:
                 state.system_status = "timestamp_rejected"
                 ndl.gate(1, "SYSTEM",
@@ -2784,7 +2787,7 @@ def run(session="market"):
                              for w in ["spouse", "joint", "dependent"]))
         staleness, discount = get_staleness(
             item.get("tx_date", ""),
-            item.get("disc_date", datetime.now().strftime('%Y-%m-%d')),
+            item.get("disc_date", datetime.utcnow().strftime('%Y-%m-%d')),
         )
         item["staleness"] = staleness
         item["is_amended"] = is_amended

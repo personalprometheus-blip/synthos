@@ -30,7 +30,7 @@ import json
 import logging
 import argparse
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from dotenv import load_dotenv
@@ -127,8 +127,8 @@ class MarketState:
 # ── TIMESTAMP HELPERS ─────────────────────────────────────────────────────
 
 def _parse_db_timestamp(ts_str):
-    """Parse a DB timestamp string (naive) into a UTC-aware datetime.
-    DB stores naive timestamps via datetime.now().strftime('%Y-%m-%d %H:%M:%S')."""
+    """Parse a DB timestamp string into a UTC-aware datetime.
+    DB stores UTC timestamps as naive-looking strings via self.now()."""
     if not ts_str:
         return None
     try:
@@ -262,7 +262,8 @@ def gate2_news(db):
     result = NewsInput()
     now = _now_utc()
 
-    cutoff = (datetime.now() - timedelta(hours=NEWS_STALE_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
+    # DB timestamps are UTC — compare against UTC.
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=NEWS_STALE_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
 
     try:
         with db.conn() as c:

@@ -2773,7 +2773,8 @@ def _fetch_alpaca_positions():
             try:
                 latest = max(r['updated_at'] for r in rows if r['updated_at'])
                 from datetime import datetime
-                age = (datetime.now() - datetime.fromisoformat(latest.replace('Z','+00:00').split('+')[0])).total_seconds()
+                # live_prices timestamps are UTC (written via db.now()).
+                age = (datetime.utcnow() - datetime.fromisoformat(latest.replace('Z','+00:00').split('+')[0])).total_seconds()
                 freshness = age
             except Exception:
                 pass

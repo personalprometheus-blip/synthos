@@ -20,7 +20,7 @@ import sys
 import time
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from dotenv import load_dotenv
 
@@ -701,7 +701,11 @@ class DB:
         c.close()
 
     def now(self):
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        """Return the current UTC time as a naive-looking string.
+        All DB timestamps are UTC as of the unification. SQLite comparisons
+        like datetime('now','-X hours') are UTC by default, so this now
+        matches consistently on both sides of age queries."""
+        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # ── PORTFOLIO ──────────────────────────────────────────────────────────
 
@@ -798,7 +802,7 @@ class DB:
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
         """
-        pos_id   = f"pos_{ticker}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
         portfolio = self.get_portfolio()
         new_cash  = round(portfolio['cash'] - cost, 2)
@@ -846,8 +850,12 @@ class DB:
         cost       = round(float(pos['entry_price']) * float(pos['shares']), 2)
         pnl_dollar = round(proceeds - cost, 2)
         pnl_pct    = round((pnl_dollar / cost) * 100, 2)
-        _opened   = datetime.fromisoformat(pos['opened_at'].replace('Z', '+00:00')).replace(tzinfo=None)
-        hold_days  = (datetime.now() - _opened).days
+        # Stored timestamps are naive-UTC strings. Parse, attach UTC tz so
+        # the subtraction against datetime.now(timezone.utc) works.
+        _opened = datetime.fromisoformat(pos['opened_at'].replace('Z', '+00:00'))
+        if _opened.tzinfo is None:
+            _opened = _opened.replace(tzinfo=timezone.utc)
+        hold_days  = (datetime.now(timezone.utc) - _opened).days
         verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
         portfolio  = self.get_portfolio()
         new_cash   = round(portfolio['cash'] + proceeds, 2)
@@ -1024,8 +1032,11 @@ class DB:
         verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
 
         try:
-            hold_days = (datetime.now() - datetime.strptime(
-                pos['opened_at'][:19], '%Y-%m-%d %H:%M:%S')).days
+            # Stored naive UTC string → attach UTC tz for aware subtraction.
+            _opened_aware = datetime.strptime(
+                pos['opened_at'][:19], '%Y-%m-%d %H:%M:%S'
+            ).replace(tzinfo=timezone.utc)
+            hold_days = (datetime.now(timezone.utc) - _opened_aware).days
         except (ValueError, TypeError):
             hold_days = 0
 
@@ -1118,8 +1129,8 @@ class DB:
 
             # Calculate expiry based on tier
             expiry_days = {1:30, 2:7, 3:2, 4:1}.get(source_tier, 7)
-            expires_at  = (datetime.now() + timedelta(days=expiry_days)).strftime('%Y-%m-%d %H:%M:%S')
-            discard_del = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+            expires_at  = (datetime.now(timezone.utc) + timedelta(days=expiry_days)).strftime('%Y-%m-%d %H:%M:%S')
+            discard_del = (datetime.now(timezone.utc) + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
 
             # Tier 4 always discarded immediately
             status = "DISCARDED" if source_tier == 4 else "PENDING"
@@ -1701,7 +1712,7 @@ class DB:
                 INSERT INTO ledger
                     (date, type, description, amount, balance, position_id, created_at)
                 VALUES (?,?,?,?,?,?,?)
-            """, (datetime.now().strftime('%Y-%m-%d'), entry_type,
+            """, (datetime.now(timezone.utc).strftime('%Y-%m-%d'), entry_type,
                   description, amount, balance, position_id, self.now()))
 
     def get_ledger(self, limit=100):
@@ -1718,7 +1729,7 @@ class DB:
         Falls back to ledger balance snapshots.
         """
         with self.conn() as c:
-            cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d')
             rows = c.execute("""
                 SELECT DATE(timestamp) as date,
                        MAX(portfolio_value) as value
@@ -2159,7 +2170,7 @@ class DB:
     def get_api_call_counts(self, date_str=None):
         """Get API call counts for a given date (default today). Returns dict with totals and per-agent breakdown."""
         if not date_str:
-            date_str = datetime.now().strftime('%Y-%m-%d')
+            date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         try:
             with self.conn() as c:
                 total = c.execute(
@@ -2432,7 +2443,7 @@ class DB:
         Returns count of rows expired.
         """
         cutoff = (
-            datetime.now() - timedelta(hours=max_age_hours)
+            datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         ).strftime('%Y-%m-%d %H:%M:%S')
         with self.conn() as c:
             result = c.execute("""
@@ -2469,14 +2480,14 @@ class DB:
                               If set, dedup only within the trailing window.
         """
         import json as _json
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         meta_str = _json.dumps(meta) if meta else None
         with self.conn() as c:
             if dedup_key:
                 sql = "SELECT id FROM notifications WHERE dedup_key=?"
                 params = [dedup_key]
                 if dedup_window_minutes:
-                    cutoff = (datetime.now()
+                    cutoff = (datetime.now(timezone.utc)
                               - timedelta(minutes=dedup_window_minutes)
                               ).strftime('%Y-%m-%d %H:%M:%S')
                     sql += " AND created_at >= ?"
@@ -2558,7 +2569,7 @@ class DB:
 
     def mark_notification_read(self, notification_id):
         """Mark a single notification as read."""
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         with self.conn() as c:
             c.execute(
                 "UPDATE notifications SET is_read = 1, read_at = ? WHERE id = ?",
@@ -2567,7 +2578,7 @@ class DB:
 
     def mark_all_notifications_read(self, category=None):
         """Mark all notifications as read. Optionally filter by category."""
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         with self.conn() as c:
             if category:
                 c.execute(
@@ -2591,8 +2602,8 @@ class DB:
         - Vacuum the database
         """
         self.expire_old_signals()
-        cutoff_180 = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d %H:%M:%S')
-        cutoff_30  = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        cutoff_180 = (datetime.now(timezone.utc) - timedelta(days=180)).strftime('%Y-%m-%d %H:%M:%S')
+        cutoff_30  = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
 
         with self.conn() as c:
             r1 = c.execute(

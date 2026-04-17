@@ -662,8 +662,11 @@ class AlpacaClient:
         if not tickers:
             return
         unique = sorted(set(t.upper() for t in tickers))
-        end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
-        start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Alpaca reads the 'Z' suffix as UTC. ET labeled as Z was a 4-5 hour
+        # silent offset — use UTC for API timestamps.
+        now_utc = datetime.utcnow()
+        end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {
             "APCA-API-KEY-ID":     ALPACA_API_KEY,
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
@@ -774,9 +777,10 @@ class AlpacaClient:
         # Check negative cache (ticker returned empty before)
         if (t_upper, 0) in self._bar_cache:
             return []
-        # Cache miss — fetch individually
-        end   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%SZ')
-        start = (datetime.now(ET) - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Cache miss — fetch individually. UTC for Alpaca.
+        now_utc = datetime.utcnow()
+        end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {
             "APCA-API-KEY-ID":     ALPACA_API_KEY,
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
