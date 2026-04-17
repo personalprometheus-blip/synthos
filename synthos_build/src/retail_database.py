@@ -683,6 +683,24 @@ class DB:
                 cursor_value  TEXT    NOT NULL,
                 articles_seen INTEGER NOT NULL DEFAULT 0,
                 updated_at    TEXT    NOT NULL)""",
+            # v3.5 — admin alerts. System-health / validator / bias findings go
+            # here instead of per-customer notifications. Customers never see
+            # these; the admin portal reads and resolves them.
+            """CREATE TABLE IF NOT EXISTS admin_alerts (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                category       TEXT    NOT NULL,    -- 'validator'|'fault'|'bias'|'system'
+                severity       TEXT    NOT NULL,    -- 'CRITICAL'|'WARNING'|'INFO'
+                source_agent   TEXT,                -- which agent raised it
+                source_customer_id TEXT,            -- null if system-wide
+                code           TEXT,                -- short identifier (e.g. STALE_HEARTBEAT_NEWS)
+                title          TEXT    NOT NULL,
+                body           TEXT    NOT NULL DEFAULT '',
+                meta           TEXT,                -- JSON blob
+                resolved       INTEGER NOT NULL DEFAULT 0,
+                resolved_at    TEXT,
+                created_at     TEXT    NOT NULL)""",
+            "CREATE INDEX IF NOT EXISTS idx_admin_alerts_resolved ON admin_alerts(resolved, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_admin_alerts_severity ON admin_alerts(severity)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -2040,6 +2058,67 @@ class DB:
             """, (ticker,)).fetchone()
             return dict(row) if row else None
 
+    # ── ADMIN ALERTS ───────────────────────────────────────────────────────
+    # Anything that means "the system has a problem, not something the
+    # customer can fix" writes here. Customers never see these; the admin
+    # portal surfaces them and the admin resolves.
+
+    def add_admin_alert(self, category, severity, title, body='',
+                        source_agent=None, source_customer_id=None,
+                        code=None, meta=None):
+        """Insert an admin-visible alert. Returns the new alert ID."""
+        import json as _json
+        meta_str = _json.dumps(meta) if meta and not isinstance(meta, str) else meta
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO admin_alerts
+                    (category, severity, source_agent, source_customer_id, code,
+                     title, body, meta, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (category, severity, source_agent, source_customer_id, code,
+                  title, body, meta_str, self.now()))
+            return c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def get_admin_alerts(self, limit=100, unresolved_only=True, severity=None):
+        """Fetch admin alerts. Newest first. unresolved_only filters by
+        resolved=0 for the default admin dashboard view."""
+        import json as _json
+        sql = "SELECT * FROM admin_alerts WHERE 1=1"
+        params = []
+        if unresolved_only:
+            sql += " AND resolved = 0"
+        if severity:
+            sql += " AND severity = ?"
+            params.append(severity)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.conn() as c:
+            rows = c.execute(sql, params).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get('meta'):
+                try:
+                    d['meta'] = _json.loads(d['meta'])
+                except Exception:
+                    pass
+            result.append(d)
+        return result
+
+    def resolve_admin_alert(self, alert_id):
+        """Mark an admin alert as resolved."""
+        with self.conn() as c:
+            c.execute("UPDATE admin_alerts SET resolved=1, resolved_at=? WHERE id=?",
+                      (self.now(), alert_id))
+
+    def count_admin_alerts(self, unresolved_only=True):
+        """Fast count for the admin badge."""
+        sql = "SELECT COUNT(*) FROM admin_alerts"
+        if unresolved_only:
+            sql += " WHERE resolved = 0"
+        with self.conn() as c:
+            return c.execute(sql).fetchone()[0]
+
     # ── TICKER → SECTOR CACHE ──────────────────────────────────────────────
 
     def get_ticker_sector(self, ticker):
@@ -2466,7 +2545,11 @@ class DB:
     # Categories considered "high-signal" — surfaced in the dashboard widget
     # and the bell dropdown. All other categories go to the /notifications
     # full-page archive only (routine 'system' / 'daily' status pings).
-    WIDGET_CATEGORIES = ('trade', 'alert', 'account', 'approval')
+    # NOTE: 'alert' is intentionally absent — system-health / validator /
+    # fault / bias alerts now flow to admin_alerts (admin-only). The
+    # customer-facing notification stream is trades, account milestones,
+    # approvals, and support — not meta-commentary on their trading.
+    WIDGET_CATEGORIES = ('trade', 'account', 'approval')
 
     def add_notification(self, category, title, body='', meta=None,
                          dedup_key=None, dedup_window_minutes=None):

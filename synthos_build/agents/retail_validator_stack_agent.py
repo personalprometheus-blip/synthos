@@ -718,23 +718,27 @@ def run_for_customer(customer_id):
     cust_db.set_setting('_VALIDATOR_DETAIL', json.dumps(detail))
     cust_db.set_setting('_VALIDATOR_RESTRICTIONS', json.dumps(restrictions))
 
-    # ── Notifications for NO_GO ───────────────────────────────────────
+    # ── Admin alerts for NO_GO ────────────────────────────────────────
+    # Validator NO_GO means the system decided this customer can't trade
+    # right now — a plumbing issue the customer can't fix. Route to the
+    # shared admin_alerts stream on the master DB so admin sees it and
+    # the customer's bell stays clean.
     if verdict == GateStatus.NO_GO:
         no_go_gates = [g for g in report.gates if g.status == GateStatus.NO_GO]
         body_lines = [f"- {g.gate}: {g.message}" for g in no_go_gates]
         try:
-            cust_db.add_notification(
-                category='alert',
+            _master_db().add_admin_alert(
+                category='validator',
+                severity='CRITICAL',
                 title='Trading Blocked — Validator NO_GO',
                 body='\n'.join(body_lines),
-                meta=json.dumps({
-                    "source": "validator_stack_agent",
-                    "verdict": verdict,
-                    "restrictions": restrictions
-                })
+                source_agent='validator_stack_agent',
+                source_customer_id=OWNER_CUSTOMER_ID if not _CUSTOMER_ID else _CUSTOMER_ID,
+                code='VALIDATOR_NO_GO',
+                meta={"verdict": verdict, "restrictions": restrictions},
             )
         except Exception as e:
-            log.warning(f"Failed to write NO_GO notification: {e}")
+            log.warning(f"Failed to write validator admin alert: {e}")
 
     # ── Lifecycle: COMPLETE ───────────────────────────────────────────
     summary = report.summary()

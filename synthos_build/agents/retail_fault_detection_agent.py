@@ -845,20 +845,27 @@ def run():
         else:
             log.info(f"  [{f.gate}] OK: {f.message}")
 
-    # ── Raise urgent flags for critical findings ──────────────────────
+    # ── Raise admin alerts for critical findings ──────────────────────
+    # Fault findings are always system-health problems (stale heartbeats,
+    # DB lock, price staleness, etc.). Never customer-actionable. Route
+    # to the shared admin_alerts stream on the master DB.
     critical_findings = [f for f in report.findings if f.severity == Severity.CRITICAL]
     if critical_findings:
-        # Write a notification per critical finding
+        admin_db = _master_db()
         for cf in critical_findings:
             try:
-                db.add_notification(
-                    category='alert',
+                admin_db.add_admin_alert(
+                    category='fault',
+                    severity='CRITICAL',
                     title=f"System Alert: {cf.code}",
                     body=f"{cf.message}\n{cf.detail}" if cf.detail else cf.message,
-                    meta=json.dumps({"gate": cf.gate, "code": cf.code, "severity": "CRITICAL"})
+                    source_agent='fault_detection_agent',
+                    source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
+                    code=cf.code,
+                    meta={"gate": cf.gate, "code": cf.code, "severity": "CRITICAL"},
                 )
             except Exception as e:
-                log.warning(f"Failed to write notification: {e}")
+                log.warning(f"Failed to write fault admin alert: {e}")
 
     # ── Store scan summary in customer_settings for portal access ─────
     scan_summary = {

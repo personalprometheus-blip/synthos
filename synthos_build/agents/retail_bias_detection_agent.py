@@ -732,19 +732,29 @@ def run():
         else:
             log.info(f"  [{f.gate}] OK: {f.message}")
 
-    # ── Write notifications for WARNING+ findings ────────────────────
+    # ── Raise admin alerts for WARNING+ bias findings ────────────────
+    # Bias findings describe portfolio-level problems (concentration,
+    # loss aversion, overtrading). By policy these go to admin, not the
+    # customer — the idea is the customer forgets the account exists
+    # until someone asks them about it. Constant flags erode confidence.
+    # Admin can decide whether / how to coach the customer.
+    admin_db = _master_db()
     actionable = [f for f in report.findings
                   if f.severity in (Severity.WARNING, Severity.CRITICAL)]
     for af in actionable:
         try:
-            db.add_notification(
-                category='alert',
+            admin_db.add_admin_alert(
+                category='bias',
+                severity=af.severity,
                 title=f"Bias Alert: {af.code}",
                 body=f"{af.message}\n{af.detail}" if af.detail else af.message,
-                meta=json.dumps({"gate": af.gate, "code": af.code, "severity": af.severity})
+                source_agent='bias_detection_agent',
+                source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
+                code=af.code,
+                meta={"gate": af.gate, "code": af.code, "severity": af.severity},
             )
         except Exception as e:
-            log.warning(f"Failed to write notification: {e}")
+            log.warning(f"Failed to write bias admin alert: {e}")
 
     # ── Store scan summary for portal access ─────────────────────────
     scan_summary = {

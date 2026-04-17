@@ -12476,6 +12476,39 @@ def api_admin_api_usage():
                         'error': str(e)})
 
 
+@app.route('/api/admin/alerts', methods=['GET'])
+@admin_required
+def api_admin_alerts():
+    """List admin alerts (validator / fault / bias). Default: unresolved only."""
+    try:
+        db = _shared_db()
+        unresolved_only = request.args.get('unresolved_only', '1') == '1'
+        severity = request.args.get('severity') or None
+        limit = min(int(request.args.get('limit', 100)), 500)
+        alerts = db.get_admin_alerts(limit=limit, unresolved_only=unresolved_only,
+                                      severity=severity)
+        unresolved_count = db.count_admin_alerts(unresolved_only=True)
+        return jsonify({'alerts': alerts, 'unresolved_count': unresolved_count})
+    except Exception as e:
+        return jsonify({'alerts': [], 'unresolved_count': 0, 'error': str(e)})
+
+
+@app.route('/api/admin/alerts/resolve', methods=['POST'])
+@admin_required
+def api_admin_alerts_resolve():
+    """Mark an admin alert as resolved."""
+    data = request.get_json(silent=True) or {}
+    alert_id = data.get('id')
+    if not alert_id:
+        return jsonify({'ok': False, 'error': 'id required'}), 400
+    try:
+        db = _shared_db()
+        db.resolve_admin_alert(int(alert_id))
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 # ── START ──────────────────────────────────────────────────────────────────
 
 
