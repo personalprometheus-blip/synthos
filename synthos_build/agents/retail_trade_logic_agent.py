@@ -69,7 +69,21 @@ USER_EMAIL        = os.environ.get('USER_EMAIL', '')
 # Falls back to MONITOR_URL if not set (monitor will proxy if it has COMPANY_URL configured).
 COMPANY_URL       = os.environ.get('COMPANY_URL', '').rstrip('/')
 ET                = ZoneInfo("America/New_York")
-MAX_RETRIES       = 3
+MAX_RETRIES       = 2   # Alpaca retry budget per call.
+                        # Was 3 → with 15s timeout + 2^n backoff a single failing
+                        # call could burn 48s. At 50+ API calls per trader run,
+                        # this stacked into the 60-min dispatch hangs we saw on
+                        # 2026-04-17. Now at most: 15 + 1 + 15 = 31s worst case.
+
+# ── TRADER WALL-CLOCK BUDGET ──────────────────────────────────────────────
+# The daemon's dispatch pool now kills any trader subprocess after 240s
+# (see TRADE_INDIVIDUAL_TIMEOUT_SEC in retail_market_daemon.py). We enforce
+# a shorter 180s soft budget inside the trader itself so we can commit
+# decision logs and exit cleanly before the daemon hard-kills us.
+TRADER_RUNTIME_BUDGET_SEC = 180
+# If Alpaca fails this many consecutive calls, stop calling Alpaca for the
+# rest of this run — no point retrying the same unreachable endpoint 30x.
+ALPACA_CIRCUIT_BREAKER_N  = 3
 
 KILL_SWITCH_FILE  = os.path.join(_ROOT_DIR, '.kill_switch')
 
@@ -656,6 +670,66 @@ def interrogation_to_score(status: str) -> float:
             "CHALLENGED": 0.20, "REJECTED": 0.0}.get(status or "UNVALIDATED", 0.50)
 
 
+# ── RUNTIME WATCHDOG ──────────────────────────────────────────────────────────
+# Two jobs:
+#   1. Track the current phase ("reconciliation", "gate_10_position_review",
+#      etc.) so if the trader ever hangs again, the last-logged phase tells
+#      us exactly where it died — no more mystery hangs.
+#   2. Enforce TRADER_RUNTIME_BUDGET_SEC by flipping _BUDGET_EXCEEDED, which
+#      gate loops check so they bail between iterations instead of mid-SQL.
+#
+# This replaces the old "trader runs until the daemon kills it at 240s"
+# behavior. The budget is a soft wall-clock ceiling inside the trader;
+# the daemon's hard kill is the safety net if the soft ceiling misses.
+import threading as _threading
+
+_PHASE_STATE = {
+    'current':   'unstarted',
+    'started_at': 0.0,     # time.monotonic()
+    'detail':    '',
+}
+_BUDGET_EXCEEDED = False
+_WATCHDOG_STOP   = _threading.Event()
+
+
+def _set_phase(name: str, detail: str = '') -> None:
+    """Update the current-phase marker so the watchdog's next tick logs it."""
+    _PHASE_STATE['current']    = name
+    _PHASE_STATE['started_at'] = time.monotonic()
+    _PHASE_STATE['detail']     = detail
+
+
+def budget_exceeded() -> bool:
+    """Gate loops check this between iterations and short-circuit when True.
+
+    A trader that blows past TRADER_RUNTIME_BUDGET_SEC commits whatever
+    decision/scan state it has and returns, rather than being hard-killed
+    mid-transaction by the daemon's 240s pool timeout.
+    """
+    return _BUDGET_EXCEEDED
+
+
+def _runtime_watchdog(t0: float, budget_sec: int) -> None:
+    """Background thread: logs phase every 15s, trips the budget flag at the
+    ceiling. No daemon thread surprise — stops cleanly when _WATCHDOG_STOP
+    is set by the run() finally block."""
+    global _BUDGET_EXCEEDED
+    while not _WATCHDOG_STOP.wait(timeout=15):
+        elapsed = time.monotonic() - t0
+        phase_elapsed = time.monotonic() - _PHASE_STATE['started_at']
+        detail = f" ({_PHASE_STATE['detail']})" if _PHASE_STATE['detail'] else ""
+        log.info(
+            f"[WATCHDOG] t={elapsed:.0f}s  phase={_PHASE_STATE['current']}"
+            f"{detail}  phase_elapsed={phase_elapsed:.0f}s"
+        )
+        if elapsed > budget_sec and not _BUDGET_EXCEEDED:
+            _BUDGET_EXCEEDED = True
+            log.warning(
+                f"[WATCHDOG] Runtime budget {budget_sec}s exceeded in phase "
+                f"'{_PHASE_STATE['current']}' — gate loops will short-circuit"
+            )
+
+
 # ── ALPACA CLIENT (KEEP — unchanged from v1.x) ────────────────────────────────
 
 class AlpacaClient:
@@ -667,12 +741,44 @@ class AlpacaClient:
             "Content-Type":        "application/json",
         }
         self._bar_cache = {}  # (ticker, days) → [bars]
+        # Circuit breaker: after ALPACA_CIRCUIT_BREAKER_N consecutive failures
+        # we stop calling Alpaca for the rest of this trader run. This cuts
+        # the worst-case hang path (Alpaca slow → retry × 3 × 50 API calls)
+        # from ~40 minutes to ~90 seconds. Downstream callers check the
+        # return value, so circuit-open returns None just like a failure —
+        # the trader degrades to "use DB data / skip this evaluation" rather
+        # than stalling.
+        self._consecutive_failures = 0
+        self._circuit_open         = False
+
+    def _circuit_check(self) -> bool:
+        """Return True if the circuit is OK to call Alpaca. Used by the
+        direct `requests.get` paths (prefetch_bars, get_bars, get_position_safe)
+        that don't go through _request(). Increment on failure via the same
+        _consecutive_failures counter so all Alpaca paths share one breaker."""
+        return not self._circuit_open
+
+    def _circuit_record(self, success: bool) -> None:
+        if success:
+            self._consecutive_failures = 0
+        else:
+            self._consecutive_failures += 1
+            if (self._consecutive_failures >= ALPACA_CIRCUIT_BREAKER_N
+                    and not self._circuit_open):
+                self._circuit_open = True
+                log.warning(
+                    f"[CIRCUIT] Alpaca circuit breaker opened after "
+                    f"{self._consecutive_failures} consecutive failures"
+                )
 
     def prefetch_bars(self, tickers, days=70):
         """Batch-fetch daily bars for multiple tickers in one API call.
         Populates _bar_cache so subsequent get_bars() calls are instant.
         Uses Alpaca multi-symbol endpoint: /v2/stocks/bars?symbols=A,B,C"""
         if not tickers:
+            return
+        if not self._circuit_check():
+            log.info("[PREFETCH] Skipped — Alpaca circuit open")
             return
         unique = sorted(set(t.upper() for t in tickers))
         # Alpaca reads the 'Z' suffix as UTC. ET labeled as Z was a 4-5 hour
@@ -687,6 +793,9 @@ class AlpacaClient:
         # Alpaca allows up to ~100 symbols per request; chunk if needed
         CHUNK = 50
         for i in range(0, len(unique), CHUNK):
+            if not self._circuit_check():
+                log.info("[PREFETCH] Circuit opened mid-sweep — bailing")
+                return
             chunk = unique[i:i + CHUNK]
             try:
                 r = requests.get(
@@ -698,7 +807,7 @@ class AlpacaClient:
                         "limit": 10000,
                         "feed": "iex",
                     },
-                    headers=headers, timeout=15,
+                    headers=headers, timeout=(5, 15),
                 )
                 try:
                     _shared_db().log_api_call(
@@ -714,23 +823,39 @@ class AlpacaClient:
                         # Cache with the max days requested — get_bars() slices as needed
                         self._bar_cache[(sym.upper(), days)] = bars
                     log.info(f"[PREFETCH] {len(data)} tickers cached ({len(chunk)} requested, {days}d)")
+                    self._circuit_record(True)
                 else:
                     log.warning(f"[PREFETCH] Alpaca returned {r.status_code}")
+                    self._circuit_record(False)
             except Exception as e:
                 log.warning(f"[PREFETCH] Failed: {e}")
+                self._circuit_record(False)
 
     def _request(self, method, endpoint, **kwargs):
+        # Circuit breaker — once tripped, return None immediately without
+        # touching the network. The trader treats None as "Alpaca call
+        # failed, degrade gracefully" which is exactly what we want when
+        # Alpaca is flaky.
+        if self._circuit_open:
+            return None
+
         url = f"{self.base_url}{endpoint}"
         last_error = None
         status_code = None
+        # (connect_timeout, read_timeout) — a slow connect fails fast (3s)
+        # while a stalled read still gets the 15s it needs to complete a
+        # partial response. Keeps the blocked-on-DNS / blocked-on-SYN cases
+        # from chewing the full timeout budget.
+        timeouts = (5, 15)
         for attempt in range(MAX_RETRIES):
             try:
                 r = getattr(requests, method)(
-                    url, headers=self.headers, timeout=15, **kwargs
+                    url, headers=self.headers, timeout=timeouts, **kwargs
                 )
                 status_code = r.status_code
                 r.raise_for_status()
-                # Track API call
+                # Success — reset the circuit breaker counter and log.
+                self._consecutive_failures = 0
                 try:
                     _shared_db().log_api_call(
                         agent='trade_logic', endpoint=endpoint,
@@ -743,7 +868,15 @@ class AlpacaClient:
                 last_error = e
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt)
-        # Track failed call too
+        # All retries exhausted for this call.
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= ALPACA_CIRCUIT_BREAKER_N:
+            self._circuit_open = True
+            log.warning(
+                f"[CIRCUIT] Alpaca circuit breaker opened after "
+                f"{self._consecutive_failures} consecutive failures — "
+                f"remaining Alpaca calls in this run will short-circuit"
+            )
         try:
             _shared_db().log_api_call(
                 agent='trade_logic', endpoint=endpoint,
@@ -790,6 +923,12 @@ class AlpacaClient:
         # Check negative cache (ticker returned empty before)
         if (t_upper, 0) in self._bar_cache:
             return []
+        # Short-circuit on open breaker — don't chew timeout budget on calls
+        # we already know will fail. Negative-cache so we don't retry same
+        # ticker within this run.
+        if not self._circuit_check():
+            self._bar_cache[(t_upper, 0)] = []
+            return []
         # Cache miss — fetch individually. UTC for Alpaca.
         now_utc = datetime.utcnow()
         end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -803,7 +942,7 @@ class AlpacaClient:
                 f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
                 params={"timeframe": "1Day", "start": start, "end": end,
                         "limit": days + 10, "feed": "iex"},
-                headers=headers, timeout=10,
+                headers=headers, timeout=(5, 10),
             )
             try:
                 _shared_db().log_api_call(
@@ -818,11 +957,15 @@ class AlpacaClient:
                 self._bar_cache[(t_upper, days)] = bars
                 if not bars:
                     self._bar_cache[(t_upper, 0)] = []  # Negative cache marker
+                self._circuit_record(True)
                 return bars
+            else:
+                self._circuit_record(False)
         except Exception as e:
             log.warning(f"get_bars({ticker}): {e}")
             # Negative cache on timeout/error — don't retry this ticker
             self._bar_cache[(t_upper, 0)] = []
+            self._circuit_record(False)
         return []
 
     def get_atr(self, ticker, period=14):
@@ -875,9 +1018,11 @@ class AlpacaClient:
         return self._request("delete", f"/v2/orders/{order_id}")
 
     def get_position_safe(self, ticker):
+        if not self._circuit_check():
+            return None
         url = f"{self.base_url}/v2/positions/{ticker}"
         try:
-            r = requests.get(url, headers=self.headers, timeout=15)
+            r = requests.get(url, headers=self.headers, timeout=(5, 15))
             try:
                 _shared_db().log_api_call(
                     agent='trade_logic', endpoint=f'/v2/positions/{ticker}',
@@ -886,11 +1031,16 @@ class AlpacaClient:
             except Exception:
                 pass
             if r.status_code == 404:
+                # 404 is a valid "no such position" response, not a failure —
+                # don't count it against the circuit breaker.
+                self._circuit_record(True)
                 return None
             r.raise_for_status()
+            self._circuit_record(True)
             return r.json()
         except Exception as e:
             log.warning(f"get_position_safe({ticker}): {e}")
+            self._circuit_record(False)
             return None
 
     def _submit_notional(self, ticker, notional, side):
@@ -2122,6 +2272,19 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
         log.error(f"[ROTATION] Unexpected error: {e}", exc_info=True)
 
 def run(session="open"):
+    # ── RUNTIME WATCHDOG ──────────────────────────────────────────────
+    # Start the background watchdog BEFORE any blocking work so even a
+    # hang on the very first Alpaca call gets a "still alive in phase X"
+    # log line every 15s. See _runtime_watchdog + _set_phase above.
+    _set_phase('startup')
+    _t0 = time.monotonic()
+    _wd = _threading.Thread(
+        target=_runtime_watchdog,
+        args=(_t0, TRADER_RUNTIME_BUDGET_SEC),
+        daemon=True,
+    )
+    _wd.start()
+
     db     = _db()
     alpaca = AlpacaClient()
     now    = datetime.now(ET)
@@ -2369,6 +2532,7 @@ def run(session="open"):
     tier      = get_portfolio_tier(_equity)
 
     # ── GATE 10: Active trade management (every session — open positions)
+    _set_phase('gate_10_position_review', f"{len(positions)} positions")
     urgent_flags    = db.get_urgent_flags()
     urgent_tickers  = {f['ticker'] for f in urgent_flags}
 
@@ -2376,6 +2540,14 @@ def run(session="open"):
     _spy_bars_cache = alpaca.get_bars(C.BENCHMARK_SYMBOL, days=30)
 
     for pos in positions:
+        # Budget ceiling — exits run before entries, so if we hit the wall
+        # we'd rather skip fresh-entry evaluation than leave an exit pending.
+        # Still, bail early if we exceed runtime so decision log / heartbeat
+        # get written cleanly.
+        if budget_exceeded():
+            log.warning("[GATE 10] Runtime budget exceeded — skipping remaining position reviews")
+            break
+        _set_phase('gate_10_position_review', f"ticker={pos['ticker']}")
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
         current_price = pos.get('current_price') or pos['entry_price']
@@ -2622,9 +2794,17 @@ def run(session="open"):
                 pass
 
             signals = _shared_db().get_validated_signals()
+            _set_phase('signal_evaluation', f"{len(signals)} signals")
             log.info(f"Evaluating {len(signals)} validated signal(s)")
 
             for signal in signals:
+                if budget_exceeded():
+                    log.warning(
+                        f"[EVAL] Runtime budget exceeded — stopping signal evaluation "
+                        f"(processed before ticker={signal.get('ticker')})"
+                    )
+                    break
+                _set_phase('signal_evaluation', f"ticker={signal.get('ticker')}")
                 positions = db.get_open_positions()
                 deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
                 deployed_pct = deployed / tradeable if tradeable > 0 else 0
@@ -2884,4 +3064,9 @@ if __name__ == '__main__':
         log.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
+        # Signal the runtime watchdog to exit so the process terminates
+        # cleanly — otherwise the daemon thread would keep the interpreter
+        # alive until its next wake (up to 15s) and subprocess retirement
+        # could stall the dispatch pool.
+        _WATCHDOG_STOP.set()
         release_agent_lock()
