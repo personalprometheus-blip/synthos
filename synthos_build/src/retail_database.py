@@ -234,9 +234,17 @@ CREATE TABLE IF NOT EXISTS signals (
     corroborated    INTEGER NOT NULL DEFAULT 0,  -- 0/1
     corroboration_note TEXT,
     status          TEXT    NOT NULL DEFAULT 'PENDING',
-                                           -- PENDING / WATCHING / QUEUED /
-                                           -- ACTED_ON / DISCARDED / EXPIRED /
-                                           -- INTERRUPTED
+                                           -- Lifecycle (forward-only):
+                                           --   PENDING  → WATCHING  → QUEUED
+                                           --        ↓                   ↓
+                                           --    DISCARDED          VALIDATED
+                                           --                           ↓
+                                           --          EVALUATED / ACTED_ON / EXPIRED
+                                           -- Terminal states: ACTED_ON, DISCARDED,
+                                           --   EVALUATED, EXPIRED, INTERRUPTED.
+                                           -- Trader reads ONLY status='VALIDATED'.
+                                           -- See promote_validated_signals() for the
+                                           -- QUEUED → VALIDATED transition gate.
     is_amended      INTEGER NOT NULL DEFAULT 0,
     is_spousal      INTEGER NOT NULL DEFAULT 0,
     needs_reeval    INTEGER NOT NULL DEFAULT 0,
@@ -696,16 +704,20 @@ class DB:
                 articles_seen INTEGER NOT NULL DEFAULT 0,
                 updated_at    TEXT    NOT NULL)""",
             # v3.6 — per-agent stamps on signals. Each processing agent writes
-            # its own completion marker so no agent reads another's tag as a
-            # hard filter. News stamps via interrogation_status (existing).
+            # its own completion marker. News stamps via interrogation_status.
             # Sentiment stamps via sentiment_score + sentiment_evaluated_at.
             # Screener stamps via screener_evaluated_at.
-            # Trader reads these as scoring inputs, not hard filters — a signal
-            # is tradeable as long as its news stamp (status='QUEUED') is set;
-            # additional stamps improve its Gate 5 score.
+            # Macro/market_state/validator stamp system-wide snapshots.
+            # A dedicated promote_validated_signals() step (run after the
+            # enrichment pipeline, before trader dispatch) checks required
+            # stamps and transitions QUEUED → VALIDATED. Trader reads ONLY
+            # status='VALIDATED' — the unvalidated pool is invisible.
             "ALTER TABLE signals ADD COLUMN sentiment_score REAL",
             "ALTER TABLE signals ADD COLUMN sentiment_evaluated_at TEXT",
             "ALTER TABLE signals ADD COLUMN screener_evaluated_at TEXT",
+            "ALTER TABLE signals ADD COLUMN macro_regime_at_validation TEXT",
+            "ALTER TABLE signals ADD COLUMN market_state_at_validation TEXT",
+            "ALTER TABLE signals ADD COLUMN validator_stamped_at TEXT",
 
             # v3.5 — admin alerts. System-health / validator / bias findings go
             # here instead of per-customer notifications. Customers never see
@@ -1211,7 +1223,7 @@ class DB:
         with self.conn() as c:
             result = c.execute(
                 "UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
-                "WHERE ticker=? AND status='QUEUED'",
+                "WHERE ticker=? AND status IN ('QUEUED','VALIDATED')",
                 (float(sentiment_score), self.now(), ticker.upper())
             )
             return result.rowcount
@@ -1225,10 +1237,88 @@ class DB:
             placeholders = ','.join('?' * len(tickers))
             result = c.execute(
                 f"UPDATE signals SET screener_evaluated_at=? "
-                f"WHERE ticker IN ({placeholders}) AND status='QUEUED'",
+                f"WHERE ticker IN ({placeholders}) AND status IN ('QUEUED','VALIDATED')",
                 (self.now(), *[t.upper() for t in tickers])
             )
             return result.rowcount
+
+    def stamp_signals_macro(self, regime_label):
+        """Macro regime agent snapshots the current market regime onto all
+        QUEUED signals. One SQL call, stamps every queued signal at once."""
+        with self.conn() as c:
+            stamp = f"{self.now()}|{regime_label}"
+            result = c.execute(
+                "UPDATE signals SET macro_regime_at_validation=? "
+                "WHERE status IN ('QUEUED','VALIDATED')",
+                (stamp,)
+            )
+            return result.rowcount
+
+    def stamp_signals_market_state(self, state_label):
+        """Market state agent snapshots the current aggregate state onto all
+        QUEUED signals."""
+        with self.conn() as c:
+            stamp = f"{self.now()}|{state_label}"
+            result = c.execute(
+                "UPDATE signals SET market_state_at_validation=? "
+                "WHERE status='QUEUED'",
+                (stamp,)
+            )
+            return result.rowcount
+
+    def stamp_signals_validator(self, verdict='OK'):
+        """Validator stack stamps completion of its pass on all QUEUED
+        signals. Called once per pipeline cycle (not per-customer) from the
+        daemon, immediately before the promoter step."""
+        with self.conn() as c:
+            stamp = f"{self.now()}|{verdict}"
+            result = c.execute(
+                "UPDATE signals SET validator_stamped_at=? "
+                "WHERE status IN ('QUEUED','VALIDATED')",
+                (stamp,)
+            )
+            return result.rowcount
+
+    def promote_validated_signals(self):
+        """The last link in the validation chain.
+
+        Transitions QUEUED signals to VALIDATED if they have ALL required
+        stamps. Trader reads only VALIDATED signals. Anything stuck at
+        QUEUED is still unvalidated noise and will age out via expiry.
+
+        Required stamps:
+          - interrogation_status   (news has classified)
+          - sentiment_evaluated_at (sentiment has analyzed the ticker)
+          - macro_regime_at_validation
+          - market_state_at_validation
+          - validator_stamped_at
+
+        Returns the count of signals promoted this call.
+        """
+        with self.conn() as c:
+            result = c.execute(
+                "UPDATE signals SET status='VALIDATED', updated_at=? "
+                "WHERE status='QUEUED' "
+                "AND interrogation_status IS NOT NULL "
+                "AND sentiment_evaluated_at IS NOT NULL "
+                "AND macro_regime_at_validation IS NOT NULL "
+                "AND market_state_at_validation IS NOT NULL "
+                "AND validator_stamped_at IS NOT NULL",
+                (self.now(),)
+            )
+            return result.rowcount
+
+    def get_validated_signals(self):
+        """Signals that have passed the full validation chain and are ready
+        for the trader. Trader reads ONLY from this view — the unvalidated
+        QUEUED pool is invisible."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT * FROM signals
+                WHERE status='VALIDATED'
+                ORDER BY source_tier ASC, created_at ASC
+            """).fetchall()
+            return [dict(r) for r in rows]
 
     def queue_signal_for_trader(self, signal_id):
         """Mark signal as QUEUED and create handshake record."""

@@ -114,7 +114,7 @@ def _mark_signal_evaluated(signal_id, reason: str = ''):
         sdb = _shared_db()
         with sdb.conn() as c:
             c.execute(
-                "UPDATE signals SET status='EVALUATED', updated_at=? WHERE id=? AND status='QUEUED'",
+                "UPDATE signals SET status='EVALUATED', updated_at=? WHERE id=? AND status IN ('QUEUED','VALIDATED')",
                 (sdb.now(), signal_id),
             )
         log.debug(f"Signal {signal_id} → EVALUATED ({reason})")
@@ -1955,7 +1955,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
     MAX_ROTATIONS = 1
 
     try:
-        signals = shared_db.get_queued_signals()
+        signals = shared_db.get_validated_signals()
         if not signals:
             return
 
@@ -2315,7 +2315,7 @@ def run(session="open"):
         _prefetch_tickers.add(p['ticker'])      # All held positions
     # Collect signal tickers from shared DB
     try:
-        _sig_tickers = _shared_db().get_queued_signals()
+        _sig_tickers = _shared_db().get_validated_signals()
         for s in (_sig_tickers or []):
             if s.get('ticker'):
                 _prefetch_tickers.add(s['ticker'])
@@ -2599,20 +2599,23 @@ def run(session="open"):
                               portfolio, tradeable, session, now)
 
         if can_enter:
-            # Expire stale QUEUED signals (>72h old — congressional data decays fast)
+            # Expire stale signals (>72h old — data decays fast). Covers both
+            # QUEUED (never validated) and VALIDATED (validated but not acted
+            # on within the window).
             try:
                 with _shared_db().conn() as _c:
                     _expired = _c.execute(
                         "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
-                        "WHERE status='QUEUED' AND created_at < datetime('now', '-3 days')"
+                        "WHERE status IN ('QUEUED','VALIDATED') "
+                        "AND created_at < datetime('now', '-3 days')"
                     ).rowcount
                     if _expired:
-                        log.info(f"[SIGNALS] Expired {_expired} stale QUEUED signals (>72h)")
+                        log.info(f"[SIGNALS] Expired {_expired} stale signal(s) (>72h)")
             except Exception:
                 pass
 
-            signals = _shared_db().get_queued_signals()
-            log.info(f"Evaluating {len(signals)} queued signal(s)")
+            signals = _shared_db().get_validated_signals()
+            log.info(f"Evaluating {len(signals)} validated signal(s)")
 
             for signal in signals:
                 positions = db.get_open_positions()

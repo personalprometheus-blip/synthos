@@ -639,6 +639,32 @@ def run_validator_stack():
         return False
 
 
+def promote_validated_signals():
+    """The last link in the validation chain.
+
+    Runs ONCE per enrichment cycle, after validator_stack completes and
+    before trader dispatch. Stamps validator completion on all QUEUED
+    signals, then promotes any signal that has all required stamps
+    (news + sentiment + macro + market_state + validator) to VALIDATED.
+    Trader reads only VALIDATED signals.
+    """
+    log.info("[PROMOTER] Stamping validator + promoting signals")
+    try:
+        from retail_database import get_customer_db
+        if not OWNER_CUSTOMER_ID:
+            log.error("[PROMOTER] OWNER_CUSTOMER_ID not set — skipping")
+            return 0
+        master = get_customer_db(OWNER_CUSTOMER_ID)
+        stamped = master.stamp_signals_validator('OK')
+        promoted = master.promote_validated_signals()
+        log.info(f"[PROMOTER] validator-stamped {stamped}, "
+                 f"promoted {promoted} signal(s) QUEUED → VALIDATED")
+        return promoted
+    except Exception as e:
+        log.error(f"[PROMOTER] Error: {e}")
+        return 0
+
+
 # ── Main Daemon Loop ──
 
 def run_premarket_prep():
@@ -676,6 +702,14 @@ def run_premarket_prep():
     if _shutdown_requested:
         return
     run_validator_stack()
+    if _shutdown_requested:
+        return
+
+    # Phase 4b: The last link in the validation chain.
+    # Stamp validator completion + promote any QUEUED signal that has all
+    # required stamps (news + sentiment + macro + market_state + validator).
+    # Trader reads ONLY promoted (VALIDATED) signals in the next phase.
+    promote_validated_signals()
     if _shutdown_requested:
         return
 
@@ -747,6 +781,9 @@ def run_market_loop():
                 run_fault_detection()
             if not _shutdown_requested:
                 run_validator_stack()
+            # Last link: stamp validator + promote fully-validated signals
+            if not _shutdown_requested:
+                promote_validated_signals()
             # Trade execution (validator verdict gates decisions)
             if not _shutdown_requested and not kill_switch_active():
                 run_trade_all_customers(session='open')

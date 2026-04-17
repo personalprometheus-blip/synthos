@@ -715,6 +715,16 @@ def run():
     db.set_setting('_MACRO_REGIME', report.regime)
     db.set_setting('_MACRO_REGIME_DETAIL', json.dumps(regime_detail))
 
+    # ── Stamp all QUEUED signals with the current macro regime ────────
+    # Part of the validation chain: signals need this stamp before being
+    # promoted to VALIDATED. One bulk UPDATE — constant-time regardless
+    # of queue size.
+    try:
+        stamped = db.stamp_signals_macro(report.regime)
+        log.info(f"macro_regime stamped {stamped} QUEUED signal(s) with '{report.regime}'")
+    except Exception as _e:
+        log.warning(f"macro stamp failed (non-fatal): {_e}")
+
     # ── Store scan summary for portal access ──────────────────────────
     scan_summary = {
         "timestamp": report.completed_at,

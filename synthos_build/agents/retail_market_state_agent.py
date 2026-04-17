@@ -513,6 +513,14 @@ def persist_state(db, state, sentiment, news, macro):
     db.set_setting('_MARKET_STATE', state.label)
     db.set_setting('_MARKET_STATE_SCORE', str(state.composite))
 
+    # Stamp all QUEUED signals with the current aggregate market state.
+    # Required stamp for QUEUED → VALIDATED promotion.
+    try:
+        stamped = db.stamp_signals_market_state(state.label)
+        log.info(f"market_state stamped {stamped} QUEUED signal(s) with '{state.label}'")
+    except Exception as _e:
+        log.warning(f"market_state stamp failed (non-fatal): {_e}")
+
     # Detailed JSON blob for portal display and debugging
     detail = {
         "sentiment_score": state.sentiment_score,
