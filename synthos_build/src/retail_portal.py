@@ -51,6 +51,16 @@ AUTONOMOUS_UNLOCK_KEY = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 OPERATING_MODE       = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
 ADMIN_TRADING_GATE   = os.environ.get('ADMIN_TRADING_GATE', 'ALL')
 ADMIN_OPERATING_MODE = os.environ.get('ADMIN_OPERATING_MODE', 'ALL')
+
+# ── SETTINGS UI LOCK ──────────────────────────────────────────────────────
+# When true, the agent-configuration slide-out is hidden for ALL users
+# (admin included), AND writes to /api/settings are refused for every key
+# except `setup_complete` (which is just a "dismiss setup guide" flag).
+# Used during the 2026-04 tier-calibration experiment: admin edits customer
+# settings directly via DB/script so end-users can't drift the fleet config
+# while we measure per-tier behavior.
+# Flip to 'false' in .env when you want to re-open the slide-out.
+SETTINGS_UI_LOCKED   = os.environ.get('SETTINGS_UI_LOCKED', 'true').lower() == 'true'
 MONITOR_URL          = os.environ.get('MONITOR_URL', 'http://localhost:5000')
 MONITOR_TOKEN        = os.environ.get('MONITOR_TOKEN', 'synthos-default-token')
 RESEND_API_KEY           = os.environ.get('RESEND_API_KEY', '')
@@ -4367,6 +4377,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
 </div>
 
+{% if not settings_ui_locked %}
 <!-- CONFIG TAB (right edge) -->
 <div class="cfg-tab" id="cfg-tab" onclick="toggleConfigPanel()" title="Configure agent">
   <span class="cfg-tab-icon">&#9881;</span>
@@ -4592,6 +4603,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
   </div>
 </div>
+{% endif %}
 
 {% if grace_warning %}
 <!-- GRACE PERIOD WARNING BANNER -->
@@ -8690,6 +8702,7 @@ def index():
         settings=settings,
         async_load=True,
         grace_warning=grace_warning,
+        settings_ui_locked=SETTINGS_UI_LOCKED,
     )
 
 
@@ -9045,6 +9058,24 @@ def api_settings():
     """Save trading settings to per-customer DB (customer_settings table).
     Falls through to global .env only for system-level keys."""
     data = request.get_json(silent=True) or {}
+
+    # ── SETTINGS UI LOCK ──────────────────────────────────────────────
+    # During the tier-calibration experiment the slide-out is hidden for
+    # all users. Writes are rejected here too so a stale tab or a hand-
+    # crafted request can't bypass the UI lock. `setup_complete` is the
+    # only key we allow — it's just a "dismiss setup guide" flag that
+    # doesn't touch trading parameters.
+    if SETTINGS_UI_LOCKED:
+        allowed = {'setup_complete'}
+        illegal = [k for k in data.keys() if k not in allowed]
+        if illegal:
+            log.info(f"[SETTINGS_LOCK] Rejected write from {session.get('customer_id','?')[:8]}: "
+                     f"keys={illegal}")
+            return jsonify({
+                'ok': False,
+                'locked': True,
+                'error': 'Trading settings are locked by administrator during calibration.',
+            }), 403
 
     # Per-customer trading params → customer_settings table.
     # Note: max_positions is deliberately NOT customer-settable; it's
