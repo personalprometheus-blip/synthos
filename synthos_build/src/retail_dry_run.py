@@ -95,15 +95,12 @@ PIPELINE_CLOSE = [
 ]
 
 # Trade agent step (appended when not --skip-trade).
-# --dry-run forces MANAGED mode in the trade agent regardless of the
-# customer's configured mode. Trades queue for approval instead of
-# being submitted to Alpaca, so running the pipeline test no longer
-# triggers real (paper) orders on AUTOMATIC customers.
-TRADE_STEP = lambda session: (
-    'retail_trade_logic_agent.py',
-    [f'--session={session}', '--dry-run'],
-    300, 'Trade Logic',
-)
+# By design this runs the trade agent with the customer's real
+# OPERATING_MODE — if a stop-loss fires or a new signal gates through,
+# the paper order is submitted to Alpaca. That's the point of the test.
+# The --dry-run flag on the agent exists as an optional override but is
+# intentionally NOT applied here.
+TRADE_STEP = lambda session: ('retail_trade_logic_agent.py', [f'--session={session}'], 300, 'Trade Logic')
 
 SESSIONS = {
     'prep':   PIPELINE_PREP,
