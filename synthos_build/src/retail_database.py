@@ -710,7 +710,12 @@ class DB:
             try:
                 c.execute(sql)
                 c.commit()
-                log.info(f"Migration applied: {sql[:60]}")
+                # Demoted to DEBUG: CREATE TABLE IF NOT EXISTS and CREATE INDEX
+                # IF NOT EXISTS silently succeed even when the object already
+                # exists, so logging at INFO fires every time the DB is opened.
+                # Portal DB opens happen on every API call → this single line
+                # was writing 25 entries × every request = 223 MB/day of noise.
+                log.debug(f"Migration applied: {sql[:60]}")
             except sqlite3.OperationalError as e:
                 if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                     pass  # column already exists — skip silently
