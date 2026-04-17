@@ -1656,11 +1656,10 @@ var _limit = 25;
 function _esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function _relTime(iso){
   if(!iso)return'';
+  // DB timestamps are UTC-naive ("YYYY-MM-DD HH:MM:SS" with no TZ marker).
+  // Append 'Z' so JS treats them as UTC, not local.
   var s=String(iso);
-  if(!s.includes('Z')&&!s.includes('+')&&!s.includes('-',10)){
-    var p=new Date(s+' EDT');if(isNaN(p.getTime()))p=new Date(s+'Z');
-    s=p.toISOString();
-  }
+  if(!s.includes('Z')&&!s.includes('+')&&!s.includes('-',10)) s=s.replace(' ','T')+'Z';
   var d=new Date(s);
   var secs=Math.floor((Date.now()-d.getTime())/1000);
   if(secs<0)secs=0;
@@ -5893,14 +5892,14 @@ function _esc(s) { var d = document.createElement('div'); d.textContent = s; ret
 
 function _relTime(iso) {
   if (!iso) return '';
-  // DB stores bare timestamps in America/New_York (no TZ marker).
-  // Append ET offset so JS doesn't assume UTC.
+  // DB timestamps are UTC-naive ("YYYY-MM-DD HH:MM:SS" with no TZ marker).
+  // Append 'Z' so JS treats them as UTC. The prior EDT hack was correct
+  // when DB stored local-ET but became a 4h-forward bug after the UTC
+  // migration — events were rendering as "just now" / "45s ago" when
+  // they were actually from much earlier in the day.
   var s = String(iso);
   if (!s.includes('Z') && !s.includes('+') && !s.includes('-', 10)) {
-    // Determine EDT (-04:00) vs EST (-05:00) from the timestamp itself
-    var probe = new Date(s + ' EDT');
-    if (isNaN(probe.getTime())) probe = new Date(s + 'Z');  // fallback
-    s = probe.toISOString();
+    s = s.replace(' ', 'T') + 'Z';
   }
   var d = new Date(s);
   var secs = Math.floor((Date.now() - d.getTime()) / 1000);
