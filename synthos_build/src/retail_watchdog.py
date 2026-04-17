@@ -148,6 +148,11 @@ WATCHED_AGENTS = [
         "args":    [],
         "log":     "portal.log",
         "managed": True,
+        # Portal is gunicorn-under-systemd now. Watchdog checks via
+        # `systemctl is-active` and restarts via `systemctl restart`
+        # instead of spawning retail_portal.py directly (which would
+        # collide with gunicorn's bound port).
+        "systemd_service": "synthos-portal",
         "env":     {},
     },
 ]
@@ -429,7 +434,23 @@ def scan_log_for_crashes(
 
 # ── RESTART LOGIC ─────────────────────────────────────────────────────────────
 
-def is_process_running(script_name: str) -> bool:
+def is_process_running(script_name: str, systemd_service: str | None = None) -> bool:
+    """True if the service is running.
+
+    If systemd_service is set, uses `systemctl is-active` — this is
+    required for services that run under a different process name than
+    their .py file (e.g. gunicorn-wrapped retail_portal). Otherwise
+    falls back to pgrep -f on the script name.
+    """
+    if systemd_service:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", "--quiet", systemd_service],
+                capture_output=True,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
     try:
         result = subprocess.run(
             ["pgrep", "-f", script_name],
@@ -441,7 +462,29 @@ def is_process_running(script_name: str) -> bool:
 
 
 def start_managed_service(agent_cfg: dict) -> bool:
-    """Start a managed service (portal) in background."""
+    """Start a managed service (portal) in background.
+
+    If agent_cfg has 'systemd_service', delegates to systemctl restart
+    (safer — systemd owns process lifecycle and won't double-bind ports).
+    Otherwise falls back to direct Popen of the .py file (legacy).
+    """
+    systemd_service = agent_cfg.get("systemd_service")
+    if systemd_service:
+        try:
+            result = subprocess.run(
+                ["sudo", "systemctl", "restart", systemd_service],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                log.info(f"Restarted {systemd_service} via systemctl")
+                return True
+            log.error(f"systemctl restart {systemd_service} failed: "
+                      f"{result.stderr.strip() or result.stdout.strip()}")
+            return False
+        except Exception as e:
+            log.error(f"systemctl restart {systemd_service} error: {e}")
+            return False
+
     script   = agent_cfg["script"]
     log_file = LOG_DIR / agent_cfg["log"]
     env      = os.environ.copy()
@@ -899,7 +942,10 @@ def watch_loop() -> None:
                     continue
 
                 if managed:
-                    running = is_process_running(agent_cfg["script"])
+                    running = is_process_running(
+                        agent_cfg["script"],
+                        systemd_service=agent_cfg.get("systemd_service"),
+                    )
                     if not running:
                         log.warning(f"{name} not running — starting now")
                         started = start_managed_service(agent_cfg)
