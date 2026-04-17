@@ -338,18 +338,63 @@ def fetch_vix():
 
 def fetch_etf_returns(tickers, bars_per_ticker=5):
     """
-    Fetch 1-day returns for a list of ETF tickers using Alpaca.
+    Fetch 1-day returns for a list of ETF tickers using Alpaca's multi-symbol
+    bars endpoint — one HTTP call for the whole list instead of one per ticker.
+    Cuts sentiment-agent Alpaca bar calls from 19 down to 2.
+
     Returns dict: {ticker: 1d_return_float} or {} on failure.
     """
-    results = {}
-    for ticker in tickers:
-        bars = fetch_alpaca_bars(ticker, days=bars_per_ticker + 5)
-        if len(bars) >= 2:
-            prev_close = bars[-2].get('c', 0)
-            last_close = bars[-1].get('c', 0)
-            if prev_close and prev_close != 0:
-                results[ticker] = (last_close - prev_close) / prev_close
-        time.sleep(0.3)  # rate-limit courtesy
+    if not tickers:
+        return {}
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        log.warning("Alpaca API keys not configured — skipping ETF returns")
+        return {}
+
+    end_dt   = datetime.now(ET)
+    start_dt = end_dt - timedelta(days=bars_per_ticker + 10)  # weekend/holiday buffer
+    url      = f"{ALPACA_DATA_URL}/v2/stocks/bars"
+    # Chunk to 50 to respect Alpaca's multi-symbol limit
+    CHUNK    = 50
+    results  = {}
+    headers  = {
+        "APCA-API-KEY-ID":     ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+    }
+
+    for i in range(0, len(tickers), CHUNK):
+        batch = tickers[i:i+CHUNK]
+        params = {
+            "symbols":   ",".join(batch),
+            "timeframe": "1Day",
+            "start":     start_dt.strftime('%Y-%m-%d'),
+            "end":       end_dt.strftime('%Y-%m-%d'),
+            "feed":      "iex",
+            "limit":     500,
+        }
+        try:
+            r = fetch_with_retry(url, params=params, headers=headers)
+            try:
+                _master_db().log_api_call(
+                    'sentiment_agent', '/v2/stocks/bars', 'GET', 'alpaca_data',
+                    status_code=getattr(r, 'status_code', None)
+                )
+            except Exception:
+                pass
+            if not r:
+                continue
+            data = r.json()
+            by_symbol = data.get("bars", {}) or {}
+            for ticker in batch:
+                bars = by_symbol.get(ticker) or []
+                if len(bars) >= 2:
+                    prev_close = bars[-2].get('c', 0)
+                    last_close = bars[-1].get('c', 0)
+                    if prev_close and prev_close != 0:
+                        results[ticker] = (last_close - prev_close) / prev_close
+        except Exception as e:
+            log.warning(f"fetch_etf_returns batch error: {e}")
+
+    log.info(f"fetch_etf_returns: {len(results)}/{len(tickers)} tickers resolved via multi-symbol endpoint")
     return results
 
 
