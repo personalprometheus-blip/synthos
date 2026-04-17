@@ -542,7 +542,9 @@ class DB:
             c.executescript(SCHEMA)
             c.commit()
             c.close()
-        log.info(f"Schema verified: {self.path}")
+        # DEBUG: fires on every DB open (every API request that opens a
+        # customer DB). INFO made portal.log unreadably noisy.
+        log.debug(f"Schema verified: {self.path}")
         self._run_migrations()
 
     def _run_migrations(self):
