@@ -156,6 +156,22 @@ WATCHED_AGENTS = [
         "systemd_service": "synthos-portal",
         "env":     {},
     },
+    {
+        # Interrogation listener — always-running UDP service on port
+        # 5556. Boot sequence starts it on @reboot, but if it crashes
+        # between boots the signal pipeline silently degrades (every
+        # new signal gets interrogation_status=UNVALIDATED and — with
+        # the tightened promoter — stops promoting).
+        # Managed=True but no systemd_service → watchdog restarts via
+        # direct Popen of the script if pgrep doesn't find it.
+        "name":    "Interrogation",
+        "alias":   "Interrogation Listener",
+        "script":  "retail_interrogation_listener.py",
+        "args":    [],
+        "log":     "interrogation.log",
+        "managed": True,
+        "env":     {},
+    },
 ]
 
 IGNORE_LOG_PATTERNS = [
