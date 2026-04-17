@@ -337,11 +337,18 @@ def _apply_customer_settings():
 
 
 PORTFOLIO_TIERS = [
-    {"threshold": 0,      "max_deployed": 0.30, "max_positions": 3,  "label": "Seed"   },
-    {"threshold": 1000,   "max_deployed": 0.35, "max_positions": 5,  "label": "Early"  },
-    {"threshold": 5000,   "max_deployed": 0.40, "max_positions": 8,  "label": "Growth" },
-    {"threshold": 20000,  "max_deployed": 0.45, "max_positions": 10, "label": "Scaled" },
-    {"threshold": 50000,  "max_deployed": 0.50, "max_positions": 12, "label": "Mature" },
+    # Tier is the infrastructure's cap on BOTH position count and portfolio-
+    # wide deployment. Position count scales with equity (Seed 3 → Mature 12)
+    # so small accounts don't over-diversify into noise. Deployment cap is
+    # uniform at 95% — the customer's preset (MAX_GROSS_EXPOSURE, typically
+    # 60/80/95) is the narrower lever. The prior 30–50% tier cap was a
+    # silent ceiling that blocked even aggressive customers from deploying
+    # what their preset said they should.
+    {"threshold": 0,      "max_deployed": 0.95, "max_positions": 3,  "label": "Seed"   },
+    {"threshold": 1000,   "max_deployed": 0.95, "max_positions": 5,  "label": "Early"  },
+    {"threshold": 5000,   "max_deployed": 0.95, "max_positions": 8,  "label": "Growth" },
+    {"threshold": 20000,  "max_deployed": 0.95, "max_positions": 10, "label": "Scaled" },
+    {"threshold": 50000,  "max_deployed": 0.95, "max_positions": 12, "label": "Mature" },
 ]
 
 VOLATILITY_BUCKETS = {

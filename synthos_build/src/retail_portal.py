@@ -6161,11 +6161,14 @@ var PRESETS = {
     'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '20', 'cfg-bil-enabled': true
   },
   aggressive: {
+    // BIL reserve OFF by default in aggressive — deploy-everything posture.
+    // Conservative and moderate keep BIL on. Custom mode lets any user opt
+    // into the other side (aggressive user with BIL on, or conservative off).
     'cfg-min-conf': 'LOW', 'cfg-max-pos': '20', 'cfg-max-trade-usd': '5000',
     'cfg-max-daily-loss': '1000', 'cfg-close-mode': 'aggressive',
     'cfg-max-drawdown': '25', 'cfg-max-sector': '50', 'cfg-max-hold-days': '30',
     'cfg-max-exposure': '95', 'cfg-profit-target': '1.5', 'cfg-staleness': 'Stale',
-    'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '10', 'cfg-bil-enabled': true
+    'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '10', 'cfg-bil-enabled': false
   }
 };
 
