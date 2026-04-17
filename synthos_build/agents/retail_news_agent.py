@@ -460,6 +460,77 @@ def _source_fetched_recently(source_name: str, db) -> bool:
         return False   # fail open — allow fetch if DB check errors
 
 
+def _get_incremental_start(db, cursor_name: str,
+                           default_hours: int,
+                           stale_clamp_hours: int = 48) -> str:
+    """Return the ISO-8601 `start` timestamp for an Alpaca news fetch.
+
+    Resolution:
+      1. If a cursor exists for this source and is <stale_clamp_hours old,
+         use it directly — we only want articles created after this point.
+      2. If the cursor is older than stale_clamp_hours, clamp to that window
+         (protects against the agent being offline for days).
+      3. If no cursor exists yet (first run), fall back to default_hours back.
+
+    This replaces the old "fetch-once-per-day" guard. We now fetch every
+    session but only pull articles we haven't seen yet.
+    """
+    try:
+        cursor = db.get_fetch_cursor(cursor_name)
+    except Exception:
+        cursor = None
+
+    if cursor and cursor.get('cursor_value'):
+        try:
+            cursor_dt = datetime.fromisoformat(cursor['cursor_value'].replace('Z', ''))
+            age_hours = (datetime.utcnow() - cursor_dt).total_seconds() / 3600
+            if age_hours > stale_clamp_hours:
+                log.info(f"Cursor {cursor_name} is {age_hours:.1f}h old — "
+                         f"clamping to {stale_clamp_hours}h back")
+                return (datetime.utcnow() - timedelta(hours=stale_clamp_hours)
+                        ).strftime('%Y-%m-%dT%H:%M:%SZ')
+            return cursor['cursor_value']
+        except Exception as exc:
+            log.warning(f"Cursor {cursor_name} unparseable ({exc}) — using default")
+
+    # First-run fallback
+    return (datetime.utcnow() - timedelta(hours=default_hours)
+            ).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _advance_cursor(db, cursor_name: str, articles: list) -> int:
+    """After a successful fetch, advance the cursor to the latest article's
+    created_at. Returns the number of articles that counted toward the cursor
+    (i.e. had a usable timestamp). No-ops cleanly if articles is empty."""
+    if not articles:
+        return 0
+    latest = None
+    for item in articles:
+        ts = item.get('disc_date') or item.get('pub_date') or item.get('created_at')
+        if not ts:
+            continue
+        # disc_date is 10-char date; we want full ISO for the cursor.
+        # The caller passes the raw article list, but _alpaca_article_to_item
+        # strips the full timestamp — pull from the original article dict.
+        full = item.get('__created_at') or item.get('raw_created_at') or ts
+        if latest is None or full > latest:
+            latest = full
+    if not latest:
+        return 0
+    # Add 1 second so the next fetch excludes the article we just saw
+    try:
+        latest_dt = datetime.fromisoformat(latest.replace('Z', ''))
+        next_start = (latest_dt + timedelta(seconds=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    except Exception:
+        next_start = latest
+    try:
+        db.set_fetch_cursor(cursor_name, next_start, articles_seen=len(articles))
+        log.info(f"Cursor {cursor_name} advanced to {next_start} (+{len(articles)} articles)")
+    except Exception as exc:
+        log.warning(f"Failed to update cursor {cursor_name}: {exc}")
+    return len(articles)
+
+
 def _record_source_fetch(source_name: str, db) -> None:
     """Record a successful fetch so the guard fires until the next 08:00 ET reset."""
     try:
@@ -708,6 +779,9 @@ def _alpaca_article_to_item(article: dict) -> dict:
         "ticker":      ticker,
         "all_symbols": symbols,
         "image_url":   image_url,
+        # Full ISO-8601 created_at kept so the incremental-fetch cursor
+        # can advance precisely. disc_date is only YYYY-MM-DD.
+        "raw_created_at": article.get("created_at") or "",
     }
 
 
@@ -841,8 +915,13 @@ def fetch_and_store_alpaca_display_news(db) -> int:
     except Exception:
         pass
 
-    start    = (datetime.now() - timedelta(hours=6)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # Incremental via fetch_cursors — "alpaca_news_display" tracks the most
+    # recent display headline we've stored. First-run fallback: last 6 h.
+    start    = _get_incremental_start(db, "alpaca_news_display",
+                                      default_hours=6)
     articles = fetch_alpaca_news_historical(start=start, limit=50, sort="desc")
+    if articles:
+        _advance_cursor(db, "alpaca_news_display", articles)
 
     stored = 0
     for item in articles:
@@ -2584,22 +2663,22 @@ def run(session="market"):
     # ── Fetch all sources (guarded — max 1 fetch per source per 24 h) ────────
     all_raw = []
 
-    # ── Fetch all news from Alpaca (guarded — max once per hour per session) ─
-    # Market session: last 2 h of news, broad market + tracked tickers.
-    # Overnight session: last 8 h of news to catch afterhours moves.
-    _source_key = "Alpaca News API"
-    if _source_fetched_recently(_source_key, db):
-        log.info("GUARD: Alpaca News API skipped — fetched within last reset window")
-    else:
-        if session == "market":
-            news_start = (datetime.now() - timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
-        else:
-            news_start = (datetime.now() - timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # ── Fetch all news from Alpaca — incremental via fetch_cursors ─────────
+    # Cursor "alpaca_news_main" tracks the most recent article we've seen.
+    # Default-window fallback when no cursor exists yet:
+    #   market session: last 2 h (catches intraday moves)
+    #   overnight:      last 8 h (catches afterhours/premarket)
+    # After a successful fetch we advance the cursor to the latest
+    # article.created_at + 1s so the next run only pulls what's new.
+    default_hours = 2 if session == "market" else 8
+    news_start = _get_incremental_start(db, "alpaca_news_main",
+                                        default_hours=default_hours)
+    log.info(f"Alpaca news fetch window starts at {news_start}")
 
-        results = fetch_alpaca_news_historical(start=news_start, limit=50, sort="desc")
-        all_raw.extend(results)
-        if results is not None:
-            _record_source_fetch(_source_key, db)
+    results = fetch_alpaca_news_historical(start=news_start, limit=50, sort="desc")
+    all_raw.extend(results)
+    if results:
+        _advance_cursor(db, "alpaca_news_main", results)
 
     if session == "market":
         # ── Display-only news for portal Intel page ────────────────────────

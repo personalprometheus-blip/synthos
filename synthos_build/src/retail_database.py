@@ -675,6 +675,14 @@ class DB:
             # 'Session Complete', etc.). Null dedup_key = legacy blind insert.
             "ALTER TABLE notifications ADD COLUMN dedup_key TEXT",
             "CREATE INDEX IF NOT EXISTS idx_notif_dedup ON notifications(dedup_key, created_at DESC)",
+            # v3.4 — incremental-fetch cursors (news agent, others).
+            # One row per data source. cursor_value is a source-specific string
+            # (ISO-8601 timestamp for news; could be a page token for others).
+            """CREATE TABLE IF NOT EXISTS fetch_cursors (
+                source_name   TEXT    PRIMARY KEY,
+                cursor_value  TEXT    NOT NULL,
+                articles_seen INTEGER NOT NULL DEFAULT 0,
+                updated_at    TEXT    NOT NULL)""",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -2048,6 +2056,37 @@ class DB:
                     updated_at=excluded.updated_at
             """, (ticker.upper().strip(), sector, industry, source,
                   confidence, self.now()))
+
+    # ── INCREMENTAL-FETCH CURSORS ──────────────────────────────────────────
+
+    def get_fetch_cursor(self, source_name):
+        """Return the cursor value for a source, or None if not yet set.
+        `source_name` is an arbitrary string (e.g. 'alpaca_news_main')."""
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT cursor_value, articles_seen, updated_at "
+                "FROM fetch_cursors WHERE source_name=?",
+                (source_name,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def set_fetch_cursor(self, source_name, cursor_value, articles_seen=None):
+        """Upsert a cursor. If articles_seen is given, adds to the running total."""
+        with self.conn() as c:
+            existing = c.execute(
+                "SELECT articles_seen FROM fetch_cursors WHERE source_name=?",
+                (source_name,)
+            ).fetchone()
+            current_seen = (existing['articles_seen'] if existing else 0)
+            new_seen = current_seen + (articles_seen or 0)
+            c.execute("""
+                INSERT INTO fetch_cursors (source_name, cursor_value, articles_seen, updated_at)
+                VALUES (?,?,?,?)
+                ON CONFLICT(source_name) DO UPDATE SET
+                    cursor_value=excluded.cursor_value,
+                    articles_seen=excluded.articles_seen,
+                    updated_at=excluded.updated_at
+            """, (source_name, cursor_value, new_seen, self.now()))
 
     def get_tickers_needing_sector(self, limit=200):
         """Return distinct tickers from positions + recent signals that have no
