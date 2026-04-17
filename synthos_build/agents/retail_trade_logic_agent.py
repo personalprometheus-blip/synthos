@@ -2279,16 +2279,23 @@ def run(session="open"):
                 except Exception:
                     pass
 
-    # Check for first-run (no history at all) — setup only, don't trade yet
+    # Check for first-run (no history at all) — setup only, don't trade yet.
+    # BUG FIX 2026-04-17: `has_history` was False forever for customers who
+    # never traded (no positions, no realized gains), re-firing the first-run
+    # gate every cycle and blocking them from ever trading. We now also set
+    # a persistent FIRST_RUN_COMPLETED customer setting the first time the
+    # gate fires, and skip the gate in all subsequent runs.
     positions_after = db.get_open_positions()
     portfolio = db.get_portfolio()
     has_history = len(positions_after) > 0 or portfolio.get('realized_gains', 0) != 0
-    if not has_history and not orphans:
+    first_run_done = (db.get_setting('FIRST_RUN_COMPLETED') == 'true')
+    if not has_history and not orphans and not first_run_done:
         log.info(f"[GATE 0] First run — account setup only (equity ${alpaca_equity:.2f})")
         session_log.gate("0_HEALTH", "FIRST_RUN", {
             "equity": alpaca_equity, "cash": alpaca_cash,
         }, "first-run setup — will trade on next cycle")
         session_log.commit(db)
+        db.set_setting('FIRST_RUN_COMPLETED', 'true')
         db.log_event("FIRST_RUN_COMPLETE", agent="Trade Logic",
                      details=f"Account initialized — equity ${alpaca_equity:.2f}")
         # Dedup key with no window → fires exactly once per customer, ever.
