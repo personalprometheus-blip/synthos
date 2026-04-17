@@ -1509,15 +1509,20 @@ class DB:
         return defaults
 
     def get_queued_signals(self):
-        """Signals ready for the trader to act on — excludes SKIPPED interrogation.
-        SKIPPED = watch-only news signals that never went through interrogation;
-        including them caused Phase 3 of the sentiment agent to scan 400+ tickers.
+        """All signals ready for the trader to act on.
+
+        The interrogation_status='SKIPPED' tag is a news-agent internal
+        bookkeeping flag (set on display-only / WATCH-routed news signals
+        in retail_news_agent.py). It is NOT a trader filter. The trader's
+        own gates 4–6 (liquidity, spread, event risk, score, entry) are
+        responsible for rejecting unsuitable signals. A prior version
+        filtered SKIPPED here to reduce sentiment-agent scan load — but
+        sentiment uses screening_requests, not this method.
         """
         with self.conn() as c:
             rows = c.execute("""
                 SELECT * FROM signals
                 WHERE status='QUEUED'
-                AND interrogation_status != 'SKIPPED'
                 ORDER BY source_tier ASC, created_at ASC
             """).fetchall()
             return [dict(r) for r in rows]
