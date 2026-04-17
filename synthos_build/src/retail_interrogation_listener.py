@@ -53,11 +53,21 @@ from collections import defaultdict
 from dotenv import load_dotenv
 
 # ── PATH RESOLUTION ───────────────────────────────────────────────────────
-BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR  = BASE_DIR / 'logs'
+BASE_DIR    = Path(__file__).resolve().parent          # synthos_build/src/
+PROJECT_DIR = BASE_DIR.parent                          # synthos_build/
+LOG_DIR     = PROJECT_DIR / 'logs'
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-load_dotenv(BASE_DIR / '.env')
+# .env lives under user/ — matches the resolution used by fault_detection,
+# sentiment, and the other agents. Previously the listener looked for
+# .env in src/ which doesn't exist, so OWNER_CUSTOMER_ID wasn't populated
+# and heartbeats landed in the master DB instead of the owner customer's
+# DB (where fault detection actually reads them).
+_ENV_PATH = PROJECT_DIR / 'user' / '.env'
+if _ENV_PATH.exists():
+    load_dotenv(_ENV_PATH)
+else:
+    load_dotenv(BASE_DIR / '.env')  # legacy fallback
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 try:
