@@ -170,13 +170,17 @@ def _is_market_hours():
 #  Check that each core agent has heartbeated recently
 # ══════════════════════════════════════════════════════════════════════════
 
-# Heartbeat agent names (as written by each agent's db.log_heartbeat call)
-# and AGENT_COMPLETE names (as written by db.log_event)
+# Heartbeat agent names (as written by each agent's db.log_heartbeat call),
+# AGENT_COMPLETE names (as written by db.log_event), and an optional
+# per-agent stale threshold override in minutes. Agents that run
+# intraday use the default (HEARTBEAT_STALE_MINUTES). Once-per-day agents
+# (like the sector screener) get a 30h window so a successful prep run
+# counts as healthy until the next day's prep.
 EXPECTED_AGENTS = [
     ("market_sentiment_agent", "The Pulse",      "Market Sentiment"),
     ("news_agent",             "News",            "News"),
     ("trade_logic_agent",      "Trade Logic",     "Trade Logic"),
-    ("sector_screener",        "Sector Screener", "Sector Screener"),
+    ("sector_screener",        "Sector Screener", "Sector Screener", 1800),  # 30h
     ("price_poller",           "Price Poller",    "Price Poller"),
 ]
 
@@ -187,7 +191,13 @@ def gate1_agent_liveness(report: FaultReport, db):
 
     now = datetime.now(tz=ZoneInfo("UTC"))
 
-    for hb_name, complete_name, agent_label in EXPECTED_AGENTS:
+    for entry in EXPECTED_AGENTS:
+        # Support both 3-tuple (default threshold) and 4-tuple (custom threshold)
+        if len(entry) == 4:
+            hb_name, complete_name, agent_label, stale_threshold = entry
+        else:
+            hb_name, complete_name, agent_label = entry
+            stale_threshold = HEARTBEAT_STALE_MINUTES
         with db.conn() as c:
             # Match exact heartbeat agent name
             row = c.execute(
@@ -218,14 +228,14 @@ def gate1_agent_liveness(report: FaultReport, db):
         except (ValueError, TypeError):
             age_min = 9999
 
-        if age_min > HEARTBEAT_STALE_MINUTES and _is_market_hours():
-            severity = Severity.CRITICAL if age_min > HEARTBEAT_STALE_MINUTES * 3 else Severity.WARNING
+        if age_min > stale_threshold and _is_market_hours():
+            severity = Severity.CRITICAL if age_min > stale_threshold * 3 else Severity.WARNING
             report.add(Finding(
                 gate="GATE1_LIVENESS",
                 severity=severity,
                 code=f"STALE_HEARTBEAT_{code_key}",
                 message=f"{agent_label}: Last heartbeat {int(age_min)}m ago",
-                detail=f"Threshold: {HEARTBEAT_STALE_MINUTES}m | Last: {row['timestamp']}"
+                detail=f"Threshold: {stale_threshold}m | Last: {row['timestamp']}"
             ))
         else:
             report.add(Finding(

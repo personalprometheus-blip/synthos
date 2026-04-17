@@ -5149,7 +5149,15 @@ setInterval(loadAgentPulse, 10000);
     </div>
   </div>
   <div style="padding:0 4px 16px">
-    <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <label style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)">Sector</label>
+      <select id="screening-sector-select" onchange="loadScreening()"
+              class="glass-input" style="font-size:12px;padding:6px 10px;max-width:260px">
+        <option value="">All sectors</option>
+      </select>
+      <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-left:auto"></div>
+    </div>
+    <div id="screening-sector-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px"></div>
     <div id="screening-grid" style="display:grid;gap:10px"></div>
   </div>
 
@@ -7975,13 +7983,64 @@ async function loadAudit() {
 
 
 // -- SCREENING --
+let _screeningSectorsLoaded = false;
+
+async function loadScreeningSectors() {
+  // Populate the dropdown + sector summary cards (run once, or on refresh).
+  const select = document.getElementById('screening-sector-select');
+  const summary = document.getElementById('screening-sector-summary');
+  if (!select || !summary) return;
+  try {
+    const r = await fetch('/api/screening/sectors');
+    const d = await r.json();
+    const sectors = d.sectors || [];
+    if (!sectors.length) {
+      summary.innerHTML = '';
+      return;
+    }
+    // Preserve current selection (if any) so refreshes don't snap back.
+    const currentSel = select.value;
+    select.innerHTML = '<option value="">All sectors</option>'
+      + sectors.map(s => '<option value="'+_esc(s.sector)+'">'+_esc(s.sector)+' ('+s.etf+')</option>').join('');
+    // Default to strongest sector (first after sort) on initial load only.
+    if (!_screeningSectorsLoaded) {
+      select.value = sectors[0].sector;
+      _screeningSectorsLoaded = true;
+    } else if (currentSel) {
+      select.value = currentSel;
+    }
+    // Summary cards — clickable shortcut to select a sector.
+    const pct = v => v != null ? (v*100).toFixed(0)+'%' : '--';
+    const retFmt = v => v != null ? ((v>=0?'+':'')+(v*100).toFixed(1)+'%') : 'n/a';
+    const retColor = v => v > 0 ? 'var(--teal)' : v < 0 ? 'var(--pink)' : 'var(--muted)';
+    summary.innerHTML = sectors.map((s,i) => {
+      const isTop = i === 0;
+      return '<div onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
+        + 'style="background:rgba(255,255,255,0.03);border:1px solid '+(isTop?'rgba(0,245,212,0.4)':'rgba(255,255,255,0.08)')+';'
+        + 'border-radius:8px;padding:10px 12px;cursor:pointer;transition:all 0.15s">'
+        + '<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:var(--muted);text-transform:uppercase">'+_esc(s.sector)+'</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px">'
+        + '<div style="font-size:14px;font-weight:700">'+_esc(s.top_ticker||'—')+'</div>'
+        + '<div style="font-size:12px;color:var(--teal);font-weight:600">'+pct(s.top_score)+'</div>'
+        + '</div>'
+        + '<div style="font-size:9px;color:'+retColor(s.etf_5yr_return)+';margin-top:2px;font-family:var(--mono)">'+s.etf+' 5yr '+retFmt(s.etf_5yr_return)+'</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) { console.warn('loadScreeningSectors', e); }
+}
+
 async function loadScreening() {
+  // Populate dropdown first (no-op after first run — don't block on it).
+  await loadScreeningSectors();
+  const select = document.getElementById('screening-sector-select');
+  const selectedSector = select ? select.value : '';
   const meta = document.getElementById('screening-meta');
   const grid = document.getElementById('screening-grid');
   meta.textContent = 'Loading...';
   grid.innerHTML = '';
   try {
-    const r = await fetch('/api/screening');
+    const qs = selectedSector ? ('?sector=' + encodeURIComponent(selectedSector)) : '';
+    const r = await fetch('/api/screening' + qs);
     const d = await r.json();
     const candidates = d.candidates || [];
     if (!candidates.length) {
@@ -7991,7 +8050,9 @@ async function loadScreening() {
     const c0 = candidates[0];
     const ret5 = c0.etf_5yr_return != null ? ((c0.etf_5yr_return*100).toFixed(1)+'%') : 'N/A';
     const retSign = c0.etf_5yr_return > 0 ? '+' : '';
-    meta.textContent = 'Sector: '+(c0.sector||'')+' | ETF: '+(c0.etf||'')+' | 5-Year Return: '+retSign+ret5+' | Run: '+(c0.run_id||'').slice(0,16)+' | '+candidates.length+' candidates';
+    const sectorLabel = selectedSector ? ('Sector: '+(c0.sector||selectedSector)+' | ETF: '+(c0.etf||'')+' | 5-Year Return: '+retSign+ret5)
+                                        : ('All sectors | '+candidates.length+' candidates across '+(new Set(candidates.map(c=>c.sector)).size)+' sectors');
+    meta.textContent = sectorLabel + ' | Run: '+(c0.run_id||'').slice(0,16);
     const sigColor = s => s==='bullish'?'#00f5d4':s==='bearish'?'#ff4b6e':'#a0a0b0';
     const sigLabel = s => s==='bullish'?'Bullish':s==='bearish'?'Bearish':s==='pending'?'Pending':'Neutral';
     const pct = v => v!=null?(v*100).toFixed(0):'--';
@@ -8001,9 +8062,12 @@ async function loadScreening() {
     grid.innerHTML = candidates.map((cd,i) => {
       const ns=cd.news_signal||'pending', ss=cd.sentiment_signal||'pending', cs=cd.combined_score;
       const nc=sigColor(ns), sc=sigColor(ss);
+      // In all-sectors mode, show a sector badge on each card so users can
+      // see which sector a candidate belongs to without drilling in.
+      const sectorBadge = !selectedSector ? '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--teal);background:rgba(0,245,212,0.08);padding:2px 6px;border-radius:4px;margin-left:6px">'+_esc(cd.sector||'')+'</span>' : '';
       return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 70px;gap:14px;align-items:start">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
-        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+'</div>'
+        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">Weight: '+(cd.etf_weight_pct||0).toFixed(1)+'%</div>'
         +congBadge(cd.congressional_flag)+'</div>'
@@ -9470,12 +9534,27 @@ def api_planning():
 @login_required
 @app.route('/api/screening')
 def api_screening():
-    """Latest sector screening — shared across all customers."""
+    """Latest sector screening — shared across all customers.
+    Query ?sector=<name> to restrict to one sector; default is all sectors
+    in the most recent screener run."""
     try:
-        candidates = _shared_db().get_latest_screening_run()
-        return jsonify({'candidates': candidates})
+        sector = request.args.get('sector') or None
+        candidates = _shared_db().get_latest_screening_run(sector=sector)
+        return jsonify({'candidates': candidates, 'sector': sector})
     except Exception as e:
         return jsonify({'candidates': [], 'error': str(e)})
+
+
+@app.route('/api/screening/sectors')
+def api_screening_sectors():
+    """Per-sector summary — sector / ETF / 5yr return / top ticker / top score.
+    Sorted so the strongest sector (by best candidate combined_score) is
+    first — used as the dashboard widget's default selection."""
+    try:
+        summary = _shared_db().get_sector_screening_summary()
+        return jsonify({'sectors': summary})
+    except Exception as e:
+        return jsonify({'sectors': [], 'error': str(e)})
 
 
 @login_required

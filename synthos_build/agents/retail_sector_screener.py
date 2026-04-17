@@ -1,21 +1,29 @@
 """
 sector_screener.py — Sector Screening Agent
-Synthos · Screening Layer · Version 1.0
+Synthos · Screening Layer · Version 2.0
 
-Runs before the main trading session (suggested: 9:00 AM ET daily).
+Runs once per day during the prep session (pre-market) — NOT per cycle.
+Sector momentum is a multi-week signal; hourly refreshes are wasted calls.
 
 What this agent does:
-  1. Fetches 5-year return for the target sector ETF (XLE for Energy).
-  2. Scores each of the ETF's top holdings using recent price momentum.
-  3. Writes candidates to the sector_screening table in the DB.
-  4. Issues screening requests so Scout (news) and Pulse (sentiment)
+  1. Iterates all 11 S&P Select Sector SPDR ETFs (XLE, XLK, XLV, XLF,
+     XLY, XLP, XLI, XLU, XLRE, XLB, XLC).
+  2. Fetches 5-year return for each sector ETF.
+  3. Scores each of the ETF's top-10 holdings using recent price momentum.
+  4. Writes candidates to the sector_screening table in the DB.
+  5. Issues screening requests so Scout (news) and Pulse (sentiment)
      enrich each candidate on their next run.
-  5. Checks for congressional signals already in the DB for these tickers
+  6. Checks for congressional signals already in the DB for these tickers
      and flags them as supplemental context.
-  6. Writes a human-readable audit log to logs/logic_audits/.
+  7. Writes a human-readable audit log to logs/logic_audits/.
 
-Current configuration: Energy sector only (XLE ETF).
-To add more sectors, extend SECTOR_CONFIG.
+Holdings source: hand-curated top-10 per sector. Stable — SPDR top-10
+holdings shift quarterly at most. TODO: swap to FMP /etf-holdings when
+we upgrade from free tier (currently paywalled).
+
+Usage:
+  python3 retail_sector_screener.py                 # all sectors
+  python3 retail_sector_screener.py --sector=Energy # one sector (dev only)
 
 Logic audit log: logs/logic_audits/YYYY-MM-DD_sector_screener.log
 """
@@ -60,9 +68,10 @@ log = logging.getLogger('sector_screener')
 
 
 # ── SECTOR CONFIGURATION ──────────────────────────────────────────────────────
-# Add new sectors here when expanding beyond Energy.
-# etf_weight_pct is the approximate % weight within the ETF (used for scoring).
-# Source: XLE (Energy Select Sector SPDR) top holdings.
+# Hand-curated top-10 holdings for each of the 11 S&P Select Sector SPDR ETFs.
+# etf_weight_pct figures are approximate (last reviewed April 2026).
+# Source: SPDR ETF fact sheets. Holdings shift slowly — review quarterly.
+# TODO: replace with FMP /etf-holdings once we're on a paid tier.
 
 SECTOR_CONFIG = {
     "Energy": {
@@ -78,6 +87,156 @@ SECTOR_CONFIG = {
             {"ticker": "OXY",  "company": "Occidental Petroleum",      "etf_weight_pct":  3.9},
             {"ticker": "WMB",  "company": "Williams Companies",        "etf_weight_pct":  3.8},
             {"ticker": "KMI",  "company": "Kinder Morgan",             "etf_weight_pct":  3.2},
+        ],
+    },
+    "Technology": {
+        "etf": "XLK",
+        "holdings": [
+            {"ticker": "AAPL", "company": "Apple Inc",                 "etf_weight_pct": 14.5},
+            {"ticker": "MSFT", "company": "Microsoft Corp",            "etf_weight_pct": 13.8},
+            {"ticker": "NVDA", "company": "NVIDIA Corp",               "etf_weight_pct": 12.4},
+            {"ticker": "AVGO", "company": "Broadcom Inc",              "etf_weight_pct":  5.2},
+            {"ticker": "ORCL", "company": "Oracle Corp",               "etf_weight_pct":  2.8},
+            {"ticker": "CRM",  "company": "Salesforce Inc",            "etf_weight_pct":  2.6},
+            {"ticker": "ADBE", "company": "Adobe Inc",                 "etf_weight_pct":  2.1},
+            {"ticker": "CSCO", "company": "Cisco Systems",             "etf_weight_pct":  2.0},
+            {"ticker": "ACN",  "company": "Accenture plc",             "etf_weight_pct":  1.9},
+            {"ticker": "AMD",  "company": "Advanced Micro Devices",    "etf_weight_pct":  1.8},
+        ],
+    },
+    "Healthcare": {
+        "etf": "XLV",
+        "holdings": [
+            {"ticker": "LLY",  "company": "Eli Lilly & Co",            "etf_weight_pct": 12.1},
+            {"ticker": "UNH",  "company": "UnitedHealth Group",        "etf_weight_pct":  7.9},
+            {"ticker": "JNJ",  "company": "Johnson & Johnson",         "etf_weight_pct":  7.2},
+            {"ticker": "ABBV", "company": "AbbVie Inc",                "etf_weight_pct":  5.8},
+            {"ticker": "MRK",  "company": "Merck & Co",                "etf_weight_pct":  4.9},
+            {"ticker": "TMO",  "company": "Thermo Fisher Scientific",  "etf_weight_pct":  3.8},
+            {"ticker": "ABT",  "company": "Abbott Laboratories",       "etf_weight_pct":  3.6},
+            {"ticker": "PFE",  "company": "Pfizer Inc",                "etf_weight_pct":  3.4},
+            {"ticker": "DHR",  "company": "Danaher Corp",              "etf_weight_pct":  3.0},
+            {"ticker": "AMGN", "company": "Amgen Inc",                 "etf_weight_pct":  2.7},
+        ],
+    },
+    "Financial Services": {
+        "etf": "XLF",
+        "holdings": [
+            {"ticker": "BRK.B","company": "Berkshire Hathaway",        "etf_weight_pct": 13.2},
+            {"ticker": "JPM",  "company": "JPMorgan Chase",            "etf_weight_pct": 10.5},
+            {"ticker": "V",    "company": "Visa Inc",                  "etf_weight_pct":  7.1},
+            {"ticker": "MA",   "company": "Mastercard Inc",            "etf_weight_pct":  6.3},
+            {"ticker": "BAC",  "company": "Bank of America",           "etf_weight_pct":  4.4},
+            {"ticker": "WFC",  "company": "Wells Fargo",               "etf_weight_pct":  3.5},
+            {"ticker": "GS",   "company": "Goldman Sachs",             "etf_weight_pct":  2.9},
+            {"ticker": "MS",   "company": "Morgan Stanley",            "etf_weight_pct":  2.6},
+            {"ticker": "AXP",  "company": "American Express",          "etf_weight_pct":  2.4},
+            {"ticker": "C",    "company": "Citigroup Inc",             "etf_weight_pct":  2.2},
+        ],
+    },
+    "Consumer Cyclical": {
+        "etf": "XLY",
+        "holdings": [
+            {"ticker": "AMZN", "company": "Amazon.com Inc",            "etf_weight_pct": 22.8},
+            {"ticker": "TSLA", "company": "Tesla Inc",                 "etf_weight_pct": 15.2},
+            {"ticker": "HD",   "company": "Home Depot Inc",            "etf_weight_pct":  7.1},
+            {"ticker": "MCD",  "company": "McDonald's Corp",           "etf_weight_pct":  4.6},
+            {"ticker": "LOW",  "company": "Lowe's Cos",                "etf_weight_pct":  3.4},
+            {"ticker": "BKNG", "company": "Booking Holdings",          "etf_weight_pct":  3.2},
+            {"ticker": "NKE",  "company": "Nike Inc",                  "etf_weight_pct":  2.8},
+            {"ticker": "SBUX", "company": "Starbucks Corp",            "etf_weight_pct":  2.5},
+            {"ticker": "TJX",  "company": "TJX Companies",             "etf_weight_pct":  2.3},
+            {"ticker": "ABNB", "company": "Airbnb Inc",                "etf_weight_pct":  1.8},
+        ],
+    },
+    "Consumer Defensive": {
+        "etf": "XLP",
+        "holdings": [
+            {"ticker": "PG",   "company": "Procter & Gamble",          "etf_weight_pct": 12.4},
+            {"ticker": "COST", "company": "Costco Wholesale",          "etf_weight_pct": 11.2},
+            {"ticker": "WMT",  "company": "Walmart Inc",               "etf_weight_pct": 10.8},
+            {"ticker": "KO",   "company": "Coca-Cola Co",              "etf_weight_pct":  9.6},
+            {"ticker": "PEP",  "company": "PepsiCo Inc",               "etf_weight_pct":  8.3},
+            {"ticker": "PM",   "company": "Philip Morris International","etf_weight_pct":  5.1},
+            {"ticker": "MO",   "company": "Altria Group",              "etf_weight_pct":  3.9},
+            {"ticker": "MDLZ", "company": "Mondelez International",    "etf_weight_pct":  3.8},
+            {"ticker": "CL",   "company": "Colgate-Palmolive",         "etf_weight_pct":  2.9},
+            {"ticker": "TGT",  "company": "Target Corp",               "etf_weight_pct":  2.5},
+        ],
+    },
+    "Industrials": {
+        "etf": "XLI",
+        "holdings": [
+            {"ticker": "GE",   "company": "GE Aerospace",              "etf_weight_pct":  4.8},
+            {"ticker": "CAT",  "company": "Caterpillar Inc",           "etf_weight_pct":  4.4},
+            {"ticker": "RTX",  "company": "RTX Corp",                  "etf_weight_pct":  4.1},
+            {"ticker": "UBER", "company": "Uber Technologies",         "etf_weight_pct":  3.7},
+            {"ticker": "HON",  "company": "Honeywell International",   "etf_weight_pct":  3.5},
+            {"ticker": "UNP",  "company": "Union Pacific",             "etf_weight_pct":  3.3},
+            {"ticker": "BA",   "company": "Boeing Co",                 "etf_weight_pct":  3.0},
+            {"ticker": "ETN",  "company": "Eaton Corp",                "etf_weight_pct":  2.9},
+            {"ticker": "LMT",  "company": "Lockheed Martin",           "etf_weight_pct":  2.6},
+            {"ticker": "DE",   "company": "Deere & Co",                "etf_weight_pct":  2.5},
+        ],
+    },
+    "Utilities": {
+        "etf": "XLU",
+        "holdings": [
+            {"ticker": "NEE",  "company": "NextEra Energy",            "etf_weight_pct": 13.2},
+            {"ticker": "SO",   "company": "Southern Co",               "etf_weight_pct":  8.4},
+            {"ticker": "DUK",  "company": "Duke Energy",               "etf_weight_pct":  8.0},
+            {"ticker": "CEG",  "company": "Constellation Energy",      "etf_weight_pct":  6.8},
+            {"ticker": "AEP",  "company": "American Electric Power",   "etf_weight_pct":  4.8},
+            {"ticker": "SRE",  "company": "Sempra",                    "etf_weight_pct":  4.4},
+            {"ticker": "D",    "company": "Dominion Energy",           "etf_weight_pct":  4.2},
+            {"ticker": "EXC",  "company": "Exelon Corp",               "etf_weight_pct":  3.9},
+            {"ticker": "PEG",  "company": "Public Service Enterprise", "etf_weight_pct":  3.3},
+            {"ticker": "XEL",  "company": "Xcel Energy",               "etf_weight_pct":  3.2},
+        ],
+    },
+    "Real Estate": {
+        "etf": "XLRE",
+        "holdings": [
+            {"ticker": "PLD",  "company": "Prologis Inc",              "etf_weight_pct":  9.2},
+            {"ticker": "AMT",  "company": "American Tower",            "etf_weight_pct":  8.8},
+            {"ticker": "EQIX", "company": "Equinix Inc",               "etf_weight_pct":  7.4},
+            {"ticker": "WELL", "company": "Welltower Inc",             "etf_weight_pct":  6.8},
+            {"ticker": "SPG",  "company": "Simon Property Group",      "etf_weight_pct":  5.2},
+            {"ticker": "DLR",  "company": "Digital Realty Trust",      "etf_weight_pct":  5.0},
+            {"ticker": "PSA",  "company": "Public Storage",            "etf_weight_pct":  4.8},
+            {"ticker": "O",    "company": "Realty Income",             "etf_weight_pct":  4.4},
+            {"ticker": "CCI",  "company": "Crown Castle Inc",          "etf_weight_pct":  3.8},
+            {"ticker": "CBRE", "company": "CBRE Group",                "etf_weight_pct":  3.4},
+        ],
+    },
+    "Basic Materials": {
+        "etf": "XLB",
+        "holdings": [
+            {"ticker": "LIN",  "company": "Linde plc",                 "etf_weight_pct": 16.2},
+            {"ticker": "SHW",  "company": "Sherwin-Williams",          "etf_weight_pct":  7.5},
+            {"ticker": "APD",  "company": "Air Products & Chemicals",  "etf_weight_pct":  5.9},
+            {"ticker": "ECL",  "company": "Ecolab Inc",                "etf_weight_pct":  5.5},
+            {"ticker": "FCX",  "company": "Freeport-McMoRan",          "etf_weight_pct":  5.1},
+            {"ticker": "NEM",  "company": "Newmont Corp",              "etf_weight_pct":  4.8},
+            {"ticker": "NUE",  "company": "Nucor Corp",                "etf_weight_pct":  3.4},
+            {"ticker": "DD",   "company": "DuPont de Nemours",         "etf_weight_pct":  3.1},
+            {"ticker": "DOW",  "company": "Dow Inc",                   "etf_weight_pct":  2.9},
+            {"ticker": "VMC",  "company": "Vulcan Materials",          "etf_weight_pct":  2.7},
+        ],
+    },
+    "Communication Services": {
+        "etf": "XLC",
+        "holdings": [
+            {"ticker": "META", "company": "Meta Platforms",            "etf_weight_pct": 22.5},
+            {"ticker": "GOOGL","company": "Alphabet Inc Class A",      "etf_weight_pct": 12.8},
+            {"ticker": "GOOG", "company": "Alphabet Inc Class C",      "etf_weight_pct": 10.6},
+            {"ticker": "NFLX", "company": "Netflix Inc",               "etf_weight_pct":  7.4},
+            {"ticker": "DIS",  "company": "Walt Disney Co",            "etf_weight_pct":  4.9},
+            {"ticker": "TMUS", "company": "T-Mobile US",               "etf_weight_pct":  4.5},
+            {"ticker": "VZ",   "company": "Verizon Communications",    "etf_weight_pct":  4.3},
+            {"ticker": "CMCSA","company": "Comcast Corp",              "etf_weight_pct":  3.8},
+            {"ticker": "T",    "company": "AT&T Inc",                  "etf_weight_pct":  3.5},
+            {"ticker": "CHTR", "company": "Charter Communications",    "etf_weight_pct":  2.8},
         ],
     },
 }
@@ -296,18 +455,52 @@ def write_audit_log(run_id, sector, etf, etf_5yr_return, candidates,
 
 # ── MAIN RUN ──────────────────────────────────────────────────────────────────
 
-def run(sector="Energy"):
-    """Run the sector screener for the specified sector."""
+def run_all_sectors():
+    """Run the sector screener across every configured sector. One shared
+    run_id for the whole sweep so the portal can show 'as of T' uniformly.
+
+    Returns the list of (sector, etf_5yr_return, top_candidate) tuples
+    for summary logging."""
+    run_id = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S')
+    summary = []
+    total_sectors = len(SECTOR_CONFIG)
+    log.info(f"Sector Screener starting — sweeping {total_sectors} sectors "
+             f"(run_id={run_id})")
+
+    for idx, sector in enumerate(SECTOR_CONFIG.keys(), 1):
+        log.info(f"── [{idx}/{total_sectors}] {sector} ──")
+        try:
+            result = run_single(sector, run_id=run_id)
+            if result:
+                summary.append(result)
+        except Exception as e:
+            log.error(f"  sector {sector} failed: {e}", exc_info=True)
+
+    # Summary log — sorted by ETF 5yr return so the best-performing sector
+    # surfaces at the top of the audit output.
+    log.info("=" * 60)
+    log.info("Sector Screener — cross-sector summary (by 5yr return):")
+    for sector, ret_5y, top in sorted(summary, key=lambda x: -(x[1] or 0)):
+        ret_str = f"{ret_5y:+.1%}" if ret_5y is not None else "n/a"
+        top_str = f"{top['ticker']} ({top['momentum_score']:.2f})" if top else "—"
+        log.info(f"  {sector:24s} 5yr={ret_str:>8s}  top={top_str}")
+    log.info("=" * 60)
+
+
+def run_single(sector, run_id=None):
+    """Screen one sector. Returns (sector, etf_5yr_return, top_candidate)
+    or None if the sector config is missing."""
     config = SECTOR_CONFIG.get(sector)
     if not config:
         log.error(f"No configuration found for sector '{sector}'")
-        return
+        return None
+    if run_id is None:
+        run_id = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S')
 
     etf      = config['etf']
     holdings = config['holdings']
-    run_id   = datetime.now(ET).strftime('%Y-%m-%dT%H:%M:%S')
 
-    log.info(f"Sector Screener starting — {sector} / {etf}")
+    log.info(f"  {sector} / {etf} — scoring {len(holdings)} holdings")
 
     # Step 1: Fetch ETF 5-year return
     log.info(f"Fetching {etf} 5-year price history...")
@@ -366,18 +559,30 @@ def run(sector="Energy"):
                 f"sector={sector} etf={etf} candidates={len(scored_candidates)}",
     )
 
-    log.info(
-        f"Sector Screener complete. {len(scored_candidates)} candidates written. "
-        f"Scout and Pulse will enrich on next run."
-    )
+    top = scored_candidates[0] if scored_candidates else None
+    log.info(f"  {sector} done — {len(scored_candidates)} candidates, "
+             f"top: {top['ticker'] if top else '—'}")
+    return (sector, etf_5yr_return, top)
+
+
+# Backward-compatible alias (older callers still expect run())
+def run(sector=None):
+    """If sector is provided, run just that one; else run all configured sectors."""
+    if sector and sector in SECTOR_CONFIG:
+        run_single(sector)
+    else:
+        run_all_sectors()
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Synthos Sector Screener')
-    parser.add_argument('--sector', default='Energy',
-                        help='Sector to screen (default: Energy)')
+    parser.add_argument('--sector', default=None,
+                        help='Restrict to a single sector (default: sweep all 11)')
     parser.add_argument('--customer-id', default=None,
                         help='Customer UUID (passed by scheduler — screener is shared, value ignored)')
     args, _ = parser.parse_known_args()
-    run(sector=args.sector)
+    if args.sector:
+        run_single(args.sector)
+    else:
+        run_all_sectors()

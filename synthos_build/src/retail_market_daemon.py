@@ -502,15 +502,17 @@ def run_fault_detection():
 
 
 def run_screener():
-    """Run sector screener once."""
-    log.info("[SCREENER] Starting")
+    """Run sector screener once — sweeps all 11 S&P sectors.
+    Only called from pre-market prep (once per day). Sector momentum is a
+    multi-week signal; no value refreshing intraday."""
+    log.info("[SCREENER] Starting — sweeping all 11 sectors")
     write_agent_running('retail_sector_screener.py')
     try:
         import subprocess
         result = subprocess.run(
             [sys.executable,
              str(_ROOT_DIR / 'agents' / 'retail_sector_screener.py')],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=900,
             cwd=str(_ROOT_DIR / 'agents'),
         )
         if result.returncode == 0:
@@ -688,9 +690,10 @@ def run_market_loop():
     9:30 AM - 4:00 PM: Event-driven trading with periodic enrichment.
 
     Schedule:
-        Every 30 min:  enrichment (news → screener → sentiment) → trade
+        Every 30 min:  enrichment (news → sentiment) → trade
         Every 10 min:  lightweight reconciliation + exit checks only
         Every 60 sec:  price poller (keeps live_prices fresh for portal)
+        Once daily:    sector screener (pre-market prep only)
 
     The trade agent only runs full signal evaluation after enrichment
     brings new data. Between enrichments, only reconciliation and exit
@@ -726,9 +729,9 @@ def run_market_loop():
         if since_enrichment >= enrichment_interval:
             log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — full pipeline")
             # Data collection
+            # NOTE: sector screener is pre-market prep only (once daily).
+            # Sector momentum doesn't move intraday, no value refreshing here.
             run_news(session='market')
-            if not _shutdown_requested:
-                run_screener()
             if not _shutdown_requested:
                 run_sentiment()
             # Analysis & classification

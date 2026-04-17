@@ -86,7 +86,8 @@ _PER_CUSTOMER_AGENTS = {'retail_trade_logic_agent.py'}  # Only trade logic runs 
 SESSION_PIPELINES = {
     'open': [
         # Data collection
-        ('retail_sector_screener.py',        ['--sector=Energy'],  180),
+        # NOTE: sector_screener moved to prep-only (once daily) as of v2.0.
+        # Sector momentum is a multi-week signal — no value refreshing intraday.
         ('retail_market_sentiment_agent.py', [],                   600),
         ('retail_news_agent.py',             ['--session=market'], 420),
         # Analysis & classification
@@ -125,9 +126,10 @@ SESSION_PIPELINES = {
         ('retail_news_agent.py',             ['--session=overnight'], 420),
     ],
     'prep': [
-        # Sunday evening prep — builds Monday context
-        # Full pipeline: data → analysis → checks → validation
-        ('retail_sector_screener.py',        [],                     300),
+        # Sunday evening prep — builds Monday context.
+        # Full pipeline: data → analysis → checks → validation.
+        # Sector screener sweeps ALL 11 S&P sectors here (once per day).
+        ('retail_sector_screener.py',        [],                     900),
         ('retail_news_agent.py',             ['--session=overnight'], 420),
         ('retail_market_sentiment_agent.py', [],                     600),
         ('retail_macro_regime_agent.py',     [],                     300),

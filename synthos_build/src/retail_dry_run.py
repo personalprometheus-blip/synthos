@@ -58,7 +58,8 @@ RESET  = '\033[0m'
 
 # (script, args, timeout_sec, label)
 PIPELINE_PREP = [
-    ('retail_sector_screener.py',        [],                      300, 'Sector Screener'),
+    # Screener sweeps all 11 sectors here; takes ~5-10 min depending on Alpaca latency.
+    ('retail_sector_screener.py',        [],                      900, 'Sector Screener'),
     ('retail_news_agent.py',             ['--session=overnight'],  420, 'News Agent'),
     ('retail_market_sentiment_agent.py', [],                      600, 'Sentiment Agent'),
     ('retail_macro_regime_agent.py',     [],                      300, 'Macro Regime'),
@@ -69,7 +70,7 @@ PIPELINE_PREP = [
 ]
 
 PIPELINE_OPEN = [
-    ('retail_sector_screener.py',        ['--sector=Energy'],     180, 'Sector Screener'),
+    # Screener runs in prep only (once daily); open session uses its latest output.
     ('retail_market_sentiment_agent.py', [],                      600, 'Sentiment Agent'),
     ('retail_news_agent.py',             ['--session=market'],    420, 'News Agent'),
     ('retail_macro_regime_agent.py',     [],                      300, 'Macro Regime'),

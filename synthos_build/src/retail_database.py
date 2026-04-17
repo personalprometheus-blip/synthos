@@ -1946,26 +1946,68 @@ class DB:
             """, (flag, ticker, ticker))
 
     def get_latest_screening_run(self, sector=None):
-        """Return all candidates from the most recent screener run."""
+        """Return candidates from the most recent screener run.
+
+        If sector is None, returns candidates for ALL sectors in the latest
+        run (one row per ticker across all 11 sectors).
+        If sector is given, restricts to that sector.
+        """
         with self.conn() as c:
+            row = c.execute("""
+                SELECT run_id FROM sector_screening
+                ORDER BY created_at DESC LIMIT 1
+            """).fetchone()
+            if not row:
+                return []
+            run_id = row['run_id']
             if sector:
-                row = c.execute("""
-                    SELECT run_id FROM sector_screening
-                    WHERE sector=? ORDER BY created_at DESC LIMIT 1
-                """, (sector,)).fetchone()
+                rows = c.execute("""
+                    SELECT * FROM sector_screening
+                    WHERE run_id=? AND sector=?
+                    ORDER BY combined_score DESC, etf_weight_pct DESC
+                """, (run_id, sector)).fetchall()
             else:
-                row = c.execute("""
-                    SELECT run_id FROM sector_screening
-                    ORDER BY created_at DESC LIMIT 1
-                """).fetchone()
+                rows = c.execute("""
+                    SELECT * FROM sector_screening WHERE run_id=?
+                    ORDER BY combined_score DESC, etf_weight_pct DESC
+                """, (run_id,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_sector_screening_summary(self):
+        """Per-sector summary of the latest screener run. Used by the dashboard
+        dropdown — each row has (sector, etf, etf_5yr_return, top_ticker,
+        top_score, candidate_count). Sorted so the highest-scoring sector's
+        top candidate surfaces first (dashboard default selection)."""
+        with self.conn() as c:
+            row = c.execute("""
+                SELECT run_id FROM sector_screening
+                ORDER BY created_at DESC LIMIT 1
+            """).fetchone()
             if not row:
                 return []
             run_id = row['run_id']
             rows = c.execute("""
-                SELECT * FROM sector_screening WHERE run_id=?
-                ORDER BY combined_score DESC, etf_weight_pct DESC
+                SELECT sector, etf, etf_5yr_return,
+                       COUNT(*) AS candidate_count,
+                       MAX(combined_score) AS top_score
+                FROM sector_screening
+                WHERE run_id=?
+                GROUP BY sector, etf, etf_5yr_return
+                ORDER BY top_score DESC
             """, (run_id,)).fetchall()
-            return [dict(r) for r in rows]
+            summary = []
+            for r in rows:
+                d = dict(r)
+                # Pick up the top-scoring ticker for this sector
+                top = c.execute("""
+                    SELECT ticker FROM sector_screening
+                    WHERE run_id=? AND sector=?
+                    ORDER BY combined_score DESC LIMIT 1
+                """, (run_id, d['sector'])).fetchone()
+                d['top_ticker'] = top['ticker'] if top else None
+                d['run_id'] = run_id
+                summary.append(d)
+            return summary
 
     def get_screening_score(self, ticker):
         """Return the most recent screening data for a ticker, or None."""
