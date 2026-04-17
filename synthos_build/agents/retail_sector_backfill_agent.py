@@ -158,10 +158,7 @@ def _backfill_positions(customer_db, shared_db):
 
 
 def run(dry_run=False, single_ticker=None):
-    lock_acquired = acquire_agent_lock('retail_sector_backfill_agent', ttl=600)
-    if not lock_acquired:
-        log.info("Another instance is running — exiting")
-        return 0
+    acquire_agent_lock('retail_sector_backfill_agent')
 
     try:
         db = _shared_db()
