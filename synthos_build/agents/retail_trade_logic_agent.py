@@ -215,6 +215,10 @@ class TradingControls:
     MAX_DRAWDOWN_PCT          = float(os.environ.get('MAX_DRAWDOWN_PCT', '0.15'))
     MAX_GROSS_EXPOSURE        = float(os.environ.get('MAX_GROSS_EXPOSURE', '0.80'))
     MAX_SECTOR_PCT            = float(os.environ.get('MAX_SECTOR_PCT', '0.25'))
+    # MAX_POSITIONS kept as an env-var default for admin tooling / debugging,
+    # but NOT enforced in the trade path — Gate 11 uses tier["max_positions"]
+    # from PORTFOLIO_TIERS (see below). Customer settings no longer write
+    # to this field.
     MAX_POSITIONS             = int(os.environ.get('MAX_POSITIONS', '10'))
     MAX_LEVERAGE              = float(os.environ.get('MAX_LEVERAGE', '1.0'))
 
@@ -273,7 +277,9 @@ def _apply_customer_settings():
             'MIN_CONFIDENCE':       ('MIN_CONFIDENCE_SCORE',   lambda v: {'LOW': 0.30, 'MEDIUM': 0.55, 'HIGH': 0.75}[v] if v in ('LOW','MEDIUM','HIGH') else float(v)),
             'MAX_POSITION_PCT':     ('MAX_POSITION_PCT',       float),
             'MAX_TRADE_USD':        ('MAX_TRADE_USD',          float),
-            'MAX_POSITIONS':        ('MAX_POSITIONS',          int),
+            # MAX_POSITIONS deliberately omitted — position count is tier-based
+            # via PORTFOLIO_TIERS (enforced in Gate 11). The customer setting
+            # was never read by the gate — this removes the ghost plumbing.
             'MAX_DAILY_LOSS':       ('MAX_DAILY_LOSS',         lambda v: -abs(float(v))),
             'MAX_SECTOR_PCT':       ('MAX_SECTOR_PCT',         lambda v: float(v) / 100 if float(v) > 1 else float(v)),
             'CLOSE_SESSION_MODE':   ('CLOSE_SESSION_MODE',     str),

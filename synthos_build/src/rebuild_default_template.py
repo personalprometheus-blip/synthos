@@ -47,7 +47,7 @@ def rebuild():
         'MIN_CONFIDENCE': 'HIGH',
         'MAX_POSITION_PCT': '0.05',
         'MAX_TRADE_USD': '500',
-        'MAX_POSITIONS': '5',
+        # MAX_POSITIONS removed — position count is tier-based via PORTFOLIO_TIERS.
         'MAX_DAILY_LOSS': '200',
         'MAX_SECTOR_PCT': '20',
         'CLOSE_SESSION_MODE': 'conservative',

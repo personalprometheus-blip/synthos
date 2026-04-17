@@ -4436,9 +4436,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         </div>
         <div style="flex:1;min-width:100px">
           <div class="setting-label">Max Positions</div>
-          <div class="setting-desc">Open at once</div>
-          <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
-            <input id="cfg-max-positions" type="number" min="1" max="50" class="glass-input" placeholder="10" style="width:60px">
+          <div class="setting-desc">Set by your equity tier</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <div id="cfg-tier-badge" style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;background:rgba(0,245,212,0.08);color:var(--teal);font-family:var(--mono)">—</div>
+            <div id="cfg-tier-max" style="font-size:11px;color:var(--muted)">— open at once</div>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">
+            Seed 3 · Early 5 · Growth 8 · Scaled 10 · Mature 12
           </div>
         </div>
       </div>
@@ -6067,6 +6071,16 @@ function closeConfigPanel(){
   document.getElementById('cfg-overlay').classList.remove('open');
 }
 
+function updateCfgTierBadge(d) {
+  var badge = document.getElementById('cfg-tier-badge');
+  var maxEl = document.getElementById('cfg-tier-max');
+  if (!badge || !maxEl) return;
+  var tier = d.PORTFOLIO_TIER || 'Seed';
+  var tierMax = d.PORTFOLIO_TIER_MAX_POSITIONS || 3;
+  badge.textContent = tier;
+  maxEl.textContent = tierMax + ' open at once';
+}
+
 async function loadCfgPanel() {
   try {
     const r = await fetch('/api/customer-settings');
@@ -6079,7 +6093,8 @@ async function loadCfgPanel() {
     if (g('cfg-max-sector'))    g('cfg-max-sector').value = d.MAX_SECTOR_PCT || '25';
     if (g('cfg-close-mode'))    g('cfg-close-mode').value = d.CLOSE_SESSION_MODE || 'aggressive';
     if (g('cfg-staleness'))      g('cfg-staleness').value = d.MAX_STALENESS || 'Aging';
-    if (g('cfg-max-positions')) g('cfg-max-positions').value = d.MAX_POSITIONS || '10';
+    // Max positions is tier-based (not customer-settable); display current tier.
+    updateCfgTierBadge(d);
     if (g('cfg-max-daily-loss'))g('cfg-max-daily-loss').value = Math.abs(parseFloat(d.MAX_DAILY_LOSS||'500'));
     if (g('cfg-max-drawdown'))  g('cfg-max-drawdown').value = parseFloat(d.MAX_DRAWDOWN_PCT||'15');
     if (g('cfg-max-hold-days')) g('cfg-max-hold-days').value = d.MAX_HOLDING_DAYS || '15';
@@ -6127,24 +6142,27 @@ async function loadCfgPanel() {
 }
 
 
+// Max positions is tier-based (not customer-settable), so presets no longer
+// include cfg-max-positions. Customers control dollar exposure via
+// cfg-max-pos (% per trade), cfg-max-trade-usd, and cfg-max-exposure.
 var PRESETS = {
   conservative: {
     'cfg-min-conf': 'HIGH', 'cfg-max-pos': '5', 'cfg-max-trade-usd': '500',
-    'cfg-max-positions': '5', 'cfg-max-daily-loss': '200', 'cfg-close-mode': 'conservative',
+    'cfg-max-daily-loss': '200', 'cfg-close-mode': 'conservative',
     'cfg-max-drawdown': '8', 'cfg-max-sector': '20', 'cfg-max-hold-days': '10',
     'cfg-max-exposure': '60', 'cfg-profit-target': '2.5', 'cfg-staleness': 'Fresh',
     'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '30', 'cfg-bil-enabled': true
   },
   moderate: {
     'cfg-min-conf': 'MEDIUM', 'cfg-max-pos': '10', 'cfg-max-trade-usd': '2000',
-    'cfg-max-positions': '10', 'cfg-max-daily-loss': '500', 'cfg-close-mode': 'moderate',
+    'cfg-max-daily-loss': '500', 'cfg-close-mode': 'moderate',
     'cfg-max-drawdown': '15', 'cfg-max-sector': '30', 'cfg-max-hold-days': '15',
     'cfg-max-exposure': '80', 'cfg-profit-target': '2', 'cfg-staleness': 'Aging',
     'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '20', 'cfg-bil-enabled': true
   },
   aggressive: {
     'cfg-min-conf': 'LOW', 'cfg-max-pos': '20', 'cfg-max-trade-usd': '5000',
-    'cfg-max-positions': '20', 'cfg-max-daily-loss': '1000', 'cfg-close-mode': 'aggressive',
+    'cfg-max-daily-loss': '1000', 'cfg-close-mode': 'aggressive',
     'cfg-max-drawdown': '25', 'cfg-max-sector': '50', 'cfg-max-hold-days': '30',
     'cfg-max-exposure': '95', 'cfg-profit-target': '1.5', 'cfg-staleness': 'Stale',
     'cfg-trading-mode': 'PAPER', 'cfg-bil-reserve': '10', 'cfg-bil-enabled': true
@@ -6207,7 +6225,7 @@ async function saveCfgPanel(){
     min_confidence:      document.getElementById('cfg-min-conf')?.value,
     max_position_pct:    parseFloat(document.getElementById('cfg-max-pos')?.value)||10,
     max_trade_usd:       parseFloat(document.getElementById('cfg-max-trade-usd')?.value)||0,
-    max_positions:       parseInt(document.getElementById('cfg-max-positions')?.value)||10,
+    // max_positions is NOT customer-settable — tier-based via PORTFOLIO_TIERS.
     max_daily_loss:      parseFloat(document.getElementById('cfg-max-daily-loss')?.value)||500,
     max_sector_pct:      parseFloat(document.getElementById('cfg-max-sector')?.value)||25,
     close_session_mode:  document.getElementById('cfg-close-mode')?.value,
@@ -9026,12 +9044,14 @@ def api_settings():
     Falls through to global .env only for system-level keys."""
     data = request.get_json(silent=True) or {}
 
-    # Per-customer trading params → customer_settings table
+    # Per-customer trading params → customer_settings table.
+    # Note: max_positions is deliberately NOT customer-settable; it's
+    # determined by portfolio equity tier (see PORTFOLIO_TIERS in the
+    # trade logic agent). Any incoming max_positions is dropped silently.
     customer_keys = {
         'min_confidence':     'MIN_CONFIDENCE',
         'max_position_pct':   'MAX_POSITION_PCT',
         'max_trade_usd':      'MAX_TRADE_USD',
-        'max_positions':      'MAX_POSITIONS',
         'max_daily_loss':     'MAX_DAILY_LOSS',
         'max_sector_pct':     'MAX_SECTOR_PCT',
         'close_session_mode': 'CLOSE_SESSION_MODE',
@@ -9250,7 +9270,7 @@ def api_customer_settings():
             'MIN_CONFIDENCE':     os.environ.get('MIN_CONFIDENCE', 'LOW'),
             'MAX_POSITION_PCT':   os.environ.get('MAX_POSITION_PCT', '0.10'),
             'MAX_TRADE_USD':      os.environ.get('MAX_TRADE_USD', '1000'),
-            'MAX_POSITIONS':      os.environ.get('MAX_POSITIONS', '10'),
+            # MAX_POSITIONS intentionally omitted — tier-based via PORTFOLIO_TIERS.
             'MAX_DAILY_LOSS':     os.environ.get('MAX_DAILY_LOSS', '500'),
             'MAX_SECTOR_PCT':     os.environ.get('MAX_SECTOR_PCT', '25'),
             'CLOSE_SESSION_MODE': os.environ.get('CLOSE_SESSION_MODE', 'aggressive'),
@@ -9281,6 +9301,35 @@ def api_customer_settings():
             merged['MAX_POSITION_PCT_DISPLAY'] = '10'
 
         merged['_source'] = {k: 'customer' if k in customer else 'global' for k in merged}
+
+        # Portfolio tier — source of truth for Max Positions cap (not customer-settable).
+        # Mirror of PORTFOLIO_TIERS in retail_trade_logic_agent.py.
+        try:
+            portfolio = db.get_portfolio()
+            positions = db.get_open_positions()
+            equity = float(portfolio.get('cash', 0))
+            for p in positions:
+                equity += float(p.get('current_price') or p.get('entry_price') or 0) * float(p.get('shares') or 0)
+            # Tier thresholds — keep in sync with retail_trade_logic_agent.PORTFOLIO_TIERS
+            _tiers = [
+                (50000,  'Mature',  12),
+                (20000,  'Scaled',  10),
+                (5000,   'Growth',   8),
+                (1000,   'Early',    5),
+                (0,      'Seed',     3),
+            ]
+            tier_label, tier_max = 'Seed', 3
+            for threshold, label, cap in _tiers:
+                if equity >= threshold:
+                    tier_label, tier_max = label, cap
+                    break
+            merged['PORTFOLIO_TIER'] = tier_label
+            merged['PORTFOLIO_TIER_MAX_POSITIONS'] = tier_max
+            merged['PORTFOLIO_EQUITY'] = round(equity, 2)
+        except Exception:
+            merged['PORTFOLIO_TIER'] = 'Seed'
+            merged['PORTFOLIO_TIER_MAX_POSITIONS'] = 3
+
         return jsonify(merged)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
