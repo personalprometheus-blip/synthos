@@ -489,6 +489,14 @@ def run_all_sectors():
         log.info(f"  {sector:24s} 5yr={ret_str:>8s}  top={top_str}")
     log.info("=" * 60)
 
+    # Post a heartbeat so the fault detector's GATE1_LIVENESS check can see
+    # us. The screener runs once per day, so the EXPECTED_AGENTS entry has a
+    # 30-hour staleness window — one heartbeat per pre-market run is enough.
+    try:
+        _master_db().log_heartbeat("sector_screener", "OK")
+    except Exception as _e:
+        log.debug(f"sector_screener heartbeat write failed: {_e}")
+
 
 def run_single(sector, run_id=None):
     """Screen one sector. Returns (sector, etf_5yr_return, top_candidate)

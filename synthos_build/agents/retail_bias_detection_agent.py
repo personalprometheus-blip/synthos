@@ -205,15 +205,18 @@ def gate1_sector_concentration(report: BiasReport, db):
         ))
         return
 
-    # Data-quality signal: positions with unresolved sector. This is a WARNING
-    # (worth surfacing so the backfill agent can fill the gap) but NEVER
-    # CRITICAL and NEVER produces a sector-block restriction.
+    # Data-quality signal: positions with unresolved sector. This is INFO
+    # (data-quality observation, not a trading-relevant finding) — the
+    # backfill agent fills this async and the trader doesn't gate on it.
+    # Previously WARNING, which rolled up into SYSTEM_WARNINGS_ACTIVE on
+    # the validator and tripped every customer's verdict to CAUTION even
+    # though nothing was blocking trades.
     if unknown_value > 0:
         unknown_pct = round((unknown_value / total_value) * 100, 1)
         if unknown_pct >= 25.0:
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
-                severity=Severity.WARNING,
+                severity=Severity.INFO,
                 code="SECTOR_DATA_INCOMPLETE",
                 message=f"{unknown_pct}% of portfolio has no sector classification",
                 detail=f"${unknown_value:,.2f} of ${total_value:,.2f} — "
@@ -246,15 +249,30 @@ def gate1_sector_concentration(report: BiasReport, db):
             flagged = True
 
     if not flagged:
-        top_sector = max(sector_value, key=sector_value.get)
-        top_pct = round((sector_value[top_sector] / total_value) * 100, 1)
-        report.add(Finding(
-            gate="GATE1_SECTOR_CONC",
-            severity=Severity.OK,
-            code="SECTOR_BALANCED",
-            message=f"Sector balance OK — largest is '{top_sector}' at {top_pct}%",
-            detail=f"{len(sector_value)} sectors across {len(positions)} positions"
-        ))
+        # Empty-dict guard: if every position is in an excluded category
+        # (reserves / broad ETFs / Unknown) then sector_value is empty and
+        # max() would raise "iterable argument is empty" — the real cause
+        # of the GATE1_ERROR warning we were seeing on customers with all
+        # positions in BIL reserves or unresolved sectors.
+        if not sector_value:
+            report.add(Finding(
+                gate="GATE1_SECTOR_CONC",
+                severity=Severity.OK,
+                code="NO_CLASSIFIED_SECTORS",
+                message="No classified equity sectors to evaluate",
+                detail=(f"${total_value:,.2f} sits in reserves or unresolved "
+                        f"positions — nothing to concentrate on yet")
+            ))
+        else:
+            top_sector = max(sector_value, key=sector_value.get)
+            top_pct = round((sector_value[top_sector] / total_value) * 100, 1)
+            report.add(Finding(
+                gate="GATE1_SECTOR_CONC",
+                severity=Severity.OK,
+                code="SECTOR_BALANCED",
+                message=f"Sector balance OK — largest is '{top_sector}' at {top_pct}%",
+                detail=f"{len(sector_value)} sectors across {len(positions)} positions"
+            ))
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -498,12 +516,18 @@ def gate5_disposition_effect(report: BiasReport, db):
         except (ValueError, TypeError):
             continue
 
-    if len(recent) < 4:
+    # Disposition effect needs a meaningful sample — at N=4 a single lucky
+    # winner / unlucky loser dominates the avg, producing noise findings
+    # like "3W/2L disposition effect!" that are pure small-sample artifacts.
+    # 10 closed trades is the floor where the avg starts reflecting behavior.
+    MIN_DISPOSITION_SAMPLE = 10
+    if len(recent) < MIN_DISPOSITION_SAMPLE:
         report.add(Finding(
             gate="GATE5_DISPOSITION",
             severity=Severity.OK,
             code="TOO_FEW_CLOSED",
-            message=f"Only {len(recent)} closed position(s) in last 30 days — disposition check N/A"
+            message=(f"Only {len(recent)} closed position(s) in last 30 days "
+                     f"— disposition check needs ≥{MIN_DISPOSITION_SAMPLE}")
         ))
         return
 

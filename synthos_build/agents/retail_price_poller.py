@@ -211,6 +211,15 @@ def run():
     db.close()
     log.info(f"Updated {updated} prices in live_prices table")
 
+    # Post a heartbeat so fault detection's GATE1_LIVENESS check can see us.
+    # Price poller runs every 60s from the daemon, so the default
+    # HEARTBEAT_STALE_MINUTES (45) is comfortable.
+    try:
+        from retail_database import get_db
+        get_db().log_heartbeat("price_poller", "OK")
+    except Exception as _e:
+        log.debug(f"price_poller heartbeat write failed: {_e}")
+
 
 if __name__ == '__main__':
     run()

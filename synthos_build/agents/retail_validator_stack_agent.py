@@ -61,6 +61,26 @@ MACRO_REGIME_STALE_HOURS   = 24   # macro regime older than 24h = degraded
 DEFENSIVE_SECTORS = {'BIL', 'XLU', 'XLP', 'SHV', 'TLT', 'SGOV'}
 DEFENSIVE_INDUSTRIES = {'utilities', 'consumer staples', 'consumer defensive', 'treasury'}
 
+# Finding codes that are informational-only — they tell us something is
+# off in the data, but the trader has no business gating on them. Keeping
+# these out of the "WARNING count" means the validator verdict reflects
+# actual system health rather than lifetime cosmetic warnings.
+#
+# Add to this set when we confirm a warning is non-blocking; remove if we
+# realize we want it to gate trades.
+INFORMATIONAL_FAULT_CODES = frozenset({
+    'STALE_SIGNALS',         # in-flight signals >48h old — will be expired
+    'STUCK_SIGNALS',         # QUEUED with missing stamps — self-clears once pipeline catches up or signals expire
+    'LOG_BLOAT',             # rotate/archive, never affects trading
+    'SECTOR_DATA_INCOMPLETE',# data quality — backfill agent handles async
+})
+INFORMATIONAL_BIAS_CODES = frozenset({
+    'SECTOR_DATA_INCOMPLETE',  # data quality (now INFO-level in bias agent, kept here for belt-and-suspenders)
+    'DISPOSITION_EFFECT',      # behavioral observation — worth surfacing but shouldn't stop trades
+    'DISPOSITION_OK',          # pass-through OK finding
+    'TOO_FEW_CLOSED',          # explicitly-N/A finding from gate5
+})
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
@@ -230,19 +250,31 @@ def gate1_system_health(report: ValidationReport, master_db):
         ))
         return
 
-    # Evaluate severity
-    worst = scan.get('worst_severity', 'OK')
-    critical_count = scan.get('critical', 0)
-    warning_count = scan.get('warnings', 0)
+    # Evaluate severity, filtering out informational-only codes that
+    # shouldn't gate the trader. worst_severity and the raw counts in the
+    # payload are overstated for our purposes because fault detection
+    # catches data-quality observations (stale signals, log bloat) that
+    # nobody should act on — we re-count actionable findings here.
+    findings = scan.get('findings', [])
+    critical_findings = [
+        f for f in findings
+        if f.get('severity') == 'CRITICAL'
+        and f.get('code') not in INFORMATIONAL_FAULT_CODES
+    ]
+    actionable_warnings = [
+        f for f in findings
+        if f.get('severity') == 'WARNING'
+        and f.get('code') not in INFORMATIONAL_FAULT_CODES
+    ]
+    info_warnings = [
+        f for f in findings
+        if f.get('severity') == 'WARNING'
+        and f.get('code') in INFORMATIONAL_FAULT_CODES
+    ]
 
-    if worst == 'CRITICAL' or critical_count > 0:
-        # Build detail from critical findings
-        critical_msgs = [
-            f.get('message', f.get('code', 'unknown'))
-            for f in scan.get('findings', [])
-            if f.get('severity') == 'CRITICAL'
-        ]
-        detail = "; ".join(critical_msgs[:3]) if critical_msgs else f"{critical_count} critical issue(s)"
+    if critical_findings:
+        critical_msgs = [f.get('message', f.get('code', 'unknown')) for f in critical_findings]
+        detail = "; ".join(critical_msgs[:3])
         log.error(f"  System health RED: {detail}")
         report.add(GateResult(
             gate="GATE1_SYSTEM_HEALTH",
@@ -250,20 +282,25 @@ def gate1_system_health(report: ValidationReport, master_db):
             message=f"System health CRITICAL: {detail}",
             restrictions=["NO_NEW_POSITIONS", "SYSTEM_CRITICAL"]
         ))
-    elif worst == 'WARNING' or warning_count > 0:
-        log.warning(f"  System health YELLOW: {warning_count} warning(s)")
+    elif actionable_warnings:
+        warn_msgs = [f.get('message', f.get('code', 'unknown')) for f in actionable_warnings]
+        log.warning(f"  System health YELLOW: {len(actionable_warnings)} actionable warning(s)")
         report.add(GateResult(
             gate="GATE1_SYSTEM_HEALTH",
             status=GateStatus.CAUTION,
-            message=f"System health degraded: {warning_count} warning(s)",
+            message=f"System health degraded: {len(actionable_warnings)} warning(s) — "
+                    + "; ".join(warn_msgs[:2]),
             restrictions=["SYSTEM_WARNINGS_ACTIVE"]
         ))
     else:
-        log.info("  System health GREEN")
+        note = ""
+        if info_warnings:
+            note = f" ({len(info_warnings)} informational-only finding(s) ignored)"
+        log.info(f"  System health GREEN{note}")
         report.add(GateResult(
             gate="GATE1_SYSTEM_HEALTH",
             status=GateStatus.GO,
-            message="System health OK"
+            message=f"System health OK{note}"
         ))
 
 
@@ -311,7 +348,9 @@ def gate2_bias_guard(report: ValidationReport, cust_db):
         ))
         return
 
-    # Evaluate bias findings
+    # Evaluate bias findings. Informational-only codes (data-quality
+    # observations) are reported to the caller but never elevate the gate
+    # from GO — they don't affect trading decisions.
     findings = scan.get('findings', [])
     if not findings:
         findings = scan.get('biases', [])
@@ -320,11 +359,16 @@ def gate2_bias_guard(report: ValidationReport, cust_db):
     has_warning = False
     restrictions = []
     messages = []
+    info_findings = 0
 
     for f in findings:
         severity = f.get('severity', 'OK')
         code = f.get('code', '')
         bias_type = f.get('type', code)
+
+        if code in INFORMATIONAL_BIAS_CODES:
+            info_findings += 1
+            continue
 
         if severity == 'CRITICAL':
             has_critical = True
