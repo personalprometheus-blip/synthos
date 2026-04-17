@@ -2152,12 +2152,12 @@ def run(session="open"):
         if ap:
             shares = float(ap.get('qty', 0))
             entry = float(ap.get('avg_entry_price', 0))
-            # Look up sector from screening data or Alpaca position asset_class
+            # Resolve sector via the map → ticker_sectors → screener cascade.
+            # retail_sector_backfill_agent fills gaps via FMP on its own schedule.
             _orphan_sector = ''
             try:
-                scr = _shared_db().get_screening_score(t)
-                if scr and scr.get('sector'):
-                    _orphan_sector = scr['sector']
+                from retail_sector_map import lookup_sector
+                _orphan_sector = lookup_sector(t, _shared_db()) or ''
             except Exception:
                 pass
             log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} sector={_orphan_sector or '?'} — auto-adopting")
@@ -2216,18 +2216,27 @@ def run(session="open"):
                 if pos['ticker'] == ap['symbol']:
                     db.update_position_price(pos['id'], cp)
 
-    # Backfill empty sectors on existing positions from screening data
-    for pos in db.get_open_positions():
-        if not pos.get('sector'):
-            try:
-                scr = _shared_db().get_screening_score(pos['ticker'])
-                if scr and scr.get('sector'):
-                    with db.conn() as _c:
-                        _c.execute("UPDATE positions SET sector=? WHERE id=?",
-                                   (scr['sector'], pos['id']))
-                    log.info(f"[GATE 0] Sector backfill: {pos['ticker']} → {scr['sector']}")
-            except Exception:
-                pass
+    # Backfill empty sectors on existing positions via the resolution cascade:
+    #   hardcoded map → ticker_sectors cache → sector_screening
+    # Tickers still unresolved after this are picked up by
+    # retail_sector_backfill_agent (runs nightly, uses FMP).
+    try:
+        from retail_sector_map import lookup_sector as _lookup_sector
+    except Exception:
+        _lookup_sector = None
+    if _lookup_sector is not None:
+        _sdb = _shared_db()
+        for pos in db.get_open_positions():
+            if not pos.get('sector'):
+                try:
+                    resolved = _lookup_sector(pos['ticker'], _sdb)
+                    if resolved:
+                        with db.conn() as _c:
+                            _c.execute("UPDATE positions SET sector=? WHERE id=?",
+                                       (resolved, pos['id']))
+                        log.info(f"[GATE 0] Sector backfill: {pos['ticker']} → {resolved}")
+                except Exception:
+                    pass
 
     # Check for first-run (no history at all) — setup only, don't trade yet
     positions_after = db.get_open_positions()

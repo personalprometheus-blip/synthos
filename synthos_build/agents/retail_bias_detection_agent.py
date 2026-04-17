@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+from retail_sector_map import is_excluded_from_concentration
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET = ZoneInfo("America/New_York")
@@ -174,16 +175,26 @@ def gate1_sector_concentration(report: BiasReport, db):
         ))
         return
 
-    # Calculate portfolio value per sector
-    sector_value = {}
+    # Calculate portfolio value per sector.
+    # Reserves (Cash/Reserve, Fixed Income), broad-market ETFs (Diversified),
+    # and Unknown (data quality gap) are tracked separately and NEVER contribute
+    # to behavioral-bias concentration findings — they are not sector bets.
+    sector_value = {}           # equity sector → value  (used for concentration)
+    excluded_value = {}         # reserves/unknown → value (tracked for transparency)
     total_value = 0.0
+    unknown_value = 0.0
     for pos in positions:
         sector = (pos.get('sector') or 'Unknown').strip() or 'Unknown'
         price = float(pos.get('current_price') or pos.get('entry_price') or 0)
         shares = float(pos.get('shares') or 0)
         value = price * shares
-        sector_value[sector] = sector_value.get(sector, 0.0) + value
         total_value += value
+        if is_excluded_from_concentration(sector):
+            excluded_value[sector] = excluded_value.get(sector, 0.0) + value
+            if sector in ('Unknown', ''):
+                unknown_value += value
+        else:
+            sector_value[sector] = sector_value.get(sector, 0.0) + value
 
     if total_value <= 0:
         report.add(Finding(
@@ -194,7 +205,23 @@ def gate1_sector_concentration(report: BiasReport, db):
         ))
         return
 
-    # Check each sector's percentage
+    # Data-quality signal: positions with unresolved sector. This is a WARNING
+    # (worth surfacing so the backfill agent can fill the gap) but NEVER
+    # CRITICAL and NEVER produces a sector-block restriction.
+    if unknown_value > 0:
+        unknown_pct = round((unknown_value / total_value) * 100, 1)
+        if unknown_pct >= 25.0:
+            report.add(Finding(
+                gate="GATE1_SECTOR_CONC",
+                severity=Severity.WARNING,
+                code="SECTOR_DATA_INCOMPLETE",
+                message=f"{unknown_pct}% of portfolio has no sector classification",
+                detail=f"${unknown_value:,.2f} of ${total_value:,.2f} — "
+                       f"retail_sector_backfill_agent will fill this on next run"
+            ))
+
+    # Check each equity sector's percentage — reserves/unknowns are already
+    # excluded from sector_value above, so concentration math is honest.
     flagged = False
     for sector, value in sorted(sector_value.items(), key=lambda x: -x[1]):
         pct = round((value / total_value) * 100, 1)

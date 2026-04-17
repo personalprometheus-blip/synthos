@@ -662,6 +662,15 @@ class DB:
                 status_code INTEGER)""",
             "CREATE INDEX IF NOT EXISTS idx_api_calls_ts ON api_calls(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_api_calls_agent ON api_calls(agent)",
+            # v3.2 — ticker → sector cache populated by retail_sector_backfill_agent
+            """CREATE TABLE IF NOT EXISTS ticker_sectors (
+                ticker      TEXT PRIMARY KEY,
+                sector      TEXT NOT NULL,
+                industry    TEXT,
+                source      TEXT,
+                confidence  TEXT,
+                updated_at  TEXT NOT NULL)""",
+            "CREATE INDEX IF NOT EXISTS idx_ticker_sectors_updated ON ticker_sectors(updated_at)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1965,6 +1974,54 @@ class DB:
                 ORDER BY created_at DESC LIMIT 1
             """, (ticker,)).fetchone()
             return dict(row) if row else None
+
+    # ── TICKER → SECTOR CACHE ──────────────────────────────────────────────
+
+    def get_ticker_sector(self, ticker):
+        """Return the cached (sector, industry, source) tuple for a ticker, or None."""
+        with self.conn() as c:
+            row = c.execute("""
+                SELECT sector, industry, source, confidence, updated_at
+                FROM ticker_sectors WHERE ticker=?
+            """, (ticker.upper().strip(),)).fetchone()
+            return dict(row) if row else None
+
+    def set_ticker_sector(self, ticker, sector, industry=None,
+                          source='manual', confidence='high'):
+        """Upsert a ticker → sector mapping."""
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO ticker_sectors (ticker, sector, industry, source,
+                                            confidence, updated_at)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    sector=excluded.sector,
+                    industry=excluded.industry,
+                    source=excluded.source,
+                    confidence=excluded.confidence,
+                    updated_at=excluded.updated_at
+            """, (ticker.upper().strip(), sector, industry, source,
+                  confidence, self.now()))
+
+    def get_tickers_needing_sector(self, limit=200):
+        """Return distinct tickers from positions + recent signals that have no
+        sector set (or have 'Unknown') and no row in ticker_sectors. Used by
+        retail_sector_backfill_agent."""
+        with self.conn() as c:
+            rows = c.execute("""
+                SELECT DISTINCT ticker FROM (
+                    SELECT ticker FROM positions
+                     WHERE status='OPEN'
+                       AND (sector IS NULL OR sector='' OR sector='Unknown')
+                    UNION
+                    SELECT ticker FROM signals
+                     WHERE status IN ('QUEUED','EVALUATED','ACTED_ON')
+                       AND (sector IS NULL OR sector='' OR sector='Unknown')
+                )
+                WHERE ticker NOT IN (SELECT ticker FROM ticker_sectors)
+                LIMIT ?
+            """, (limit,)).fetchall()
+            return [r['ticker'] for r in rows]
 
     # ── SYSTEM LOG & HEARTBEAT ─────────────────────────────────────────────
 
