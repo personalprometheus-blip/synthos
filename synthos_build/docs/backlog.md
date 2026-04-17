@@ -24,6 +24,57 @@ Each backlog item:
 
 ---
 
+## TIER-CALIBRATION-EXPERIMENT — 5-day paper fleet behavior study
+
+**Why deferred.** Originally scheduled to start Monday 2026-04-20; pushed
+back when weekend hardware migration + overnight-queue infrastructure
+build landed higher priority. The experiment needs a stable baseline
+it can actually measure, not a moving target.
+
+**State at defer-time:**
+- All 7 real-trading customers tagged with TIER / EXPERIMENT_ID /
+  EXPERIMENT_FREEZE=true (`customer_settings` via
+  `/tmp/apply_tier_ladder.py` → `2026-04-17_tier_ladder`)
+- Portal settings slide-out locked (`SETTINGS_UI_LOCKED=true` default)
+- `tier_readout.py` deployed to pi5 at
+  `/home/pi516gb/synthos/synthos_build/tier_readout.py`
+- Signal-pool tier-weighted cap (60/25/10/5) live, VALIDATED expiry 12h
+- Fleet is already running the T1-T5 configs, so "doing nothing" during
+  the defer still yields data — just data that the overnight-queue
+  landing will partially invalidate
+
+**Entry conditions (all must be true):**
+
+1. **Hardware migration complete** — pi5 running from SSD/NVMe mount,
+   boot stable across ≥1 reboot, all systemd services active, DB
+   integrity check passes (`PRAGMA integrity_check` on every
+   per-customer + master DB returns `ok`).
+2. **Overnight-queue infrastructure shipped and stable ≥48h** —
+   `docs/overnight_queue_plan.md` executed end-to-end, no new crash-class
+   bugs in watchdog/auditor logs during the 48h window, one full
+   weekend-through-Monday-open cycle exercised without manual intervention.
+3. **No open validator CAUTION verdicts** — every customer reads GO at
+   the time of restart; if any are CAUTION, the reason must be named
+   and acceptable, not "we don't know why."
+4. **`tier_readout.py` smoke-tested** on the new hardware (synthetic or
+   real data) — proves the readout tool still runs against the migrated
+   DBs so we can measure the experiment on day one.
+
+**Scope.** Un-defer: restart the daemon, reset `EXPERIMENT_START`
+timestamps per customer, re-run `tier_readout.py` to establish day-0
+baseline, then let the week run.
+
+**Risk.** Low — this is a passive observation experiment. Biggest risk
+is restarting without resetting experiment metadata, which would fold
+pre/post-deferral data together and corrupt the week's readings.
+
+**Related context.**
+- Tier ladder commit: `c97dc6c` (pool cap) + fleet-apply via
+  `/tmp/apply_tier_ladder.py`
+- Original proposal chat session 2026-04-17
+
+---
+
 ## C8 — News agent gate-pipeline refactor
 
 **Why deferred.** The main `run()` loop of `retail_news_agent.py` hard-codes
