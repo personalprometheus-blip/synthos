@@ -133,40 +133,29 @@ def fetch_put_call_ratio(ticker):
     except Exception as e:
         log.warning(f"CBOE parse error: {e}")
 
-    # Fallback: use Finviz options data if available
-    return fetch_finviz_put_call(ticker)
-
-
-def fetch_finviz_put_call(ticker):
-    """Fallback put/call from Finviz screener data."""
-    url = f"https://finviz.com/quote.ashx?t={ticker}"
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
-    r = fetch_with_retry(url, headers=headers)
-    try:
-        _master_db().log_api_call('sentiment_agent', f'/quote.ashx?t={ticker}', 'GET', 'finviz', status_code=getattr(r, 'status_code', None))
-    except Exception:
-        pass
-    if not r:
-        return None, None
-
-    try:
-        # Look for options data in Finviz page
-        match = re.search(r'Optionable.*?Yes', r.text, re.DOTALL)
-        if match:
-            # Finviz doesn't expose put/call directly in free HTML
-            # Return None to indicate data unavailable
-            return None, None
-    except Exception:
-        pass
+    # No fallback — Finviz doesn't expose per-ticker put/call in free HTML.
+    # Previously we hit Finviz anyway and parsed it just to return (None, None);
+    # that was a wasted HTTP call per CBOE failure. Now we bail cleanly.
     return None, None
+
+
+# Per-run cache for EDGAR + Finviz — same ticker can be scanned in Phase 2
+# (positions), Phase 3 (queued signals), and screening-request fulfillment.
+# Cleared at the start of each run() invocation.
+_EDGAR_CACHE: dict = {}
+_FINVIZ_CACHE: dict = {}
 
 
 def fetch_sec_insider_transactions(ticker, days_back=30):
     """
     Fetch recent insider transactions from SEC EDGAR.
     Returns dict with buys, sells, net_dollar.
-    Free API — no key required.
+    Free API — no key required.  Cached per-run on (ticker, days_back).
     """
+    cache_key = (ticker.upper(), days_back)
+    if cache_key in _EDGAR_CACHE:
+        return _EDGAR_CACHE[cache_key]
+
     url = "https://data.sec.gov/submissions"
     # SEC EDGAR full-text search for Form 4 (insider transactions)
     search_url = "https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&dateRange=custom&startdt={start}&enddt={end}&forms=4"
@@ -184,7 +173,9 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
     except Exception:
         pass
     if not r:
-        return {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
+        result = {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
+        _EDGAR_CACHE[cache_key] = result
+        return result
 
     try:
         data  = r.json()
@@ -200,16 +191,20 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
             sells += 1  # conservative: assume sells until proven otherwise
 
         log.info(f"SEC EDGAR {ticker}: found {len(hits)} Form 4 filings in last {days_back}d")
-        return {
+        result = {
             "buys": buys,
             "sells": sells,
             "net_dollar": f"-${sells * 100000:,}" if sells > buys else f"+${buys * 100000:,}",
             "available": True,
             "filing_count": len(hits),
         }
+        _EDGAR_CACHE[cache_key] = result
+        return result
     except Exception as e:
         log.warning(f"SEC EDGAR parse error ({ticker}): {e}")
-        return {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
+        result = {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
+        _EDGAR_CACHE[cache_key] = result
+        return result
 
 
 def fetch_volume_profile(ticker, is_position=False):
@@ -217,7 +212,12 @@ def fetch_volume_profile(ticker, is_position=False):
     Fetch volume data from Finviz, SEC EDGAR, and Yahoo Finance (last).
     Yahoo only checked for positions or tickers showing elevated Finviz volume.
     Returns dict with today_vs_avg, seller_dominance estimate.
+    Cached per-run on ticker (is_position flag only affects logging).
     """
+    cache_key = ticker.upper()
+    if cache_key in _FINVIZ_CACHE:
+        return _FINVIZ_CACHE[cache_key]
+
     volume_data = {
         "today_vs_avg": "+0%",
         "seller_dominance": "50%",
@@ -260,6 +260,7 @@ def fetch_volume_profile(ticker, is_position=False):
 
     # Yahoo RSS removed — redundant with Alpaca news. VIX + treasury Yahoo calls retained.
 
+    _FINVIZ_CACHE[cache_key] = volume_data
     return volume_data
 
 
@@ -2580,6 +2581,13 @@ def run():
     ctrl = SentimentControls()
     now  = datetime.now(ET)
     log.info(f"The Pulse starting — {now.strftime('%H:%M ET')}")
+
+    # Per-run caches — cleared at run start so Phase 2/3 + screening-request
+    # fulfillment can each call EDGAR/Finviz without hitting the network twice
+    # for the same ticker. Module-level (single-threaded agent) so a shared
+    # dict is safe.
+    _EDGAR_CACHE.clear()
+    _FINVIZ_CACHE.clear()
 
     db.log_event("AGENT_START", agent="The Pulse")
     db.log_heartbeat("market_sentiment_agent", "RUNNING")
