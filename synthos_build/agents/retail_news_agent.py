@@ -816,10 +816,14 @@ def fetch_alpaca_news_historical(
         log.warning("ALPACA_API_KEY / ALPACA_SECRET_KEY not set — skipping news fetch")
         return []
 
+    # Alpaca expects UTC timestamps (the 'Z' suffix means UTC). Using
+    # datetime.now() here would tag local-time (ET) values as UTC and
+    # either miss articles or produce start > end errors on hosts where
+    # the system clock is set to local time (e.g. pi5 on ET).
     if not start:
-        start = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (datetime.utcnow() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
     if not end:
-        end = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+        end = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
 
     params: dict = {
         "start":               start,
@@ -883,7 +887,8 @@ def fetch_alpaca_news_for_ticker(ticker: str, limit: int = 10) -> list[dict]:
     Used by the screening request handler and per-ticker lookups.
     Returns a list of normalised item dicts.
     """
-    start = (datetime.now() - timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # UTC — see note in fetch_alpaca_news_historical about local/UTC mixing.
+    start = (datetime.utcnow() - timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
     return fetch_alpaca_news_historical(
         symbols=[ticker], start=start, limit=limit, sort="desc"
     )

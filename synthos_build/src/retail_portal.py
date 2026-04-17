@@ -11610,9 +11610,9 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 
   <div class="section-title">API Usage</div>
   <div class="metrics-grid" style="grid-template-columns:1fr 1fr">
-    <!-- Gauge card -->
+    <!-- Gauge card — surfaces rate-limit proximity, not a fake daily cap -->
     <div class="metric-card" style="text-align:center">
-      <div class="metric-label">Today's API Calls</div>
+      <div class="metric-label">Rate (calls / min)</div>
       <div style="position:relative;width:160px;height:90px;margin:8px auto 4px">
         <svg viewBox="0 0 160 90" style="width:160px;height:90px">
           <path d="M 15 80 A 65 65 0 0 1 145 80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10" stroke-linecap="round"/>
@@ -11620,7 +11620,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
         </svg>
         <div style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);text-align:center">
           <div id="api-gauge-val" style="font-size:1.6rem;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
-          <div style="font-size:10px;color:var(--muted)">/ 1,000</div>
+          <div id="api-gauge-cap" style="font-size:10px;color:var(--muted)">/ 200 req/min</div>
         </div>
       </div>
       <div id="api-gauge-breakdown" style="font-size:11px;color:var(--muted);margin-top:4px">Loading...</div>
@@ -12020,22 +12020,27 @@ function showSchedulerDetail(idx) {
 async function loadApiUsage() {
   try {
     const d = await fetch('/api/admin/api-usage').then(r => r.json());
-    const total = (d.today && d.today.total) || 0;
-    const max = 1000;
-    const pct = Math.min(total / max, 1);
+    // Primary gauge: current rate vs Alpaca's 200 req/min limit.
+    // Alpaca has no daily cap — the old "/1000" gauge was misleading.
+    const rateLimit = d.rate_limit || 200;
+    const currentRate = d.current_rate || 0;
+    const peakRate = d.peak_rate || 0;
+    const todayTotal = (d.today && d.today.total) || 0;
+    const pct = Math.min(currentRate / rateLimit, 1);
     // Arc length = 204 (approx semicircle path length)
     const arc = 204;
     const fill = document.getElementById('api-gauge-fill');
     fill.setAttribute('stroke-dasharray', (pct * arc) + ' ' + arc);
-    fill.setAttribute('stroke', pct >= 0.85 ? 'var(--pink)' : pct >= 0.65 ? '#f5a623' : 'var(--green)');
-    document.getElementById('api-gauge-val').textContent = total.toLocaleString();
-    // Breakdown by service
-    if (d.today && d.today.by_service) {
-      const parts = Object.entries(d.today.by_service).map(([k,v]) => k + ': ' + v).join(' · ');
-      document.getElementById('api-gauge-breakdown').textContent = parts || 'No calls today';
-    } else {
-      document.getElementById('api-gauge-breakdown').textContent = 'No calls today';
-    }
+    // Thresholds tuned for rate-limit proximity, not a fake daily cap
+    fill.setAttribute('stroke', pct >= 0.85 ? 'var(--pink)' : pct >= 0.60 ? '#f5a623' : 'var(--green)');
+    document.getElementById('api-gauge-val').textContent = currentRate.toLocaleString();
+    // Breakdown row: today's total + 24h peak rate + service mix
+    // by_service is a list of {service, count} dicts from the API.
+    const serviceList = (d.today && Array.isArray(d.today.by_service)) ? d.today.by_service : [];
+    const serviceMix = serviceList.map(s => s.service + ': ' + s.count).join(' · ');
+    const summary = 'Today: ' + todayTotal.toLocaleString() + ' calls · 24h peak: ' + peakRate + '/min';
+    document.getElementById('api-gauge-breakdown').innerHTML =
+      summary + (serviceMix ? '<div style="margin-top:2px;opacity:0.7">' + serviceMix + '</div>' : '');
     // History table
     const tbody = document.getElementById('api-history-table');
     if (d.history && d.history.length) {
@@ -12044,7 +12049,9 @@ async function loadApiUsage() {
         const dt = h.date || '—';
         const ct = h.total || 0;
         const barW = Math.round((ct / histMax) * 100);
-        const barColor = ct >= 850 ? 'var(--pink)' : ct >= 650 ? '#f5a623' : 'var(--green)';
+        // Relative-only coloring — Alpaca has no daily cap, so absolute
+        // thresholds are meaningless. Darker teal for bigger days.
+        const barColor = barW >= 85 ? '#f5a623' : 'var(--green)';
         return '<tr>' +
           '<td style="padding:3px 6px;font-family:var(--mono);color:var(--muted)">' + dt + '</td>' +
           '<td style="padding:3px 6px;text-align:right;font-family:var(--mono);font-weight:600">' + ct.toLocaleString() + '</td>' +
@@ -12395,14 +12402,25 @@ def api_admin_scheduler_history():
 @app.route('/api/admin/api-usage')
 @admin_required
 def api_admin_api_usage():
-    """API call tracking — today's usage + last 5 market days."""
+    """API call tracking — surfaces proximity to Alpaca's 200/min rate limit
+    (primary gauge) plus daily totals and history (secondary)."""
     try:
         db = _shared_db()
-        today = db.get_api_call_counts()
-        history = db.get_api_call_history(days=5)
-        return jsonify({'today': today, 'history': history})
+        today       = db.get_api_call_counts()
+        history     = db.get_api_call_history(days=5)
+        current_rate = db.get_api_call_rate(window_seconds=60)
+        peak_rate   = db.get_api_call_peak_rate(window_seconds=60, lookback_hours=24)
+        return jsonify({
+            'today':        today,
+            'history':      history,
+            'current_rate': current_rate,     # calls in last 60s
+            'peak_rate':    peak_rate,        # worst 60s window in last 24h
+            'rate_limit':   200,              # Alpaca free/paper tier req/min
+        })
     except Exception as e:
-        return jsonify({'today': {'total': 0}, 'history': [], 'error': str(e)})
+        return jsonify({'today': {'total': 0}, 'history': [],
+                        'current_rate': 0, 'peak_rate': 0, 'rate_limit': 200,
+                        'error': str(e)})
 
 
 # ── START ──────────────────────────────────────────────────────────────────

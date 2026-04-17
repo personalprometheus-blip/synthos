@@ -2124,6 +2124,38 @@ class DB:
         except Exception:
             pass  # never let tracking break an agent
 
+    def get_api_call_rate(self, window_seconds=60):
+        """Return the count of API calls in the last N seconds. Used by the
+        dashboard gauge to surface proximity to Alpaca's 200/min rate limit."""
+        try:
+            with self.conn() as c:
+                row = c.execute(
+                    "SELECT COUNT(*) FROM api_calls "
+                    "WHERE timestamp >= datetime('now', ?)",
+                    (f'-{window_seconds} seconds',)
+                ).fetchone()
+                return row[0] if row else 0
+        except Exception:
+            return 0
+
+    def get_api_call_peak_rate(self, window_seconds=60, lookback_hours=24):
+        """Return the peak calls-per-window observed over the past lookback_hours.
+        Used to surface the worst case rate over the day (not just right now)."""
+        try:
+            with self.conn() as c:
+                # Bucket timestamps into window_seconds buckets and find max count
+                rows = c.execute("""
+                    SELECT COUNT(*) as cnt
+                    FROM api_calls
+                    WHERE timestamp >= datetime('now', ?)
+                    GROUP BY strftime('%s', timestamp) / ?
+                    ORDER BY cnt DESC
+                    LIMIT 1
+                """, (f'-{lookback_hours} hours', window_seconds)).fetchone()
+                return rows[0] if rows else 0
+        except Exception:
+            return 0
+
     def get_api_call_counts(self, date_str=None):
         """Get API call counts for a given date (default today). Returns dict with totals and per-agent breakdown."""
         if not date_str:
