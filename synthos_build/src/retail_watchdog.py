@@ -45,6 +45,7 @@ import subprocess
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -917,6 +918,112 @@ def handle_failed_agent(state: AgentState) -> None:
 
 # ── MAIN WATCH LOOP ───────────────────────────────────────────────────────────
 
+# ── PIPELINE HEALTH ──────────────────────────────────────────────────────────
+# Detect stalls in the signal validation chain. A healthy pipeline promotes
+# QUEUED → VALIDATED on every enrichment cycle (~30 min). If no promotions
+# occur for over PIPELINE_STALL_MINS during market hours, the pipeline is
+# almost certainly broken somewhere upstream — this fires ONE alert per stall
+# event, resets when the pipeline recovers.
+PIPELINE_STALL_MINS      = 90     # market-hours threshold before alert
+PIPELINE_STUCK_MINS      = 120    # minimum signal age before "stuck" scrutiny
+PIPELINE_STUCK_THRESHOLD = 5      # number of stuck signals that trips an alert
+
+_pipeline_stall_alerted = False   # module-level latch — reset when recovered
+
+
+def is_market_hours_now() -> bool:
+    """True between 9:30 ET and 16:00 ET on weekdays. Watchdog only alerts
+    on pipeline stalls during market hours — off-hours stalls are expected."""
+    try:
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return False
+    if now.weekday() >= 5:
+        return False
+    open_time  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+    close_time = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+    return open_time <= now < close_time
+
+
+def check_pipeline_health() -> None:
+    """Inspect signal_decisions + signals to detect validation-pipeline stalls
+    and stuck signals during market hours. Sends at most one ALERT per stall
+    episode; clears the latch when the pipeline recovers."""
+    global _pipeline_stall_alerted
+    if not is_market_hours_now():
+        return
+
+    try:
+        import sqlite3
+        db_path = USER_DIR / "signals.db"
+        if not db_path.exists():
+            return
+        conn = sqlite3.connect(str(db_path), timeout=5)
+
+        # 1) Time since last successful promotion (minutes).
+        last_promo = conn.execute(
+            "SELECT ts FROM signal_decisions "
+            "WHERE agent='promoter' AND action='PROMOTED' "
+            "ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+
+        # 2) Stuck signals per agent (which upstream stamp is most commonly missing).
+        stuck_rows = conn.execute(
+            "SELECT ticker, reason FROM signal_decisions "
+            "WHERE agent='promoter' AND action='STUCK' "
+            "ORDER BY ts DESC LIMIT 50"
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        log.debug(f"pipeline_health DB probe skipped: {e}")
+        return
+
+    # Evaluate stall condition.
+    # DB timestamps are naive UTC strings (see DB.now()), so compare against
+    # naive UTC to avoid tz-aware/naive subtraction errors.
+    stall_mins = None
+    if last_promo:
+        try:
+            last_ts = last_promo[0].replace(' ', 'T').split('.')[0]
+            last_dt = datetime.fromisoformat(last_ts)
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            stall_mins = (now_utc - last_dt).total_seconds() / 60
+        except Exception:
+            stall_mins = None
+
+    if stall_mins is not None and stall_mins >= PIPELINE_STALL_MINS:
+        # Categorize most-common missing stamp to point at the likely culprit.
+        missing_counts: dict = {}
+        for _, reason in stuck_rows:
+            if reason and 'missing:' in reason:
+                try:
+                    tag = reason.split('missing:', 1)[1].split('(')[0].strip()
+                    for s in (x.strip() for x in tag.split(',') if x.strip()):
+                        missing_counts[s] = missing_counts.get(s, 0) + 1
+                except Exception:
+                    continue
+        top_miss = sorted(missing_counts.items(), key=lambda x: -x[1])[:3]
+        bottleneck = ', '.join(f"{k}={v}" for k, v in top_miss) or 'unknown'
+
+        if not _pipeline_stall_alerted:
+            send_alert(
+                level="warning",
+                category="PIPELINE_STALL",
+                message=(
+                    f"Signal validation pipeline stalled on {PI_ID} — "
+                    f"no promotions for {stall_mins:.0f}m (threshold {PIPELINE_STALL_MINS}m). "
+                    f"Most-common missing stamps (points to failing upstream agent): {bottleneck}"
+                ),
+            )
+            _pipeline_stall_alerted = True
+            log.warning(f"[PIPELINE_STALL] {stall_mins:.0f}m since last promotion — bottleneck: {bottleneck}")
+    else:
+        # Recovery: clear latch the first time we see a recent promotion.
+        if _pipeline_stall_alerted and stall_mins is not None and stall_mins < PIPELINE_STALL_MINS:
+            log.info(f"[PIPELINE_RECOVERED] last promotion {stall_mins:.0f}m ago — stall cleared")
+            _pipeline_stall_alerted = False
+
+
 def watch_loop() -> None:
     """
     Main monitoring loop — scans every 5 minutes.
@@ -924,6 +1031,7 @@ def watch_loop() -> None:
     Managed services (Portal): checks process is alive, restarts if not.
     Cron agents (Bolt, Scout, Pulse): scans logs for errors, restarts on crash.
     Post-deploy: checks rollback trigger conditions in post-trading mode.
+    Pipeline health: flags validation-chain stalls during market hours.
     """
     log.info(
         f"Watchdog v{SYNTHOS_VERSION} started on {PI_ID} — "
@@ -995,6 +1103,12 @@ def watch_loop() -> None:
                     if name not in alerted:
                         handle_failed_agent(state)
                         alerted.add(name)
+
+            # Signal validation pipeline health — runs after per-agent crash
+            # scans so a crashed news agent shows up as a log-crash alert
+            # (restart path) AND as a pipeline-stall alert (points at the
+            # downstream effect on stamps).
+            check_pipeline_health()
 
         except Exception as e:
             log.error(f"Watchdog loop error: {e}", exc_info=True)

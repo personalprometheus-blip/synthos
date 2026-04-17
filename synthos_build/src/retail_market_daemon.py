@@ -61,6 +61,7 @@ import time
 import signal
 import logging
 import json
+import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -646,6 +647,9 @@ def promote_validated_signals():
     before trader dispatch. Stamps validator completion on all QUEUED
     signals, then promotes any signal that has all required stamps
     (news + sentiment + macro + market_state + validator) to VALIDATED.
+    Per-signal PROMOTED rows and STUCK (with missing-stamps diagnostic)
+    rows are written to signal_decisions so the fault detector and portal
+    can explain exactly why any given signal did or did not pass.
     Trader reads only VALIDATED signals.
     """
     log.info("[PROMOTER] Stamping validator + promoting signals")
@@ -656,19 +660,36 @@ def promote_validated_signals():
             return 0
         master = get_customer_db(OWNER_CUSTOMER_ID)
         stamped = master.stamp_signals_validator('OK')
-        promoted = master.promote_validated_signals()
+        promoted, stuck = master.promote_validated_signals()
         log.info(f"[PROMOTER] validator-stamped {stamped}, "
-                 f"promoted {promoted} signal(s) QUEUED → VALIDATED")
+                 f"promoted {promoted} signal(s) QUEUED → VALIDATED, "
+                 f"{stuck} still stuck at QUEUED (missing stamps — see signal_decisions)")
         return promoted
     except Exception as e:
         log.error(f"[PROMOTER] Error: {e}")
         return 0
 
 
+def _begin_cycle(label='enrichment'):
+    """Mint a new cycle_id, export it via env var (inherited by subprocess
+    agents), and log the cycle start. Returns the cycle_id string."""
+    cycle_id = uuid.uuid4().hex[:8]
+    os.environ['SYNTHOS_CYCLE_ID'] = cycle_id
+    log.info(f"[CYCLE {cycle_id}] {label} start — validation stamps tagged with this id")
+    return cycle_id
+
+
+def _end_cycle(cycle_id):
+    """Clear the env var so no stray stamp outside a cycle picks it up."""
+    os.environ.pop('SYNTHOS_CYCLE_ID', None)
+    log.info(f"[CYCLE {cycle_id}] end")
+
+
 # ── Main Daemon Loop ──
 
 def run_premarket_prep():
     """9:15 AM: Sequential prep block — full enrichment pipeline → trade."""
+    cycle_id = _begin_cycle(label='premarket')
     log.info("=" * 60)
     log.info("PRE-MARKET PREP — news → screener → sentiment → macro → state → bias → fault → validator → trade")
     log.info("=" * 60)
@@ -717,6 +738,7 @@ def run_premarket_prep():
     run_price_poller()
     run_trade_all_customers(session='open')
     clear_agent_running()
+    _end_cycle(cycle_id)
 
 
 def run_market_loop():
@@ -761,6 +783,7 @@ def run_market_loop():
         # ── ENRICHMENT CYCLE (every 30 min) ──
         # Full pipeline: data → analysis → checks → validation → trade
         if since_enrichment >= enrichment_interval:
+            cycle_id = _begin_cycle(label='enrichment')
             log.info(f"[ENRICHMENT] {since_enrichment/60:.0f}m — full pipeline")
             # Data collection
             # NOTE: sector screener is pre-market prep only (once daily).
@@ -791,6 +814,7 @@ def run_market_loop():
             last_recon = time.monotonic()  # enrichment includes reconciliation
             clear_agent_running()
             send_retail_heartbeat('market_daemon', 'OK')
+            _end_cycle(cycle_id)
 
         # ── RECONCILIATION CYCLE (every 10 min between enrichments) ──
         # Lightweight: catches trailing stop fills, exit conditions, approved trades

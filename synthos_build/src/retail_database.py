@@ -737,6 +737,29 @@ class DB:
                 created_at     TEXT    NOT NULL)""",
             "CREATE INDEX IF NOT EXISTS idx_admin_alerts_resolved ON admin_alerts(resolved, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_admin_alerts_severity ON admin_alerts(severity)",
+
+            # v3.7 — per-agent signal decision log. Every stamp/promotion/skip
+            # writes one row so we can replay the validation chain for any
+            # signal or cycle. The stamp_signals_* methods record batch-level
+            # events; the promoter records per-signal PROMOTED/STUCK events
+            # with the set of missing stamps on stuck rows.
+            """CREATE TABLE IF NOT EXISTS signal_decisions (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts         TEXT    NOT NULL,           -- ISO UTC
+                cycle_id   TEXT,                       -- groups events from one enrichment cycle
+                agent      TEXT    NOT NULL,           -- 'news'|'sentiment'|'screener'|'macro'|'market_state'|'validator'|'promoter'
+                action     TEXT    NOT NULL,           -- 'STAMPED_BATCH'|'STAMPED_TICKER'|'PROMOTED'|'STUCK'|'SKIPPED'
+                ticker     TEXT,                       -- null for system-wide bulk ops
+                signal_id  INTEGER,                    -- null for batch-level rows
+                value      TEXT,                       -- e.g. '0.60', 'EXPANSION', 'QUEUED→VALIDATED'
+                reason     TEXT,                       -- human-readable
+                meta       TEXT                        -- optional JSON
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_sd_cycle    ON signal_decisions(cycle_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sd_agent    ON signal_decisions(agent)",
+            "CREATE INDEX IF NOT EXISTS idx_sd_signal   ON signal_decisions(signal_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sd_ticker   ON signal_decisions(ticker)",
+            "CREATE INDEX IF NOT EXISTS idx_sd_ts       ON signal_decisions(ts DESC)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1223,95 +1246,255 @@ class DB:
     # never re-stamped.
     _STAMPABLE_STATUSES = "('QUEUED','VALIDATED')"
 
-    def stamp_signals_sentiment(self, ticker, sentiment_score):
+    def stamp_signals_sentiment(self, ticker, sentiment_score, cycle_id=None):
         """Sentiment agent attaches a numeric score (0.0-1.0) and timestamp to
-        all in-flight signals for `ticker`. Returns count stamped."""
+        all in-flight signals for `ticker`. Records a STAMPED_TICKER decision
+        log row. Returns count stamped."""
         with self.conn() as c:
             result = c.execute(
                 f"UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
                 f"WHERE ticker=? AND status IN {self._STAMPABLE_STATUSES}",
                 (float(sentiment_score), self.now(), ticker.upper())
             )
-            return result.rowcount
+            count = result.rowcount
+        if count > 0:
+            self.log_signal_decision(
+                agent='sentiment', action='STAMPED_TICKER',
+                ticker=ticker.upper(), value=f"{float(sentiment_score):.2f}",
+                reason=f"{count} signal(s) stamped", cycle_id=cycle_id,
+            )
+        return count
 
-    def stamp_signals_screener(self, tickers):
+    def stamp_signals_screener(self, tickers, cycle_id=None):
         """Sector screener marks all in-flight signals for the given tickers as
-        screener-evaluated. Returns count stamped."""
+        screener-evaluated. Records a STAMPED_BATCH decision log row.
+        Returns count stamped."""
         if not tickers:
             return 0
+        upper = [t.upper() for t in tickers]
         with self.conn() as c:
-            placeholders = ','.join('?' * len(tickers))
+            placeholders = ','.join('?' * len(upper))
             result = c.execute(
                 f"UPDATE signals SET screener_evaluated_at=? "
                 f"WHERE ticker IN ({placeholders}) AND status IN {self._STAMPABLE_STATUSES}",
-                (self.now(), *[t.upper() for t in tickers])
+                (self.now(), *upper)
             )
-            return result.rowcount
+            count = result.rowcount
+        if count > 0:
+            self.log_signal_decision(
+                agent='screener', action='STAMPED_BATCH',
+                value=str(count), reason=f"candidates: {','.join(upper[:10])}"
+                                         + (f"+{len(upper)-10}" if len(upper) > 10 else ""),
+                cycle_id=cycle_id,
+            )
+        return count
 
-    def stamp_signals_macro(self, regime_label):
+    def stamp_signals_macro(self, regime_label, cycle_id=None):
         """Macro regime agent snapshots the current market regime onto all
         in-flight signals. One SQL call; O(1) regardless of queue size.
-        Stamp format: 'timestamp|regime_label'."""
+        Stamp format: 'timestamp|regime_label'.
+        Records a STAMPED_BATCH decision log row."""
         with self.conn() as c:
             result = c.execute(
                 f"UPDATE signals SET macro_regime_at_validation=? "
                 f"WHERE status IN {self._STAMPABLE_STATUSES}",
                 (f"{self.now()}|{regime_label}",)
             )
-            return result.rowcount
+            count = result.rowcount
+        if count > 0:
+            self.log_signal_decision(
+                agent='macro', action='STAMPED_BATCH',
+                value=regime_label, reason=f"{count} in-flight signal(s) stamped",
+                cycle_id=cycle_id,
+            )
+        return count
 
-    def stamp_signals_market_state(self, state_label):
+    def stamp_signals_market_state(self, state_label, cycle_id=None):
         """Market state agent snapshots the current aggregate state onto all
-        in-flight signals. Stamp format: 'timestamp|state_label'."""
+        in-flight signals. Stamp format: 'timestamp|state_label'.
+        Records a STAMPED_BATCH decision log row."""
         with self.conn() as c:
             result = c.execute(
                 f"UPDATE signals SET market_state_at_validation=? "
                 f"WHERE status IN {self._STAMPABLE_STATUSES}",
                 (f"{self.now()}|{state_label}",)
             )
-            return result.rowcount
+            count = result.rowcount
+        if count > 0:
+            self.log_signal_decision(
+                agent='market_state', action='STAMPED_BATCH',
+                value=state_label, reason=f"{count} in-flight signal(s) stamped",
+                cycle_id=cycle_id,
+            )
+        return count
 
-    def stamp_signals_validator(self, verdict='OK'):
+    def stamp_signals_validator(self, verdict='OK', cycle_id=None):
         """Validator stack stamps completion of its pass on all in-flight
         signals. Called once per pipeline cycle (not per-customer) from the
         daemon, immediately before the promoter step.
-        Stamp format: 'timestamp|verdict'."""
+        Stamp format: 'timestamp|verdict'.
+        Records a STAMPED_BATCH decision log row."""
         with self.conn() as c:
             result = c.execute(
                 f"UPDATE signals SET validator_stamped_at=? "
                 f"WHERE status IN {self._STAMPABLE_STATUSES}",
                 (f"{self.now()}|{verdict}",)
             )
-            return result.rowcount
+            count = result.rowcount
+        if count > 0:
+            self.log_signal_decision(
+                agent='validator', action='STAMPED_BATCH',
+                value=verdict, reason=f"{count} in-flight signal(s) stamped",
+                cycle_id=cycle_id,
+            )
+        return count
 
-    def promote_validated_signals(self):
+    # Required stamps for promotion (used by promote_validated_signals and
+    # the fault detection "stuck signal" gate).
+    REQUIRED_STAMPS = (
+        'interrogation_status',
+        'sentiment_evaluated_at',
+        'macro_regime_at_validation',
+        'market_state_at_validation',
+        'validator_stamped_at',
+    )
+
+    def promote_validated_signals(self, cycle_id=None):
         """The last link in the validation chain.
 
         Transitions QUEUED signals to VALIDATED if they have ALL required
         stamps. Trader reads only VALIDATED signals. Anything stuck at
         QUEUED is still unvalidated noise and will age out via expiry.
 
-        Required stamps:
-          - interrogation_status   (news has classified)
-          - sentiment_evaluated_at (sentiment has analyzed the ticker)
-          - macro_regime_at_validation
-          - market_state_at_validation
-          - validator_stamped_at
+        For every promotion, writes a PROMOTED row to signal_decisions.
+        For every still-QUEUED signal, writes a STUCK row listing which
+        stamps are missing — this tells the fault detector which upstream
+        agent is the bottleneck.
 
-        Returns the count of signals promoted this call.
+        Returns (promoted_count, stuck_count).
         """
+        stamp_cols = self.REQUIRED_STAMPS
+        # 1) Find candidates BEFORE the update so we know which IDs were promoted.
         with self.conn() as c:
-            result = c.execute(
-                "UPDATE signals SET status='VALIDATED', updated_at=? "
+            promotable = c.execute(
+                "SELECT id, ticker FROM signals "
                 "WHERE status='QUEUED' "
                 "AND interrogation_status IS NOT NULL "
                 "AND sentiment_evaluated_at IS NOT NULL "
                 "AND macro_regime_at_validation IS NOT NULL "
                 "AND market_state_at_validation IS NOT NULL "
-                "AND validator_stamped_at IS NOT NULL",
-                (self.now(),)
+                "AND validator_stamped_at IS NOT NULL"
+            ).fetchall()
+            promoted_ids = [(r[0], r[1]) for r in promotable]
+
+            # 2) Promote them in one UPDATE.
+            if promoted_ids:
+                ids_placeholders = ','.join('?' * len(promoted_ids))
+                c.execute(
+                    f"UPDATE signals SET status='VALIDATED', updated_at=? "
+                    f"WHERE id IN ({ids_placeholders})",
+                    (self.now(), *[p[0] for p in promoted_ids])
+                )
+
+            # 3) Snapshot still-QUEUED rows with their stamp status for STUCK logging.
+            stuck_cols = ','.join(['id', 'ticker', 'created_at', *stamp_cols])
+            stuck_rows = c.execute(
+                f"SELECT {stuck_cols} FROM signals WHERE status='QUEUED'"
+            ).fetchall()
+
+        # 4) Write per-signal PROMOTED rows.
+        for sid, ticker in promoted_ids:
+            self.log_signal_decision(
+                agent='promoter', action='PROMOTED',
+                ticker=ticker, signal_id=sid,
+                value='QUEUED→VALIDATED',
+                reason='all 5 required stamps present',
+                cycle_id=cycle_id,
             )
-            return result.rowcount
+
+        # 5) Write per-signal STUCK rows listing missing stamps.
+        # Only log for signals that have progressed partially (at least one
+        # stamp present). A freshly-QUEUED signal with zero stamps is 'new',
+        # not stuck — logging every fresh arrival would swamp the table.
+        stuck_logged = 0
+        for row in stuck_rows:
+            sid       = row[0]
+            ticker    = row[1]
+            created   = row[2]
+            missing   = [stamp_cols[i] for i, v in enumerate(row[3:]) if v is None]
+            present   = len(stamp_cols) - len(missing)
+            if present == 0:
+                continue
+            self.log_signal_decision(
+                agent='promoter', action='STUCK',
+                ticker=ticker, signal_id=sid,
+                value=f"missing={len(missing)}/{len(stamp_cols)}",
+                reason=f"missing: {','.join(missing)} (created={created})",
+                cycle_id=cycle_id,
+            )
+            stuck_logged += 1
+
+        return len(promoted_ids), stuck_logged
+
+    def get_stuck_signals(self, min_age_minutes=120):
+        """Return QUEUED signals older than `min_age_minutes` that never got
+        all required stamps. Each row is a dict with 'ticker', 'id', 'age_minutes',
+        'missing_stamps' (list). Used by fault detection to surface which
+        upstream agent is the bottleneck."""
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        stamp_cols = self.REQUIRED_STAMPS
+        cutoff = (_dt.now(_tz.utc) - _td(minutes=min_age_minutes)).isoformat()[:19]
+        cols = ','.join(['id', 'ticker', 'created_at', *stamp_cols])
+        with self.conn() as c:
+            rows = c.execute(
+                f"SELECT {cols} FROM signals "
+                f"WHERE status='QUEUED' AND created_at < ?",
+                (cutoff,)
+            ).fetchall()
+        result = []
+        now = _dt.now(_tz.utc)
+        for row in rows:
+            created_str = row[2]
+            try:
+                created = _dt.fromisoformat(created_str.replace(' ', 'T').split('.')[0])
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=_tz.utc)
+                age_min = int((now - created).total_seconds() / 60)
+            except Exception:
+                age_min = -1
+            missing = [stamp_cols[i] for i, v in enumerate(row[3:]) if v is None]
+            result.append({
+                'id':             row[0],
+                'ticker':         row[1],
+                'age_minutes':    age_min,
+                'missing_stamps': missing,
+            })
+        return result
+
+    def log_signal_decision(self, agent, action, ticker=None, signal_id=None,
+                            value=None, reason=None, cycle_id=None, meta=None):
+        """Append a row to signal_decisions. Every stamp/promotion/skip ends
+        here so we can replay the validation chain for any signal or cycle.
+        Non-fatal — any insert failure is logged at DEBUG and swallowed, so a
+        decision-log hiccup never breaks the pipeline.
+
+        cycle_id falls back to os.environ['SYNTHOS_CYCLE_ID'] so the daemon
+        can set it once per enrichment cycle and every subprocess picks it up
+        without threading the ID through every call site."""
+        if cycle_id is None:
+            cycle_id = os.environ.get('SYNTHOS_CYCLE_ID')
+        try:
+            meta_json = json.dumps(meta) if meta is not None else None
+            with self.conn() as c:
+                c.execute(
+                    "INSERT INTO signal_decisions "
+                    "(ts, cycle_id, agent, action, ticker, signal_id, value, reason, meta) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (self.now(), cycle_id, agent, action, ticker, signal_id,
+                     value, reason, meta_json)
+                )
+        except Exception as e:
+            log.debug(f"log_signal_decision failed (non-fatal): {e}")
 
     def get_validated_signals(self):
         """Signals that have passed the full validation chain and are ready

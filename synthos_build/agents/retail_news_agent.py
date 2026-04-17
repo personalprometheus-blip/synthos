@@ -2992,6 +2992,15 @@ def run(session="market"):
                     "UPDATE signals SET interrogation_status = ?, updated_at = ? WHERE id = ?",
                     (interrogation_status, db.now(), sig_id)
                 )
+            # Decision-log row so the full validation chain is replayable from
+            # one table. cycle_id is picked up from SYNTHOS_CYCLE_ID env var
+            # set by the daemon at enrichment start.
+            db.log_signal_decision(
+                agent='news', action='STAMPED_TICKER',
+                ticker=ticker, signal_id=sig_id,
+                value=interrogation_status,
+                reason=f"routing={routing} adj={adj_text}",
+            )
         except Exception as e:
             log.warning(f"interrogation_status write failed (non-fatal): {e}")
 

@@ -63,6 +63,22 @@ HEARTBEAT_STALE_MINUTES     = 45      # agent heartbeat older than this = stale
 PRICE_STALE_MINUTES         = 10      # live_prices older than this during market hours
 SIGNAL_STALE_HOURS          = 48      # queued signals older than this = warn
 AGENT_LOCK_STALE_MINUTES    = 12      # .agent_lock file older than this = stuck
+# Stuck-signal diagnostics — a QUEUED signal older than STUCK_SIGNAL_MINUTES
+# that never accumulated all 5 required stamps points at a broken upstream
+# agent. Threshold defines how many stuck rows elevate the finding from INFO
+# to WARNING.
+STUCK_SIGNAL_MINUTES        = 120
+STUCK_SIGNAL_THRESHOLD      = 5
+
+# Maps missing-stamp column → agent that owns writing it. Used to translate
+# a "most-common missing stamp" diagnostic into a named upstream culprit.
+_STAMP_OWNER = {
+    'interrogation_status':        'news',
+    'sentiment_evaluated_at':      'sentiment',
+    'macro_regime_at_validation':  'macro_regime',
+    'market_state_at_validation':  'market_state',
+    'validator_stamped_at':        'validator_stack',
+}
 DISK_WARN_PCT               = 85      # disk usage % threshold
 DISK_CRITICAL_PCT           = 95
 MEMORY_WARN_PCT             = 85
@@ -315,6 +331,47 @@ def gate2_data_freshness(report: FaultReport, db):
             code="STALE_SIGNALS",
             message=f"{stale_count} in-flight signal(s) older than {SIGNAL_STALE_HOURS}h",
             detail="May need expiry or manual review"
+        ))
+
+    # 2b-bis. Stuck signals — QUEUED rows older than the stuck threshold that
+    # never accumulated all five required stamps. This is the diagnostic that
+    # actually surfaces WHICH upstream agent is failing: we look at the set of
+    # missing stamps across all stuck rows and rank them so the most frequent
+    # missing stamp (= most likely broken agent) shows up in the finding.
+    try:
+        stuck = db.get_stuck_signals(min_age_minutes=STUCK_SIGNAL_MINUTES)
+    except Exception as e:
+        stuck = []
+        log.debug(f"get_stuck_signals skipped: {e}")
+
+    if stuck:
+        # Count missing-stamp occurrences to identify the bottleneck agent.
+        miss_count: dict = {}
+        for row in stuck:
+            for stamp in row.get('missing_stamps', []):
+                miss_count[stamp] = miss_count.get(stamp, 0) + 1
+        top = sorted(miss_count.items(), key=lambda x: -x[1])
+        bottleneck_stamp = top[0][0] if top else 'unknown'
+        bottleneck_agent = _STAMP_OWNER.get(bottleneck_stamp, 'unknown')
+
+        severity = Severity.WARNING if len(stuck) >= STUCK_SIGNAL_THRESHOLD else Severity.INFO
+        report.add(Finding(
+            gate="GATE2_FRESHNESS",
+            severity=severity,
+            code="STUCK_SIGNALS",
+            message=(f"{len(stuck)} signal(s) stuck at QUEUED (>{STUCK_SIGNAL_MINUTES}m) "
+                     f"— bottleneck: {bottleneck_agent} "
+                     f"(most-missing stamp: {bottleneck_stamp})"),
+            detail=("Top tickers: "
+                    + ", ".join(f"{r['ticker']}({r['age_minutes']}m)" for r in stuck[:5])
+                    + f" | Missing-stamp histogram: {dict(top[:5])}")
+        ))
+    else:
+        report.add(Finding(
+            gate="GATE2_FRESHNESS",
+            severity=Severity.OK,
+            code="NO_STUCK_SIGNALS",
+            message=f"No signals stuck at QUEUED beyond {STUCK_SIGNAL_MINUTES}m"
         ))
 
     # 2c. News feed freshness (during market hours, news should be <2h old)
