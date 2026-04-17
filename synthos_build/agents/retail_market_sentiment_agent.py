@@ -2547,6 +2547,13 @@ def _handle_screening_requests(db):
                 score=score,
                 notes=notes,
             )
+            # Also stamp any QUEUED signals for this ticker with the sentiment
+            # score — gives the trader a scoring boost at Gate 5 for signals
+            # that have been sentiment-evaluated.
+            try:
+                db.stamp_signals_sentiment(ticker, score)
+            except Exception as _e:
+                log.debug(f"sentiment stamp failed for {ticker}: {_e}")
 
             audit_lines += [
                 f"  {ticker}",
@@ -2810,6 +2817,16 @@ def run():
                 )
                 # Write finding back to signal so Agent 1 reads it in Gate 5 signal scoring
                 db.annotate_signal_pulse(sig['id'], tier, summary)
+            # Stamp sentiment_score on ALL matching QUEUED signals. Tier → score
+            # is the same mapping used for screening-request fulfillment:
+            # tier 1 (critical bearish) = 0.10, 2 = 0.35, 3 (neutral) = 0.60,
+            # 4 (quiet/bullish) = 0.85. Trader reads this as an optional Gate 5
+            # scoring input (not a hard filter).
+            sentiment_score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
+            try:
+                db.stamp_signals_sentiment(ticker, sentiment_score)
+            except Exception as _e:
+                log.debug(f"sentiment stamp failed for {ticker}: {_e}")
             time.sleep(1)
 
     portfolio = db.get_portfolio()

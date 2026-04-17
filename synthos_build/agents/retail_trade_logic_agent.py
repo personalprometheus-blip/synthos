@@ -1208,14 +1208,23 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     interr_score = interrogation_to_score(signal.get('interrogation_status', 'UNVALIDATED'))
     conf_score   = confidence_to_score(signal.get('confidence', 'MEDIUM'))
 
-    # Sentiment from corroboration_note (written by agent3)
-    corr_note = signal.get('corroboration_note', '') or ''
-    if '[PULSE_POSITIVE' in corr_note:
-        sentiment_score = 0.90
-    elif '[PULSE' in corr_note or '[PULSE_NEGATIVE' in corr_note:
-        sentiment_score = 0.25
+    # Sentiment — prefer the new per-signal sentiment stamp if present,
+    # else fall back to parsing corroboration_note (legacy path).
+    # stamp_signals_sentiment() writes signal.sentiment_score in [0.10, 0.85].
+    stamped_sent = signal.get('sentiment_score')
+    if stamped_sent is not None:
+        try:
+            sentiment_score = max(0.0, min(1.0, float(stamped_sent)))
+        except (ValueError, TypeError):
+            sentiment_score = 0.55
     else:
-        sentiment_score = 0.55  # neutral — no pulse data
+        corr_note = signal.get('corroboration_note', '') or ''
+        if '[PULSE_POSITIVE' in corr_note:
+            sentiment_score = 0.90
+        elif '[PULSE' in corr_note or '[PULSE_NEGATIVE' in corr_note:
+            sentiment_score = 0.25
+        else:
+            sentiment_score = 0.55  # neutral — no pulse data
 
     # Weighted composite
     W = C.SIGNAL_WEIGHTS
@@ -1269,6 +1278,14 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
             final_score = round(min(max(final_score + screening_adj, 0.0), 1.0), 4)
     except Exception as _e:
         log.debug(f"Screening lookup failed for {ticker}: {_e}")
+
+    # Per-agent stamp bonus — if the screener has specifically stamped this
+    # signal (meaning the ticker is in the screener's candidate universe
+    # *as of this signal's lifetime*), give a small extra nudge. This is
+    # separate from the sector_screening table lookup above, which reads
+    # whatever the most-recent screener run said about this ticker.
+    if signal.get('screener_evaluated_at'):
+        final_score = round(min(final_score + 0.02, 1.0), 4)
 
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 

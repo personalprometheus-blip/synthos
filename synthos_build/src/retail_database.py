@@ -207,6 +207,16 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 
 -- ── SIGNALS ────────────────────────────────────────────────────────────
+-- Per-agent stamp ownership (enforce this convention when adding new fields):
+--   news_agent:      status (initial QUEUED), interrogation_status, needs_reeval,
+--                    staleness, expires_at, corroboration_note
+--   market_sentiment: sentiment_score, sentiment_evaluated_at
+--   sector_screener:  screener_evaluated_at
+--   trade_logic:      status transitions (QUEUED → EVALUATED | ACTED_ON | EXPIRED)
+--
+-- Rule: no agent reads another agent's tag as a hard SQL filter. If an agent
+-- needs another's output, it must be consumed as a scoring input / soft
+-- signal, not a gate. See get_queued_signals() docstring.
 CREATE TABLE IF NOT EXISTS signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker          TEXT    NOT NULL,
@@ -685,6 +695,18 @@ class DB:
                 cursor_value  TEXT    NOT NULL,
                 articles_seen INTEGER NOT NULL DEFAULT 0,
                 updated_at    TEXT    NOT NULL)""",
+            # v3.6 — per-agent stamps on signals. Each processing agent writes
+            # its own completion marker so no agent reads another's tag as a
+            # hard filter. News stamps via interrogation_status (existing).
+            # Sentiment stamps via sentiment_score + sentiment_evaluated_at.
+            # Screener stamps via screener_evaluated_at.
+            # Trader reads these as scoring inputs, not hard filters — a signal
+            # is tradeable as long as its news stamp (status='QUEUED') is set;
+            # additional stamps improve its Gate 5 score.
+            "ALTER TABLE signals ADD COLUMN sentiment_score REAL",
+            "ALTER TABLE signals ADD COLUMN sentiment_evaluated_at TEXT",
+            "ALTER TABLE signals ADD COLUMN screener_evaluated_at TEXT",
+
             # v3.5 — admin alerts. System-health / validator / bias findings go
             # here instead of per-customer notifications. Customers never see
             # these; the admin portal reads and resolves them.
@@ -1177,6 +1199,36 @@ class DB:
             sig_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
             log.info(f"New signal: {ticker} T{source_tier} {confidence} — id={sig_id}")
             return sig_id
+
+    # ── PER-AGENT STAMPS ───────────────────────────────────────────────────
+    # Each analysis agent writes its own completion marker on signals it
+    # processes. No agent reads another agent's tag as a hard filter — the
+    # trader uses these as Gate 5 scoring inputs only.
+
+    def stamp_signals_sentiment(self, ticker, sentiment_score):
+        """Sentiment agent marks all QUEUED signals for `ticker` as evaluated,
+        attaching its numeric sentiment score (0.0-1.0). Returns count stamped."""
+        with self.conn() as c:
+            result = c.execute(
+                "UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
+                "WHERE ticker=? AND status='QUEUED'",
+                (float(sentiment_score), self.now(), ticker.upper())
+            )
+            return result.rowcount
+
+    def stamp_signals_screener(self, tickers):
+        """Sector screener marks all QUEUED signals for the given tickers as
+        screener-evaluated. Returns count stamped."""
+        if not tickers:
+            return 0
+        with self.conn() as c:
+            placeholders = ','.join('?' * len(tickers))
+            result = c.execute(
+                f"UPDATE signals SET screener_evaluated_at=? "
+                f"WHERE ticker IN ({placeholders}) AND status='QUEUED'",
+                (self.now(), *[t.upper() for t in tickers])
+            )
+            return result.rowcount
 
     def queue_signal_for_trader(self, signal_id):
         """Mark signal as QUEUED and create handshake record."""

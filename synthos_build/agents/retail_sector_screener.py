@@ -545,6 +545,16 @@ def run_single(sector, run_id=None):
     db = _master_db()
     db.write_screening_run(run_id, sector, etf, etf_5yr_return, scored_candidates)
 
+    # Stamp any QUEUED signals for these candidate tickers. Trader reads
+    # screener_evaluated_at as a "this ticker is in the screener universe"
+    # signal and gives it a small Gate 5 scoring bonus.
+    try:
+        stamped = db.stamp_signals_screener(tickers)
+        if stamped:
+            log.info(f"  {sector}: stamped {stamped} QUEUED signal(s) with screener mark")
+    except Exception as _e:
+        log.debug(f"screener stamp failed: {_e}")
+
     # Step 5: Write congressional flags
     for ticker, flag in congressional_flags.items():
         if flag != 'none':
