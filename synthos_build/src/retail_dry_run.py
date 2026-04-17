@@ -181,11 +181,14 @@ def read_macro_regime():
 
 
 def get_api_call_count():
-    """Get today's API call count from shared DB."""
+    """Get today's API call count from shared DB. Uses UTC date to match
+    the DB's UTC timestamps — using ET date here drops the current run's
+    rows when ET/UTC dates straddle midnight."""
     try:
+        from datetime import timezone
         db_path = _DATA / 'customers' / OWNER_CID / 'signals.db'
         conn = sqlite3.connect(str(db_path), timeout=5)
-        today = datetime.now(ET).strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         row = conn.execute(
             "SELECT COUNT(*) FROM api_calls WHERE date(timestamp) = ?", (today,)
         ).fetchone()
@@ -197,11 +200,12 @@ def get_api_call_count():
 
 
 def get_api_breakdown():
-    """Get today's API call breakdown by agent."""
+    """Get today's API call breakdown by agent (UTC date to match DB)."""
     try:
+        from datetime import timezone
         db_path = _DATA / 'customers' / OWNER_CID / 'signals.db'
         conn = sqlite3.connect(str(db_path), timeout=5)
-        today = datetime.now(ET).strftime('%Y-%m-%d')
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
         rows = conn.execute(
             "SELECT agent, COUNT(*) FROM api_calls WHERE date(timestamp) = ? GROUP BY agent ORDER BY COUNT(*) DESC",
             (today,)
