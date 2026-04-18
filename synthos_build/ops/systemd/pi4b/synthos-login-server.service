@@ -1,0 +1,15 @@
+[Unit]
+Description=Synthos Command Portal (monitor dashboard)
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/synthos-company
+EnvironmentFile=/home/pi/synthos-company/company.env
+Environment=PORT=5050
+ExecStart=/usr/bin/python3 /home/pi/synthos-company/synthos_monitor.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

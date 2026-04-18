@@ -209,7 +209,26 @@ def check_alpaca(db):
 
 
 def check_positions(db):
-    """Reconcile DB positions against Alpaca."""
+    """Reconcile DB positions against Alpaca.
+
+    In the single-tenant design that pre-dated the fleet, the master
+    signals.db held all positions and a single Alpaca account was
+    authoritative, so orphans/ghosts were well-defined.
+
+    In the current multi-tenant design positions live in per-customer
+    DBs (data/customers/<uuid>/signals.db), and each customer has
+    their own Alpaca credentials.  The master DB's `positions` table
+    is vestigial and stays empty.  A blind comparison therefore
+    flags every real position in the admin's Alpaca account as an
+    "orphan in master DB" — which it is, technically, but not in any
+    useful sense.  customer_health_check.py (called by the auditor)
+    owns per-customer reconciliation.
+
+    Detect the multi-tenant case by master-DB emptiness and skip
+    cleanly.  This keeps the boot-time Alpaca connectivity check
+    intact (which IS useful — it catches DNS / auth / network
+    problems) while suppressing the false-positive orphan flood.
+    """
     issues = []
     if not ALPACA_API_KEY:
         return issues
@@ -226,6 +245,16 @@ def check_positions(db):
         r.raise_for_status()
         alpaca_tickers = {p['symbol'] for p in r.json()}
         db_tickers     = db.get_open_tickers()
+
+        # Multi-tenant mode — master DB positions table is unused.
+        # Don't compare against an intentionally-empty set.
+        if not db_tickers:
+            log.info(
+                f"✓ Position reconciliation: skipped — master DB has no "
+                f"positions (multi-tenant mode; {len(alpaca_tickers)} positions "
+                f"reported by Alpaca, reconciled per-customer by customer_health_check)"
+            )
+            return issues
 
         orphans = alpaca_tickers - db_tickers
         ghosts  = db_tickers - alpaca_tickers

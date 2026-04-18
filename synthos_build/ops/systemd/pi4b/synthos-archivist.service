@@ -1,0 +1,17 @@
+[Unit]
+Description=Synthos Data Archivist (nightly DB archiver)
+After=network.target synthos-company-server.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/synthos-company
+ExecStart=/usr/bin/python3 /home/pi/synthos-company/company_archivist.py
+Restart=always
+RestartSec=60
+StandardOutput=append:/home/pi/synthos-company/logs/archivist.log
+StandardError=append:/home/pi/synthos-company/logs/archivist.log
+
+[Install]
+WantedBy=multi-user.target

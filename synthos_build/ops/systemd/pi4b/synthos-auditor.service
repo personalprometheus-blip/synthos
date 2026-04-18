@@ -1,0 +1,17 @@
+[Unit]
+Description=Synthos Operations Auditor (log scanner + morning reports)
+After=network.target synthos-company-server.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/synthos-company
+ExecStart=/usr/bin/python3 /home/pi/synthos-company/company_auditor.py --daemon
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/pi/synthos-company/logs/auditor.log
+StandardError=append:/home/pi/synthos-company/logs/auditor.log
+
+[Install]
+WantedBy=multi-user.target

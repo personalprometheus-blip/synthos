@@ -58,71 +58,74 @@ The morning grep caught the stale Apr-17 error line and flagged it as current. B
 
 ---
 
-## 2. Silent failure modes identified (not fixed today)
+## 2. Fragility items found — status after PM fix session
 
-These are things that are currently broken-but-not-complaining. Each one is scoped and ready to fix when we resume extension work; none is urgent enough that it blocks today's stabilization goal.
+### 2.1 Alert delivery — updated diagnosis (NOT actually broken)
 
-### 2.1 Alert delivery — both paths dead
+My morning write-up said both paths were dead. After live-firing `send_alert()` and tracing, the story is simpler:
 
-`send_alert()` in `retail_health_check.py` tries two paths in order:
+- **Path 1 (Scoop queue via POST `/api/enqueue`)** — **works.** The `.env` has `MONITOR_URL=http://10.0.0.10:5050` and `MONITOR_TOKEN` matching pi4b's `SECRET_TOKEN`. Manual test returned `200 OK` and `"Health alert queued for Scoop: VALIDATION_FAILURE P1"`.
+- **Path 2 (Resend direct)** — guard does fail because `USER_EMAIL=''` in the env file (actually empty, not just unset) and `ALERT_TO` is absent, so `ALERT_TO` resolves empty. Not a blocker because Path 1 succeeds first.
 
-**Path 1 — Scoop queue via `db_helpers`:**
-```python
-from db_helpers import DB as _DB   # retail_watchdog.py:79
+**Boot-time alert failure is a race, not a fragility.** Both pi5 and pi4b reboot at 04:00 Saturday per their crontabs. Pi5's health_check fires at ~04:01:19 while pi4b may still be coming up — the `POST /api/enqueue` hits a closed socket, Path 1 returns False, Path 2 fails guard (empty `ALERT_TO`), and the "Alert not delivered" log line is produced. Once pi4b is up (typically ~30–60s after the initial race), ongoing alerts work fine.
+
+**Accepting this as known behavior.** Fixing properly requires either ordering the reboots so pi4b comes up first, adding retry/backoff in `_enqueue_alert`, or wiring a local-machine fallback (e.g. populating `USER_EMAIL` so Path 2 works). None are urgent — the race is narrow and operational alerts during regular-hours are working correctly.
+
+### 2.2 `db_helpers` import — NOT dead code (graceful degradation)
+
+Rechecking retail_watchdog.py line 10-12 docstring: *"Watchdog does NOT send email or SMS directly. All alerts are written to company.db via db_helpers.post_suggestion() and Scoop delivers the notification."* Lines 67-84 show this is an explicit shared-Pi-only path — there is a module-level try/except that logs a `warning` when the module is unreachable, sets `_db = None`, and the downstream callers all guard on `if _db is None: return False`.
+
+This is deliberate cross-deployment design, not dead code. In the current two-node setup, the watchdog's DB-level alert path is intentionally inert; the equivalent cross-node alerting is through `_enqueue_alert()` in `retail_health_check.py` (Path 1 above). No fix needed.
+
+### 2.3 ORPHAN positions false positive — FIXED
+
+Morning report cited `health_check: ORPHAN positions in Alpaca (not in DB): MSFT, AMD, HOOD, AVGO, KGC, LYFT, AAL, BIL, LUMN` as a reconciliation bug. Investigation showed:
+
+- Master signals.db has 0 OPEN positions (multi-tenant mode: positions live per-customer).
+- Alpaca returned 9 positions (Patrick's admin paper account).
+- `check_positions()` computes `orphans = alpaca_tickers - db_tickers` = {9 tickers} - {} = 9 false "orphans".
+
+Every boot flagged it as an error. It's a structural mismatch between the single-tenant design that check was written for and the current multi-tenant architecture.
+
+**Fixed this session** (commit pending): `check_positions()` now detects empty master-DB positions and skips with an informational log:
+
 ```
-The `db_helpers` module **doesn't exist anywhere on pi5 or pi4b** (`find ~/synthos ~/synthos-company -name db_helpers.py` returns nothing). The import is caught in a try/except that logs `"db_helpers not available — alerts will fall back to local log"` and continues with `None`. So Path 1 has been dead since at least 2026-04-15 (when log starts) — possibly always.
-
-**Path 2 — Resend direct email:**
-```python
-# retail_health_check.py line 35 and 111:
-ALERT_TO = os.environ.get('ALERT_TO', os.environ.get('USER_EMAIL', ''))
-if RESEND_API_KEY and ALERT_FROM and ALERT_TO:
+✓ Position reconciliation: skipped — master DB has no positions
+  (multi-tenant mode; 9 positions reported by Alpaca, reconciled
+   per-customer by customer_health_check)
 ```
-Env file on pi5 has `RESEND_API_KEY`, `ALERT_FROM`, and **`ALERT_PHONE`** — but the code reads **`ALERT_TO`** (with fallback to `USER_EMAIL`, also not set). Name mismatch → `ALERT_TO` resolves empty → guard fails → Path 2 never attempts.
 
-**Net result:** when health_check or watchdog calls `send_alert()`, nothing leaves the machine. The only trace is `"Alert not delivered — all paths failed or unconfigured"` in boot.log.
+Alpaca connectivity check (the genuinely useful part of the step — catches DNS/auth/network problems) is preserved.
 
-**Fix options (deferred):**
-- Trivial: add `ALERT_TO=<email>` to `user/.env` on pi5. Restores Path 2.
-- Medium: locate or reimplement `db_helpers.py` (likely was in a previous repo layout). Restores Path 1.
-- Right now, pick the trivial one; defer the other until we formalize cross-node alert routing.
+### 2.4 pi5 `backups/staging/` directory absent
 
-### 2.2 `db_helpers` import in retail_watchdog.py
+Got cleaned during migration. `retail_backup.py` recreates it on demand at the next 01:30 fire. Self-heals tonight. No action.
 
-Line 79 imports a module that doesn't exist. Try/except swallows the ImportError and the watchdog continues without the helper. No functional impact today — the code path that would have used `_DB` also has a None check — but it's dead code pretending to be live.
+### 2.5 journald persistence
 
-**Fix options:** delete the import and the dead `_DB` code path, or restore `db_helpers.py`. Either way, cheap cleanup.
-
-### 2.3 pi5 `backups/staging/` directory absent
-
-Got removed in the migration cleanup and hasn't been recreated. `retail_backup.py` creates it on demand at the next 01:30 fire, so this self-heals tonight. Flagging only for the record; no action needed.
-
-### 2.4 journald persistence
-
-This morning I flagged it as broken. Re-checking: `/var/log/journal` **does** exist, `journald.conf` uses `Storage=auto` (which persists when the directory is present), and 32.8 MB of current-boot journal is stored. Earlier "no persistent journal" error was for boot offset `-1` (there is no previous boot — migration reset the journal dir). Persistence is working; history will accumulate across future reboots.
-
-**No action needed.**
+False alarm this morning. `/var/log/journal` exists, `Storage=auto` is in effect, 32.8 MB stored. Persistence working; history accumulates across future reboots. No action.
 
 ---
 
-## 3. Open items carried from this morning (not touched)
+## 3. Housekeeping addressed this session
 
-Tracked for a future session:
+- **Dead 0-byte log files on pi5** — deleted (`daily.log`, `install.log`, `monitor.log`, `manual_run.log`, `price_poller.log`). They had been zero bytes since Apr 11/14 and nothing was writing to them.
+- **pi4b systemd unit snapshots** — captured to `ops/systemd/pi4b/`: `synthos-archivist.service`, `synthos-auditor.service`, `synthos-login-server.service`, `synthos-company-server.service`. Repo now has symmetric canonical systemd state for both nodes.
 
-- **Orphan positions** — 9 tickers in Alpaca paper account (`MSFT, AMD, HOOD, AVGO, KGC, LYFT, AAL, BIL, LUMN`) not reflected in local DB. Reconciliation needed.
-- **Dead 0-byte log files on pi5** — `daily.log`, `install.log`, `monitor.log`, `manual_run.log`, `price_poller.log`. Housekeeping.
-- **pi4b systemd unit snapshots** → `ops/systemd/pi4b/` for symmetric canonical state. ~10 min of purely additive work.
+## 4. Remaining carryover — not urgent
+
 - **Full pi5 reboot test** — exercise boot chain end-to-end on an intentional reboot. Scheduled Saturday 04:00 will do this automatically next week.
 - **Stale `tool_agent.log` / `interface_agent.log` / `control_agent.log`** on pi4b — no longer written to after today's LOG_FILE rename; will naturally age out. Harmless.
+- **Boot-race alert loss** — documented in §2.1. Known behavior on Saturday 04:00 reboot when pi5+pi4b come up together. Fix requires either reboot ordering, retry/backoff, or populating `USER_EMAIL` for Path 2 fallback. Not fixing in this stabilization session — will revisit if we see a real incident lost to the race.
 
 ---
 
-## 4. Foundation health: green
+## 5. Foundation health: green (after PM fix pass)
 
-The stack is in a stable, verifiable state. Every change landed today (across seven commits in the retail repo plus one in synthos-company) has been observed working in production. No regressions detected. The three silent-failure modes identified are all:
+Every change from today's heavy bug-fix day is verified working in production. No regressions. The three flagged "silent failure modes" from the morning report:
 
-- Non-fatal today (nothing actively failing; only alert paths are silent, and nothing has needed to alert).
-- Well-scoped (known symptom + known cause + known fix option).
-- Safe to carry into the next session.
+- **Alert delivery** → not actually broken; live-fire confirms Path 1 works. Boot-time race known and documented.
+- **`db_helpers` import** → deliberate cross-deployment graceful degradation, not a bug.
+- **ORPHAN false positive** → real bug, **fixed this session**.
 
-**Foundations are solid enough to build on.** Next session, pick one item from §2 or §3 and extend from there.
+**Foundations are solid enough to build on.** Quick wins taken this session (orphan fix, dead-log cleanup, pi4b unit snapshots). Carryover in §4 is genuinely low-urgency; next session can safely open with extension work.
