@@ -1,0 +1,33 @@
+[Unit]
+Description=Synthos Retail Portal (Gunicorn — port 5001)
+# Ordered to start AFTER the boot-sequence oneshot, so env / DB / health
+# checks have been exercised before the portal accepts traffic.  Wants=
+# is a soft dep: if boot_sequence fails the portal still starts (matches
+# the pre-systemd philosophy of "don't block agents; let them fail
+# gracefully and log their own errors").
+After=network.target synthos-boot-sequence.service
+Wants=network.target synthos-boot-sequence.service
+
+[Service]
+Type=simple
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/home/pi516gb/.local/bin/gunicorn \
+    --workers 2 \
+    --threads 2 \
+    --bind 0.0.0.0:5001 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    retail_portal:app
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/portal.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/portal.log
+
+# Env file loaded by the portal itself via python-dotenv
+# Do not duplicate secrets here
+
+[Install]
+WantedBy=multi-user.target

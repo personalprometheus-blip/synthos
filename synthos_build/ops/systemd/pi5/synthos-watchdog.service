@@ -1,0 +1,21 @@
+[Unit]
+Description=Synthos Retail Watchdog (crash monitor + recovery)
+# No direct boot-sequence dependency here — watchdog transitively waits
+# via synthos-portal.service, which itself is After=synthos-boot-sequence.
+# Keep the chain simple: network → boot-sequence → portal → watchdog.
+After=network.target synthos-portal.service
+Wants=synthos-portal.service
+
+[Service]
+Type=simple
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/usr/bin/python3 retail_watchdog.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/watchdog.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/watchdog.log
+
+[Install]
+WantedBy=multi-user.target

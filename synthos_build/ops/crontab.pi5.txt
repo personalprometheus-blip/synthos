@@ -1,0 +1,33 @@
+# SYNTHOS RETAIL — updated 2026-04-14
+# All times America/New_York (Pi5 16GB system clock)
+# Market daemon owns 9:10-16:00 (news, sentiment, trade, screener, price poller)
+# Cron handles: overnight news, boot, heartbeat, backup, maintenance
+
+# Boot services
+
+# ── MARKET DAEMON — owns trading hours 9:10-16:00 weekdays ──
+10 9 * * 1-5  cd /home/pi516gb/synthos/synthos_build && /usr/bin/python3 src/retail_market_daemon.py >> logs/market_daemon.log 2>&1
+
+# ── OVERNIGHT NEWS — off-hours only (daemon handles 9-4) ──
+5 0-8,16-23 * * 1-5 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_scheduler.py --session overnight >> /home/pi516gb/synthos/synthos_build/logs/scheduler.log 2>&1
+
+# ── Node heartbeat — every minute ──
+* * * * * /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/node_heartbeat.py /home/pi516gb/synthos/synthos_build/user/.env >> /home/pi516gb/synthos/synthos_build/logs/heartbeat.log 2>&1
+
+# ── Retail heartbeat — every 20 min (agent status to monitor) ──
+21 * * * 1-5 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_heartbeat.py --session trade >> /home/pi516gb/synthos/synthos_build/logs/heartbeat.log 2>&1
+
+# ── Sunday evening prep — build Monday context ──
+0 20 * * 0  /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_scheduler.py --session prep >> /home/pi516gb/synthos/synthos_build/logs/scheduler.log 2>&1
+
+# ── Saturday maintenance ──
+55 3 * * 6  /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_shutdown.py
+0  4 * * 6  sudo reboot
+
+# ── BACKUP — nightly 1:30am ET to pi4b staging ──
+30 1 * * *  /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_backup.py >> /home/pi516gb/synthos/synthos_build/logs/backup.log 2>&1
+
+# ── NIGHTLY TEMPLATE REBUILD ──
+0 3 * * * /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/rebuild_default_template.py >> /home/pi516gb/synthos/synthos_build/logs/template_rebuild.log 2>&1
+# ── LOG ROTATION — weekly Sunday midnight ──
+0 0 * * 0 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/rotate_logs.py >> /home/pi516gb/synthos/synthos_build/logs/rotation.log 2>&1

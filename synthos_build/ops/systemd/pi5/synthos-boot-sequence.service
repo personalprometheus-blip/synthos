@@ -1,0 +1,26 @@
+[Unit]
+# Synthos Retail Boot Sequence — env check, DB integrity, health check.
+# Runs once on boot as a systemd oneshot, replacing the @reboot cron entry
+# that used a 60-second sleep as a crude network wait.  By using
+# After=network.target we get a proper readiness signal, and by declaring
+# Before= on the downstream service units we ensure portal + watchdog
+# start only after boot_sequence has exercised the environment.
+
+Description=Synthos Retail Boot Sequence (env + DB integrity + health checks)
+After=network.target
+Wants=network.target
+Before=synthos-portal.service synthos-watchdog.service
+
+[Service]
+Type=oneshot
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
+ExecStart=/usr/bin/python3 retail_boot_sequence.py
+RemainAfterExit=yes
+TimeoutStartSec=300
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/boot.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/boot.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,31 @@
+# SYNTHOS COMPANY — company_node (Pi 4B)
+# All times US Eastern. Timezone: America/New_York.
+
+# ── v2 agents (synthos-company/agents/) ───────────────────────────────────────
+# Boot — timekeeper starts immediately, patches runs continuously
+
+# Market hours agents
+*/15 9-16 * * 1-5  /usr/bin/python3 /home/pi/synthos-company/agents/company_sentinel.py >> /home/pi/synthos-company/logs/sentinel.log 2>&1
+0 2 * * *          /usr/bin/python3 /home/pi/synthos-company/agents/company_vault.py --backup-now >> /home/pi/synthos-company/logs/vault.log 2>&1
+
+# Off-hours agents
+0 8 * * *          /usr/bin/python3 /home/pi/synthos-company/agents/company_fidget.py >> /home/pi/synthos-company/logs/fidget.log 2>&1
+0 9 * * 0          /usr/bin/python3 /home/pi/synthos-company/agents/company_librarian.py >> /home/pi/synthos-company/logs/librarian.log 2>&1
+
+# ── v3 services (synthos_build/src/) ──────────────────────────────────────────
+# company_server.py — ops dashboard + Scoop API (port 5010)
+
+# scoop.py — persistent queue drain daemon (replaces cron-based company_scoop.py)
+
+# company_keepalive.py — 60s server pinger
+
+# company_sentinel.py (v3 health watchdog) — polls server health every 2 min
+
+# company_archivist.py — nightly data archiver (2am)
+
+# Saturday maintenance — reboot at 4am
+0 4 * * 6  sudo reboot
+*/5 * * * * /home/pi/synthos-company/venv/bin/python3 /home/pi/synthos-company/node_heartbeat.py /home/pi/synthos-company/company.env >> /home/pi/synthos-company/logs/heartbeat.log 2>&1
+
+# ── STRONGBOX — nightly encrypt + R2 upload (2am ET) ──
+0 2 * * *  /usr/bin/python3 /home/pi/synthos-company/agents/company_strongbox.py >> /home/pi/synthos-company/logs/strongbox.log 2>&1
