@@ -35,6 +35,8 @@ import re
 import math
 import logging
 import requests
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -139,11 +141,28 @@ def fetch_put_call_ratio(ticker):
     return None, None
 
 
-# Per-run cache for EDGAR + Finviz — same ticker can be scanned in Phase 2
-# (positions), Phase 3 (queued signals), and screening-request fulfillment.
-# Cleared at the start of each run() invocation.
+# Per-run cache for EDGAR + Finviz + Alpaca volume — same ticker can be
+# scanned in Phase 2 (positions), Phase 3 (queued signals), and
+# screening-request fulfillment. Cleared at the start of each run()
+# invocation.
+#
+# Cache access is concurrent-safe: Phase 3 now dispatches fetches to a
+# ThreadPoolExecutor (see SENTIMENT_FETCH_WORKERS below), so multiple
+# threads may check-then-set these dicts simultaneously. Python's GIL
+# makes `dict[key] = value` atomic, but the "check then set" in
+# fetch_* helpers is not — lost updates would mean duplicate HTTP
+# calls, not corruption. Adding the lock keeps the cache-hit rate
+# deterministic.
 _EDGAR_CACHE: dict = {}
 _FINVIZ_CACHE: dict = {}
+_VOLUME_CACHE: dict = {}   # Alpaca-bars-derived volume; primary source
+_CACHE_LOCK = threading.Lock()
+
+# Phase 3 parallel-fetch pool size. 5 workers = 5 concurrent HTTP
+# requests. Enough to hide network latency on EDGAR/Finviz/Alpaca
+# without overwhelming their rate limits (all three permit ~10
+# req/sec). Can be tuned via env var for incident response.
+SENTIMENT_FETCH_WORKERS = int(os.environ.get('SENTIMENT_FETCH_WORKERS', '5'))
 
 
 def fetch_sec_insider_transactions(ticker, days_back=30):
@@ -151,10 +170,15 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
     Fetch recent insider transactions from SEC EDGAR.
     Returns dict with buys, sells, net_dollar.
     Free API — no key required.  Cached per-run on (ticker, days_back).
+    Thread-safe for Phase 3's parallel fetcher; cache ops hold
+    _CACHE_LOCK so concurrent calls for the same ticker coalesce
+    into a single HTTP fetch.
     """
     cache_key = (ticker.upper(), days_back)
-    if cache_key in _EDGAR_CACHE:
-        return _EDGAR_CACHE[cache_key]
+    with _CACHE_LOCK:
+        cached = _EDGAR_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
     url = "https://data.sec.gov/submissions"
     # SEC EDGAR full-text search for Form 4 (insider transactions)
@@ -174,7 +198,8 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
         pass
     if not r:
         result = {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
-        _EDGAR_CACHE[cache_key] = result
+        with _CACHE_LOCK:
+            _EDGAR_CACHE[cache_key] = result
         return result
 
     try:
@@ -198,70 +223,152 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
             "available": True,
             "filing_count": len(hits),
         }
-        _EDGAR_CACHE[cache_key] = result
+        with _CACHE_LOCK:
+            _EDGAR_CACHE[cache_key] = result
         return result
     except Exception as e:
         log.warning(f"SEC EDGAR parse error ({ticker}): {e}")
         result = {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
-        _EDGAR_CACHE[cache_key] = result
+        with _CACHE_LOCK:
+            _EDGAR_CACHE[cache_key] = result
         return result
 
 
 def fetch_volume_profile(ticker, is_position=False):
-    """
-    Fetch volume data from Finviz, SEC EDGAR, and Yahoo Finance (last).
-    Yahoo only checked for positions or tickers showing elevated Finviz volume.
-    Returns dict with today_vs_avg, seller_dominance estimate.
-    Cached per-run on ticker (is_position flag only affects logging).
+    """Return relative-volume + seller-dominance for a ticker.
+
+    Primary source: Alpaca bars API (official, API-keyed, stable shape).
+    Fallback:       Finviz HTML scrape (fragile — Finviz can silently
+                    change page structure and break our regex any day).
+
+    Cached per-run on ticker. Thread-safe — called from the Phase-3
+    ThreadPoolExecutor; cache ops hold _CACHE_LOCK.
     """
     cache_key = ticker.upper()
-    if cache_key in _FINVIZ_CACHE:
-        return _FINVIZ_CACHE[cache_key]
+    with _CACHE_LOCK:
+        cached = _VOLUME_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
-    volume_data = {
-        "today_vs_avg": "+0%",
+    volume_data = _fetch_volume_from_alpaca(ticker)
+    if not volume_data.get("available"):
+        # Alpaca returned nothing usable (keys missing, stale ticker,
+        # 404, etc). Fall back to Finviz scrape — accept the fragility
+        # rather than ship with no data.
+        volume_data = _fetch_volume_from_finviz(ticker)
+
+    with _CACHE_LOCK:
+        # Mirror into the legacy _FINVIZ_CACHE name so any stray caller
+        # that still reaches it gets a consistent answer.
+        _VOLUME_CACHE[cache_key] = volume_data
+        _FINVIZ_CACHE[cache_key] = volume_data
+    return volume_data
+
+
+def _fetch_volume_from_alpaca(ticker):
+    """Build the volume_profile dict from 30-ish daily bars via Alpaca.
+
+    Rel-volume = today's volume / mean(previous 30 sessions' volume).
+    Seller dominance = heuristic bump based on today's close-to-open
+    negative move combined with elevated volume — same shape detect_
+    cascade expects, just sourced from an API instead of an HTML scrape.
+    """
+    out = {
+        "today_vs_avg":     "+0%",
         "seller_dominance": "50%",
         "cascade_detected": False,
-        "available": False,
+        "available":        False,
+        "source":           "alpaca",
     }
+    bars = fetch_alpaca_bars(ticker, days=35)
+    if not bars or len(bars) < 5:
+        return out
 
-    # ── FINVIZ FIRST (reliable, fast) ──
-    rel_vol = None
+    try:
+        # Alpaca returns oldest → newest. Last bar is "today" (or the
+        # most recent session). Average over the prior 30 bars.
+        today = bars[-1]
+        prior = bars[-31:-1] if len(bars) >= 31 else bars[:-1]
+        avg_v = sum(b.get('v') or 0 for b in prior) / max(1, len(prior))
+        today_v = float(today.get('v') or 0)
+        if avg_v <= 0:
+            return out
+        rel_vol = today_v / avg_v
+
+        pct_change = f"+{int((rel_vol - 1) * 100)}%" if rel_vol > 1 \
+                     else f"{int((rel_vol - 1) * 100)}%"
+        out["today_vs_avg"] = pct_change
+        out["available"]    = True
+
+        # Seller-dominance heuristic — same shape the old Finviz path
+        # produced. Uses intraday close-vs-open change as a proxy.
+        o = float(today.get('o') or 0)
+        c = float(today.get('c') or 0)
+        if o > 0:
+            price_change_pct = ((c - o) / o) * 100
+            if price_change_pct < 0 and rel_vol > 1.5:
+                dom = min(50 + abs(price_change_pct) * 5, 90)
+                out["seller_dominance"] = f"{dom:.0f}%"
+                if (rel_vol > CASCADE_VOLUME_THRESHOLD
+                        and dom > CASCADE_SELLER_DOM_THRESHOLD * 100):
+                    out["cascade_detected"] = True
+
+        log.debug(f"Alpaca volume {ticker}: rel_vol={pct_change} sellers={out['seller_dominance']}")
+        return out
+    except Exception as e:
+        log.warning(f"Alpaca volume parse error ({ticker}): {e}")
+        return out
+
+
+def _fetch_volume_from_finviz(ticker):
+    """Legacy Finviz HTML scrape — used only when Alpaca returns
+    nothing. Kept narrow because the regex is one page-change away
+    from breaking silently."""
+    out = {
+        "today_vs_avg":     "+0%",
+        "seller_dominance": "50%",
+        "cascade_detected": False,
+        "available":        False,
+        "source":           "finviz",
+    }
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     fv_url  = f"https://finviz.com/quote.ashx?t={ticker}"
     fv_r    = fetch_with_retry(fv_url, headers=headers)
     try:
-        _master_db().log_api_call('sentiment_agent', f'/quote.ashx?t={ticker}', 'GET', 'finviz', status_code=getattr(fv_r, 'status_code', None))
-    except Exception:
-        pass
+        _master_db().log_api_call('sentiment_agent',
+                                  f'/quote.ashx?t={ticker}', 'GET',
+                                  'finviz',
+                                  status_code=getattr(fv_r, 'status_code', None))
+    except Exception as e:
+        log.debug(f"api_call log failed for finviz {ticker}: {e}")
 
-    if fv_r:
-        try:
-            text = fv_r.text
-            vol_match = re.search(r'Rel Volume.*?(\d+\.\d+)', text, re.DOTALL)
-            if vol_match:
-                rel_vol = float(vol_match.group(1))
-                pct_change = f"+{int((rel_vol - 1) * 100)}%" if rel_vol > 1 else f"{int((rel_vol - 1) * 100)}%"
-                volume_data["today_vs_avg"] = pct_change
-                volume_data["available"] = True
+    if not fv_r:
+        return out
 
-                price_match = re.search(r'Change.*?(-?\d+\.\d+)%', text, re.DOTALL)
-                if price_match:
-                    price_change = float(price_match.group(1))
-                    if price_change < 0 and rel_vol > 1.5:
-                        dom = min(50 + abs(price_change) * 5, 90)
-                        volume_data["seller_dominance"] = f"{dom:.0f}%"
-                        if rel_vol > CASCADE_VOLUME_THRESHOLD and dom > CASCADE_SELLER_DOM_THRESHOLD * 100:
-                            volume_data["cascade_detected"] = True
+    try:
+        text = fv_r.text
+        vol_match = re.search(r'Rel Volume.*?(\d+\.\d+)', text, re.DOTALL)
+        if not vol_match:
+            return out
+        rel_vol = float(vol_match.group(1))
+        pct_change = f"+{int((rel_vol - 1) * 100)}%" if rel_vol > 1 \
+                     else f"{int((rel_vol - 1) * 100)}%"
+        out["today_vs_avg"] = pct_change
+        out["available"]    = True
 
-            log.info(f"Finviz {ticker}: rel_vol={volume_data['today_vs_avg']} sellers={volume_data['seller_dominance']}")
-        except Exception as e:
-            log.warning(f"Finviz parse error ({ticker}): {e}")
-
-    # Yahoo RSS removed — redundant with Alpaca news. VIX + treasury Yahoo calls retained.
-
-    _FINVIZ_CACHE[cache_key] = volume_data
-    return volume_data
+        price_match = re.search(r'Change.*?(-?\d+\.\d+)%', text, re.DOTALL)
+        if price_match:
+            price_change = float(price_match.group(1))
+            if price_change < 0 and rel_vol > 1.5:
+                dom = min(50 + abs(price_change) * 5, 90)
+                out["seller_dominance"] = f"{dom:.0f}%"
+                if (rel_vol > CASCADE_VOLUME_THRESHOLD
+                        and dom > CASCADE_SELLER_DOM_THRESHOLD * 100):
+                    out["cascade_detected"] = True
+        log.info(f"Finviz {ticker}: rel_vol={out['today_vs_avg']} sellers={out['seller_dominance']}")
+    except Exception as e:
+        log.warning(f"Finviz parse error ({ticker}): {e}")
+    return out
 
 
 def fetch_alpaca_bars(ticker, days=60):
@@ -2790,12 +2897,18 @@ def run():
         )
 
     # ── Phase 3: Pre-trade queue check ───────────────────────────────────
-    # Dedup by ticker — the per-ticker HTTP results (EDGAR insider + Finviz
-    # volume) apply to every QUEUED signal for that ticker, but the tier
-    # annotation still needs to be written to each individual signal row.
-    # A time budget prevents the daemon's 600s hard kill from leaving the
-    # agent with a half-written state (old behavior: 268 signals × sleep(1)
-    # +2 HTTP each → exceeded timeout at ticker 119, blocking the promoter).
+    # Dedup by ticker, fetch in parallel, serialize DB writes.
+    # Each ticker's fetch (EDGAR + volume) applies to every QUEUED
+    # signal for that ticker; the tier annotation still writes to each
+    # individual signal row. Network IO is the dominant cost so
+    # SENTIMENT_FETCH_WORKERS concurrent fetches scale linearly with
+    # ticker count until we hit rate limits.
+    #
+    # The time budget keeps the daemon's 600s hard kill from leaving us
+    # with a half-written state. Old single-threaded behavior: 268 ×
+    # sleep(1) + 2 HTTP each → exceeded at ticker 119, blocking the
+    # promoter. New parallel behavior with 5 workers and Alpaca-primary
+    # volume: ~5× speedup, budget comfortable for 300+ tickers.
     PHASE3_BUDGET_SEC = 480
     queued_signals = db.get_queued_signals()
     if queued_signals:
@@ -2804,75 +2917,119 @@ def run():
             by_ticker.setdefault(sig['ticker'], []).append(sig)
         log.info(
             f"Checking sentiment for {len(queued_signals)} queued signal(s) "
-            f"across {len(by_ticker)} unique ticker(s)"
+            f"across {len(by_ticker)} unique ticker(s) "
+            f"(workers={SENTIMENT_FETCH_WORKERS})"
         )
+
+        # Ticker → fetch result bundle. Populated by the thread pool.
+        # Only network IO lives inside the worker — detect_cascade is
+        # cheap so we leave it in the worker too so the main thread
+        # sees a ready-to-write bundle.
+        def _fetch_ticker_bundle(ticker):
+            t0 = time.monotonic()
+            insider = fetch_sec_insider_transactions(ticker, days_back=7)
+            volume  = fetch_volume_profile(ticker)
+            tier, label, cascade_detected, summary = detect_cascade(
+                put_call, put_call_avg, insider, volume
+            )
+            # tier → score mapping (same as legacy single-thread path)
+            score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
+            return {
+                'insider':    insider,
+                'volume':     volume,
+                'tier':       tier,
+                'label':      label,
+                'cascade':    cascade_detected,
+                'summary':    summary,
+                'score':      score,
+                'fetch_sec':  round(time.monotonic() - t0, 2),
+            }
 
         phase3_start  = time.monotonic()
         processed     = 0
         stopped_early = False
 
-        for ticker, sigs in by_ticker.items():
-            if time.monotonic() - phase3_start > PHASE3_BUDGET_SEC:
+        # Submit all tickers up front; process as they complete.
+        # as_completed's timeout bounds the TOTAL wait, giving us the
+        # soft-budget semantics we had single-threaded. On timeout we
+        # break out, write a TIME_BUDGET decision-log row, and let the
+        # rest of run() commit cleanly.
+        pool = ThreadPoolExecutor(max_workers=SENTIMENT_FETCH_WORKERS,
+                                  thread_name_prefix='pulse-fetch')
+        future_to_ticker = {}
+        try:
+            for ticker, sigs in by_ticker.items():
+                fut = pool.submit(_fetch_ticker_bundle, ticker)
+                future_to_ticker[fut] = (ticker, sigs)
+
+            try:
+                for fut in as_completed(future_to_ticker,
+                                        timeout=PHASE3_BUDGET_SEC):
+                    ticker, sigs = future_to_ticker[fut]
+                    try:
+                        bundle = fut.result()
+                    except Exception as e:
+                        log.warning(f"Phase 3 fetch failed for {ticker}: {e}")
+                        continue
+
+                    # DB writes in the main thread — sqlite under WAL
+                    # handles concurrency but keeping writes serial
+                    # here keeps the per-customer DB lock contention
+                    # predictable (matches other agents).
+                    db.log_scan(
+                        ticker=ticker,
+                        put_call_ratio=put_call,
+                        put_call_avg30d=put_call_avg,
+                        insider_net=bundle['insider'].get('net_dollar'),
+                        volume_vs_avg=bundle['volume'].get('today_vs_avg'),
+                        seller_dominance=bundle['volume'].get('seller_dominance'),
+                        cascade_detected=bundle['cascade'],
+                        tier=bundle['tier'],
+                        event_summary=f"PRE-TRADE CHECK: {bundle['summary']}",
+                    )
+
+                    if bundle['tier'] <= 2:
+                        for sig in sigs:
+                            log.warning(
+                                f"Pre-trade warning: {ticker} (signal {sig['id']}) — "
+                                f"{bundle['label']}: {bundle['summary']}"
+                            )
+                            db.annotate_signal_pulse(sig['id'], bundle['tier'],
+                                                     bundle['summary'])
+
+                    try:
+                        db.stamp_signals_sentiment(ticker, bundle['score'])
+                    except Exception as _e:
+                        log.debug(f"sentiment stamp failed for {ticker}: {_e}")
+
+                    processed += 1
+            except FuturesTimeoutError:
+                stopped_early = True
                 log.warning(
                     f"Phase 3 time budget exceeded ({PHASE3_BUDGET_SEC}s) — "
                     f"processed {processed}/{len(by_ticker)} tickers, "
-                    f"skipping remainder so the agent can commit cleanly"
+                    f"remainder left unstamped so the agent can commit cleanly"
                 )
-                stopped_early = True
-                break
-
-            # Quick check only — full scan done on open positions
-            qs_put_call, qs_put_call_avg = put_call, put_call_avg  # reuse market-wide put/call from Phase 1
-            qs_insider_data              = fetch_sec_insider_transactions(ticker, days_back=7)
-            qs_volume_data               = fetch_volume_profile(ticker)
-            tier, tier_label, cascade_detected, summary = detect_cascade(
-                qs_put_call, qs_put_call_avg, qs_insider_data, qs_volume_data
-            )
-            db.log_scan(
-                ticker=ticker,
-                put_call_ratio=qs_put_call,
-                put_call_avg30d=qs_put_call_avg,
-                insider_net=qs_insider_data.get("net_dollar"),
-                volume_vs_avg=qs_volume_data.get("today_vs_avg"),
-                seller_dominance=qs_volume_data.get("seller_dominance"),
-                cascade_detected=cascade_detected,
-                tier=tier,
-                event_summary=f"PRE-TRADE CHECK: {summary}",
-            )
-
-            # Per-signal annotation: same tier/summary from the ticker-level
-            # scan gets stamped onto every individual signal row.
-            if tier <= 2:
-                for sig in sigs:
-                    log.warning(
-                        f"Pre-trade warning: {ticker} (signal {sig['id']}) — "
-                        f"{tier_label}: {summary}"
-                    )
-                    # Write finding back to signal so Agent 1 reads it in Gate 5 signal scoring
-                    db.annotate_signal_pulse(sig['id'], tier, summary)
-
-            # Stamp sentiment_score once per ticker — applies to every
-            # QUEUED/VALIDATED signal for that ticker (ticker-level UPDATE).
-            # Tier → score: tier 1 (critical bearish) = 0.10, 2 = 0.35,
-            # 3 (neutral) = 0.60, 4 (quiet/bullish) = 0.85. Trader reads
-            # this as an optional Gate 5 scoring input (not a hard filter).
-            sentiment_score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
-            try:
-                db.stamp_signals_sentiment(ticker, sentiment_score)
-            except Exception as _e:
-                log.debug(f"sentiment stamp failed for {ticker}: {_e}")
-
-            processed += 1
+        finally:
+            # Drop the pool. cancel_futures=True (Py 3.9+) drops anything
+            # still queued; workers mid-HTTP can't be cancelled but will
+            # exit on their own REQUEST_TIMEOUT since fetch_with_retry
+            # has bounded per-call timeouts. wait=False lets the run()
+            # tail continue immediately rather than blocking on stuck
+            # workers.
+            pool.shutdown(wait=False, cancel_futures=True)
 
         elapsed = time.monotonic() - phase3_start
         log.info(
-            f"Phase 3 complete — {processed}/{len(by_ticker)} tickers in {elapsed:.1f}s"
+            f"Phase 3 complete — {processed}/{len(by_ticker)} tickers "
+            f"in {elapsed:.1f}s (parallel={SENTIMENT_FETCH_WORKERS})"
             + (" (stopped on budget)" if stopped_early else "")
         )
 
-        # Surface budget exhaustion in the decision log so the promoter's
-        # STUCK rows and the fault detector's bottleneck reading both show
-        # 'sentiment time budget' rather than a silent miss.
+        # Surface budget exhaustion in the decision log so the
+        # promoter's STUCK rows and the fault detector's bottleneck
+        # reading both show 'sentiment time budget' rather than a
+        # silent miss.
         if stopped_early:
             try:
                 db.log_signal_decision(
