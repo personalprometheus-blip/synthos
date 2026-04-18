@@ -482,6 +482,58 @@ blank — same as today. Non-chart UI unaffected.
 
 ---
 
+## MONDAY-SPOT-CHECK — Patrick's stuck-signal queue drain
+
+**Why deferred.** Saturday afternoon validator spot-check surfaced an
+informational WARNING on Patrick's account (30eff008):
+
+```
+FAULT: [WARNING] GATE2_FRESHNESS/STUCK_SIGNALS:
+  11 signal(s) stuck at QUEUED (>120m) —
+  bottleneck: sentiment (most-missing stamp: sentiment_evaluated_at)
+```
+
+Likely story: backlog accumulated from Friday market close → Saturday
+morning when retail_scheduler was still weekday-only. The weekend
+hourly scheduler cron (`5 * * * 0,6`) was added Saturday AM; Sunday
+runs should drain the queue naturally. Validator still reports
+verdict=GO — the WARNING does NOT cascade to CAUTION (proof the
+2026-04-17 bias-threshold fix is holding).
+
+**What to do Monday before 9:30 ET market open:**
+
+```bash
+# from workstation
+ssh -J pi4b pi516gb@10.0.0.11 \
+  "cd ~/synthos/synthos_build && python3 tools/validator_investigate.py | \
+   grep -A2 'Patrick McGuire'"
+```
+
+**Three outcomes possible:**
+
+1. **0 stuck signals** — queue drained via Sat/Sun hourly scheduler
+   fires. Nothing to do; weekend-scheduler fix worked as intended.
+   Mark item closed.
+2. **<11 stuck signals** (decreasing) — sentiment IS draining but
+   slowly; keep watching. Not urgent if market_daemon starts
+   successfully at 9:10 ET Monday (that will also process the
+   queue).
+3. **≥11 stuck signals** (flat or growing) — real sentiment
+   bottleneck that the parallelism fix (SENTIMENT_FETCH_WORKERS=5)
+   didn't fully address. Investigate: is sentiment_evaluated_at
+   stamping working? Is the agent getting rate-limited by Alpaca?
+   Is Patrick's signal volume exceeding what 5 workers can chew
+   through in an hour?
+
+**Related context.**
+- Spot-check conducted 2026-04-18 PM during "stabilize, don't
+  extend" session.
+- No code change proposed today — this is pure observation, and
+  the hourly scheduler change already in place is expected to
+  resolve it.
+
+---
+
 ## Historical / completed (struck through)
 
 <!-- Move completed items here with commit SHAs when done, keep for
