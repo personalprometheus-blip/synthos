@@ -50,13 +50,14 @@ ssh <node> "crontab /tmp/crontab.<node>.txt && crontab -l"
 - **2026-04-18 (AM)** — pi5 migrated retail_boot_sequence.py from `@reboot` cron to `synthos-boot-sequence.service`. Removed two now-redundant `@reboot` entries (boot_sequence + watchdog). Commit chain: `5cdee51` (boot_sequence systemd-aware) → `7b52281`.
 - **2026-04-18 (AM)** — pi4b cron: moved `company_vault.py --backup-now` from 02:00 to 01:45 to eliminate second-by-second collision with `company_strongbox.py` at 02:00 (both write to R2; future risk if vault's integration ever completes). Added `/etc/logrotate.d/synthos-company` for daily rotation of all `synthos-company/logs/*.log` with 30-day retention. Note: two logs (`archivist.log`, `auditor.log`) were initially owned by root because `StandardOutput=append:` in their systemd units opens the file as root before the service drops to `User=pi`; chowning to pi once is sufficient because systemd writes through the pre-opened FD and logrotate's `copytruncate` preserves that FD.
 - **2026-04-18 (AM)** — fixed pi4b heartbeat target. `company.env` had `MONITOR_URL=http://192.168.203.10:5000` (stale subnet from pre-current network topology) and `MONITOR_TOKEN=synthos-default-token` (install-time default). Both heartbeats had been silently failing every 5 minutes for an unknown period. Changed to `MONITOR_URL=http://10.0.0.10:5050` (pi4b's own command portal, same endpoint pi5 successfully posts to) and `MONITOR_TOKEN` to match the existing `SECRET_TOKEN` on the node. First post-fix heartbeat at 08:27:14 reported OK.
+- **2026-04-18 (AM)** — aligned pi4b heartbeat cadence from 5min to 1min (matching pi5). Updated `node_heartbeat.py` `_detect_agents()` to also recognize retail long-running agents (`retail_portal`, `retail_watchdog`, `retail_interrogation_listener`, `retail_market_daemon`, `retail_price_poller`). Previously pi5 reported only `['node_heartbeat']` because the `known` dict contained only company-side script names; post-fix pi5 reports its real running agents. Note: pi4b has an independent copy of `node_heartbeat.py` in the `synthos-company` repo — the fix landed here (retail repo) only, so if pi4b's copy is ever refreshed it should merge this change.
 
-## Heartbeat cadence — deliberately asymmetric
+## Heartbeat cadence — 1 minute on both nodes
 
-- **pi5** → `http://10.0.0.10:5050/heartbeat` **every minute**. Cross-node; measures "can pi5 reach pi4b over the LAN?" and is the primary failure-detection signal during trading hours.
-- **pi4b** → `http://10.0.0.10:5050/heartbeat` **every 5 minutes**. Self-loop; measures "is pi4b's command-portal process up and accepting POSTs?" — shallow check, so lower cadence is fine.
+- **pi5** → `http://10.0.0.10:5050/heartbeat` every minute. Cross-node; primary failure-detection signal during trading hours.
+- **pi4b** → `http://10.0.0.10:5050/heartbeat` every minute. Self-loop; measures "is pi4b's command-portal process accepting POSTs?".
 
-Don't "standardize" these without reading this section. The signals mean different things on each side and the cadences reflect that.
+The two signals mean different things (cross-node reachability vs self-liveness) but the cadences are aligned at 1min for consistency and simpler ops reasoning. Total write volume: 2880 heartbeat records/day across the pair — trivial load on the monitor DB.
 
 ## Config files NOT tracked in this directory
 

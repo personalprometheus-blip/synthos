@@ -105,11 +105,26 @@ def _collect_metrics() -> dict:
 
 
 def _detect_agents() -> dict:
-    """Return running Synthos agent names → 'active' by scanning process list."""
+    """Return running Synthos agent names → 'active' by scanning process list.
+
+    The `known` dict lists every long-running daemon we'd want to see in the
+    heartbeat payload on any node.  Keys are substrings to match against the
+    process cmdline; values are the canonical name reported to the monitor.
+    An agent that isn't running on this node simply doesn't match — no harm
+    in listing both company and retail agents here, so the same script works
+    unchanged on both pi4b and pi5.
+
+    Short-lived cron-spawned scripts (retail_backup.py, rotate_logs.py,
+    retail_heartbeat.py, retail_scheduler.py, rebuild_default_template.py)
+    are intentionally NOT listed here — by the time the heartbeat fires they
+    have typically exited, and reporting their absence as "not live" would
+    be misleading noise.
+    """
     agents = {}
     try:
         import psutil
         known = {
+            # ── Company node (pi4b) long-running agents ───────────────────
             'scoop.py':             'scoop',
             'strongbox.py':         'strongbox',
             'company_server.py':    'company_server',
@@ -118,6 +133,16 @@ def _detect_agents() -> dict:
             'company_archivist.py': 'company_archivist',
             'company_keepalive.py': 'company_keepalive',
             'company_auditor.py':   'company_auditor',
+
+            # ── Retail node (pi5) long-running agents ─────────────────────
+            # retail_portal is matched on the substring 'retail_portal'
+            # (not .py) because it runs under gunicorn with cmdline like
+            # "gunicorn ... retail_portal:app" — no literal .py token.
+            'retail_portal':                    'retail_portal',
+            'retail_watchdog.py':               'retail_watchdog',
+            'retail_interrogation_listener.py': 'retail_interrogation_listener',
+            'retail_market_daemon.py':          'retail_market_daemon',
+            'retail_price_poller.py':           'retail_price_poller',
         }
         for proc in psutil.process_iter(['cmdline']):
             try:

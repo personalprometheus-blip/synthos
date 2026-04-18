@@ -25,7 +25,7 @@
 
 # Saturday maintenance — reboot at 4am
 0 4 * * 6  sudo reboot
-*/5 * * * * /home/pi/synthos-company/venv/bin/python3 /home/pi/synthos-company/node_heartbeat.py /home/pi/synthos-company/company.env >> /home/pi/synthos-company/logs/heartbeat.log 2>&1
+* * * * * /home/pi/synthos-company/venv/bin/python3 /home/pi/synthos-company/node_heartbeat.py /home/pi/synthos-company/company.env >> /home/pi/synthos-company/logs/heartbeat.log 2>&1
 
 # ── STRONGBOX — nightly encrypt + R2 upload (2am ET) ──
 0 2 * * *  /usr/bin/python3 /home/pi/synthos-company/agents/company_strongbox.py >> /home/pi/synthos-company/logs/strongbox.log 2>&1
