@@ -12688,30 +12688,90 @@ def api_admin_market_activity():
     total_sells_bins_r = [round(v, 2) for v in total_sells_bins]
     total_net_bins     = [round(b - s, 2) for b, s in zip(total_buys_bins, total_sells_bins)]
 
-    # ── 24h USER SESSIONS (unchanged shape, moved under its own key) ──
-    session_bins  = {k: 0        for k in hour_keys}
-    session_names = {k: set()    for k in hour_keys}
-    with _session_activity_lock:
-        for entry in _session_hourly:
-            ts    = entry[0]
-            count = entry[1]
-            names = entry[2] if len(entry) > 2 else []
-            hkey = ts[:13] + ':00'
-            if hkey in session_bins:
-                session_bins[hkey] = max(session_bins[hkey], count)
-                for n in names:
-                    session_names[hkey].add(n)
+    # ── USER SESSIONS BINS ─────────────────────────────────────────────
+    # Two modes:
+    #   date NOT set → rolling last 24h (read from in-memory deque).
+    #                  Existing behavior, preserved.
+    #   date SET     → that ET calendar day (0:00-23:59), read from the
+    #                  persistent session_history table so we can page
+    #                  back through history the same way the market
+    #                  chart does. "Attached to the same controls."
+    if date_param:
+        # Build 24 ET-hour keys spanning the selected date.
+        session_day_start_et = datetime.combine(session_date, _time(0, 0), tzinfo=_et)
+        session_user_hours = []
+        for i in range(24):
+            h_et = session_day_start_et + timedelta(hours=i)
+            session_user_hours.append(h_et.strftime('%Y-%m-%dT%H:00'))
+
+        # session_history stores timestamps as naive UTC minute strings
+        # (format '%Y-%m-%dT%H:%M', see the persistence loop below in
+        # this file). Query the ET-date window converted to UTC.
+        day_start_utc = session_day_start_et.astimezone(ZoneInfo("UTC"))
+        day_end_utc   = day_start_utc + timedelta(hours=24)
+        u_lo = day_start_utc.strftime('%Y-%m-%dT%H:%M')
+        u_hi = day_end_utc.strftime('%Y-%m-%dT%H:%M')
+
+        session_bins  = {k: 0     for k in session_user_hours}
+        session_names = {k: set() for k in session_user_hours}
+        try:
+            shared = _shared_db()
+            import json as _json_local
+            with shared.conn() as c:
+                rows = c.execute(
+                    "SELECT ts, count, names FROM session_history "
+                    "WHERE ts >= ? AND ts < ? ORDER BY ts ASC",
+                    (u_lo, u_hi),
+                ).fetchall()
+            for r in rows:
+                try:
+                    utc_dt = datetime.fromisoformat(r['ts']).replace(tzinfo=ZoneInfo("UTC"))
+                except Exception:
+                    continue
+                et_dt = utc_dt.astimezone(_et)
+                hkey = et_dt.strftime('%Y-%m-%dT%H:00')
+                if hkey not in session_bins:
+                    continue
+                session_bins[hkey] = max(session_bins[hkey], int(r['count'] or 0))
+                try:
+                    for n in (_json_local.loads(r['names']) if r['names'] else []):
+                        session_names[hkey].add(n)
+                except Exception:
+                    pass
+        except Exception as e:
+            log.debug(f"session_history historical fetch failed: {e}")
+
+        hour_keys = session_user_hours
+        # No active_now on a historical view — use 0 so the UI doesn't
+        # imply "3 users are active right now" when the user is looking
+        # at last Thursday.
         active_now = 0
         active_customers = []
-        for cid, v in _session_activity.items():
-            idle = (datetime.utcnow() - v['last_activity']).total_seconds()
-            if idle < 900:
-                active_now += 1
-                try:
-                    name = auth.get_display_name_by_id(cid) if hasattr(auth, 'get_display_name_by_id') else cid[:8]
-                except Exception:
-                    name = cid[:8]
-                active_customers.append({'name': name, 'idle_secs': int(idle)})
+    else:
+        # Default rolling 24h — existing behavior.
+        session_bins  = {k: 0     for k in hour_keys}
+        session_names = {k: set() for k in hour_keys}
+        with _session_activity_lock:
+            for entry in _session_hourly:
+                ts    = entry[0]
+                count = entry[1]
+                names = entry[2] if len(entry) > 2 else []
+                hkey = ts[:13] + ':00'
+                if hkey in session_bins:
+                    session_bins[hkey] = max(session_bins[hkey], count)
+                    for n in names:
+                        session_names[hkey].add(n)
+            active_now = 0
+            active_customers = []
+            for cid, v in _session_activity.items():
+                idle = (datetime.utcnow() - v['last_activity']).total_seconds()
+                if idle < 900:
+                    active_now += 1
+                    try:
+                        name = auth.get_display_name_by_id(cid) if hasattr(auth, 'get_display_name_by_id') else cid[:8]
+                    except Exception:
+                        name = cid[:8]
+                    active_customers.append({'name': name, 'idle_secs': int(idle)})
 
     hours_list = sorted(session_bins.keys())
     sessions_list = [session_bins[h] for h in hours_list]
@@ -12738,7 +12798,8 @@ def api_admin_market_activity():
                                   if next_session_date else None),
             'is_current_session': session_date == _today_session,
         },
-        # 24h user sessions (hourly bins, rolling window)
+        # User sessions. Rolling 24h when no date param; else the
+        # session_date's ET calendar day read from session_history.
         'user_sessions': {
             'hours':            hours_list,
             'counts':           sessions_list,
@@ -12747,6 +12808,9 @@ def api_admin_market_activity():
             'active_now':       active_now,
             'active_customers': active_customers,
             'peak':             max(peak, active_now),
+            # Metadata so the UI can show "Tue Apr 15 · hourly" vs "24h rolling"
+            'session_date':     session_date.isoformat() if date_param else None,
+            'mode':             'historical' if date_param else 'rolling_24h',
         },
         # Summary totals — same fields the monitor's summary strip reads
         'summary': {
