@@ -245,6 +245,48 @@ it surfaces.
 
 ---
 
+## PI4B-SSD-MIGRATION — company node SD → SSD (blocked on hardware)
+
+**Why deferred.** Pi4b (the company/monitor node) is the next candidate
+for the same SD-to-SSD migration we just finished on pi5. Blocked on
+a powered USB hub — the external SSD pulls more current than pi4b's
+USB ports can supply unassisted, so it needs its own power source.
+
+**State at defer-time:**
+- Pi4b is still booting from SD, running the monitor stack + synthos-
+  company services.
+- The playbook `docs/pi5_nvme_migration.md` is directly reusable with
+  two edits: (a) the target device will be `sdaN` (USB SSD) instead of
+  `nvme0n1p2`, so fstab/cmdline.txt substitutions differ, and (b) the
+  EEPROM BOOT_ORDER value for USB-first on pi4b is `0xf14` not
+  `0xf461` (different bootloader generation).
+- Pi5 migration validated the general shape of the procedure: manual
+  rsync beats rpi-clone for this workload.
+
+**Entry conditions (all must be true):**
+
+1. **Powered USB hub on hand** — sufficient amperage to keep the SSD
+   happy under sustained write load (≥2 A recommended).
+2. **Pi4b accessible** — same "user available to debug" posture we had
+   for pi5.
+3. **Monitor / company stack quiet** — pick a window where the
+   company node isn't actively ingesting or reporting. Early morning
+   weekend is ideal.
+
+**Scope.** Same 10-step structure as pi5. Expect ~30-40 minutes
+end-to-end if the hardware cooperates.
+
+**Risk.** Lower than pi5 — this is the second run of a playbook we
+already know works. Same cold-rollback posture: keep the SD in hand,
+reinsert if SSD boot fails.
+
+**Related context.**
+- Reusable playbook: `docs/pi5_nvme_migration.md`
+- Pi5 migration completed 2026-04-18 (commit `9881b1f`); apply
+  lessons learned (manual rsync vs rpi-clone, EEPROM tool caching).
+
+---
+
 ## ITEM-8 — R2 vault path fix (company node)
 
 **Why deferred.** Lives on pi4b (company node), not pi5. Requires shell
