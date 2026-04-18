@@ -31,3 +31,9 @@
 0 3 * * * /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/rebuild_default_template.py >> /home/pi516gb/synthos/synthos_build/logs/template_rebuild.log 2>&1
 # ── LOG ROTATION — weekly Sunday midnight ──
 0 0 * * 0 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/rotate_logs.py >> /home/pi516gb/synthos/synthos_build/logs/rotation.log 2>&1
+
+# ── WEEKEND OVERNIGHT SCHEDULER — hourly, :05 past ──
+# Matches the weekday :05 pattern but runs 24 hours/day Sat+Sun
+# since markets are closed and market_daemon doesn't run then.
+# :05 deliberately chosen to dodge :00 (reboot/rebuild) and :30 (backup).
+5 * * * 0,6 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_scheduler.py --session overnight >> /home/pi516gb/synthos/synthos_build/logs/scheduler.log 2>&1
