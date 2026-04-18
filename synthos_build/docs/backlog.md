@@ -311,6 +311,81 @@ mean" scoping pass. Each is ~5-15 min of work once scope is clear.
 
 ---
 
+## EARLY-ACCESS-TOS — revisit & flip the flag
+
+**Why deferred.** Built dormant behind `EARLY_ACCESS_TOS_ENABLED = False`
+in `src/retail_portal.py`. The UI, routes, state model, supersession
+wiring, and fixture-bypass logic are all in place and syntax-checked on
+both Mac and pi4b. Left inert pending a second-pass review of the TOS
+copy and the modal/overlay UX.
+
+**State at defer-time:**
+- TOS copy:  `docs/tos_early_access.md` (placeholders for
+  EFFECTIVE_DATE, CONTACT_EMAIL, GOVERNING_STATE, VENUE_COUNTY)
+- Design:    `docs/early_access_tos_design.md`
+- Code:      `src/retail_portal.py` — feature block marked with loud
+  banner comments; grep for `EARLY_ACCESS_TOS_ENABLED`.
+- Routes:    `GET /api/ea/status`, `POST /api/ea/accept-tos`,
+  `POST /api/ea/hide-setup` (all short-circuit when flag off)
+- State keys (all in per-customer `customer_settings`):
+  `ACCOUNT_TYPE`, `EA_TOS_ACCEPTED_VERSION`, `EA_TOS_ACCEPTED_AT`,
+  `EA_SETUP_GUIDE_HIDDEN`
+- Fixtures are identified by `ACCOUNT_TYPE='fixture'`; real
+  beta-testers / early-adopters get the full flow.
+
+**Open design questions to revisit:**
+
+1. **Scroll-to-enable on Accept** — button disabled until the modal
+   body is scrolled to the bottom. Too strict? Too loose? Remove
+   entirely?
+2. **Setup overlay is a bottom-right card, not a centred modal.** Want
+   more presence for the overlay? Swap to centred.
+3. **Fixture tagging script.** Before flipping the flag, `test_01` and
+   `test_02` need `ACCOUNT_TYPE='fixture'` written to their
+   customer_settings. Add to `tools/apply_tier_ladder.py` or make a
+   new `tools/tag_fixtures.py`?
+4. **TOS copy itself** — two items flagged in an earlier pass for a
+   deeper look:
+   - §5 brokerage-conflict wording ("if conflict, broker's terms
+     control *with respect to brokerage relationship*") — deliberately
+     deferred for deeper review at deploy time.
+   - Section 9 "Basic Ground Rules" softened once; confirm it's now
+     at the right tone for early-adopter audience.
+5. **Placeholders** — EFFECTIVE_DATE, CONTACT_EMAIL, GOVERNING_STATE,
+   VENUE_COUNTY must be filled in before flipping the flag. Rendered
+   verbatim into the modal body; no code change needed to fill them.
+
+**Entry conditions (all must be true):**
+
+1. **TOS copy reviewed end-to-end** — including all items above.
+2. **Placeholders filled** in `docs/tos_early_access.md`.
+3. **Fixture tagger decided + run** — `test_01`, `test_02` carry
+   `ACCOUNT_TYPE='fixture'` in their customer_settings.
+4. **UX pass** — visual check of both modal and overlay on the
+   dashboard to confirm positioning, contrast, keyboard dismissal,
+   and mobile layout are acceptable.
+
+**Scope when entered.**
+
+- Flip `EARLY_ACCESS_TOS_ENABLED = True` in `src/retail_portal.py`.
+- Restart the portal service on pi5.
+- Smoke-test the flip-the-flag checklist in
+  `docs/early_access_tos_design.md`.
+
+**Risk.**
+
+Low while dormant (feature flag is off, zero runtime cost beyond a
+few hundred bytes of inert DOM). On flip, risk is confined to the
+login flow — worst case, revert the flag.
+
+**Related context.**
+
+- Commit landing the dormant build: `[TBD — this commit]`
+- Original conversation: ToS drafting + modal/overlay UX iteration
+  over several turns, including the test-vs-beta-tester distinction.
+
+---
+
 ## Historical / completed (struck through)
 
 <!-- Move completed items here with commit SHAs when done, keep for

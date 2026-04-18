@@ -84,6 +84,174 @@ TOS_CURRENT_VERSION  = "1.0"
 # Per-customer agreement files go here: data/customers/<id>/agreements/
 _CUSTOMERS_DIR       = os.path.join(_ROOT_DIR, 'data', 'customers')
 
+# ══════════════════════════════════════════════════════════════════════════
+# EARLY-ACCESS TOS + NON-RESTRICTIVE SETUP GUIDE  (DORMANT)
+# ─────────────────────────────────────────────────────────────────────────
+# Everything guarded by EARLY_ACCESS_TOS_ENABLED.  When False:
+#   - Server: no new routes are hit; helpers return no-op; render_template_string
+#     gets ea_enabled=False; the dormant HTML blocks don't activate.
+#   - Client: `window.EARLY_ACCESS_TOS_ENABLED === false`, the setup-overlay
+#     and TOS-modal bootstraps are no-ops; legacy SETUP_COMPLETE auto-redirect
+#     to the Setup Guide tab remains in place.
+#
+# When True:
+#   - Real humans see a TOS modal on first login that supersedes /terms.
+#   - Setup Guide tab no longer force-opens — a non-blocking "Getting
+#     Started" overlay appears each login, dismissible with "OK" (session)
+#     or "Don't show again" + "OK" (persistent).
+#   - Fixture accounts (ACCOUNT_TYPE='fixture' in customer_settings) skip
+#     both flows entirely.  That marker is set ONLY by the bootstrap script
+#     — never by UI — so real beta-testers / early-adopters always get the
+#     full flow.
+#
+# Design doc:  synthos_build/docs/early_access_tos_design.md
+# TOS copy:    synthos_build/docs/tos_early_access.md
+# ══════════════════════════════════════════════════════════════════════════
+EARLY_ACCESS_TOS_ENABLED = False
+
+# Bump this only when the TOS copy changes materially.  All users then
+# re-accept via the modal.  Non-material changes (typos) must leave this
+# alone, per §11 of the TOS.
+EARLY_ACCESS_TOS_VERSION = "1.0"
+
+# customer_settings value identifying a non-human fixture account (the
+# paper accounts seeded by bootstrap_test_fleet.py).  Must only ever be
+# written by the bootstrap script; the portal UI has no path to set it.
+EA_FIXTURE_ACCOUNT_TYPE  = "fixture"
+EA_ACCOUNT_TYPE_KEY      = "ACCOUNT_TYPE"
+EA_TOS_ACCEPTED_KEY      = "EA_TOS_ACCEPTED_VERSION"
+EA_TOS_ACCEPTED_AT_KEY   = "EA_TOS_ACCEPTED_AT"
+EA_SETUP_HIDDEN_KEY      = "EA_SETUP_GUIDE_HIDDEN"
+
+
+def _ea_load_tos_html() -> str:
+    """Read the TOS markdown once at module load and convert it to
+    minimal HTML for the modal body.  Kept deliberately simple — the
+    TOS is under review and we don't want a markdown dependency here.
+
+    Supports: # / ## / ### headings, paragraphs, **bold**, *italic*,
+    unordered lists (- or *), and horizontal rules (---).  Anything
+    fancier should be avoided in the TOS copy itself."""
+    path = os.path.join(_ROOT_DIR, 'docs', 'tos_early_access.md')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+    except Exception as e:
+        log.error(f"Could not read early-access TOS markdown: {e}")
+        return "<p><em>(TOS copy unavailable — contact support.)</em></p>"
+
+    import html as _html, re as _re
+    out:   list[str] = []
+    lines = raw.splitlines()
+    i = 0
+    in_list = False
+
+    def _inline(s: str) -> str:
+        s = _html.escape(s)
+        s = _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = _re.sub(r'(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)', r'<em>\1</em>', s)
+        return s
+
+    def _flush_list():
+        nonlocal in_list
+        if in_list:
+            out.append('</ul>')
+            in_list = False
+
+    while i < len(lines):
+        line = lines[i].rstrip()
+        if not line.strip():
+            _flush_list()
+            i += 1
+            continue
+        if line.strip() == '---':
+            _flush_list()
+            out.append('<hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:14px 0">')
+            i += 1
+            continue
+        if line.startswith('### '):
+            _flush_list()
+            out.append(f'<h4 style="font-size:13px;font-weight:700;margin:14px 0 6px">{_inline(line[4:].strip())}</h4>')
+            i += 1
+            continue
+        if line.startswith('## '):
+            _flush_list()
+            out.append(f'<h3 style="font-size:14px;font-weight:700;margin:18px 0 8px;color:var(--text)">{_inline(line[3:].strip())}</h3>')
+            i += 1
+            continue
+        if line.startswith('# '):
+            _flush_list()
+            out.append(f'<h2 style="font-size:16px;font-weight:700;margin:4px 0 12px;color:var(--text)">{_inline(line[2:].strip())}</h2>')
+            i += 1
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            if not in_list:
+                out.append('<ul style="padding-left:18px;margin:6px 0 10px">')
+                in_list = True
+            out.append(f'<li style="margin:3px 0">{_inline(stripped[2:].strip())}</li>')
+            i += 1
+            continue
+        # Paragraph — collect consecutive non-empty, non-structural lines.
+        _flush_list()
+        buf = [line]
+        j = i + 1
+        while j < len(lines) and lines[j].strip() and not (
+            lines[j].startswith(('#', '-', '*'))
+            or lines[j].strip() == '---'
+        ):
+            buf.append(lines[j].rstrip())
+            j += 1
+        out.append(f'<p style="margin:6px 0 10px;line-height:1.65">{_inline(" ".join(buf))}</p>')
+        i = j
+
+    _flush_list()
+    return "\n".join(out)
+
+
+# Rendered once at module load — cheap, and the TOS file is small.
+_EA_TOS_HTML = _ea_load_tos_html()
+
+
+def _ea_is_fixture(cdb) -> bool:
+    """True if this customer is a non-human test fixture and should bypass
+    the TOS modal + setup overlay.  Missing key → treated as a real user."""
+    if not EARLY_ACCESS_TOS_ENABLED:
+        return False
+    try:
+        return (cdb.get_setting(EA_ACCOUNT_TYPE_KEY) or "user").lower() \
+               == EA_FIXTURE_ACCOUNT_TYPE
+    except Exception:
+        return False
+
+
+def _ea_status(cdb) -> dict:
+    """Shape the state the client needs to decide whether to show the
+    modal / overlay.  Returns the dormant shape when the feature flag is
+    off so the JS bootstrap has a consistent contract."""
+    if not EARLY_ACCESS_TOS_ENABLED:
+        return {
+            "enabled":          False,
+            "fixture":          False,
+            "tos_needs_accept": False,
+            "setup_hidden":     True,
+            "tos_version":      EARLY_ACCESS_TOS_VERSION,
+        }
+    fixture     = _ea_is_fixture(cdb)
+    accepted    = (cdb.get_setting(EA_TOS_ACCEPTED_KEY) or "") == EARLY_ACCESS_TOS_VERSION
+    setup_hide  = (cdb.get_setting(EA_SETUP_HIDDEN_KEY) or "0") == "1"
+    return {
+        "enabled":          True,
+        "fixture":          fixture,
+        # Fixtures never see the modal; everyone else until they accept.
+        "tos_needs_accept": (not fixture) and (not accepted),
+        # Fixtures also skip the setup overlay; real users see it each
+        # login until they tick "Don't show again".
+        "setup_hidden":     fixture or setup_hide,
+        "tos_version":      EARLY_ACCESS_TOS_VERSION,
+    }
+# ══════════════════════════════════════════════════════════════════════════
+
 # In-memory OTP store — one slot, TTL enforced on use
 # {'otp': str, 'expires_at': datetime, 'session_key': str}
 _construction_otp: dict = {}
@@ -4769,6 +4937,56 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- ══════════════════════════════════════════════════════════════════
+     EARLY-ACCESS TOS MODAL + NON-RESTRICTIVE SETUP OVERLAY  (DORMANT)
+     Hidden by CSS + inert unless window.EARLY_ACCESS_TOS_ENABLED is
+     true, which is set from the server feature flag at render time.
+     When the flag is off, the only cost of these elements is a few
+     hundred extra bytes in the DOM.
+     ══════════════════════════════════════════════════════════════════ -->
+
+<!-- TOS modal — full-screen blocker until "I Agree" is clicked. -->
+<div id="ea-tos-overlay" class="sig-modal-overlay" style="display:none;z-index:900">
+  <div class="sig-modal" style="width:min(640px,95vw);max-height:85vh;display:flex;flex-direction:column">
+    <div class="sig-modal-head" style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.08)">
+      <div style="font-size:15px;font-weight:700">Synthos Early-Access Terms of Service</div>
+      <div style="font-size:11px;color:var(--muted)" id="ea-tos-version-label">v1.0</div>
+    </div>
+    <div class="sig-modal-body" id="ea-tos-body" style="padding:20px;overflow-y:auto;flex:1;font-size:12.5px;line-height:1.65;color:var(--text)">
+      {{ ea_tos_html|safe }}
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:14px 20px;border-top:1px solid rgba(255,255,255,0.08)">
+      <div id="ea-tos-scroll-hint" style="flex:1;font-size:11px;color:var(--muted)">Scroll to the end to enable acceptance.</div>
+      <button id="ea-tos-accept-btn" class="save-btn" disabled
+              style="padding:8px 18px;font-size:12px;opacity:0.5;cursor:not-allowed"
+              onclick="eaAcceptTos()">I Agree</button>
+    </div>
+  </div>
+</div>
+
+<!-- Setup overlay — non-blocking "Getting Started" card. User can
+     dismiss with OK (session) or "Don't show again" + OK (persistent).
+     Does NOT redirect tabs; account is fully functional while this is
+     visible, and the user can close it at any time. -->
+<div id="ea-setup-overlay" style="display:none;position:fixed;right:20px;bottom:20px;width:min(380px,92vw);background:linear-gradient(180deg,rgba(20,24,36,0.98),rgba(14,17,26,0.98));border:1px solid rgba(255,255,255,0.12);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.5);padding:18px;z-index:700">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:linear-gradient(90deg,var(--teal),var(--purple))"></span>
+    <div style="font-size:13px;font-weight:700">Getting Started</div>
+  </div>
+  <div style="font-size:12px;color:var(--muted);line-height:1.65;margin-bottom:14px">
+    Walk through two-factor authentication, your Alpaca brokerage connection, and API keys any time from the <a href="#" onclick="showTab('guide');eaCloseSetupOverlay();return false" style="color:var(--teal);text-decoration:none;font-weight:600">Setup Guide tab</a>.
+    <br><br>
+    You don't have to do anything here — your account is already active.
+  </div>
+  <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text);margin-bottom:12px;cursor:pointer">
+    <input type="checkbox" id="ea-setup-dont-show" style="margin:0">
+    <span>Don't show this again</span>
+  </label>
+  <div style="display:flex;justify-content:flex-end">
+    <button class="save-btn" style="padding:6px 18px;font-size:12px" onclick="eaDismissSetupOverlay()">OK</button>
+  </div>
+</div>
+
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
 
@@ -5803,6 +6021,11 @@ setInterval(loadAgentPulse, 10000);
 // ── STATE ──
 const PI_ID   = '{{ pi_id }}';
 const IS_KILL = {{ 'true' if kill_active else 'false' }};
+// Server-rendered feature flag.  Stays false unless
+// EARLY_ACCESS_TOS_ENABLED is flipped on in retail_portal.py.
+// When false, the ea* handlers further down are no-ops even though
+// their DOM elements are present.
+window.EARLY_ACCESS_TOS_ENABLED = {{ 'true' if ea_enabled else 'false' }};
 let killState = IS_KILL;
 let chartInst = null;
 let allSignals = [];
@@ -8488,12 +8711,125 @@ loadTraderActivity();
 checkNewAccountBanner();
 checkAlpacaFunding(false);
 loadCfgPanel();
-// First-time setup guide check
-fetch('/api/customer-settings').then(r=>r.json()).then(function(d){
-  if (d.SETUP_COMPLETE !== '1') {
-    showTab('guide');
+// First-time setup guide check.
+// When EARLY_ACCESS_TOS_ENABLED is on the server, the setup guide
+// no longer force-opens.  The server-rendered flag below controls the
+// whole behavior — when it's false, we run the legacy auto-redirect.
+if (window.EARLY_ACCESS_TOS_ENABLED) {
+  // New flow: boot the TOS modal + non-blocking setup overlay.
+  // The user stays on whatever tab they chose; nothing is forced.
+  eaBoot();
+} else {
+  // Legacy flow: switch to Setup Guide until user dismisses.
+  fetch('/api/customer-settings').then(r=>r.json()).then(function(d){
+    if (d.SETUP_COMPLETE !== '1') {
+      showTab('guide');
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EARLY-ACCESS TOS + SETUP OVERLAY — CLIENT HANDLERS  (DORMANT)
+// Every function below is a no-op when window.EARLY_ACCESS_TOS_ENABLED
+// is false (the default).  When on, these drive the modal and the
+// non-restrictive setup overlay.
+// ══════════════════════════════════════════════════════════════════
+async function eaBoot() {
+  if (!window.EARLY_ACCESS_TOS_ENABLED) return;
+  try {
+    const r = await fetch('/api/ea/status');
+    const d = await r.json();
+    if (!d.enabled || d.fixture) return;          // fixtures see nothing
+    if (d.tos_needs_accept) {
+      eaShowTosModal(d.tos_version);
+    } else if (!d.setup_hidden) {
+      eaShowSetupOverlay();
+    }
+  } catch (e) {
+    // Fail closed: if we can't reach the status endpoint we simply
+    // don't pop either surface — the legacy guide tab auto-redirect
+    // won't fire either, because that branch is gated by the flag.
+    console.warn('eaBoot: status fetch failed', e);
   }
-});
+}
+
+function eaShowTosModal(version) {
+  const overlay = document.getElementById('ea-tos-overlay');
+  const body    = document.getElementById('ea-tos-body');
+  const label   = document.getElementById('ea-tos-version-label');
+  const btn     = document.getElementById('ea-tos-accept-btn');
+  const hint    = document.getElementById('ea-tos-scroll-hint');
+  if (!overlay || !body || !btn) return;
+  if (label && version) label.textContent = 'v' + version;
+  // TOS copy body is populated by the server-side render_template_string
+  // via the {{ ea_tos_html|safe }} placeholder further down — so it's
+  // already in the DOM.  Nothing to do here beyond showing the overlay.
+  overlay.style.display = 'flex';
+  // Enable Accept only when the user has scrolled to the bottom,
+  // matching the TOS §13 requirement for an affirmative acknowledgment.
+  const enableAccept = () => {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    if (hint) hint.textContent = 'Thanks for reviewing the terms.';
+  };
+  body.onscroll = () => {
+    const nearEnd = (body.scrollTop + body.clientHeight + 8) >= body.scrollHeight;
+    if (nearEnd) enableAccept();
+  };
+  // If the content is short enough that there's nothing to scroll,
+  // enable immediately so the user isn't stuck.
+  requestAnimationFrame(() => {
+    if (body.scrollHeight <= body.clientHeight + 4) enableAccept();
+  });
+}
+
+async function eaAcceptTos() {
+  const btn = document.getElementById('ea-tos-accept-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/ea/accept-tos', {method: 'POST'});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'unknown');
+    const overlay = document.getElementById('ea-tos-overlay');
+    if (overlay) overlay.style.display = 'none';
+    // After accepting, check whether the setup overlay should appear
+    // this session.  (It won't for fixtures, and won't if the user has
+    // previously ticked "Don't show again".)
+    const s = await fetch('/api/ea/status').then(x => x.json()).catch(() => null);
+    if (s && s.enabled && !s.fixture && !s.setup_hidden) {
+      eaShowSetupOverlay();
+    }
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    if (typeof toast === 'function') toast('Could not save acceptance — please retry', 'err');
+  }
+}
+
+function eaShowSetupOverlay() {
+  const el = document.getElementById('ea-setup-overlay');
+  if (el) el.style.display = 'block';
+}
+
+function eaCloseSetupOverlay() {
+  const el = document.getElementById('ea-setup-overlay');
+  if (el) el.style.display = 'none';
+}
+
+async function eaDismissSetupOverlay() {
+  const dontShow = document.getElementById('ea-setup-dont-show');
+  if (dontShow && dontShow.checked) {
+    try {
+      await fetch('/api/ea/hide-setup', {method: 'POST'});
+    } catch (e) {
+      // Non-fatal: if the persist fails the overlay still closes for
+      // this session, and we'll just prompt again next login.
+      console.warn('eaDismissSetupOverlay: persist failed', e);
+    }
+  }
+  eaCloseSetupOverlay();
+}
+// ══════════════════════════════════════════════════════════════════
 loadNews('all');
 updateMarketClock();
 updateSessionTimeline();
@@ -8693,6 +9029,11 @@ def index():
         async_load=True,
         grace_warning=grace_warning,
         settings_ui_locked=SETTINGS_UI_LOCKED,
+        # Early-access TOS + setup overlay wiring.  When the feature
+        # flag is off (the default) these render as the inert shape
+        # and nothing activates on the client side.
+        ea_enabled=EARLY_ACCESS_TOS_ENABLED,
+        ea_tos_html=_EA_TOS_HTML,
     )
 
 
@@ -9041,6 +9382,81 @@ def api_change_email():
         return jsonify({'ok': False, 'error': str(e)})
     except Exception as e:
         return jsonify({'ok': False, 'error': 'Server error'})
+
+# ══════════════════════════════════════════════════════════════════════════
+# EARLY-ACCESS TOS + SETUP OVERLAY — API ENDPOINTS (DORMANT)
+# ─────────────────────────────────────────────────────────────────────────
+# All three endpoints short-circuit to 404/no-op when the feature flag is
+# off, so a stray client-side call can't accidentally touch state.
+# ══════════════════════════════════════════════════════════════════════════
+@app.route('/api/ea/status')
+@authenticated_only  # deliberately NOT @login_required — modal renders
+                     # over dashboard, but server must not insist on
+                     # legacy tos_version being current when the new
+                     # modal is the supersession mechanism.
+def api_ea_status():
+    """Read-only state for the dashboard bootstrap. Safe when disabled."""
+    if not EARLY_ACCESS_TOS_ENABLED:
+        return jsonify(_ea_status(None)), 200
+    try:
+        cdb = _customer_db()
+    except Exception as e:
+        log.error(f"ea/status: db error: {e}")
+        return jsonify({"enabled": True, "error": "db"}), 500
+    return jsonify(_ea_status(cdb)), 200
+
+
+@app.route('/api/ea/accept-tos', methods=['POST'])
+@authenticated_only
+def api_ea_accept_tos():
+    """Record acceptance of the current early-access TOS. Idempotent."""
+    if not EARLY_ACCESS_TOS_ENABLED:
+        return jsonify({"ok": False, "error": "disabled"}), 404
+    try:
+        cdb = _customer_db()
+        if _ea_is_fixture(cdb):
+            # Fixtures never reach the modal in normal flow; accept this
+            # path defensively so a replay doesn't 500.
+            return jsonify({"ok": True, "fixture": True}), 200
+        from datetime import datetime, timezone
+        cdb.set_setting(EA_TOS_ACCEPTED_KEY,    EARLY_ACCESS_TOS_VERSION)
+        cdb.set_setting(EA_TOS_ACCEPTED_AT_KEY, datetime.now(timezone.utc).isoformat())
+        # Mirror into the session so the legacy login_required gate, which
+        # checks session['tos_version'] vs TOS_CURRENT_VERSION, treats the
+        # new acceptance as sufficient — i.e. this TOS supersedes /terms.
+        session['tos_version'] = TOS_CURRENT_VERSION
+        try:
+            cdb.log_event(
+                'EA_TOS_ACCEPTED',
+                agent='portal',
+                details=f"version={EARLY_ACCESS_TOS_VERSION}",
+            )
+        except Exception:
+            pass
+        return jsonify({"ok": True, "version": EARLY_ACCESS_TOS_VERSION}), 200
+    except Exception as e:
+        log.error(f"ea/accept-tos: {e}")
+        return jsonify({"ok": False, "error": "save_failed"}), 500
+
+
+@app.route('/api/ea/hide-setup', methods=['POST'])
+@authenticated_only
+def api_ea_hide_setup():
+    """Persistently dismiss the non-restrictive setup overlay. The 'OK'
+    button on the overlay does NOT call this — it only closes the overlay
+    client-side for the current session. Only the 'Don't show again'
+    checkbox + OK combination triggers this write."""
+    if not EARLY_ACCESS_TOS_ENABLED:
+        return jsonify({"ok": False, "error": "disabled"}), 404
+    try:
+        cdb = _customer_db()
+        cdb.set_setting(EA_SETUP_HIDDEN_KEY, "1")
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        log.error(f"ea/hide-setup: {e}")
+        return jsonify({"ok": False, "error": "save_failed"}), 500
+# ══════════════════════════════════════════════════════════════════════════
+
 
 @app.route('/api/settings', methods=['POST'])
 @login_required
