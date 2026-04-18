@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-15T01:00:00-04:00",
-    "version": "3.0"
+    "last_updated": "2026-04-18T02:30:00-04:00",
+    "version": "3.1"
   },
   "nodes": [
     {
@@ -26,7 +26,8 @@
         {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 5m", "status": "cron"}
       ],
       "databases": ["company.db", "auditor.db", "login.db", "support.db"],
-      "services": ["Cloudflare tunnel", "command.synth-cloud.com"]
+      "services": ["Cloudflare tunnel", "command.synth-cloud.com"],
+      "storage": "microSD (external SSD migration pending — blocked on powered USB hub)"
     },
     {
       "id": "pi5",
@@ -59,7 +60,9 @@
         {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"}
       ],
       "databases": ["auth.db", "customers/*/signals.db", "live_prices (shared)"],
-      "services": ["Cloudflare tunnel", "portal.synth-cloud.com"]
+      "services": ["Cloudflare tunnel", "portal.synth-cloud.com"],
+      "storage": "NVMe (Patriot M.2 P300 256GB) — migrated from SD 2026-04-18",
+      "tools": ["synthos_build/tools/ (_fleet + 10 diagnostics: customer_audit, trader_audit, validator_investigate, sentiment_smoke, verify_schema, tier_readout, apply_tier_ladder, portal_lint, dead_code, lint, complexity)"]
     },
     {
       "id": "pi2w_monitor",
@@ -113,7 +116,8 @@
     ]
   },
   "known_issues": [
-    "Sentinel display needs reboot for rotation=0 + wave renderer debugging"
+    "Sentinel display needs reboot for rotation=0 + wave renderer debugging",
+    "Portal Chart.js blocked by Cloudflare tunnel CSP — charts render blank (tracked: backlog PORTAL-CSP-CHARTJS)"
   ],
   "resolved": [
     "Backup chain pi5→pi4b working",
@@ -136,6 +140,12 @@
     "Sentiment data wired into intelligence cards",
     "Log rotation system (weekly + 30-day archive)",
     "Security hardening: auth checks on all endpoints",
-    "Password eye toggles on all forms"
+    "Password eye toggles on all forms",
+    "Pi5 retail stack migrated SD → NVMe (Patriot M.2 P300, 2026-04-18)",
+    "Diagnostic tools consolidated into synthos_build/tools/ (_fleet helper + 10 scripts)",
+    "Code-health trio added to tools/ (vulture, ruff, radon wrappers)",
+    "Early-access TOS modal + non-restrictive setup overlay — built dormant behind EARLY_ACCESS_TOS_ENABLED=False",
+    "rotate_logs.py landed in git (was running from cron on pi5 but untracked)",
+    "JS init-killer fixed: Jinja substitution inside a // comment produced a literal '<' that aborted dashboard init for all users (commit bba337a)"
   ]
 }

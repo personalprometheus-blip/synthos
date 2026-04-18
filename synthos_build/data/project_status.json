@@ -1,10 +1,10 @@
 {
   "meta": {
     "project": "Synthos",
-    "last_updated": "2026-04-12",
+    "last_updated": "2026-04-18",
     "current_phase": 7,
     "total_phases": 10,
-    "version": "2.1",
+    "version": "2.2",
     "next_milestone": "Beta testing + paper trading review",
     "domain_map": {
       "synth-cloud.com": "Redirect \u2192 portal.synth-cloud.com",
