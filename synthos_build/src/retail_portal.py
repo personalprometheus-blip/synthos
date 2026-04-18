@@ -12460,23 +12460,96 @@ def _get_customer_trading_modes():
 @app.route('/api/admin/market-activity')
 @admin_required
 def api_admin_market_activity():
-    """Aggregate buy/sell activity per-customer for the monitor chart."""
-    from datetime import datetime, timedelta
+    """Aggregate buy/sell activity + user sessions for the monitor.
+
+    Response is split into two visualizations:
+
+      market_activity — the most recent trading session (9:30-16:00 ET),
+        bucketed into 10-min bins (39 bins). Buys and sells in dollars.
+        Net is buys minus sells. Per-customer breakdown included when
+        multiple customers traded.
+
+      user_sessions — rolling 24h window of distinct-user counts,
+        bucketed hourly (24 bins). Used for the separate user-count
+        chart the monitor now renders beside the market chart.
+
+    The ?hours= query param still controls the user_sessions window
+    (legacy clients can keep passing hours=24). Market activity is
+    always the most-recent session — not configurable because the
+    monitor chart is always "how did today go", not a rolling window.
+    """
+    from datetime import datetime, timedelta, date as _date, time as _time
+    from zoneinfo import ZoneInfo
     import auth as _auth
 
     hours = int(request.args.get('hours', 24))
-    from zoneinfo import ZoneInfo
     _et = ZoneInfo("America/New_York")
     now = datetime.now(_et)
-    cutoff = (now - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S')
 
-    # Build hourly bins in ET
+    # ── SESSION DATE RESOLUTION ────────────────────────────────────────
+    # Most-recent trading day in ET:
+    #   - If today is a weekday and now >= 9:30 ET → today
+    #   - Otherwise → the most recent prior weekday
+    # Holidays aren't modeled; the chart will just show flat 0 bars on
+    # a holiday session which is honest (nothing traded that day).
+    session_date = now.date()
+    _market_start_t = _time(9, 30)
+    if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
+        session_date = session_date - timedelta(days=1)
+        while session_date.weekday() >= 5:
+            session_date = session_date - timedelta(days=1)
+
+    session_start = datetime.combine(session_date, _time(9, 30), tzinfo=_et)
+    session_end   = datetime.combine(session_date, _time(16, 0), tzinfo=_et)
+
+    # 10-min bins across 9:30→16:00 ET (39 bins). Labels are "HH:MM"
+    # for display; key is the bin-start minute-of-day (0-indexed) so
+    # lookups are deterministic even across DST boundaries.
+    BIN_MINUTES = 10
+    session_minutes = int((session_end - session_start).total_seconds() // 60)   # 390
+    n_bins = session_minutes // BIN_MINUTES                                      # 39
+    market_bin_labels = []
+    market_bin_starts = []                                                       # ISO strings for tooltip
+    for i in range(n_bins):
+        start = session_start + timedelta(minutes=i * BIN_MINUTES)
+        market_bin_labels.append(start.strftime('%H:%M'))
+        market_bin_starts.append(start.isoformat())
+
+    def _parse_to_et(ts_str):
+        """Parse a DB timestamp (usually naive UTC or ISO+tz) and return
+        a tz-aware ET datetime, or None if unparseable."""
+        if not ts_str:
+            return None
+        s = str(ts_str).strip()
+        try:
+            if '+' in s or s.endswith('Z'):
+                dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                return dt.astimezone(_et)
+            # Naive — DB stores UTC-naive, so attach UTC then convert.
+            dt = datetime.fromisoformat(s.replace(' ', 'T')[:19])
+            return dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(_et)
+        except Exception:
+            return None
+
+    def _market_bin_index(dt_et):
+        """Return the 10-min bin index [0..n_bins) for a session-day
+        timestamp, or None if outside the session window."""
+        if dt_et is None:
+            return None
+        if dt_et < session_start or dt_et >= session_end:
+            return None
+        delta = int((dt_et - session_start).total_seconds() // 60)
+        idx = delta // BIN_MINUTES
+        return idx if 0 <= idx < n_bins else None
+
+    # ── 24h USER-SESSIONS BINS (existing shape, unchanged) ─────────────
+    cutoff_sessions = (now - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S')
     hour_keys = []
     for i in range(hours):
         h = (now - timedelta(hours=hours - 1 - i))
         hour_keys.append(h.strftime('%Y-%m-%dT%H:00'))
 
-    # Get customer names from auth.db
+    # ── CUSTOMER NAME LOOKUP ───────────────────────────────────────────
     customer_names = {}
     try:
         with _auth._auth_conn() as c:
@@ -12488,9 +12561,12 @@ def api_admin_market_activity():
     except Exception:
         pass
 
-    # Per-customer hourly data
-    customers_data = {}  # {cid: {name, buys: [per hour], sells: [per hour]}}
-    total_bins = {k: {'buys': 0.0, 'sells': 0.0, 'buy_count': 0, 'sell_count': 0} for k in hour_keys}
+    # ── PER-CUSTOMER MARKET BINS (10-min) + TOTAL BINS ─────────────────
+    customers_data   = {}   # {cid: {name, buys[n_bins], sells[n_bins]}}
+    total_buys_bins  = [0.0] * n_bins
+    total_sells_bins = [0.0] * n_bins
+    total_buy_count  = 0
+    total_sell_count = 0
 
     customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
     for cid in os.listdir(customers_dir):
@@ -12503,74 +12579,66 @@ def api_admin_market_activity():
             import sqlite3
             conn = sqlite3.connect(db_path, timeout=5)
             conn.row_factory = sqlite3.Row
-            cust_buys = {k: 0.0 for k in hour_keys}
-            cust_sells = {k: 0.0 for k in hour_keys}
+            cust_buys  = [0.0] * n_bins
+            cust_sells = [0.0] * n_bins
             has_activity = False
-            def _hour_key(ts_str):
-                """Normalize any timestamp to ET hour key: YYYY-MM-DDTHH:00"""
-                if not ts_str:
-                    return None
-                s = str(ts_str).strip()
-                try:
-                    if '+' in s or s.endswith('Z'):
-                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
-                        dt = dt.astimezone(_et)
-                    else:
-                        dt = datetime.fromisoformat(s.replace(' ', 'T')[:19])
-                        dt = dt.replace(tzinfo=_et)
-                    return dt.strftime('%Y-%m-%dT%H:00')
-                except Exception:
-                    s = s.replace(' ', 'T')
-                    return s[:13] + ':00' if len(s) >= 13 else None
 
-            # Buys
+            # Buys — opened_at in this session's window
             for r in conn.execute(
-                "SELECT opened_at, entry_price * shares AS amt, ticker FROM positions WHERE opened_at >= ?",
-                (cutoff,)
+                "SELECT opened_at, entry_price * shares AS amt FROM positions "
+                "WHERE opened_at IS NOT NULL"
             ).fetchall():
-                ts = _hour_key(r['opened_at'])
+                idx = _market_bin_index(_parse_to_et(r['opened_at']))
+                if idx is None:
+                    continue
                 amt = float(r['amt'] or 0)
-                if ts and ts in cust_buys:
-                    cust_buys[ts] += amt
-                    total_bins[ts]['buys'] += amt
-                    total_bins[ts]['buy_count'] += 1
-                    has_activity = True
-            # Sells
+                cust_buys[idx]        += amt
+                total_buys_bins[idx]  += amt
+                total_buy_count       += 1
+                has_activity = True
+
+            # Sells — closed_at in this session's window
             for r in conn.execute(
-                "SELECT closed_at, entry_price * shares AS amt, ticker FROM positions WHERE closed_at IS NOT NULL AND closed_at >= ?",
-                (cutoff,)
+                "SELECT closed_at, entry_price * shares AS amt FROM positions "
+                "WHERE closed_at IS NOT NULL"
             ).fetchall():
-                ts = _hour_key(r['closed_at'])
+                idx = _market_bin_index(_parse_to_et(r['closed_at']))
+                if idx is None:
+                    continue
                 amt = float(r['amt'] or 0)
-                if ts and ts in cust_sells:
-                    cust_sells[ts] += amt
-                    total_bins[ts]['sells'] += amt
-                    total_bins[ts]['sell_count'] += 1
-                    has_activity = True
+                cust_sells[idx]        += amt
+                total_sells_bins[idx]  += amt
+                total_sell_count       += 1
+                has_activity = True
+
             conn.close()
             if has_activity:
                 customers_data[cid] = {
-                    'name': customer_names.get(cid, cid[:8]),
-                    'buys': [round(cust_buys[h], 2) for h in hour_keys],
-                    'sells': [round(cust_sells[h], 2) for h in hour_keys],
+                    'name':  customer_names.get(cid, cid[:8]),
+                    'buys':  [round(v, 2) for v in cust_buys],
+                    'sells': [round(v, 2) for v in cust_sells],
                 }
         except Exception as e:
             log.warning(f"market-activity scan for {cid[:8]}: {e}")
 
-    # Session history from ring buffer — track peak count + all names per hour
-    session_bins = {k: 0 for k in hour_keys}
-    session_names = {k: set() for k in hour_keys}
+    # Round + compute net for the total series
+    total_buys_bins_r  = [round(v, 2) for v in total_buys_bins]
+    total_sells_bins_r = [round(v, 2) for v in total_sells_bins]
+    total_net_bins     = [round(b - s, 2) for b, s in zip(total_buys_bins, total_sells_bins)]
+
+    # ── 24h USER SESSIONS (unchanged shape, moved under its own key) ──
+    session_bins  = {k: 0        for k in hour_keys}
+    session_names = {k: set()    for k in hour_keys}
     with _session_activity_lock:
         for entry in _session_hourly:
-            ts = entry[0]
+            ts    = entry[0]
             count = entry[1]
             names = entry[2] if len(entry) > 2 else []
-            hour_key = ts[:13] + ':00'
-            if hour_key in session_bins:
-                session_bins[hour_key] = max(session_bins[hour_key], count)
+            hkey = ts[:13] + ':00'
+            if hkey in session_bins:
+                session_bins[hkey] = max(session_bins[hkey], count)
                 for n in names:
-                    session_names[hour_key].add(n)
-        # Current active sessions with customer names
+                    session_names[hkey].add(n)
         active_now = 0
         active_customers = []
         for cid, v in _session_activity.items():
@@ -12583,28 +12651,45 @@ def api_admin_market_activity():
                     name = cid[:8]
                 active_customers.append({'name': name, 'idle_secs': int(idle)})
 
-    hours_list = sorted(total_bins.keys())
-    total_buys = sum(total_bins[h]['buys'] for h in hours_list)
-    total_sells = sum(total_bins[h]['sells'] for h in hours_list)
-    sessions_list = [session_bins.get(h, 0) for h in hours_list]
+    hours_list = sorted(session_bins.keys())
+    sessions_list = [session_bins[h] for h in hours_list]
     peak = max(sessions_list) if sessions_list else 0
+    total_buys_all = sum(total_buys_bins)
+    total_sells_all = sum(total_sells_bins)
 
     return jsonify({
-        'hours':    hours_list,
-        'buys':     [round(total_bins[h]['buys'], 2) for h in hours_list],
-        'sells':    [round(total_bins[h]['sells'], 2) for h in hours_list],
-        'customers': customers_data,
-        'sessions': sessions_list,
-        'session_users': {h: sorted(session_names.get(h, set())) for h in hours_list if session_names.get(h)},
-        'summary': {
-            'total_buys':    round(total_buys, 2),
-            'total_sells':   round(total_sells, 2),
-            'net_flow':      round(total_buys - total_sells, 2),
-            'buy_count':     sum(total_bins[h]['buy_count'] for h in hours_list),
-            'sell_count':    sum(total_bins[h]['sell_count'] for h in hours_list),
-            'active_now':    active_now,
+        # Market-hours activity (10-min bins, most recent session)
+        'market_activity': {
+            'bins':         market_bin_labels,
+            'bin_starts':   market_bin_starts,
+            'buys':         total_buys_bins_r,
+            'sells':        total_sells_bins_r,
+            'net':          total_net_bins,
+            'customers':    customers_data,
+            'session_date': session_date.isoformat(),
+            'session_open_iso':  session_start.isoformat(),
+            'session_close_iso': session_end.isoformat(),
+        },
+        # 24h user sessions (hourly bins, rolling window)
+        'user_sessions': {
+            'hours':            hours_list,
+            'counts':           sessions_list,
+            'names':            {h: sorted(session_names.get(h, set()))
+                                 for h in hours_list if session_names.get(h)},
+            'active_now':       active_now,
             'active_customers': active_customers,
-            'peak_sessions': max(peak, active_now),
+            'peak':             max(peak, active_now),
+        },
+        # Summary totals — same fields the monitor's summary strip reads
+        'summary': {
+            'total_buys':       round(total_buys_all, 2),
+            'total_sells':      round(total_sells_all, 2),
+            'net_flow':         round(total_buys_all - total_sells_all, 2),
+            'buy_count':        total_buy_count,
+            'sell_count':       total_sell_count,
+            'active_now':       active_now,
+            'active_customers': active_customers,
+            'peak_sessions':    max(peak, active_now),
         },
         'trading_modes': _get_customer_trading_modes(),
     })
