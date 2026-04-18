@@ -5749,21 +5749,11 @@ setInterval(loadAgentPulse, 10000);
     </div>
   </div>
 
-  <div class="section-title">System Update</div>
-  <div class="glass" style="margin-bottom:16px">
-    <div class="settings-section">
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">Pull Latest from GitHub</div>
-          <div class="setting-desc">Downloads the latest files and restarts the portal. Takes ~10 seconds. Page will reload automatically.</div>
-        </div>
-        <button class="save-btn" id="update-btn" onclick="selfUpdate()" style="white-space:nowrap;flex-shrink:0">
-          ↓ Update Now
-        </button>
-      </div>
-      <div id="update-status" style="display:none;font-size:11px;color:var(--teal);padding:8px 0;font-family:var(--mono)"></div>
-    </div>
-  </div>
+  {# System Update section removed from customer view — it exposed a
+     one-click "git pull + restart portal" button to every logged-in
+     user. That's admin-only plumbing. The /api/update endpoint is
+     still reachable for admin CLI use and is now gated by
+     @admin_required server-side. #}
 
 
 </div>
@@ -10718,11 +10708,15 @@ def api_audit():
 
 
 @app.route('/api/update', methods=['POST'])
+@admin_required
 def api_update():
     """
     Pull latest from GitHub and restart portal.
     Runs qpull.sh if available, otherwise git pull directly.
-    Requires portal password or no-password mode.
+
+    Admin-only. The customer-facing UI trigger was removed (item 10
+    cleanup) so this endpoint is reachable only via direct API call
+    by admin sessions. Still useful for admin CLI / curl workflow.
     """
     import subprocess, threading
 
