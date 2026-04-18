@@ -430,6 +430,58 @@ login flow — worst case, revert the flag.
 
 ---
 
+## PORTAL-CSP-CHARTJS — self-host Chart.js or allow-list CDN
+
+**Why deferred.** The Cloudflare tunnel serving `portal.synth-cloud.com`
+sets a Content-Security-Policy header of `script-src 'self' 'unsafe-inline'`,
+which blocks the portal's external Chart.js CDN script:
+
+```
+Loading the script 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js'
+violates the following Content Security Policy directive:
+"script-src 'self' 'unsafe-inline'"
+```
+
+Chart.js never loads → any chart on the portal (market chart,
+performance chart, sparkline visualisations) renders as empty / errors
+silently. The same CSP also blocks `cloudflareinsights.com` beacon but
+that's harmless.
+
+Not an emergency — the functional data is intact, just the charts are
+blank. Caught during the 2026-04-18 post-migration debugging session.
+
+**Options (pick one when we get to it):**
+
+1. **Self-host Chart.js** — copy `chart.umd.min.js` into the portal's
+   static asset path, replace the `<script src=".../cdnjs..."` tag.
+   Most portable; no external-network dependency at page load.
+2. **Allow-list the CDN in CSP** — add `https://cdnjs.cloudflare.com`
+   to `script-src`. One-line Cloudflare dashboard edit, or wherever
+   the CSP is set (need to trace which layer adds it).
+3. **Remove the CSP entirely** — if it was set unintentionally. Least
+   good: gives up the XSS protection benefit.
+
+**Entry conditions.** None technical — this can be done any time. Do
+it during a quiet portal window (non-trading hours) since it'll need
+a portal restart + visual verification the charts come back.
+
+**Scope.** Option 1 = ~30 minutes (download file, move into the portal
+asset tree, update one script tag, test). Options 2/3 = 5 minutes of
+config + restart.
+
+**Risk.** Very low. If Chart.js fails to load the new way, charts stay
+blank — same as today. Non-chart UI unaffected.
+
+**Related context.**
+- Discovered 2026-04-18 while debugging a separate init-chain JS error
+  (Jinja substitution inside a `// comment` — see commit `bba337a`)
+- Fix commit for that separate bug: `bba337a`
+- Related prevention idea: add a `portal_lint.py` check that flags
+  `{{...}}` appearing inside `//`-style JS comments, to avoid the
+  Jinja-in-comment trap reoccurring.
+
+---
+
 ## Historical / completed (struck through)
 
 <!-- Move completed items here with commit SHAs when done, keep for
