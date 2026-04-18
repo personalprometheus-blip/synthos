@@ -8649,77 +8649,83 @@ async function loadMarketIndices() {
   } catch(e) {}
 }
 
-// ── TRADER ACTIVITY ──
+// ── HISTORY CARD — closed trades with outcome classification (WIN/LOSS/PROTECTIVE/EVEN)
 async function loadTraderActivity() {
   try {
-    const r = await fetch('/api/trader-activity');
+    const r = await fetch('/api/performance-summary');
     const d = await r.json();
     const el = document.getElementById('history-list') || document.getElementById('trader-activity-list');
     const ts = document.getElementById('trader-activity-ts');
     if (!el) return;
-    const items = [];
-    (d.scans||[]).slice(0,8).forEach(s => {
-      const _tierMap = {'1':'HIGH','2':'MEDIUM','3':'LOW','4':'QUIET'};
-      const tier    = (_tierMap[String(s.tier)] || String(s.tier||'LOW')).toUpperCase();
-      const tierCls = tier==='HIGH'?'conf-high':tier==='MEDIUM'?'conf-med':'conf-low';
-      const cascade = s.cascade_detected ? '<span style="color:var(--pink);font-size:8px;margin-left:4px">CASCADE</span>' : '';
-      const summary = (s.event_summary||'Scanned').slice(0,60);
-      const time    = (s.scanned_at||'').slice(11,16);
-      const ticker  = s.ticker||'?';
-      items.push(`<div class="agent-row"
-          data-ticker="${ticker.replace(/"/g,'')}"
-          data-conf="${tier}"
-          data-summary="${summary.replace(/"/g,'')}"
-          data-type="SCAN"
+
+    const trades = (d.trades || []).slice(0, 12);
+    if (!trades.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\u26a1</div>No closed trades yet</div>';
+      if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+      return;
+    }
+
+    // Outcome classifier. "Protective" wins over win/loss — it's how the trade
+    // was closed, not the dollar result. A stop-loss can still be a small win.
+    const classify = (t) => {
+      const reason = (t.exit_reason || '').toLowerCase();
+      if (/(stop|protect|trail|safety)/.test(reason)) {
+        return { outcome: 'PROTECTIVE', color: 'var(--amber)', rgb: '245,166,35' };
+      }
+      if (t.pnl > 0)  return { outcome: 'WIN',  color: 'var(--teal)', rgb: '0,245,212' };
+      if (t.pnl < 0)  return { outcome: 'LOSS', color: 'var(--pink)', rgb: '255,75,110' };
+      return { outcome: 'EVEN', color: 'var(--muted)', rgb: '255,255,255' };
+    };
+
+    const reasonLabel = (reason) => {
+      if (!reason || reason === '--') return '';
+      const r = reason.toLowerCase();
+      if (/take.?profit|target/.test(r))  return 'Take profit';
+      if (/trail/.test(r))                return 'Trailing stop';
+      if (/stop.?loss|protective/.test(r))return 'Stop loss';
+      if (/manual|user/.test(r))          return 'Manual close';
+      if (/session|market.?close/.test(r))return 'Session close';
+      if (/bil|rotation/.test(r))         return 'Rotation';
+      return reason.replace(/_/g, ' ').slice(0, 22);
+    };
+
+    const esc = s => (s || '').toString().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    el.innerHTML = trades.map(t => {
+      const c       = classify(t);
+      const ticker  = t.ticker || '--';
+      const label   = reasonLabel(t.exit_reason);
+      const pnl     = t.pnl || 0;
+      const pnlStr  = (pnl >= 0 ? '+' : '\u2212') + '$' + Math.abs(pnl).toFixed(2);
+      const retVal  = t.ret_pct || 0;
+      const retStr  = (retVal >= 0 ? '+' : '') + retVal.toFixed(2) + '%';
+      const hold    = t.hold || '--';
+      const entry   = (t.entry || 0).toFixed(2);
+      const exit    = (t.exit  || 0).toFixed(2);
+      const summary = 'Held ' + hold + ' \u00b7 $' + entry + ' \u2192 $' + exit;
+
+      return `<div class="agent-row"
+          data-ticker="${esc(ticker)}"
+          data-conf="${c.outcome}"
+          data-summary="${esc(summary + (label ? ' \u00b7 ' + label : ''))}"
+          data-type="TRADE"
           onmouseenter="showIntelTooltip(event,this)"
           onmouseleave="hideIntelTooltip()"
           onclick="openLogicModal(this)">
-        <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(245,166,35,0.2),rgba(245,166,35,0.05));border:1px solid rgba(245,166,35,0.2);color:var(--amber)">${ticker.slice(0,4)}</div>
+        <div class="agent-row-icon" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
-          <div class="agent-row-ticker">${ticker}${cascade}</div>
+          <div class="agent-row-ticker">${ticker}<span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
           <div class="agent-row-sub">${summary}</div>
         </div>
         <div class="agent-row-right">
-          <div class="conf-chip ${tierCls}">${tier}</div>
-          <div class="agent-row-time">${time}</div>
+          <div style="font-size:11px;font-weight:700;color:${c.color};font-family:var(--mono)">${pnlStr}</div>
+          <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:2px">${retStr}</div>
         </div>
-      </div>`);
-    });
-    // Add recent system_log entries (trade decisions, approvals, etc.)
-    (d.recent||[]).slice(0,12).forEach(r => {
-      const ev   = r.event||'EVENT';
-      const agent = r.agent||'';
-      const time = (r.timestamp||'').slice(11,16);
-      let det = '';
-      try { det = typeof r.details === 'string' ? r.details : JSON.stringify(r.details); } catch(e){ det=r.details||''; }
-      det = (det||'').slice(0,70);
+      </div>`;
+    }).join('');
 
-      const evColors = {
-        'TRADE_DECISION':'var(--teal)','TRADE_APPROVED':'#00f5d4',
-        'TRADE_PENDING_APPROVAL':'var(--amber)','TRADE_REJECTED':'var(--pink)',
-        'BIL_BUY':'var(--purple)','ORPHAN_POSITION':'var(--pink)',
-        'AGENT_COMPLETE':'var(--dim)'
-      };
-      const evColor = evColors[ev] || 'var(--muted)';
-      const evShort = ev.replace('TRADE_','').replace('_',' ');
-
-      items.push('<div class="agent-row" style="cursor:default">'
-        +'<div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);color:'+evColor+';font-size:8px;letter-spacing:0.02em">'+evShort.slice(0,4)+'</div>'
-        +'<div class="agent-row-body">'
-        +'<div class="agent-row-ticker" style="color:'+evColor+'">'+evShort+'<span style="font-size:9px;color:var(--dim);margin-left:6px">'+agent+'</span></div>'
-        +'<div class="agent-row-sub">'+det+'</div>'
-        +'</div>'
-        +'<div class="agent-row-right"><div class="agent-row-time">'+time+'</div></div>'
-        +'</div>');
-    });
-
-    if (!items.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-icon">\u26a1</div>No recent activity</div>';
-    } else {
-      el.innerHTML = items.join('');
-      if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-    }
-  } catch(e) {}
+    if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  } catch(e) { console.log('History error:', e); }
 }
 
 // ── PLANNING PANEL ──
