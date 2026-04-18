@@ -5090,6 +5090,226 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
 
+<!-- ══════════════ INTRO SPLASH — digital water onto glass SYNTHOS ══════════════
+     Plays once per tab session (sessionStorage-gated). Vertical wave streams
+     fall from the top, splash on large glass SYNTHOS letters in the center,
+     then the whole overlay fades out into the normal dashboard. -->
+<style>
+  #synthos-intro {
+    position:fixed; inset:0; z-index:10000;
+    pointer-events:none;
+    background:radial-gradient(ellipse at center, rgba(10,14,26,0.94), rgba(4,6,12,0.98));
+    opacity:0;
+    display:none;
+  }
+  #synthos-intro.visible { display:block; }
+  #intro-canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #intro-text {
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%, -50%);
+    font-family:'Inter', system-ui, sans-serif;
+    font-weight:900;
+    font-size:clamp(72px, 14vw, 200px);
+    letter-spacing:0.08em;
+    color:rgba(255,255,255,0.10);
+    -webkit-text-stroke:2px rgba(0,245,212,0.75);
+    text-shadow:
+      0 0 20px rgba(0,245,212,0.5),
+      0 0 50px rgba(0,245,212,0.28),
+      0 0 100px rgba(0,245,212,0.15);
+    filter:drop-shadow(0 0 18px rgba(0,245,212,0.3));
+    user-select:none;
+    pointer-events:none;
+    white-space:nowrap;
+    transition:text-shadow 180ms ease-out, filter 180ms ease-out;
+  }
+  #intro-text.splash {
+    text-shadow:
+      0 0 28px rgba(0,245,212,0.9),
+      0 0 60px rgba(0,245,212,0.55),
+      0 0 120px rgba(0,245,212,0.3);
+    filter:drop-shadow(0 0 24px rgba(0,245,212,0.55));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #synthos-intro { display:none !important; }
+  }
+</style>
+<div id="synthos-intro" aria-hidden="true">
+  <canvas id="intro-canvas"></canvas>
+  <div id="intro-text">SYNTHOS</div>
+</div>
+<script>
+(function() {
+  try {
+    if (sessionStorage.getItem('synthos_intro_played')) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      sessionStorage.setItem('synthos_intro_played', '1');
+      return;
+    }
+    var overlay = document.getElementById('synthos-intro');
+    var canvas  = document.getElementById('intro-canvas');
+    var textEl  = document.getElementById('intro-text');
+    if (!overlay || !canvas || !textEl) return;
+
+    var ctx = canvas.getContext('2d');
+    var W = window.innerWidth, H = window.innerHeight;
+    var dpr = window.devicePixelRatio || 1;
+    function sizeCanvas() {
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width  = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    sizeCanvas();
+
+    // Vertical falling wave streams — the "digital water"
+    var streams = [];
+    var STREAM_COUNT = Math.max(18, Math.floor(W / 55));
+    for (var i = 0; i < STREAM_COUNT; i++) {
+      streams.push({
+        x:       Math.random() * W,
+        y:       -40 - Math.random() * H * 0.7,
+        vy:      2.8 + Math.random() * 2.4,
+        amp:     12 + Math.random() * 26,
+        freq:    0.014 + Math.random() * 0.012,
+        phase:   Math.random() * Math.PI * 2,
+        length:  90 + Math.random() * 160,
+        width:   1.2 + Math.random() * 1.1,
+        alpha:   0.22 + Math.random() * 0.5,
+        splashed: false
+      });
+    }
+
+    var particles = [];
+    function spawnSplash(x, y) {
+      var count = 10 + Math.floor(Math.random() * 8);
+      for (var k = 0; k < count; k++) {
+        var angle = -Math.PI / 2 + (Math.random() - 0.5) * (Math.PI * 0.95);
+        var speed = 1.2 + Math.random() * 3.8;
+        particles.push({
+          x: x + (Math.random() - 0.5) * 6,
+          y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          size: 1 + Math.random() * 2.2
+        });
+      }
+      // Brief glow pulse on the glass text
+      textEl.classList.add('splash');
+      setTimeout(function() { textEl.classList.remove('splash'); }, 160);
+    }
+
+    var start = performance.now();
+    var FADE_IN  = 350;
+    var ACTIVE   = 2600;
+    var FADE_OUT = 800;
+    var TOTAL    = FADE_IN + ACTIVE + FADE_OUT;
+
+    function frame(now) {
+      var elapsed = now - start;
+
+      var op;
+      if      (elapsed < FADE_IN)              op = elapsed / FADE_IN;
+      else if (elapsed < FADE_IN + ACTIVE)     op = 1;
+      else if (elapsed < TOTAL)                op = 1 - ((elapsed - FADE_IN - ACTIVE) / FADE_OUT);
+      else {
+        overlay.classList.remove('visible');
+        overlay.style.display = 'none';
+        sessionStorage.setItem('synthos_intro_played', '1');
+        return;
+      }
+      overlay.style.opacity = op;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Splash line — a bit above the top of the SYNTHOS text
+      var textRect = textEl.getBoundingClientRect();
+      var splashLine = textRect.top + textRect.height * 0.18;
+
+      // Stop spawning new streams during fade-out so it settles cleanly
+      var allowRespawn = elapsed < FADE_IN + ACTIVE - 400;
+
+      ctx.lineCap = 'round';
+      for (var s of streams) {
+        s.y += s.vy;
+        s.phase += 0.09;
+
+        if (!s.splashed && s.y >= splashLine) {
+          // Stream center has reached the letters — splash
+          var impactX = s.x + Math.sin(s.phase * 1.2) * s.amp * 0.4;
+          spawnSplash(impactX, splashLine);
+          s.splashed = true;
+        }
+        // Fully past — respawn at top, unless we're winding down
+        if (s.y - s.length > splashLine + 40) {
+          if (allowRespawn) {
+            s.x  = Math.random() * W;
+            s.y  = -40 - Math.random() * 120;
+            s.vy = 2.8 + Math.random() * 2.4;
+            s.amp = 12 + Math.random() * 26;
+            s.alpha = 0.22 + Math.random() * 0.5;
+            s.splashed = false;
+          } else {
+            continue;
+          }
+        }
+
+        // Draw stream trail — fades from head (brightest) to tail (faintest)
+        ctx.beginPath();
+        ctx.lineWidth = s.width;
+        var segs = 0;
+        for (var dy = 0; dy < s.length; dy += 3) {
+          var py = s.y - dy;
+          if (py > splashLine + 3) continue;
+          if (py < -12) break;
+          var env = 1 - dy / s.length;              // head=1, tail=0
+          var offset = Math.sin(dy * s.freq + s.phase) * s.amp * env;
+          var px = s.x + offset;
+          if (segs === 0) ctx.moveTo(px, py);
+          else            ctx.lineTo(px, py);
+          segs++;
+        }
+        ctx.strokeStyle = 'rgba(0,245,212,' + s.alpha + ')';
+        ctx.stroke();
+      }
+
+      // Particles
+      for (var i = particles.length - 1; i >= 0; i--) {
+        var p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.18;   // gravity
+        p.life -= 0.022;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(0,245,212,' + (p.life * 0.9) + ')';
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener('resize', sizeCanvas);
+
+    // Show overlay then kick off the animation after layout settles
+    overlay.classList.add('visible');
+    requestAnimationFrame(function() { requestAnimationFrame(function() {
+      requestAnimationFrame(frame);
+    }); });
+  } catch (err) {
+    console.error('synthos intro failed:', err);
+    try { sessionStorage.setItem('synthos_intro_played', '1'); } catch(e){}
+  }
+})();
+</script>
+
 <!-- NEW ACCOUNT BANNER -->
 <div id="new-account-banner" style="display:none;background:linear-gradient(90deg,rgba(245,166,35,0.12),rgba(245,166,35,0.04));border-bottom:2px solid var(--amber);padding:10px 24px;display:none;align-items:center;gap:10px">
   <span style="font-size:16px">&#x26A0;</span>
