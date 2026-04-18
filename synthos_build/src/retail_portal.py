@@ -5176,9 +5176,11 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="dash-panel-title">Agent Status</div>
       <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">STANDBY</div>
     </div>
-    <!-- LAST ACTIVITY (top center — compact event log) -->
-    <div style="padding:8px 14px 4px;border-bottom:1px solid var(--border)">
-      <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6;text-align:center"></div>
+    <!-- LAST ACTIVITY — slow-rotating cylinder: new events roll up from bottom, disappear at top -->
+    <div style="position:relative;height:60px;overflow:hidden;border-bottom:1px solid var(--border);
+                -webkit-mask-image:linear-gradient(to bottom, transparent 0%, black 28%, black 72%, transparent 100%);
+                mask-image:linear-gradient(to bottom, transparent 0%, black 28%, black 72%, transparent 100%)">
+      <div id="ap-events-inner" style="position:absolute;left:14px;right:14px;top:60px;font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.8;text-align:center;will-change:transform"></div>
     </div>
     <!-- SINE WAVE CANVAS -->
     <div style="position:relative;height:100px;overflow:hidden">
@@ -5349,6 +5351,66 @@ function _apDrawWave() {
 
 var _apLastAside = null;
 
+// ── EVENT CYLINDER — slow vertical ticker ─────────────────────────────────
+// New log lines append to the bottom of an offscreen container, then the
+// whole stack translates upward at a gentle constant speed. Once a line has
+// scrolled past the top it's pruned from the DOM (and the offset is reduced
+// by that line's height so the remaining lines don't visually jump).
+var _apLogSeen = new Set();
+var _apLogOffset = 0;         // cumulative pixels scrolled upward
+var _apLogSpeed = 0.18;       // px per frame @ ~60fps → ~11 px/sec
+var _apLogViewportH = 60;     // matches CSS height above
+
+function _apLogTick() {
+  var inner = document.getElementById('ap-events-inner');
+  if (inner) {
+    if (inner.children.length > 0) {
+      _apLogOffset += _apLogSpeed;
+      inner.style.transform = 'translate3d(0,' + (-_apLogOffset) + 'px,0)';
+      // Prune children that have fully scrolled past the viewport top.
+      // A child is "fully above" when its bottom (offsetTop + offsetHeight,
+      // in inner's natural coord space) is less than the current scroll offset.
+      while (inner.firstElementChild) {
+        var first = inner.firstElementChild;
+        var firstBottom = first.offsetTop + first.offsetHeight;
+        if (firstBottom < _apLogOffset) {
+          var h = first.offsetHeight;
+          inner.removeChild(first);
+          _apLogOffset -= h;
+          inner.style.transform = 'translate3d(0,' + (-_apLogOffset) + 'px,0)';
+        } else {
+          break;
+        }
+      }
+    }
+  }
+  requestAnimationFrame(_apLogTick);
+}
+requestAnimationFrame(_apLogTick);
+
+function _apLogAppend(e) {
+  var key = (e.timestamp || '') + '|' + (e.event || '') + '|' + (e.event_label || '');
+  if (_apLogSeen.has(key)) return;
+  _apLogSeen.add(key);
+  var inner = document.getElementById('ap-events-inner');
+  if (!inner) return;
+  var time = (e.timestamp || '').slice(11, 16);
+  var isComplete = e.event === 'AGENT_COMPLETE';
+  var isDec = e.event === 'TRADE_DECISION';
+  var icon = isComplete ? '<span style="color:var(--teal)">&#x2713;</span>'
+           : isDec      ? '<span style="color:var(--amber)">&#x25C6;</span>'
+                        : '<span style="color:var(--purple)">&#x25B6;</span>';
+  var lbl = e.event_label || 'activity';
+  var label = isDec ? 'decision recorded'
+            : isComplete ? lbl + ' complete'
+                         : lbl + ' started';
+  var det = (e.details || '').slice(0, 40);
+  var div = document.createElement('div');
+  div.innerHTML = time + ' ' + icon + ' ' + label +
+                  (det ? ' <span style="color:var(--dim)">' + det + '</span>' : '');
+  inner.appendChild(div);
+}
+
 async function loadAgentPulse() {
   try {
     var r = await fetch('/api/agent-pulse');
@@ -5412,19 +5474,12 @@ async function loadAgentPulse() {
       regEl.style.color = reg.color;
     }
 
-    // Events — uses event_label from the lexicon (no raw agent names leaked).
-    var evEl = document.getElementById('ap-events');
-    if (evEl && d.events) {
-      evEl.innerHTML = d.events.slice(0, 4).map(function(e) {
-        var time = (e.timestamp || '').slice(11, 16);
-        var isComplete = e.event === 'AGENT_COMPLETE';
-        var isDec = e.event === 'TRADE_DECISION';
-        var icon = isComplete ? '<span style="color:var(--teal)">&#x2713;</span>' : isDec ? '<span style="color:var(--amber)">&#x25C6;</span>' : '<span style="color:var(--purple)">&#x25B6;</span>';
-        var lbl = e.event_label || 'activity';
-        var label = isDec ? 'decision recorded' : isComplete ? lbl + ' complete' : lbl + ' started';
-        var det = (e.details || '').slice(0, 40);
-        return '<div>' + time + ' ' + icon + ' ' + label + (det ? ' <span style="color:var(--dim)">' + det + '</span>' : '') + '</div>';
-      }).join('');
+    // Events — fed into the slow-rotating cylinder ticker. Dedupe prevents
+    // re-appending the same event on each poll (the /api endpoint returns
+    // the latest N events; we only append ones we haven't seen yet).
+    if (d.events) {
+      // Iterate oldest-first so newer events stack below older ones.
+      d.events.slice().reverse().forEach(_apLogAppend);
     }
   } catch(e) { console.error('agentPulse:', e); }
 }
