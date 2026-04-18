@@ -9379,6 +9379,49 @@ def api_approvals():
     return jsonify(data)
 
 
+@app.route('/api/pending')
+@login_required
+def api_pending():
+    """Dashboard pending-decisions card data source.
+
+    Returns the subset of pending_approvals rows that represent
+    'decisions the system is about to make / made and is re-checking':
+
+      - PENDING_APPROVAL   — supervised mode: user needs to approve/reject
+      - QUEUED_FOR_OPEN    — automatic mode: waiting for pre-open re-eval
+      - APPROVED           — re-eval passed or user approved, awaiting exec
+
+    Also returns recent CANCELLED_PROTECTIVE rows in a separate field so
+    the card can show "we killed these before they ran" with the reason.
+
+    Shape:
+      {
+        "active":     [row, ...],   // PENDING_APPROVAL + QUEUED_FOR_OPEN + APPROVED
+        "cancelled":  [row, ...],   // CANCELLED_PROTECTIVE in last 14d
+        "operating_mode": "AUTOMATIC" | "MANAGED" | "SUPERVISED"
+      }
+    """
+    try:
+        db   = _customer_db()
+        mode = (db.get_setting('OPERATING_MODE') or 'AUTOMATIC').upper()
+        all_rows = db.get_pending_approvals()
+        active = [r for r in all_rows
+                  if r.get('status') in ('PENDING_APPROVAL',
+                                         'QUEUED_FOR_OPEN',
+                                         'APPROVED')]
+        cancelled = db.get_cancelled_protective(since_days=14)
+        return jsonify({
+            "active":         active,
+            "cancelled":      cancelled,
+            "operating_mode": mode,
+        })
+    except Exception as e:
+        log.error(f"/api/pending error: {e}")
+        return jsonify({"active": [], "cancelled": [],
+                        "operating_mode": "AUTOMATIC",
+                        "error": str(e)}), 500
+
+
 
 @app.route('/api/agent-pulse')
 @login_required

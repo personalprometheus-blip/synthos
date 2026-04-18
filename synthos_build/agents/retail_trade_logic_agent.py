@@ -721,13 +721,14 @@ def _queue_overnight_order(ticker: str, qty, side: str,
     reason_bits.append(f"order_type={order_type}")
     reasoning = " | ".join(reason_bits)
     try:
-        # Write to the SHARED (owner) DB so the daemon's pre-open
-        # re-evaluation sees every customer's queued orders in one pass.
-        # Per-customer details are preserved via the signal_id prefix and
-        # the customer_id column on future queries (TODO: add customer_id
-        # column when pending_approvals becomes multi-tenant; today the
-        # owner DB is the single source).
-        _shared_db().queue_approval(
+        # Write to THIS customer's own DB — pending_approvals is
+        # already per-customer (matches how managed-mode approvals
+        # work). The daemon's pre-open re-evaluation walks active
+        # customer DBs and processes each one's overnight queue
+        # independently, so the customer's portal surfaces the right
+        # rows and the re-eval step doesn't need a customer_id filter
+        # on a shared table.
+        _db().queue_approval(
             signal_id=sid, ticker=ticker, shares=qty,
             reasoning=reasoning, session="overnight",
             queue_origin="overnight", status="QUEUED_FOR_OPEN",

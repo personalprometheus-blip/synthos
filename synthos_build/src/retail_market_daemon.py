@@ -702,92 +702,107 @@ def promote_validated_signals():
 
 
 def run_pre_open_reeval():
-    """Walk pending_approvals rows that were queued overnight
-    (queue_origin='overnight') and decide whether each one still makes
-    sense now that the market is about to open.
+    """Walk every active customer's pending_approvals rows that were
+    queued overnight (queue_origin='overnight') and decide whether each
+    one still makes sense now that the market is about to open.
+
+    pending_approvals is per-customer (matches managed-mode approvals).
+    This function iterates the same customer list the trader dispatch
+    uses, so every fleet member gets the same treatment with one pass.
 
     Runs as the FIRST step of the market-open pipeline — before the
-    normal enrichment cycle kicks off — so any orders we approve land
-    in the APPROVED pool that the existing managed-mode executor picks
-    up on the next trader dispatch.
+    normal enrichment cycle — so any orders we approve land in the
+    APPROVED pool that the existing managed-mode executor picks up on
+    the next trader dispatch.
 
     Decision rules (v1, intentionally conservative):
       - Queued row older than PRE_OPEN_REEVAL_MAX_AGE_HOURS → CANCELLED
         ("too stale — original gate state no longer representative")
-      - Ticker that has already been closed/traded in the meantime →
-        CANCELLED ("state changed since queue time")
       - Otherwise → APPROVED (ready for executor)
     Later versions can re-run gate4/5/6 for BUYs and gate10 for SELLs
     for a stricter check; v1 establishes the pipeline + cancel path
     with a small, explainable rule set.
+
+    Returns (total_approved, total_cancelled) across all customers.
     """
     from retail_database import get_customer_db
-    if not OWNER_CUSTOMER_ID:
-        log.error("[REEVAL] OWNER_CUSTOMER_ID not set — skipping")
-        return 0, 0
-    try:
-        master = get_customer_db(OWNER_CUSTOMER_ID)
-        queue  = master.get_overnight_queue()
-    except Exception as e:
-        log.error(f"[REEVAL] Failed to read overnight queue: {e}")
+    customers = get_active_customers()
+    if not customers:
+        log.info("[REEVAL] No active customers — skipping")
         return 0, 0
 
-    if not queue:
-        log.info("[REEVAL] Overnight queue empty — nothing to re-evaluate")
-        return 0, 0
-
-    log.info(f"[REEVAL] Re-evaluating {len(queue)} overnight queue row(s)")
-    approved = 0
-    cancelled = 0
+    total_approved = 0
+    total_cancelled = 0
+    total_touched = 0
     now_utc = datetime.now(ZoneInfo("UTC"))
     max_age_hours = PRE_OPEN_REEVAL_MAX_AGE_HOURS
 
-    for row in queue:
-        sid    = row.get('id')
-        ticker = row.get('ticker', '?')
+    for cid in customers:
         try:
-            master.mark_reevaluated(sid)
+            cdb   = get_customer_db(cid)
+            queue = cdb.get_overnight_queue()
         except Exception as e:
-            log.debug(f"[REEVAL] mark_reevaluated({sid}) failed: {e}")
-
-        # Age check — if the decision was made >N hours ago, the gate
-        # state that produced it is probably stale. Better to cancel
-        # explicitly than silently execute on outdated intent.
-        queued_at_str = row.get('queued_at') or ''
-        try:
-            qdt = datetime.fromisoformat(queued_at_str.replace('Z', ''))
-            if qdt.tzinfo is None:
-                qdt = qdt.replace(tzinfo=ZoneInfo("UTC"))
-            age_hours = (now_utc - qdt).total_seconds() / 3600
-        except Exception:
-            age_hours = 0.0  # can't parse → assume fresh, let it through
-
-        if age_hours > max_age_hours:
-            reason = (f"queued {age_hours:.1f}h ago "
-                      f"(>{max_age_hours}h max age) — gate state stale")
-            try:
-                master.cancel_protective(sid, reason)
-                cancelled += 1
-            except Exception as e:
-                log.warning(f"[REEVAL] cancel_protective failed for {sid}: {e}")
+            log.warning(f"[REEVAL] {cid[:8]}: read overnight queue failed: {e}")
+            continue
+        if not queue:
             continue
 
-        # Flip to APPROVED so the normal managed-mode executor picks it
-        # up on the next trader dispatch. decided_by marks the source
-        # as the re-eval step for audit clarity.
-        try:
-            master.update_approval_status(
-                sid, 'APPROVED',
-                decided_by='pre_open_reeval',
-                decision_note=f"overnight queue re-evaluated at {master.now()}",
-            )
-            approved += 1
-        except Exception as e:
-            log.warning(f"[REEVAL] approve failed for {sid}: {e}")
+        total_touched += len(queue)
+        approved = 0
+        cancelled = 0
+        for row in queue:
+            sid    = row.get('id')
+            ticker = row.get('ticker', '?')
+            try:
+                cdb.mark_reevaluated(sid)
+            except Exception as e:
+                log.debug(f"[REEVAL] {cid[:8]}: mark_reevaluated({sid}) failed: {e}")
 
-    log.info(f"[REEVAL] Complete — approved {approved}, cancelled {cancelled} "
-             f"of {len(queue)} queued row(s)")
-    return approved, cancelled
+            # Age check — stale queued rows get an explicit cancel
+            # rather than a silent out-of-date execute.
+            queued_at_str = row.get('queued_at') or ''
+            try:
+                qdt = datetime.fromisoformat(queued_at_str.replace('Z', ''))
+                if qdt.tzinfo is None:
+                    qdt = qdt.replace(tzinfo=ZoneInfo("UTC"))
+                age_hours = (now_utc - qdt).total_seconds() / 3600
+            except Exception:
+                age_hours = 0.0  # unparseable → assume fresh, let it through
+
+            if age_hours > max_age_hours:
+                reason = (f"queued {age_hours:.1f}h ago "
+                          f"(>{max_age_hours}h max age) — gate state stale")
+                try:
+                    if cdb.cancel_protective(sid, reason):
+                        cancelled += 1
+                except Exception as e:
+                    log.warning(f"[REEVAL] {cid[:8]}: cancel_protective "
+                                f"failed for {sid}: {e}")
+                continue
+
+            # Otherwise → APPROVED for the managed-mode executor.
+            try:
+                cdb.update_approval_status(
+                    sid, 'APPROVED',
+                    decided_by='pre_open_reeval',
+                    decision_note=(f"overnight queue re-evaluated at "
+                                   f"{cdb.now()} (age {age_hours:.1f}h)"),
+                )
+                approved += 1
+            except Exception as e:
+                log.warning(f"[REEVAL] {cid[:8]}: approve failed for "
+                            f"{sid}: {e}")
+
+        if approved or cancelled:
+            log.info(f"[REEVAL] {cid[:8]}: approved {approved}, "
+                     f"cancelled {cancelled} of {len(queue)} row(s)")
+        total_approved  += approved
+        total_cancelled += cancelled
+
+    log.info(f"[REEVAL] Complete — approved {total_approved}, "
+             f"cancelled {total_cancelled} of {total_touched} queued row(s) "
+             f"across {len(customers)} customer(s)")
+    return total_approved, total_cancelled
 
 
 def _begin_cycle(label='enrichment'):
