@@ -12609,18 +12609,22 @@ def api_admin_market_activity():
     total_sell_count = 0
 
     # SQL-level pre-filter to avoid pulling a customer's full trade
-    # history into Python just to bin today's session. DB stores
-    # timestamps as naive UTC strings sortable lexically, so an
-    # ISO-string cutoff works across both `YYYY-MM-DD HH:MM:SS` and
-    # `YYYY-MM-DDTHH:MM:SS[Z]` formats. Lower bound: session open
-    # expressed in UTC. Adds a small buffer so the edge-of-window
-    # record doesn't get excluded by minor clock skew.
+    # history into Python just to bin today's session.
+    #
+    # DB stores opened_at / closed_at as naive UTC strings with a SPACE
+    # separator: "2026-04-17 16:03:09" — see DB.now() in retail_database.
+    # My previous version emitted cutoffs with a 'T' separator, which
+    # made lexical comparisons break silently: space (ASCII 32) sorts
+    # BEFORE 'T' (ASCII 84), so "2026-04-17 16:03:09" < "2026-04-17T13:29:00"
+    # even though 16:03 is clearly after 13:29. Result: every real row
+    # was filtered out as "before the cutoff" and today's chart was empty.
+    # Format matches DB.now() exactly so the SQL comparison is honest.
     session_start_utc = session_start.astimezone(ZoneInfo("UTC"))
     session_end_utc   = session_end.astimezone(ZoneInfo("UTC"))
     _session_start_cutoff = (session_start_utc - timedelta(minutes=1)
-                             ).strftime('%Y-%m-%dT%H:%M:%S')
+                             ).strftime('%Y-%m-%d %H:%M:%S')
     _session_end_cutoff   = (session_end_utc + timedelta(minutes=1)
-                             ).strftime('%Y-%m-%dT%H:%M:%S')
+                             ).strftime('%Y-%m-%d %H:%M:%S')
 
     customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
     for cid in os.listdir(customers_dir):
