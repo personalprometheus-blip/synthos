@@ -106,9 +106,28 @@ Alpaca connectivity check (the genuinely useful part of the step — catches DNS
 
 Got cleaned during migration. `retail_backup.py` recreates it on demand at the next 01:30 fire. Self-heals tonight. No action.
 
-### 2.5 journald persistence
+### 2.5 journald persistence — FIXED (PM correction of my PM correction)
 
-False alarm this morning. `/var/log/journal` exists, `Storage=auto` is in effect, 32.8 MB stored. Persistence working; history accumulates across future reboots. No action.
+Flip-flop for the record:
+- Morning: flagged as disabled — correct.
+- Mid-afternoon: "corrected" to "false alarm, working" — **that correction was wrong.** I read `/var/log/journal` existing + a 32 MB "disk usage" number as evidence of persistence. Both were misleading: the directory was empty (no machine-id subdir), and the disk-usage reporting conflates tmpfs-backed `/run/log/journal/` with actual on-disk storage.
+- Now: actually fixed.
+
+**Root cause** (late-afternoon investigation): Raspberry Pi OS ships `/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` which **forces `Storage=volatile`** to protect the SD card from journal-induced write wear. That default was correct pre-NVMe. Post-migration it's obsolete.
+
+**Fix deployed** on pi5:
+- New drop-in `/etc/systemd/journald.conf.d/90-nvme-persistent.conf` with `Storage=persistent` (also captured in repo at `ops/systemd/pi5/journald.conf.d/90-nvme-persistent.conf`).
+- `/etc/`-scope drop-ins take precedence over `/usr/lib/`.
+- Created `/var/log/journal/<machine-id>/` with correct perms (`root:systemd-journal` 2755).
+- Restarted journald and ran `journalctl --flush` to migrate volatile content to on-disk storage.
+
+**Verified:**
+- `journalctl --header` → active file now at `/var/log/journal/<mid>/system.journal` (was `/run/log/journal/...`).
+- 44.2 MB across 3 journal files in `/var/log/journal/<mid>/` on disk.
+- `systemd-analyze cat-config systemd/journald.conf` shows effective `Storage=persistent` after all drop-ins merge.
+- Smoke-test log entry written and retrieved via `systemd-cat` + `journalctl -t`.
+
+Future reboots will accumulate boot history instead of losing it. Pi4b still uses the RPi vendor `Storage=volatile` default — acceptable because pi4b is still on microSD and wear is a real concern there until the SSD migration lands.
 
 ---
 
