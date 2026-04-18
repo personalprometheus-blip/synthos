@@ -34,10 +34,10 @@ it can actually measure, not a moving target.
 **State at defer-time:**
 - All 7 real-trading customers tagged with TIER / EXPERIMENT_ID /
   EXPERIMENT_FREEZE=true (`customer_settings` via
-  `/tmp/apply_tier_ladder.py` → `2026-04-17_tier_ladder`)
+  `tools/apply_tier_ladder.py` → `2026-04-17_tier_ladder`)
 - Portal settings slide-out locked (`SETTINGS_UI_LOCKED=true` default)
-- `tier_readout.py` deployed to pi5 at
-  `/home/pi516gb/synthos/synthos_build/tier_readout.py`
+- `tier_readout.py` deployed as part of the `tools/` package; invoked
+  via `cd ~/synthos/synthos_build && python3 tools/tier_readout.py`
 - Signal-pool tier-weighted cap (60/25/10/5) live, VALIDATED expiry 12h
 - Fleet is already running the T1-T5 configs, so "doing nothing" during
   the defer still yields data — just data that the overnight-queue
@@ -45,10 +45,11 @@ it can actually measure, not a moving target.
 
 **Entry conditions (all must be true):**
 
-1. **Hardware migration complete** — pi5 running from SSD/NVMe mount,
-   boot stable across ≥1 reboot, all systemd services active, DB
-   integrity check passes (`PRAGMA integrity_check` on every
-   per-customer + master DB returns `ok`).
+1. **Hardware migration complete** — ~~pi5 running from SSD/NVMe mount~~ ✅
+   (completed 2026-04-18; root is `/dev/nvme0n1p2`, all 13 DBs pass
+   `PRAGMA integrity_check`, services active post-cutover). **Still
+   pending:** one intentional reboot on NVMe to confirm "boot stable
+   across ≥1 reboot" — trivial, ~30s.
 2. **Overnight-queue infrastructure shipped and stable ≥48h** —
    `docs/overnight_queue_plan.md` executed end-to-end, no new crash-class
    bugs in watchdog/auditor logs during the 48h window, one full
@@ -70,8 +71,9 @@ pre/post-deferral data together and corrupt the week's readings.
 
 **Related context.**
 - Tier ladder commit: `c97dc6c` (pool cap) + fleet-apply via
-  `/tmp/apply_tier_ladder.py`
+  `tools/apply_tier_ladder.py`
 - Original proposal chat session 2026-04-17
+- Migration playbook: `docs/pi5_nvme_migration.md`; executed 2026-04-18
 
 ---
 
@@ -391,4 +393,26 @@ login flow — worst case, revert the flag.
 <!-- Move completed items here with commit SHAs when done, keep for
      institutional memory. -->
 
-_(none yet)_
+### ~~PI5-NVME-MIGRATION — pi5 retail stack SD → NVMe~~ ✅ 2026-04-18
+
+**What:** Moved the entire retail stack from the 128 GB SD card to the
+attached 256 GB Patriot M.2 P300 NVMe. Cold-rollback SD is preserved,
+EEPROM `BOOT_ORDER` is `0xf461` (NVMe-first), services auto-started
+on NVMe boot, all 13 DBs report `ok` post-migration. The SD card is
+now in the user's physical possession as a bootable recovery image.
+
+**Commits (in order of the migration session):**
+- `3d87152` — pre-migration housekeeping: land `rotate_logs.py`,
+  gitignore `.bak`/runtime-state patterns
+- `122becc` — annotate `.wave_override` in gitignore
+- `a396a2d` — migration playbook in `docs/pi5_nvme_migration.md`
+
+**Notes:**
+- `rpi-clone` has a bug with NVMe partition naming (uses `nvme0n12`
+  instead of `nvme0n1p2`). Fell back to manual rsync clone; faster
+  and more controllable. If ever reused: format the target partitions
+  directly, skip rpi-clone's `mkfs` step.
+- EEPROM flash appeared to not apply while still running on SD
+  (`vcgencmd bootloader_config` kept showing `0xf416` post-apply).
+  Post-NVMe-boot confirmed the flash DID persist — those tools were
+  just reading a boot-time cache. Non-issue.
