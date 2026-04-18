@@ -25,7 +25,7 @@ works the same way.
 
 ## The tools
 
-### Read-only
+### Read-only — fleet & data
 
 | Tool | Purpose |
 |------|---------|
@@ -35,7 +35,17 @@ works the same way.
 | `validator_investigate.py` | Dumps `_FAULT_SCAN_LAST`, `_BIAS_SCAN_LAST`, `_VALIDATOR_DETAIL` for master + every customer. Shows only WARNING/CRITICAL severities — INFO noise is suppressed. |
 | `sentiment_smoke.py` | Live smoke test of the sentiment agent's `_fetch_volume_from_alpaca` + its `ThreadPoolExecutor` parallelism. Prints single-ticker baseline and an 8-ticker parallel run so you can see per-ticker cost. |
 | `verify_schema.py` | Checks that a given `table.column` exists in master + every customer signals.db. Default: `signals.screener_score`. Pass two positional args to check any other column: `python3 tools/verify_schema.py positions exit_reason`. |
+
+### Read-only — code health
+
+These wrap third-party analyzers. They install as `pip3 install --break-system-packages vulture ruff radon` once per machine; each wrapper tells you how if missing.
+
+| Tool | Purpose |
+|------|---------|
 | `portal_lint.py` | Static linter for the command portal — missing Flask routes, decorator-order bugs, `getElementById` / `id` mismatches, unsafe Jinja filters, undeclared template vars, unclosed HTML tags, unused IDs. Stdlib-only; safe to run as part of CI. |
+| `dead_code.py` | Unused imports, functions, classes, variables via **vulture**. Default confidence 70 (balanced). Pass `--min-confidence 100` to see only certain dead code. |
+| `lint.py` | Fast lint pass via **ruff** (pyflakes + pycodestyle by default). Read-only unless you pass `--fix`. Narrow rule set via `--select`. Expect ~200 findings on the current codebase — most are E402 from our `sys.path.insert` bootstrap pattern. A curated `ruff.toml` baseline is a future task. |
+| `complexity.py` | Cyclomatic complexity + maintainability index via **radon**. Defaults to showing functions rated C or worse. Pass `--cc` or `--mi` to narrow to one report. |
 
 ### Write (danger zone)
 
