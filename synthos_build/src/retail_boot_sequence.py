@@ -75,7 +75,6 @@ REQUIRED_AGENT_FILES = [
 ]
 
 BOOT_STEPS = []   # records pass/fail for each step
-watchdog_process = None
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
@@ -91,6 +90,37 @@ def step(name, passed, detail=""):
         log.error(msg)
     BOOT_STEPS.append({"name": name, "passed": passed, "detail": detail})
     return passed
+
+
+def _check_systemd_service(unit, label):
+    """Check whether a systemd unit is active. Replaces the legacy
+    'Popen a second copy and see if it exits' pattern used by step6 /
+    step7 / step8: that pattern collided with systemd-owned services
+    (portal, watchdog) because the subprocess could not bind the same
+    port, exited immediately, and logged ~180 false ERROR/day. Moving
+    to a status check means the boot sequence now agrees with reality.
+
+    Returns the result of step() — pass if the unit reports 'active',
+    fail otherwise with the actual state (inactive, failed, etc.) in
+    the detail field so the operator can `systemctl status` into it.
+    """
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', unit],
+            capture_output=True, text=True, timeout=5,
+        )
+        state = result.stdout.strip() or 'unknown'
+        if state == 'active':
+            return step(label, True, f"active (systemd unit {unit})")
+        return step(label, False,
+                    f"{unit} is '{state}' — run `systemctl status {unit}`")
+    except FileNotFoundError:
+        # systemctl missing on some minimal images — not fatal, just inconclusive.
+        return step(label, False, "systemctl not available on this host")
+    except subprocess.TimeoutExpired:
+        return step(label, False, "systemctl is-active timed out")
+    except Exception as e:
+        return step(label, False, str(e))
 
 
 def wait_for_network(timeout=60):
@@ -257,83 +287,45 @@ def step5_health_check():
 
 
 def step6_watchdog():
-    """Step 6 — Start watchdog in background."""
+    """Step 6 — Verify watchdog service is running (systemd-managed).
+
+    Previous behavior attempted to Popen a second watchdog directly,
+    which collided with the synthos-watchdog.service unit: the second
+    instance would fail to acquire the watchdog lock and exit, logging
+    a false ERROR on every boot. Switched to a systemctl status check.
+    """
     log.info("Step 6/9 — Watchdog")
-    wd_path = os.path.join(PROJECT_DIR, 'retail_watchdog.py')
-    if not os.path.exists(wd_path):
-        return step("Watchdog", False, "retail_watchdog.py not found")
-    try:
-        global watchdog_process
-        log_path = os.path.join(LOG_DIR, 'watchdog.log')
-        with open(log_path, 'a') as logf:
-            watchdog_process = subprocess.Popen(
-                [sys.executable, wd_path],
-                stdout=logf, stderr=logf,
-                cwd=PROJECT_DIR,
-            )
-        time.sleep(2)  # give watchdog a moment to start
-        if watchdog_process.poll() is None:
-            return step("Watchdog", True, f"started (pid={watchdog_process.pid})")
-        else:
-            return step("Watchdog", False, "process exited immediately — check watchdog.log")
-    except Exception as e:
-        return step("Watchdog", False, str(e))
+    return _check_systemd_service('synthos-watchdog', 'Watchdog')
 
 
 def step7_portal():
-    """Step 7 — Start portal web server in background."""
+    """Step 7 — Verify portal service is running (systemd-managed).
+
+    Previous behavior attempted to Popen a second gunicorn on port 5001,
+    which collided with the synthos-portal.service unit: port 5001 was
+    already bound, the subprocess exited, false ERROR logged. Switched
+    to a systemctl status check.
+    """
     log.info("Step 7/9 — Portal")
-    portal_path = os.path.join(PROJECT_DIR, 'retail_portal.py')
-    if not os.path.exists(portal_path):
-        return step("Portal", False, "retail_portal.py not found — portal unavailable")
-    try:
-        log_path = os.path.join(LOG_DIR, 'portal.log')
-        with open(log_path, 'a') as logf:
-            portal_proc = subprocess.Popen(
-                [sys.executable, portal_path],
-                stdout=logf, stderr=logf,
-                cwd=PROJECT_DIR,
-            )
-        time.sleep(2)
-        if portal_proc.poll() is None:
-            port = os.environ.get('PORTAL_PORT', '5001')
-            return step("Portal", True,
-                        f"started (pid={portal_proc.pid}) — http://raspberrypi.local:{port}")
-        else:
-            return step("Portal", False, "exited immediately — check portal.log")
-    except Exception as e:
-        return step("Portal", False, str(e))
+    return _check_systemd_service('synthos-portal', 'Portal')
 
 
 def step8_monitor():
-    """Step 8 — Start monitor server in background (if not already running)."""
-    log.info("Step 8/9 — Monitor server")
-    monitor_path = os.path.join(PROJECT_DIR, 'synthos_monitor.py')
-    if not os.path.exists(monitor_path):
-        return step("Monitor", False, "synthos_monitor.py not found — skipping")
-    try:
-        # Check if already running
-        result = subprocess.run(['pgrep', '-f', 'synthos_monitor.py'],
-                                capture_output=True, text=True)
-        if result.stdout.strip():
-            return step("Monitor", True, f"already running (pid={result.stdout.strip()})")
+    """Step 8 — Monitor server.
 
-        log_path = os.path.join(LOG_DIR, 'monitor.log')
-        env = os.environ.copy()
-        env['PORT'] = '5000'
-        with open(log_path, 'a') as logf:
-            mon_proc = subprocess.Popen(
-                [sys.executable, monitor_path],
-                stdout=logf, stderr=logf,
-                cwd=PROJECT_DIR, env=env,
-            )
-        time.sleep(2)
-        if mon_proc.poll() is None:
-            return step("Monitor", True, f"started (pid={mon_proc.pid}) — http://localhost:5000/console")
-        else:
-            return step("Monitor", False, "exited immediately — check monitor.log")
-    except Exception as e:
-        return step("Monitor", False, str(e))
+    The monitor / command portal lives on the company node (pi4b), not
+    the retail node. Retail boots skip entirely — it was a no-op on pi5
+    that only generated "synthos_monitor.py not found — skipping" noise
+    in boot.log. On company nodes (COMPANY_MODE=true) we verify the
+    monitor systemd unit instead of spawning a competing subprocess.
+    """
+    log.info("Step 8/9 — Monitor server")
+    if os.environ.get('COMPANY_MODE', '').lower() != 'true':
+        return step("Monitor", True, "skipped — not company node")
+    # Company node: verify the monitor systemd unit. Unit name is
+    # synthos-login-server per the pi4b service list. If the unit is
+    # renamed later, update here.
+    return _check_systemd_service('synthos-login-server', 'Monitor')
 
 
 def step9_initial_seed():
@@ -378,43 +370,38 @@ def step9_initial_seed():
 
 def step_interrogation_listener():
     """
-    Step — Start interrogation listener in background.
-    Listens on UDP 5556 for Scout's HAS_DATA_FOR_INTERROGATION broadcasts.
-    Sends INTERROGATION_ACK on port 5557 when a signal passes validation.
-    Non-fatal: if listener fails to start, Scout marks all signals UNVALIDATED
-    and Bolt falls back to WATCH — trading continues safely.
+    Step — Report interrogation-listener status.
+
+    The retail-watchdog service owns starting and restarting this
+    listener — see retail_watchdog.py, which pgrep's and spawns it on
+    its own cycle. Boot sequence's job is to observe and report, not to
+    launch a second copy. Previous behavior also used a wrong path
+    (src/src/retail_interrogation_listener.py) so it always reported
+    "not found — skipping" even when the listener was running fine
+    under the watchdog.
+
+    Non-fatal: if the listener isn't up yet when this runs, the
+    watchdog's own @reboot fire (~30s after this step) will spin it.
     """
     log.info("Step — Interrogation listener")
-    listener_path = os.path.join(PROJECT_DIR, 'src', 'retail_interrogation_listener.py')
-    if not os.path.exists(listener_path):
-        return step("Interrogation listener", True,
-                    "retail_interrogation_listener.py not found — skipping (signals will be UNVALIDATED)")
     try:
-        # Check if already running
         result = subprocess.run(
             ['pgrep', '-f', 'retail_interrogation_listener.py'],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=5,
         )
-        if result.stdout.strip():
-            return step("Interrogation listener", True,
-                        f"already running (pid={result.stdout.strip().splitlines()[0]})")
-
-        log_path = os.path.join(LOG_DIR, 'interrogation.log')
-        with open(log_path, 'a') as logf:
-            proc = subprocess.Popen(
-                [sys.executable, listener_path],
-                stdout=logf, stderr=logf,
-                cwd=PROJECT_DIR,
-            )
-        time.sleep(1)
-        if proc.poll() is None:
-            return step("Interrogation listener", True,
-                        f"started (pid={proc.pid}) — UDP {os.environ.get('INTERROGATION_PORT', 5556)}")
-        else:
-            return step("Interrogation listener", False,
-                        "exited immediately — check interrogation.log")
+        pid_line = result.stdout.strip().splitlines()
     except Exception as e:
-        return step("Interrogation listener", False, str(e))
+        return step("Interrogation listener", True,
+                    f"status check failed ({e}) — watchdog will manage")
+
+    if pid_line:
+        return step("Interrogation listener", True,
+                    f"running (pid={pid_line[0]}) — UDP "
+                    f"{os.environ.get('INTERROGATION_PORT', 5556)}")
+    # Not up yet — watchdog fires slightly after boot_sequence.  Pass
+    # the step and let watchdog handle the spin-up.
+    return step("Interrogation listener", True,
+                "not yet running — watchdog will start it shortly")
 
 
 def step10_seed_suggestions():
