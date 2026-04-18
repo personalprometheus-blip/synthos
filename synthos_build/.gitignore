@@ -20,6 +20,8 @@ company.env
 
 # Logs
 logs/*.log
+logs/archive/
+logs/logic_audits/
 logs/crash_reports/
 src/logs/
 
@@ -30,3 +32,18 @@ data/suggestions.json
 .kill_switch
 .pending_approvals.json
 signals_backup.db
+.market_daemon.pid
+.market_daemon_heartbeat
+.wave_override
+# .known_good/ is intentionally tracked — it's the watchdog's
+# rollback snapshot and we want version history on it.
+
+# Ad-hoc patch snapshots — one-shot *.py.pre_*_bak / *.py.bak_* files
+# produced by /tmp patch scripts during early development. Not source.
+*_bak
+*.bak
+*.bak_*
+
+# Rolling automated backups (separate disaster-recovery artifacts —
+# not committed; migrated out-of-band).
+backups/
