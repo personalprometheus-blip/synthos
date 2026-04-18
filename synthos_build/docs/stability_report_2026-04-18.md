@@ -60,16 +60,21 @@ The morning grep caught the stale Apr-17 error line and flagged it as current. B
 
 ## 2. Fragility items found — status after PM fix session
 
-### 2.1 Alert delivery — updated diagnosis (NOT actually broken)
+### 2.1 Alert delivery — FIXED (boot race closed)
 
-My morning write-up said both paths were dead. After live-firing `send_alert()` and tracing, the story is simpler:
+Morning diagnosis said both paths were dead. Corrected diagnosis after live-firing:
 
-- **Path 1 (Scoop queue via POST `/api/enqueue`)** — **works.** The `.env` has `MONITOR_URL=http://10.0.0.10:5050` and `MONITOR_TOKEN` matching pi4b's `SECRET_TOKEN`. Manual test returned `200 OK` and `"Health alert queued for Scoop: VALIDATION_FAILURE P1"`.
-- **Path 2 (Resend direct)** — guard does fail because `USER_EMAIL=''` in the env file (actually empty, not just unset) and `ALERT_TO` is absent, so `ALERT_TO` resolves empty. Not a blocker because Path 1 succeeds first.
+- **Path 1 (Scoop queue via POST `/api/enqueue`)** — works. `.env` has `MONITOR_URL=http://10.0.0.10:5050` and `MONITOR_TOKEN` matching pi4b's `SECRET_TOKEN`. Returned `200 OK`.
+- **Path 2 (Resend direct)** — guard fails because `USER_EMAIL=''` and `ALERT_TO` is absent. Blank fallback. Not active today; would kick in only if Path 1 gave up.
 
-**Boot-time alert failure is a race, not a fragility.** Both pi5 and pi4b reboot at 04:00 Saturday per their crontabs. Pi5's health_check fires at ~04:01:19 while pi4b may still be coming up — the `POST /api/enqueue` hits a closed socket, Path 1 returns False, Path 2 fails guard (empty `ALERT_TO`), and the "Alert not delivered" log line is produced. Once pi4b is up (typically ~30–60s after the initial race), ongoing alerts work fine.
+**Boot-time race — addressed.** Both pi5 and pi4b reboot at 04:00 Sat; pi5's health_check fired at ~04:01:19 before pi4b was listening, Path 1 failed without retry, alert dropped. Two fixes landed this session (commit `b090c5f`):
 
-**Accepting this as known behavior.** Fixing properly requires either ordering the reboots so pi4b comes up first, adding retry/backoff in `_enqueue_alert`, or wiring a local-machine fallback (e.g. populating `USER_EMAIL` so Path 2 works). None are urgent — the race is narrow and operational alerts during regular-hours are working correctly.
+- **`_enqueue_alert` retries on transport failures** — up to 3 attempts with 10 s backoff. Only retries `ConnectionError` / `Timeout` (non-transient 4xx/5xx pass through). Worst-case latency ~30 s; comfortably covers pi4b's 30–45 s boot-to-listening window. Verified on pi5:
+  - Dead IP: retries 3×, falls through after 29.2 s ✓
+  - Pi4b up: succeeds 1st try in 0.08 s, no retry noise ✓
+- **`synthos-boot-sequence.service` uses `network-online.target`** — waits for DNS + actual reachability, not just link-up. Fixes the concurrent "Temporary failure in name resolution" for Alpaca at 04:01:19.
+
+Path 2 (Resend fallback with `USER_EMAIL=''` blank) isn't closed — if Path 1 gives up after 30 s of retries *and* Path 2 would guard-fail, the alert is still dropped. Low priority because Path 1's retry window makes that almost impossible in practice, and belt-and-suspenders is a separate feature ask.
 
 ### 2.2 `db_helpers` import — NOT dead code (graceful degradation)
 
@@ -114,9 +119,9 @@ False alarm this morning. `/var/log/journal` exists, `Storage=auto` is in effect
 
 ## 4. Remaining carryover — not urgent
 
-- **Full pi5 reboot test** — exercise boot chain end-to-end on an intentional reboot. Scheduled Saturday 04:00 will do this automatically next week.
+- **Full pi5 reboot test** — exercise boot chain end-to-end on an intentional reboot. Scheduled Saturday 04:00 will do this automatically next week, and is now the first real-world test of the retry + `network-online.target` fixes from §2.1.
 - **Stale `tool_agent.log` / `interface_agent.log` / `control_agent.log`** on pi4b — no longer written to after today's LOG_FILE rename; will naturally age out. Harmless.
-- **Boot-race alert loss** — documented in §2.1. Known behavior on Saturday 04:00 reboot when pi5+pi4b come up together. Fix requires either reboot ordering, retry/backoff, or populating `USER_EMAIL` for Path 2 fallback. Not fixing in this stabilization session — will revisit if we see a real incident lost to the race.
+- **Path 2 (Resend) fallback still not wired** — `USER_EMAIL=''` in pi5's `.env`. Not a fragility today (Path 1 retry covers the typical race); only matters if pi4b is permanently down AND we need the alert delivered by email anyway. Flag for belt-and-suspenders in a future session.
 
 ---
 
