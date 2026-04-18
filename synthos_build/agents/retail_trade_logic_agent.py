@@ -1549,12 +1549,28 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     except Exception as _e:
         log.debug(f"Screening lookup failed for {ticker}: {_e}")
 
-    # Per-agent stamp bonus — if the screener has specifically stamped this
-    # signal (meaning the ticker is in the screener's candidate universe
-    # *as of this signal's lifetime*), give a small extra nudge. This is
-    # separate from the sector_screening table lookup above, which reads
-    # whatever the most-recent screener run said about this ticker.
-    if signal.get('screener_evaluated_at'):
+    # Per-agent stamp bonus — the screener writes screener_score
+    # (0.0-1.0) to every in-flight signal:
+    #   - Top-N candidates get their actual momentum score
+    #   - Everyone else gets a sector-baseline derived from the sector
+    #     ETF's 5yr return
+    # We convert that score into a centered ±3% Gate 5 nudge so strong
+    # sectors/candidates get a boost and weak ones get a penalty, with
+    # a null-safe fallback to the legacy +0.02 boolean bonus if the
+    # column hasn't been populated yet (first run after migration).
+    scr_score = signal.get('screener_score')
+    if scr_score is not None:
+        try:
+            # (score - 0.5) × 0.06 →  range is roughly -0.03 .. +0.03
+            # given the baseline table and momentum score distribution
+            screener_stamp_adj = round((float(scr_score) - 0.5) * 0.06, 4)
+        except Exception:
+            screener_stamp_adj = 0.0
+        final_score = round(max(0.0, min(final_score + screener_stamp_adj, 1.0)), 4)
+    elif signal.get('screener_evaluated_at'):
+        # Legacy path — signals stamped before the screener_score
+        # column landed. Preserves old +0.02 boolean bonus so we don't
+        # silently drop Gate 5 output on the migration boundary.
         final_score = round(min(final_score + 0.02, 1.0), 4)
 
     passes = final_score >= C.MIN_CONFIDENCE_SCORE

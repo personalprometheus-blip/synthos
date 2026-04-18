@@ -784,6 +784,17 @@ class DB:
             "ALTER TABLE pending_approvals ADD COLUMN reevaluated_at TEXT",
             "ALTER TABLE pending_approvals ADD COLUMN cancelled_reason TEXT",
             "CREATE INDEX IF NOT EXISTS idx_approvals_queue_origin ON pending_approvals(queue_origin, status)",
+
+            # v3.9 — screener_score on signals. screener_evaluated_at
+            # previously carried a timestamp-only "this ticker was a top
+            # candidate" meaning, which stamped only 5-10 signals per
+            # cycle out of 40+ in-flight — 80% of validated signals had
+            # no sector-quality stamp. Adding a score column so every
+            # in-flight signal can be sector-scored (top candidates get
+            # their momentum score, remaining get a sector baseline)
+            # closes that gap and lets the trader lift the stamp from
+            # a duplicative boolean bonus to a proportional ranking input.
+            "ALTER TABLE signals ADD COLUMN screener_score REAL",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1289,29 +1300,125 @@ class DB:
             )
         return count
 
-    def stamp_signals_screener(self, tickers, cycle_id=None):
+    def stamp_signals_screener(self, tickers, cycle_id=None, score=None):
         """Sector screener marks all in-flight signals for the given tickers as
-        screener-evaluated. Records a STAMPED_BATCH decision log row.
-        Returns count stamped."""
+        screener-evaluated.
+
+        Two calling conventions supported:
+          - list of tickers + optional single `score` (0.0-1.0) — stamps
+            every matching signal with the same timestamp and score.
+            Used for a sector's top-N candidate pool where all share
+            the same momentum_score bucket, or for a "set to baseline"
+            bulk write.
+          - dict of {ticker: score} — per-ticker scoring (used when
+            each candidate has its own momentum score). Iterates and
+            calls the list-form internally so decision-log rows stay
+            one-per-ticker-set.
+
+        Returns count of signal rows stamped.
+        """
+        # Dict form → delegate per-score
+        if isinstance(tickers, dict):
+            total = 0
+            for tkr, sc in tickers.items():
+                total += self.stamp_signals_screener(
+                    [tkr], cycle_id=cycle_id, score=sc
+                )
+            return total
+
         if not tickers:
             return 0
         upper = [t.upper() for t in tickers]
         with self.conn() as c:
             placeholders = ','.join('?' * len(upper))
-            result = c.execute(
-                f"UPDATE signals SET screener_evaluated_at=? "
-                f"WHERE ticker IN ({placeholders}) AND status IN {self._STAMPABLE_STATUSES}",
-                (self.now(), *upper)
-            )
+            if score is not None:
+                result = c.execute(
+                    f"UPDATE signals SET screener_evaluated_at=?, screener_score=? "
+                    f"WHERE ticker IN ({placeholders}) AND status IN {self._STAMPABLE_STATUSES}",
+                    (self.now(), float(score), *upper)
+                )
+            else:
+                # Back-compat: old callers pass just a list. Stamp the
+                # timestamp without a score — trader's Gate 5 treats a
+                # null score the same as "legacy stamp" (boolean bonus).
+                result = c.execute(
+                    f"UPDATE signals SET screener_evaluated_at=? "
+                    f"WHERE ticker IN ({placeholders}) AND status IN {self._STAMPABLE_STATUSES}",
+                    (self.now(), *upper)
+                )
             count = result.rowcount
         if count > 0:
+            summary = ','.join(upper[:10]) + (f"+{len(upper)-10}" if len(upper) > 10 else "")
+            reason  = f"candidates: {summary}"
+            if score is not None:
+                reason += f" (score={score:.2f})"
             self.log_signal_decision(
                 agent='screener', action='STAMPED_BATCH',
-                value=str(count), reason=f"candidates: {','.join(upper[:10])}"
-                                         + (f"+{len(upper)-10}" if len(upper) > 10 else ""),
-                cycle_id=cycle_id,
+                value=str(count), reason=reason, cycle_id=cycle_id,
             )
         return count
+
+    def stamp_signals_screener_baseline(self, sector_scores, cycle_id=None):
+        """Blanket-stamp every in-flight signal that doesn't already have
+        a screener_score with a per-sector baseline.
+
+        sector_scores: dict {sector_name: baseline_score}. Each signal's
+        ticker is resolved to its sector (via the signals.sector column
+        written at news-agent classification time), then gets the
+        corresponding baseline. Signals whose sector isn't in the map
+        default to 0.5 (neutral).
+
+        Intended to run AFTER all sectors' top-N candidates have been
+        stamped — the WHERE clause skips any row with screener_score
+        already set so top-candidate momentum scores aren't overwritten
+        by the blanket baseline. Closes the "most signals have no
+        screener stamp" sparsity gap without flattening per-ticker
+        ranking info.
+
+        Returns count of signal rows stamped.
+        """
+        if not sector_scores:
+            return 0
+        total_stamped = 0
+        now = self.now()
+
+        # Per-sector UPDATE: matches signals whose sector column equals
+        # the sector name AND screener_score IS NULL (don't overwrite
+        # top-candidate scores written earlier in the same cycle).
+        with self.conn() as c:
+            for sector, baseline in sector_scores.items():
+                result = c.execute(
+                    f"UPDATE signals "
+                    f"SET screener_evaluated_at=?, screener_score=? "
+                    f"WHERE sector=? "
+                    f"AND status IN {self._STAMPABLE_STATUSES} "
+                    f"AND screener_score IS NULL",
+                    (now, float(baseline), sector)
+                )
+                total_stamped += result.rowcount
+
+            # Remaining: signals in-flight but with no sector match at
+            # all (sector='Unknown' or missing). Give them the neutral
+            # 0.5 baseline so they're still flagged as evaluated.
+            result = c.execute(
+                f"UPDATE signals "
+                f"SET screener_evaluated_at=?, screener_score=? "
+                f"WHERE status IN {self._STAMPABLE_STATUSES} "
+                f"AND screener_score IS NULL",
+                (now, 0.5)
+            )
+            unknown_stamped = result.rowcount
+            total_stamped += unknown_stamped
+
+        if total_stamped > 0:
+            self.log_signal_decision(
+                agent='screener', action='STAMPED_BASELINE',
+                value=str(total_stamped),
+                reason=(f"blanket baseline for {len(sector_scores)} sector(s), "
+                        f"{unknown_stamped} unknown-sector fallbacks"),
+                cycle_id=cycle_id,
+            )
+        return total_stamped
 
     def stamp_signals_macro(self, regime_label, cycle_id=None):
         """Macro regime agent snapshots the current market regime onto all

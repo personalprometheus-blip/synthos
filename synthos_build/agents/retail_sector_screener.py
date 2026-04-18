@@ -489,6 +489,42 @@ def run_all_sectors():
         log.info(f"  {sector:24s} 5yr={ret_str:>8s}  top={top_str}")
     log.info("=" * 60)
 
+    # ── BLANKET BASELINE STAMP ────────────────────────────────────────
+    # The per-sector stamp above only covers tickers that appear in a
+    # sector's top-N momentum candidates. Most news signals land on
+    # tickers that are NOT in any top-N (80%+ sparse). Without a
+    # sector-baseline fallback the screener stamp is effectively
+    # missing from most validated signals — a cliff if the trader ever
+    # graduates screener_evaluated_at to a promotion requirement.
+    #
+    # Baseline formula: map each sector's ETF 5yr return to a 0-1
+    # score. Strong sectors (ETF > +50%) score 0.7; negative sectors
+    # score 0.3; around-flat sectors score 0.5. Gives downstream a
+    # usable per-sector signal without implying we actually evaluated
+    # each ticker individually.
+    def _etf_return_to_baseline(ret):
+        if ret is None:
+            return 0.5
+        if ret >=  0.80: return 0.75
+        if ret >=  0.40: return 0.65
+        if ret >=  0.15: return 0.55
+        if ret >= -0.10: return 0.50
+        if ret >= -0.30: return 0.40
+        return 0.30
+
+    sector_baselines = {
+        sector: _etf_return_to_baseline(ret_5y)
+        for sector, ret_5y, _top in summary
+    }
+    if sector_baselines:
+        try:
+            n = _master_db().stamp_signals_screener_baseline(sector_baselines)
+            if n:
+                log.info(f"Baseline stamp: {n} in-flight signal(s) stamped with "
+                         f"sector-baseline scores (across {len(sector_baselines)} sectors)")
+        except Exception as e:
+            log.warning(f"Baseline screener stamp failed (non-fatal): {e}")
+
     # Post a heartbeat so the fault detector's GATE1_LIVENESS check can see
     # us. The screener runs once per day, so the EXPECTED_AGENTS entry has a
     # 30-hour staleness window — one heartbeat per pre-market run is enough.
@@ -553,13 +589,17 @@ def run_single(sector, run_id=None):
     db = _master_db()
     db.write_screening_run(run_id, sector, etf, etf_5yr_return, scored_candidates)
 
-    # Stamp any QUEUED signals for these candidate tickers. Trader reads
-    # screener_evaluated_at as a "this ticker is in the screener universe"
-    # signal and gives it a small Gate 5 scoring bonus.
+    # Stamp any in-flight signals for these candidate tickers with
+    # their individual momentum score. Trader reads screener_score
+    # (0.0-1.0) as a weighted Gate 5 input rather than the old
+    # boolean bonus, so the actual momentum number matters here.
+    ticker_scores = {cd['ticker']: cd['momentum_score']
+                     for cd in scored_candidates}
     try:
-        stamped = db.stamp_signals_screener(tickers)
+        stamped = db.stamp_signals_screener(ticker_scores)
         if stamped:
-            log.info(f"  {sector}: stamped {stamped} QUEUED signal(s) with screener mark")
+            log.info(f"  {sector}: stamped {stamped} in-flight signal(s) "
+                     f"with per-ticker momentum scores")
     except Exception as _e:
         log.debug(f"screener stamp failed: {_e}")
 
