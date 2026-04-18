@@ -5277,6 +5277,11 @@ var _apIntroStart  = null;
 var _apIntroTotal  = 2400;   // ms: total traversal time
 (function _apInitIntro() {
   try {
+    // URL bypass for testing: ?replay=1 forces intro regardless of flag
+    var force = /[?&]replay=1/.test(window.location.search || '');
+    if (force) {
+      sessionStorage.removeItem('synthos_intro_played');
+    }
     if (sessionStorage.getItem('synthos_intro_played')) return;
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       sessionStorage.setItem('synthos_intro_played', '1');
@@ -5284,6 +5289,7 @@ var _apIntroTotal  = 2400;   // ms: total traversal time
     }
     _apIntroActive = true;
     sessionStorage.setItem('synthos_intro_played', '1');
+    if (window.console && console.log) console.log('[synthos] intro armed');
   } catch (e) {}
 })();
 
@@ -5318,32 +5324,36 @@ function _apDrawIntroFrame(ctx, w, h, elapsed) {
   var pe = 0.5 * (1 - Math.cos(Math.PI * p));
 
   ctx.save();
-  var fontSize = Math.floor(h * 0.62);
-  ctx.font = '400 ' + fontSize + 'px "Brush Script MT", "Savoye LET", "Lucida Handwriting", "Segoe Script", cursive';
+  var fontSize = Math.floor(h * 0.72);
+  // Italic serif as fallback — always renders as "cursive-ish" even if
+  // named cursive fonts aren't installed.
+  ctx.font = 'italic 600 ' + fontSize + 'px "Brush Script MT", "Apple Chancery", "Savoye LET", "Lucida Handwriting", "Segoe Script", cursive, serif';
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   var textW = ctx.measureText('Synthos').width;
-  var travel = w + textW;                       // left-offscreen → right-offscreen
+  if (!textW || textW < 20) textW = w * 0.55; // safety fallback
+  var travel = w + textW;
   var textX = -textW + pe * travel;
   var textY = h / 2 + 1;
 
-  // Alpha peaks when word is centered, fades near edges
-  var edgeDist = Math.abs(pe - 0.5) * 2;        // 0 center, 1 at either edge
-  var alpha = Math.max(0, 1 - Math.pow(edgeDist, 2.5));
+  // Alpha peaks when word is centered, gentler edge fade so it's visible longer
+  var edgeDist = Math.abs(pe - 0.5) * 2;
+  var alpha = Math.max(0, 1 - Math.pow(edgeDist, 3));
 
-  // Waves ramp in as the word travels. Slow start so the word reads alone
-  // at first, then builds so the handoff feels continuous.
+  // Waves ramp in behind. Slow start, full by end.
   var waveMult  = Math.pow(pe, 1.6);
   var layers    = 1 + Math.floor(waveMult * 4);
   _apDrawIntroWave(ctx, w, h, waveMult, layers, waveMult);
 
-  // Draw the cursive word on top
-  ctx.lineWidth = 2;
-  ctx.shadowBlur = 16;
-  ctx.shadowColor = 'rgba(0,245,212,' + (0.8 * alpha) + ')';
-  ctx.strokeStyle = 'rgba(0,245,212,' + (0.92 * alpha) + ')';
-  ctx.strokeText('Synthos', textX, textY);
+  // Fill + stroke for a solid, readable cursive rendering regardless of font
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = 'rgba(0,245,212,' + (0.85 * alpha) + ')';
+  ctx.fillStyle   = 'rgba(0,245,212,' + (0.92 * alpha) + ')';
+  ctx.fillText('Synthos', textX, textY);
   ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(220,250,255,' + (0.85 * alpha) + ')';
+  ctx.strokeText('Synthos', textX, textY);
   ctx.restore();
 }
 
