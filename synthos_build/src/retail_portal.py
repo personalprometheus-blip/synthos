@@ -8762,8 +8762,11 @@ function eaShowTosModal(version) {
   if (!overlay || !body || !btn) return;
   if (label && version) label.textContent = 'v' + version;
   // TOS copy body is populated by the server-side render_template_string
-  // via the {{ ea_tos_html|safe }} placeholder further down — so it's
+  // call (rendered directly into #ea-tos-body at request time) so it's
   // already in the DOM.  Nothing to do here beyond showing the overlay.
+  // NOTE: do NOT mention the Jinja placeholder literally in any JS
+  // comment — Jinja substitutes it even inside // comments, which
+  // leaves stray HTML on the next line and breaks the parser.
   overlay.style.display = 'flex';
   // Enable Accept only when the user has scrolled to the bottom,
   // matching the TOS §13 requirement for an affirmative acknowledgment.
