@@ -251,30 +251,194 @@ def _alpaca_headers():
     }
 
 
+# Circuit breaker on primary bar source (Alpaca). After this many
+# consecutive failures the screener gives up on Alpaca for the rest
+# of the run and routes every subsequent ticker through the Yahoo
+# fallback. Keeps a rate-limit incident or Alpaca outage from
+# chewing 70+ × timeout seconds before we notice.
+_ALPACA_CIRCUIT_BREAKER_N = 3
+_alpaca_consecutive_failures = 0
+_alpaca_circuit_open         = False
+
+# Retry / timeout matching the pattern in sentiment + trader.
+# (connect_timeout=5, read_timeout=20) — fast-fail on DNS/SYN.
+_FETCH_MAX_RETRIES = 2
+_FETCH_TIMEOUT     = (5, 20)
+
+
 def fetch_bars(ticker, days):
-    """Fetch daily OHLCV bars for ticker going back `days` calendar days.
-    Timestamps passed to Alpaca are UTC — the 'Z' suffix means UTC.
-    datetime.now(ET) labeled as Z was a 4-5 hour silent offset."""
+    """Fetch daily OHLCV bars for `ticker` going back `days` calendar days.
+
+    Primary:  Alpaca Data API (IEX feed, authenticated).
+    Fallback: Yahoo Finance chart API (public, unauthenticated).
+
+    Both paths return the Alpaca bar shape: list of dicts with keys
+    t/o/h/l/c/v. Yahoo's structure is flattened to match. Downstream
+    callers (calc_return, calc_momentum_score) don't know which source
+    provided the data.
+    """
+    global _alpaca_consecutive_failures, _alpaca_circuit_open
+
+    bars = []
+    if not _alpaca_circuit_open:
+        bars = _fetch_bars_alpaca(ticker, days)
+        if bars:
+            _alpaca_consecutive_failures = 0
+        else:
+            _alpaca_consecutive_failures += 1
+            if _alpaca_consecutive_failures >= _ALPACA_CIRCUIT_BREAKER_N:
+                _alpaca_circuit_open = True
+                log.warning(
+                    f"[CIRCUIT] Alpaca bars breaker opened after "
+                    f"{_alpaca_consecutive_failures} consecutive empties — "
+                    f"remaining fetches will use Yahoo fallback"
+                )
+
+    if not bars:
+        # Either primary failed or circuit is open. Try the free Yahoo
+        # chart API — same data, stable-ish shape, no auth required.
+        bars = _fetch_bars_yahoo(ticker, days)
+        if bars:
+            log.info(f"fetch_bars({ticker}): Yahoo fallback filled in {len(bars)} bars")
+
+    return bars
+
+
+def _fetch_bars_alpaca(ticker, days):
+    """Primary Alpaca path, with retry + tuple timeout. Returns [] on
+    permanent failure (so the caller can try Yahoo)."""
     now_utc = datetime.utcnow()
     end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
     start = (now_utc - timedelta(days=days + 10)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    try:
-        r = requests.get(
-            f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
-            params={"timeframe": "1Day", "start": start, "end": end,
-                    "limit": days + 20, "feed": "iex"},
-            headers=_alpaca_headers(), timeout=20,
-        )
+    url   = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"
+    params = {"timeframe": "1Day", "start": start, "end": end,
+              "limit": days + 20, "feed": "iex"}
+    status = None
+    for attempt in range(_FETCH_MAX_RETRIES):
         try:
-            _master_db().log_api_call('sector_screener', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=r.status_code)
-        except Exception:
-            pass
-        if r.status_code == 200:
-            return r.json().get("bars", [])
-        log.warning(f"Alpaca bars {ticker}: HTTP {r.status_code}")
-    except Exception as e:
-        log.warning(f"fetch_bars({ticker}): {e}")
+            r = requests.get(url, params=params,
+                             headers=_alpaca_headers(), timeout=_FETCH_TIMEOUT)
+            status = r.status_code
+            if r.status_code == 200:
+                try:
+                    _master_db().log_api_call(
+                        'sector_screener',
+                        f'/v2/stocks/{ticker}/bars',
+                        'GET', 'alpaca_data', status_code=status)
+                except Exception as _e:
+                    log.debug(f"api_call log failed for alpaca {ticker}: {_e}")
+                return r.json().get("bars", []) or []
+            # 429 rate limit / 5xx → retry with backoff
+            if r.status_code in (429,) or 500 <= r.status_code < 600:
+                if attempt < _FETCH_MAX_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            break
+        except Exception as e:
+            log.debug(f"_fetch_bars_alpaca({ticker}) attempt {attempt + 1}: {e}")
+            if attempt < _FETCH_MAX_RETRIES - 1:
+                time.sleep(2 ** attempt)
+                continue
+    log.warning(f"Alpaca bars {ticker}: exhausted retries (last status={status})")
+    try:
+        _master_db().log_api_call(
+            'sector_screener', f'/v2/stocks/{ticker}/bars',
+            'GET', 'alpaca_data', status_code=status)
+    except Exception:
+        pass
     return []
+
+
+# Yahoo range keyword mapping — API accepts symbolic ranges rather
+# than absolute dates. Picking the smallest range that covers `days`
+# keeps payload size sane.
+def _yahoo_range_for_days(days):
+    if days <=   7: return "5d"
+    if days <=  32: return "1mo"
+    if days <=  95: return "3mo"
+    if days <= 190: return "6mo"
+    if days <= 400: return "1y"
+    if days <= 760: return "2y"
+    if days <=1830: return "5y"
+    return "max"
+
+
+def _fetch_bars_yahoo(ticker, days):
+    """Yahoo Finance chart API fallback.
+
+    Public endpoint, no auth required; needs a browser-ish User-Agent
+    or Yahoo will 401 us. Returns [] on any failure. Response shape
+    is flattened into the Alpaca bar dict format so downstream
+    consumers don't care which source won.
+    """
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+    params = {"interval": "1d", "range": _yahoo_range_for_days(days)}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
+    status = None
+    for attempt in range(_FETCH_MAX_RETRIES):
+        try:
+            r = requests.get(url, params=params, headers=headers,
+                             timeout=_FETCH_TIMEOUT)
+            status = r.status_code
+            if r.status_code == 200:
+                break
+            if r.status_code in (429,) or 500 <= r.status_code < 600:
+                if attempt < _FETCH_MAX_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            return []
+        except Exception as e:
+            log.debug(f"_fetch_bars_yahoo({ticker}) attempt {attempt + 1}: {e}")
+            if attempt < _FETCH_MAX_RETRIES - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return []
+
+    try:
+        _master_db().log_api_call(
+            'sector_screener', f'/v8/finance/chart/{ticker}',
+            'GET', 'yahoo', status_code=status)
+    except Exception:
+        pass
+
+    try:
+        data = r.json()
+        results = data.get("chart", {}).get("result") or []
+        if not results:
+            return []
+        first = results[0]
+        timestamps = first.get("timestamp") or []
+        quote = (first.get("indicators", {}).get("quote") or [{}])[0]
+        opens  = quote.get("open")   or []
+        highs  = quote.get("high")   or []
+        lows   = quote.get("low")    or []
+        closes = quote.get("close")  or []
+        vols   = quote.get("volume") or []
+
+        bars = []
+        for i, ts in enumerate(timestamps):
+            # Yahoo sometimes returns None for individual fields on
+            # partial-session bars (e.g. mid-day volume). Skip rather
+            # than poison downstream math.
+            try:
+                c = closes[i]
+                if c is None:
+                    continue
+                bar_t = datetime.utcfromtimestamp(int(ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                bars.append({
+                    "t": bar_t,
+                    "o": opens[i]  if i < len(opens)  and opens[i]  is not None else c,
+                    "h": highs[i]  if i < len(highs)  and highs[i]  is not None else c,
+                    "l": lows[i]   if i < len(lows)   and lows[i]   is not None else c,
+                    "c": c,
+                    "v": vols[i]   if i < len(vols)   and vols[i]   is not None else 0,
+                })
+            except (IndexError, TypeError):
+                continue
+        return bars
+    except Exception as e:
+        log.warning(f"_fetch_bars_yahoo({ticker}): parse error {e}")
+        return []
 
 
 def calc_return(bars):
