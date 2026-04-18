@@ -5131,44 +5131,42 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       min-height: 22px;
     }
     .ap-persona {
-      color: var(--teal);
+      color: var(--text);
       font-weight: 700;
       letter-spacing: 0.05em;
-      text-shadow: 0 0 8px rgba(0,245,212,0.28);
     }
-    .ap-action-prefix, .ap-sep { color: var(--muted); }
-    .ap-action { color: var(--text); }
+    .ap-action-prefix, .ap-sep, .ap-action { color: var(--text); }
     .ap-aside {
-      color: var(--pink);
+      color: var(--teal);
       font-style: italic;
-      text-shadow: 0 0 6px rgba(255,75,110,0.45);
+      text-shadow: 0 0 6px rgba(0,245,212,0.45);
     }
-    /* "Time-traveled-in" chromatic-aberration warp — plays once per text change */
+    /* "Time-traveled-in" chromatic-aberration warp — slower, softer, readable */
     @keyframes ap-warp-in {
       0% {
         opacity: 0;
         text-shadow:
-          -6px 0 0 rgba(0,245,212,0.9),
-           6px 0 0 rgba(255,75,110,0.9);
-        filter: blur(0.4px);
+          -4px 0 0 rgba(0,245,212,0.85),
+           4px 0 0 rgba(255,75,110,0.7);
+        filter: blur(0.5px);
       }
-      45% {
-        opacity: 1;
+      40% {
+        opacity: 0.9;
         text-shadow:
-          -2px 0 0 rgba(0,245,212,0.6),
-           2px 0 0 rgba(255,75,110,0.6);
+          -2px 0 0 rgba(0,245,212,0.5),
+           2px 0 0 rgba(255,75,110,0.4);
         filter: blur(0);
       }
-      70% {
+      75% {
         opacity: 1;
-        text-shadow: 0 0 10px rgba(255,75,110,0.65);
+        text-shadow: 0 0 10px rgba(0,245,212,0.6);
       }
       100% {
         opacity: 1;
-        text-shadow: 0 0 6px rgba(255,75,110,0.45);
+        text-shadow: 0 0 6px rgba(0,245,212,0.45);
       }
     }
-    .ap-aside.ap-warp-in { animation: ap-warp-in 300ms ease-out; }
+    .ap-aside.ap-warp-in { animation: ap-warp-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1); }
     @media (prefers-reduced-motion: reduce) {
       .ap-aside.ap-warp-in { animation: none; }
     }
@@ -5178,6 +5176,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div class="dash-panel-title">Agent Status</div>
       <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">STANDBY</div>
     </div>
+    <!-- LAST ACTIVITY (top center — compact event log) -->
+    <div style="padding:8px 14px 4px;border-bottom:1px solid var(--border)">
+      <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6;text-align:center"></div>
+    </div>
     <!-- SINE WAVE CANVAS -->
     <div style="position:relative;height:100px;overflow:hidden">
       <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
@@ -5186,8 +5188,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="ap-status-strip">
       <span class="ap-persona" id="ap-persona">Synthos</span><span class="ap-action-prefix"> is </span><span class="ap-action" id="ap-action">on watch</span><span class="ap-sep"> · </span><span class="ap-aside" id="ap-aside">the tape is quiet</span>
     </div>
-    <!-- STATUS DETAILS -->
-    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+    <!-- STATUS DETAILS (bottom) -->
+    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;border-top:1px solid var(--border)">
       <div style="text-align:center">
         <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
         <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
@@ -5200,10 +5202,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
         <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
       </div>
-    </div>
-    <!-- LAST ACTIVITY -->
-    <div style="padding:0 14px 12px">
-      <div id="ap-events" style="font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.6"></div>
     </div>
   </div>
 
