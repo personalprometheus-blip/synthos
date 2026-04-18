@@ -7,8 +7,13 @@
 # start only after boot_sequence has exercised the environment.
 
 Description=Synthos Retail Boot Sequence (env + DB integrity + health checks)
-After=network.target
-Wants=network.target
+# network-online.target (not plain network.target) so we wait for DNS +
+# actual reachability before running any step that talks to the outside
+# world.  Morning boot logs showed retail_health_check.py failing
+# Alpaca lookups with "Temporary failure in name resolution" at T+60s
+# after kernel boot — network.target had fired but DNS wasn't ready.
+After=network-online.target
+Wants=network-online.target
 Before=synthos-portal.service synthos-watchdog.service
 
 [Service]

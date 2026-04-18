@@ -54,6 +54,17 @@ def _enqueue_alert(subject: str, message: str, priority: int,
     """
     POST a health alert to the company Pi Scoop queue via /api/enqueue.
     Returns True if enqueue succeeded.
+
+    Retries transient connection failures with 10s backoff (up to 3 tries,
+    ~30s total patience).  This is specifically to cover the Saturday
+    04:00 boot race: pi5 and pi4b both reboot at the same minute, and
+    pi5's boot_sequence fires health_check before pi4b is listening on
+    5050.  Without retries the alert was silently dropped.
+
+    Retries are ONLY applied to transport-level failures (connection
+    refused, timeout, DNS).  4xx/5xx responses are passed through without
+    retry — those indicate auth/payload/server-logic issues that more
+    retries won't fix.
     """
     monitor_url   = os.environ.get('MONITOR_URL', '').rstrip('/')
     monitor_token = os.environ.get('MONITOR_TOKEN', '')
@@ -74,23 +85,58 @@ def _enqueue_alert(subject: str, message: str, priority: int,
         "payload":      {"pi_id": pi_id, "message": message[:200]},
     }
 
-    try:
-        import requests as _req
-        r = _req.post(
-            f"{monitor_url}/api/enqueue",
-            json=payload,
-            headers={"X-Token": monitor_token, "Content-Type": "application/json"},
-            timeout=5,
-        )
-        if r.status_code == 200:
-            log.info(f"Health alert queued for Scoop: {event_type} P{priority}")
-            return True
-        else:
-            log.warning(f"Enqueue returned {r.status_code} — falling back to direct send")
+    import requests as _req
+    endpoint = f"{monitor_url}/api/enqueue"
+    headers  = {"X-Token": monitor_token, "Content-Type": "application/json"}
+
+    # Up to 3 attempts with 10s backoff — covers ~30s of pi4b unavailability.
+    # Total worst-case latency to "give up and fall through to direct
+    # send": ~35 seconds (3 tries × 5s timeout + 2 × 10s waits).
+    max_attempts  = 3
+    backoff_secs  = 10
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = _req.post(endpoint, json=payload, headers=headers, timeout=5)
+            # Non-200 response: do NOT retry — it's a server-side
+            # rejection (bad auth, malformed payload, etc.) that further
+            # retries won't fix.
+            if r.status_code == 200:
+                if attempt > 1:
+                    log.info(
+                        f"Health alert queued for Scoop: {event_type} "
+                        f"P{priority} (succeeded on attempt {attempt}/{max_attempts})"
+                    )
+                else:
+                    log.info(f"Health alert queued for Scoop: {event_type} P{priority}")
+                return True
+            log.warning(
+                f"Enqueue returned HTTP {r.status_code} on attempt "
+                f"{attempt}/{max_attempts} — not retrying (non-transient)"
+            )
             return False
-    except Exception as e:
-        log.warning(f"Enqueue failed ({e}) — falling back to direct send")
-        return False
+        except (_req.exceptions.ConnectionError,
+                _req.exceptions.Timeout) as e:
+            if attempt < max_attempts:
+                log.warning(
+                    f"Enqueue attempt {attempt}/{max_attempts} failed "
+                    f"({type(e).__name__}: {str(e)[:80]}) — retrying in "
+                    f"{backoff_secs}s"
+                )
+                time.sleep(backoff_secs)
+                continue
+            log.warning(
+                f"Enqueue failed after {max_attempts} attempts "
+                f"({type(e).__name__}) — falling back to direct send"
+            )
+            return False
+        except Exception as e:
+            # Non-network unexpected error — fail fast.
+            log.warning(f"Enqueue failed with unexpected error ({e}) — "
+                        f"falling back to direct send")
+            return False
+
+    return False
 
 
 def send_alert(message: str) -> bool:
