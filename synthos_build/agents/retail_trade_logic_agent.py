@@ -670,6 +670,77 @@ def interrogation_to_score(status: str) -> float:
             "CHALLENGED": 0.20, "REJECTED": 0.0}.get(status or "UNVALIDATED", 0.50)
 
 
+# ── MARKET HOURS + OVERNIGHT QUEUE ────────────────────────────────────────────
+# The overnight-queue gate below sits at the AlpacaClient boundary so every
+# market-order submit path goes through one check. Orders submitted outside
+# market hours land in pending_approvals with queue_origin='overnight' and
+# get re-evaluated by run_pre_open_reeval() (in retail_market_daemon.py) on
+# the next market-open cycle. See docs/overnight_queue_plan.md.
+
+def is_market_hours_utc_now() -> bool:
+    """True during US regular session hours (13:30-20:00 UTC, weekdays).
+
+    Daylight-saving drift: US markets shift between EST/EDT but the UTC
+    window is fixed (13:30-20:00 / 14:30-21:00 depending on DST). We
+    use the tighter window here (EDT) — during EST months we queue
+    orders from 13:30-14:30 UTC that would actually be market-valid,
+    which is a mild false-positive. Fix when DST handling gets a proper
+    source of truth (exchange holiday calendar TODO).
+    """
+    now = datetime.now(timezone.utc)
+    if now.weekday() >= 5:
+        return False
+    open_time  = now.replace(hour=13, minute=30, second=0, microsecond=0)
+    close_time = now.replace(hour=20, minute=0,  second=0, microsecond=0)
+    return open_time <= now < close_time
+
+
+def _queue_overnight_order(ticker: str, qty, side: str,
+                           order_type: str = "market",
+                           notional: float = None,
+                           close_position: bool = False) -> None:
+    """Write a QUEUED_FOR_OPEN row to the shared pending_approvals table
+    in place of submitting an order to Alpaca. Returns None so callers
+    that check `if order:` treat this as "no order placed" and skip
+    the downstream DB position-open/close work — which is correct: the
+    actual fill happens at market open after pre-open re-evaluation.
+
+    The signal_id has a deterministic-ish shape
+    (`overnight_<side>_<ticker>_<ts>_<rand6>`) so logs can be grepped
+    and duplicates within the same minute don't collide."""
+    import uuid as _uuid
+    ts  = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')
+    sid = f"overnight_{side}_{ticker}_{ts}_{_uuid.uuid4().hex[:6]}"
+    reason_bits = [f"overnight queue: {side} {ticker}"]
+    if close_position:
+        reason_bits.append("close_position=True")
+    elif notional is not None:
+        reason_bits.append(f"notional=${notional:.2f}")
+    elif qty is not None:
+        reason_bits.append(f"qty={qty}")
+    reason_bits.append(f"order_type={order_type}")
+    reasoning = " | ".join(reason_bits)
+    try:
+        # Write to the SHARED (owner) DB so the daemon's pre-open
+        # re-evaluation sees every customer's queued orders in one pass.
+        # Per-customer details are preserved via the signal_id prefix and
+        # the customer_id column on future queries (TODO: add customer_id
+        # column when pending_approvals becomes multi-tenant; today the
+        # owner DB is the single source).
+        _shared_db().queue_approval(
+            signal_id=sid, ticker=ticker, shares=qty,
+            reasoning=reasoning, session="overnight",
+            queue_origin="overnight", status="QUEUED_FOR_OPEN",
+        )
+        log.info(f"[OVERNIGHT] Queued {side} {ticker} — id={sid} ({reasoning})")
+    except Exception as e:
+        # Queue write failure is serious — the alternative is that the
+        # order silently vanishes. Log at ERROR so auditor / fault
+        # detector sees it.
+        log.error(f"[OVERNIGHT] Failed to queue {side} {ticker}: {e}")
+    return None
+
+
 # ── RUNTIME WATCHDOG ──────────────────────────────────────────────────────────
 # Two jobs:
 #   1. Track the current phase ("reconciliation", "gate_10_position_review",
@@ -1000,6 +1071,23 @@ class AlpacaClient:
 
     def submit_order(self, ticker, qty, side, order_type="market",
                      trail_price=None, trail_percent=None):
+        # ── OVERNIGHT QUEUE GATE ─────────────────────────────────────
+        # Market/notional orders submitted outside market hours sit in
+        # Alpaca as `new` and fill at the next open anyway — zero
+        # information/timing advantage and they de-sync DB state when
+        # the fill price differs from what we assumed. Instead, queue
+        # the decision for pre-open re-evaluation.
+        #
+        # Gate applies only to unconditional market orders. Trailing
+        # stops and limit orders stay on Alpaca across sessions and
+        # trigger at their own condition — submitting those off-hours
+        # is intentional and correct.
+        if (order_type == "market"
+                and not is_market_hours_utc_now()):
+            return _queue_overnight_order(
+                ticker=ticker, qty=qty, side=side, order_type=order_type,
+            )
+
         if TRADING_MODE == "PAPER":
             log.info(f"[PAPER] Would {side} {qty} shares of {ticker}")
         payload = {
@@ -1044,6 +1132,15 @@ class AlpacaClient:
             return None
 
     def _submit_notional(self, ticker, notional, side):
+        # Same overnight-queue gate as submit_order — notional orders are
+        # market orders under the hood and carry the same fill-at-open
+        # drift risk if submitted off-hours.
+        if not is_market_hours_utc_now():
+            return _queue_overnight_order(
+                ticker=ticker, qty=None, side=side,
+                order_type="market", notional=notional,
+            )
+
         if TRADING_MODE == "PAPER":
             log.info(f"[PAPER] Would {side} ${notional:.2f} notional of {ticker}")
         payload = {
@@ -1066,6 +1163,14 @@ class AlpacaClient:
             return []
 
     def close_position(self, ticker):
+        # close_position is a market-close via Alpaca's position endpoint.
+        # Same off-hours drift concern as submit_order market — queue
+        # instead of submitting so the fill price matches real execution.
+        if not is_market_hours_utc_now():
+            return _queue_overnight_order(
+                ticker=ticker, qty=None, side="sell",
+                order_type="market", close_position=True,
+            )
         return self._request("delete", f"/v2/positions/{ticker}")
 
 

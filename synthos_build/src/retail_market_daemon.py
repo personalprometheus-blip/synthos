@@ -84,6 +84,11 @@ MARKET_OPEN_MIN = 30
 MARKET_CLOSE_HOUR = 16
 MARKET_CLOSE_MIN = 0
 ENRICHMENT_INTERVAL_MIN = 30    # run enrichment (screener+sentiment+news) then trade
+# Pre-open re-evaluation: an overnight-queued decision older than this
+# gets CANCELLED_PROTECTIVE rather than executed. 18h covers a Friday-
+# close → Monday-open window comfortably; anything older is almost
+# certainly stale intent that the user would want re-examined.
+PRE_OPEN_REEVAL_MAX_AGE_HOURS = 18
 APPROVAL_CHECK_TIMES    = [(9, 30), (12, 0), (15, 30)]  # ET times to nudge managed-mode customers
 RECON_INTERVAL_MIN      = 10    # lightweight reconciliation + exit checks between enrichments
 PRICE_POLL_INTERVAL_SEC = 60    # price poller between major cycles
@@ -696,6 +701,95 @@ def promote_validated_signals():
         return 0
 
 
+def run_pre_open_reeval():
+    """Walk pending_approvals rows that were queued overnight
+    (queue_origin='overnight') and decide whether each one still makes
+    sense now that the market is about to open.
+
+    Runs as the FIRST step of the market-open pipeline — before the
+    normal enrichment cycle kicks off — so any orders we approve land
+    in the APPROVED pool that the existing managed-mode executor picks
+    up on the next trader dispatch.
+
+    Decision rules (v1, intentionally conservative):
+      - Queued row older than PRE_OPEN_REEVAL_MAX_AGE_HOURS → CANCELLED
+        ("too stale — original gate state no longer representative")
+      - Ticker that has already been closed/traded in the meantime →
+        CANCELLED ("state changed since queue time")
+      - Otherwise → APPROVED (ready for executor)
+    Later versions can re-run gate4/5/6 for BUYs and gate10 for SELLs
+    for a stricter check; v1 establishes the pipeline + cancel path
+    with a small, explainable rule set.
+    """
+    from retail_database import get_customer_db
+    if not OWNER_CUSTOMER_ID:
+        log.error("[REEVAL] OWNER_CUSTOMER_ID not set — skipping")
+        return 0, 0
+    try:
+        master = get_customer_db(OWNER_CUSTOMER_ID)
+        queue  = master.get_overnight_queue()
+    except Exception as e:
+        log.error(f"[REEVAL] Failed to read overnight queue: {e}")
+        return 0, 0
+
+    if not queue:
+        log.info("[REEVAL] Overnight queue empty — nothing to re-evaluate")
+        return 0, 0
+
+    log.info(f"[REEVAL] Re-evaluating {len(queue)} overnight queue row(s)")
+    approved = 0
+    cancelled = 0
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    max_age_hours = PRE_OPEN_REEVAL_MAX_AGE_HOURS
+
+    for row in queue:
+        sid    = row.get('id')
+        ticker = row.get('ticker', '?')
+        try:
+            master.mark_reevaluated(sid)
+        except Exception as e:
+            log.debug(f"[REEVAL] mark_reevaluated({sid}) failed: {e}")
+
+        # Age check — if the decision was made >N hours ago, the gate
+        # state that produced it is probably stale. Better to cancel
+        # explicitly than silently execute on outdated intent.
+        queued_at_str = row.get('queued_at') or ''
+        try:
+            qdt = datetime.fromisoformat(queued_at_str.replace('Z', ''))
+            if qdt.tzinfo is None:
+                qdt = qdt.replace(tzinfo=ZoneInfo("UTC"))
+            age_hours = (now_utc - qdt).total_seconds() / 3600
+        except Exception:
+            age_hours = 0.0  # can't parse → assume fresh, let it through
+
+        if age_hours > max_age_hours:
+            reason = (f"queued {age_hours:.1f}h ago "
+                      f"(>{max_age_hours}h max age) — gate state stale")
+            try:
+                master.cancel_protective(sid, reason)
+                cancelled += 1
+            except Exception as e:
+                log.warning(f"[REEVAL] cancel_protective failed for {sid}: {e}")
+            continue
+
+        # Flip to APPROVED so the normal managed-mode executor picks it
+        # up on the next trader dispatch. decided_by marks the source
+        # as the re-eval step for audit clarity.
+        try:
+            master.update_approval_status(
+                sid, 'APPROVED',
+                decided_by='pre_open_reeval',
+                decision_note=f"overnight queue re-evaluated at {master.now()}",
+            )
+            approved += 1
+        except Exception as e:
+            log.warning(f"[REEVAL] approve failed for {sid}: {e}")
+
+    log.info(f"[REEVAL] Complete — approved {approved}, cancelled {cancelled} "
+             f"of {len(queue)} queued row(s)")
+    return approved, cancelled
+
+
 def _begin_cycle(label='enrichment'):
     """Mint a new cycle_id, export it via env var (inherited by subprocess
     agents), and log the cycle start. Returns the cycle_id string."""
@@ -717,8 +811,15 @@ def run_premarket_prep():
     """9:15 AM: Sequential prep block — full enrichment pipeline → trade."""
     cycle_id = _begin_cycle(label='premarket')
     log.info("=" * 60)
-    log.info("PRE-MARKET PREP — news → screener → sentiment → macro → state → bias → fault → validator → trade")
+    log.info("PRE-MARKET PREP — reeval → news → screener → sentiment → macro → state → bias → fault → validator → trade")
     log.info("=" * 60)
+
+    # Phase 0: Pre-open re-evaluation of overnight-queued orders.
+    # Runs first so APPROVED rows are visible to the managed-mode
+    # executor in the trader dispatch that comes at the end of prep.
+    run_pre_open_reeval()
+    if _shutdown_requested:
+        return
 
     # Phase 1: Data collection
     run_news(session='market')
@@ -1148,31 +1249,57 @@ def run_trail_optimizer():
             log.debug(f"[OPTIMIZER] {cid[:8]} error: {_e}")
 
 
-def main():
-    """Main entry point. Waits for pre-market, then runs through market day."""
-    if not acquire_pidlock():
-        return
-    log.info("=" * 60)
-    log.info(f"MARKET DAEMON starting — pid={os.getpid()}")
-    log.info(f"  Pre-market: {PREMARKET_START_HOUR}:{PREMARKET_START_MIN:02d} ET")
-    log.info(f"  Market: {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d} - "
-             f"{MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MIN:02d} ET")
-    log.info(f"  Enrichment interval: {ENRICHMENT_INTERVAL_MIN}m")
-    log.info(f"  Owner: {OWNER_CUSTOMER_ID[:12] if OWNER_CUSTOMER_ID else 'not set'}...")
-    log.info("=" * 60)
-    send_retail_heartbeat('market_daemon', 'STARTING')
+def run_overnight_cycle():
+    """One-shot enrichment pass for off-hours / weekend runs.
 
-    if not is_weekday():
-        log.info("Weekend — exiting")
-        return
+    Fetches news incrementally via the cursor-based path, runs the full
+    validation chain (sentiment → macro → market_state → fault →
+    validator → promoter), and exits. Does NOT dispatch traders — the
+    overnight-queue gate inside AlpacaClient would queue any submits
+    anyway, so traders would produce no useful execution and just
+    consume the dispatch budget.
 
+    Intended to be cron-invoked hourly 24/7 (see docs/overnight_queue_plan.md
+    Phase 4.1) — during market hours main() picks the intraday path
+    instead, so this function only runs on off-hours entries.
+    """
+    cycle_id = _begin_cycle(label='overnight')
+    log.info("=" * 60)
+    log.info("OVERNIGHT CYCLE — news → sentiment → macro → state → fault → validator → promoter (no trader)")
+    log.info("=" * 60)
+    try:
+        run_news(session='overnight')
+        if _shutdown_requested: return
+        run_sentiment()
+        if _shutdown_requested: return
+        run_macro_regime()
+        if _shutdown_requested: return
+        run_market_state()
+        if _shutdown_requested: return
+        run_fault_detection()
+        if _shutdown_requested: return
+        run_validator_stack()
+        if _shutdown_requested: return
+        promote_validated_signals()
+    except Exception as e:
+        log.error(f"[OVERNIGHT] Cycle error: {e}", exc_info=True)
+    finally:
+        clear_agent_running()
+        _end_cycle(cycle_id)
+
+
+def _run_intraday_pipeline():
+    """The existing wait-for-open → premarket-prep → market-loop →
+    close-session flow. Extracted from main() so main() can pick
+    intraday vs overnight based on the current time."""
     write_heartbeat(status="STARTING")
 
     # Wait for pre-market if started early
     while not _shutdown_requested:
         t = now_et()
         if t.hour > MARKET_CLOSE_HOUR or (t.hour == MARKET_CLOSE_HOUR and t.minute >= MARKET_CLOSE_MIN):
-            log.info("Past market close — exiting")
+            log.info("Past market close — switching to overnight cycle")
+            run_overnight_cycle()
             return
         if t.hour > PREMARKET_START_HOUR or \
            (t.hour == PREMARKET_START_HOUR and t.minute >= PREMARKET_START_MIN):
@@ -1185,7 +1312,7 @@ def main():
     if _shutdown_requested:
         return
 
-    # Phase 1: Pre-market prep
+    # Phase 1: Pre-market prep (includes pre-open re-evaluation as Phase 0)
     if is_premarket() or (now_et().hour == PREMARKET_START_HOUR and
                           now_et().minute >= PREMARKET_START_MIN):
         run_premarket_prep()
@@ -1213,11 +1340,55 @@ def main():
     if not _shutdown_requested:
         run_close_session()
 
-    clear_agent_running()
-    release_pidlock()
-    write_heartbeat(status="STOPPED")
-    send_retail_heartbeat('market_daemon', 'STOPPED')
-    log.info("Market daemon shutting down — day complete")
+
+def main():
+    """Entry point. Dispatches to intraday pipeline during the trading-
+    hours runway (weekday pre-market through close) or the one-shot
+    overnight cycle otherwise. Cron invokes hourly 24/7 — same script,
+    different path based on wall-clock time. See
+    docs/overnight_queue_plan.md Phase 4."""
+    if not acquire_pidlock():
+        return
+
+    log.info("=" * 60)
+    log.info(f"MARKET DAEMON starting — pid={os.getpid()}")
+    log.info(f"  Pre-market: {PREMARKET_START_HOUR}:{PREMARKET_START_MIN:02d} ET")
+    log.info(f"  Market: {MARKET_OPEN_HOUR}:{MARKET_OPEN_MIN:02d} - "
+             f"{MARKET_CLOSE_HOUR}:{MARKET_CLOSE_MIN:02d} ET")
+    log.info(f"  Enrichment interval: {ENRICHMENT_INTERVAL_MIN}m")
+    log.info(f"  Owner: {OWNER_CUSTOMER_ID[:12] if OWNER_CUSTOMER_ID else 'not set'}...")
+    log.info("=" * 60)
+    send_retail_heartbeat('market_daemon', 'STARTING')
+
+    try:
+        t = now_et()
+        weekday         = is_weekday()
+        before_premkt   = weekday and (
+            t.hour < PREMARKET_START_HOUR or
+            (t.hour == PREMARKET_START_HOUR and t.minute < PREMARKET_START_MIN)
+        )
+        in_trading_day  = weekday and not past_market_close() and not before_premkt
+
+        if in_trading_day:
+            log.info(f"[MODE] intraday — current ET time {t.strftime('%H:%M')}")
+            _run_intraday_pipeline()
+        else:
+            # Weekend, before pre-market, or after close. Run one-shot
+            # overnight cycle so news keeps flowing and the validation
+            # chain advances against whatever fresh signals arrive.
+            reason = (
+                "weekend" if not weekday else
+                "before pre-market" if before_premkt else
+                "past market close"
+            )
+            log.info(f"[MODE] overnight ({reason}) — current ET time {t.strftime('%H:%M')}")
+            run_overnight_cycle()
+    finally:
+        clear_agent_running()
+        release_pidlock()
+        write_heartbeat(status="STOPPED")
+        send_retail_heartbeat('market_daemon', 'STOPPED')
+        log.info("Market daemon shutting down")
 
 
 if __name__ == '__main__':
