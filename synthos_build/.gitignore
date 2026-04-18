@@ -34,6 +34,9 @@ data/suggestions.json
 signals_backup.db
 .market_daemon.pid
 .market_daemon_heartbeat
+# .wave_override — dev-only override for the agent-status waveform
+# animation in the retail portal. Lets the UI be iterated on without
+# running the validator stack. Local state, not shared source.
 .wave_override
 # .known_good/ is intentionally tracked — it's the watchdog's
 # rollback snapshot and we want version history on it.
