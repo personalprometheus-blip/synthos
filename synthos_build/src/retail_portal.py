@@ -12543,7 +12543,6 @@ def api_admin_market_activity():
         return idx if 0 <= idx < n_bins else None
 
     # ── 24h USER-SESSIONS BINS (existing shape, unchanged) ─────────────
-    cutoff_sessions = (now - timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S')
     hour_keys = []
     for i in range(hours):
         h = (now - timedelta(hours=hours - 1 - i))
@@ -12568,6 +12567,20 @@ def api_admin_market_activity():
     total_buy_count  = 0
     total_sell_count = 0
 
+    # SQL-level pre-filter to avoid pulling a customer's full trade
+    # history into Python just to bin today's session. DB stores
+    # timestamps as naive UTC strings sortable lexically, so an
+    # ISO-string cutoff works across both `YYYY-MM-DD HH:MM:SS` and
+    # `YYYY-MM-DDTHH:MM:SS[Z]` formats. Lower bound: session open
+    # expressed in UTC. Adds a small buffer so the edge-of-window
+    # record doesn't get excluded by minor clock skew.
+    session_start_utc = session_start.astimezone(ZoneInfo("UTC"))
+    session_end_utc   = session_end.astimezone(ZoneInfo("UTC"))
+    _session_start_cutoff = (session_start_utc - timedelta(minutes=1)
+                             ).strftime('%Y-%m-%dT%H:%M:%S')
+    _session_end_cutoff   = (session_end_utc + timedelta(minutes=1)
+                             ).strftime('%Y-%m-%dT%H:%M:%S')
+
     customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
     for cid in os.listdir(customers_dir):
         if cid == 'default':
@@ -12583,10 +12596,12 @@ def api_admin_market_activity():
             cust_sells = [0.0] * n_bins
             has_activity = False
 
-            # Buys — opened_at in this session's window
+            # Buys — opened_at within today's session window
             for r in conn.execute(
                 "SELECT opened_at, entry_price * shares AS amt FROM positions "
-                "WHERE opened_at IS NOT NULL"
+                "WHERE opened_at IS NOT NULL "
+                "AND opened_at >= ? AND opened_at < ?",
+                (_session_start_cutoff, _session_end_cutoff)
             ).fetchall():
                 idx = _market_bin_index(_parse_to_et(r['opened_at']))
                 if idx is None:
@@ -12597,10 +12612,12 @@ def api_admin_market_activity():
                 total_buy_count       += 1
                 has_activity = True
 
-            # Sells — closed_at in this session's window
+            # Sells — closed_at within today's session window
             for r in conn.execute(
                 "SELECT closed_at, entry_price * shares AS amt FROM positions "
-                "WHERE closed_at IS NOT NULL"
+                "WHERE closed_at IS NOT NULL "
+                "AND closed_at >= ? AND closed_at < ?",
+                (_session_start_cutoff, _session_end_cutoff)
             ).fetchall():
                 idx = _market_bin_index(_parse_to_et(r['closed_at']))
                 if idx is None:
