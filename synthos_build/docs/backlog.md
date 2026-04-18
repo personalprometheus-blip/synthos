@@ -162,6 +162,155 @@ imported name is re-exported from the new top-level module.
 
 ---
 
+## OVERNIGHT-QUEUE — deferred pieces (Phase 3.2, 3.3, 4.1, 4.3)
+
+**Why deferred.** The overnight-queue plan was built out through phases
+1, 2, 3.1 (backend), and 5 during the weekend build-while-away session.
+Three pieces were deliberately held back because they need either
+visual judgment or running-host access that shouldn't happen without
+the user present.
+
+**Deferred pieces:**
+
+1. **Phase 3.2 — Pending dashboard card (HTML)**
+   Backend endpoint `/api/pending` is live. Returns
+   `{active, cancelled, operating_mode}`. Frontend needs to:
+   - Add a card to the dashboard showing `active` entries
+   - Managed/supervised customers: approve/reject buttons wired to
+     existing `/api/approval` endpoint
+   - Automatic customers: read-only preview, low-emphasis styling
+   - Empty state copy: "No pending decisions — check back after the
+     next overnight cycle"
+   - Styling should match existing dashboard cards
+   Needs visual review on layout + emptystate wording.
+
+2. **Phase 3.3 — Cancelled-protective overlay in trade history**
+   Data lives at `/api/pending` under `cancelled`. Frontend needs to:
+   - Render CANCELLED_PROTECTIVE rows in place of where the trade
+     would have been in trade history
+   - Use `warn_red()` icon from `synthos_build/src/icons.py`
+   - Label: "CANCELLED (protective)"
+   - Show the `cancelled_reason` field
+   - Muted / struck-through styling on trade details
+   Needs visual review on exact presentation.
+
+3. **Phase 4.1 — Cron consolidation (pi5-side)**
+   Replace the following crontab entries on pi5:
+   ```
+   # Remove
+   10 9 * * 1-5  retail_market_daemon.py             (weekdays only, 9:10 ET start)
+   5 0-8,16-23 * * 1-5  retail_scheduler.py --session overnight
+
+   # Add
+   5 * * * *  retail_market_daemon.py                (hourly, 24/7)
+   ```
+   The daemon's `main()` already dispatches to intraday vs overnight
+   paths based on wall-clock time, so the single hourly entry is
+   correct. Crontab edit requires shell access and isn't safe to do
+   while the user is out.
+
+4. **Phase 4.3 — Deploy + verify**
+   - `git pull` on pi5
+   - Run DB migration (idempotent ALTER for queue_origin,
+     reevaluated_at, cancelled_reason — safe to run while daemon is
+     stopped)
+   - Kill and restart daemon to pick up new main() dispatch
+   - Restart portal to pick up new /api/pending endpoint + security
+     gating changes
+   - Smoke test: check that weekend cron fire triggers overnight
+     cycle; check that market-open pre-eval runs; check that
+     submit_order off-hours writes to pending_approvals
+
+**Entry conditions:**
+1. User available to debug any portal/daemon regression
+2. Pi5 accessible (post-hardware migration is fine)
+3. Tier-calibration experiment not actively running OR at a clean
+   pause point (so behavior changes don't confound measurements)
+
+**Risk.** Low — all the schema additions are idempotent ALTERs; new
+code paths (overnight queue, pre-open re-eval) only activate outside
+market hours so they're off-by-default during regular trading. Portal
+security changes could break a frontend endpoint that was silently
+relying on the auth gap; mitigation is to fix each specific 401 as
+it surfaces.
+
+**Related context.**
+- Plan: `docs/overnight_queue_plan.md`
+- Audit doc: `docs/trade_lifecycle.md`
+- Commits: 2ba8f04 (phase 1), e5a6149 (phase 2), 8e0d343 (phase 3
+  backend), 8711c62 (audit doc), ff2a06b (system update removal),
+  6f530d1 (security sweep)
+
+---
+
+## ITEM-8 — R2 vault path fix (company node)
+
+**Why deferred.** Lives on pi4b (company node), not pi5. Requires shell
+access to the company host and coordination with whatever the R2
+backup chain is currently doing. Out of scope for weekend
+build-while-away work.
+
+**Entry conditions.** Pi4b accessible, R2 credentials confirmed in
+vault env, time window to test backup/restore round-trip safely.
+
+**Scope.** Investigate `/home/pi/synthos-company/company_vault.py` on
+pi4b; diagnose the path issue mentioned in the Apr 17 morning session;
+fix and verify one successful backup lands in the R2 bucket.
+
+---
+
+## ITEM-9 — Interrogation upgrade path (feature additions)
+
+**Why deferred.** The listener's stability problems were closed during
+the Apr 17 session (heartbeat, watchdog restart, tightened promoter,
+stuck-signal diagnostic). The remaining work is feature additions —
+multi-peer corroboration, stronger per-signal validation, signed ACKs,
+metrics — none of which have clear requirements yet and all of which
+need design input from the user.
+
+**Current state (stable):**
+- Listener posts heartbeat every 60s to owner DB
+- Fault detector includes it in EXPECTED_AGENTS
+- Watchdog auto-restarts on crash
+- Promoter blocks UNVALIDATED (only VALIDATED/CORROBORATED/SKIPPED
+  promote)
+- Stuck-signal diagnostic names the listener as the bottleneck when
+  it fails
+
+**Candidate features for future:**
+- Multi-peer CORROBORATED status (2+ nodes must ACK)
+- Signed ACKs (HMAC over payload) to prevent rogue-peer abuse
+- Per-signal data validation beyond ticker format (e.g. verify the
+  price summary matches the listener's own Alpaca snapshot)
+- Persistent dedup window across restarts (currently in-memory only)
+- ACK rate / rejection metrics surfaced to the dashboard
+
+**Entry conditions.** User-driven — these are feature decisions, not
+bug fixes. Pick them up when the architecture around cross-node
+corroboration matters to a real use case.
+
+---
+
+## ITEM-10 — Remaining UI cleanups
+
+**Why deferred.** Three of the four item-10 entries need visual
+judgment on exact scope. "Remove System Update" landed during the
+weekend build (commit ff2a06b).
+
+**Remaining:**
+1. **Trade mode switch** — what change? Today there's an AUTO/MANAGED
+   indicator next to the bell icon. Needs user clarification on the
+   desired behavior.
+2. **Remove news tabs** — which news tabs specifically? The
+   notifications dropdown has tabs for All / System / Daily / Account.
+   Unclear which should be removed.
+3. **Support button** — add? remove? restyle? reposition?
+
+**Entry conditions.** User available for a brief "which one do you
+mean" scoping pass. Each is ~5-15 min of work once scope is clear.
+
+---
+
 ## Historical / completed (struck through)
 
 <!-- Move completed items here with commit SHAs when done, keep for
