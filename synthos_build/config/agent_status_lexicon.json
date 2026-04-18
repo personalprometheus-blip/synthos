@@ -1,0 +1,76 @@
+{
+  "_comment": "View-layer only. Maps raw agent names to user-facing Synthos status lines. Edit this file to change tone without touching code. Reloaded automatically on mtime change.",
+  "persona": "Synthos",
+  "sticky_seconds": 25,
+  "agents": {
+    "retail_trade_logic_agent.py": {
+      "event_label": "trade scan",
+      "lines": [
+        ["weighing a trade", "the math disagrees with the tweet"],
+        ["running the numbers", "slowly, carefully"],
+        ["lining up the shot", "patience is the strategy"],
+        ["measuring the drop", "gravity's undefeated"],
+        ["checking the odds", "Vegas would approve"]
+      ]
+    },
+    "retail_news_agent.py": {
+      "event_label": "news sweep",
+      "lines": [
+        ["reading the news", "the Fed is 'watching closely' again"],
+        ["sweeping the wire", "80% noise, as usual"],
+        ["tagging headlines", "analysts still analyzing"],
+        ["cutting through the static", "the real story's on page nine"],
+        ["scanning the feed", "someone's 'optimistic' again"]
+      ]
+    },
+    "retail_market_sentiment_agent.py": {
+      "event_label": "sentiment read",
+      "lines": [
+        ["taking the temperature", "the market runs hot"],
+        ["reading the room", "it's buying the dip, again"],
+        ["calling the weather", "overcast with a chance of selloff"],
+        ["counting heartbeats", "the tape's nervous today"],
+        ["feeling the tape", "it feels expensive"]
+      ]
+    },
+    "retail_sector_screener.py": {
+      "event_label": "sector scan",
+      "lines": [
+        ["sweeping the spectrum", "tech loud, bonds quiet"],
+        ["filtering the glare", "skipping the obvious names"],
+        ["sorting signal from noise", "noise is winning"],
+        ["scanning the sectors", "the quiet ones are interesting"],
+        ["chasing the hot edge", "respectfully"]
+      ]
+    }
+  },
+  "aliases": {
+    "Trade Logic": "retail_trade_logic_agent.py",
+    "trade_logic": "retail_trade_logic_agent.py",
+    "News": "retail_news_agent.py",
+    "news": "retail_news_agent.py",
+    "The Pulse": "retail_market_sentiment_agent.py",
+    "Market Sentiment": "retail_market_sentiment_agent.py",
+    "pulse": "retail_market_sentiment_agent.py",
+    "Sector Screener": "retail_sector_screener.py",
+    "Screener": "retail_sector_screener.py",
+    "screener": "retail_sector_screener.py"
+  },
+  "idle": {
+    "event_label": "idle",
+    "lines": [
+      ["standing by", "markets are breathing"],
+      ["on watch", "nothing worth flagging"],
+      ["listening in", "the tape is quiet"],
+      ["holding position", "patience"]
+    ]
+  },
+  "fallback": {
+    "event_label": "activity",
+    "lines": [
+      ["on the grid", "doing the work"],
+      ["running diagnostics", "self-check"],
+      ["scanning the void", "looking for signal"]
+    ]
+  }
+}

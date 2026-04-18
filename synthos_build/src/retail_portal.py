@@ -2912,6 +2912,106 @@ def get_wave_status():
     return None
 
 
+# ── AGENT STATUS LEXICON (view-layer only; never touches agent code) ─────────
+# Maps raw agent identifiers to user-facing Synthos-persona lines.
+# Sticky rotation holds a chosen line for `sticky_seconds` so the UI
+# doesn't animate on every poll. Lexicon hot-reloads on mtime change.
+_LEXICON_FILE = os.path.join(_ROOT_DIR, 'config', 'agent_status_lexicon.json')
+_lexicon_cache = {'mtime': 0.0, 'data': None}
+_lexicon_pick_cache = {}  # {key: (action, aside, picked_at_epoch)}
+
+_LEXICON_FALLBACK = {
+    'persona': 'Synthos',
+    'sticky_seconds': 25,
+    'agents': {},
+    'aliases': {},
+    'idle':     {'event_label': 'idle',     'lines': [['on watch', 'the tape is quiet']]},
+    'fallback': {'event_label': 'activity', 'lines': [['on the grid', 'doing the work']]},
+}
+
+
+def _load_lexicon():
+    """Return the parsed lexicon, cached and hot-reloaded on mtime change."""
+    import json as _json
+    try:
+        mtime = os.path.getmtime(_LEXICON_FILE)
+        if _lexicon_cache['data'] is not None and _lexicon_cache['mtime'] == mtime:
+            return _lexicon_cache['data']
+        with open(_LEXICON_FILE, 'r') as fh:
+            data = _json.load(fh)
+        _lexicon_cache['mtime'] = mtime
+        _lexicon_cache['data'] = data
+        return data
+    except Exception as exc:
+        log.warning(f"agent_status_lexicon unreadable — using builtin fallback: {exc}")
+        return _LEXICON_FALLBACK
+
+
+def _resolve_agent_key(raw_name, lex):
+    """Resolve an agent identifier to its canonical key in lex['agents'], or None."""
+    if not raw_name:
+        return None
+    canonical = lex.get('aliases', {}).get(raw_name, raw_name)
+    if canonical in lex.get('agents', {}):
+        return canonical
+    return None
+
+
+def interpret_agent_status(raw_agent):
+    """
+    View-layer mapping: raw agent name -> {persona, action, aside}.
+    Accepts None (idle), a dict from get_wave_status(), or a bare string.
+    Sticky rotation prevents per-poll churn.
+    """
+    import random
+    import time as _time
+
+    lex = _load_lexicon()
+    persona = lex.get('persona', 'Synthos')
+    sticky = int(lex.get('sticky_seconds', 25) or 25)
+
+    if raw_agent is None or (isinstance(raw_agent, dict) and not raw_agent.get('agent')):
+        key = '__idle__'
+        bucket = lex.get('idle') or _LEXICON_FALLBACK['idle']
+    else:
+        raw_name = raw_agent.get('agent') if isinstance(raw_agent, dict) else raw_agent
+        canonical = _resolve_agent_key(raw_name, lex)
+        if canonical is None:
+            key = '__fallback__'
+            bucket = lex.get('fallback') or _LEXICON_FALLBACK['fallback']
+        else:
+            key = canonical
+            bucket = lex['agents'][canonical]
+
+    pool = bucket.get('lines') or [['on the grid', 'doing the work']]
+    now = _time.time()
+    cached = _lexicon_pick_cache.get(key)
+    if cached and (now - cached[2]) < sticky:
+        action, aside = cached[0], cached[1]
+    else:
+        choice = random.choice(pool)
+        action = choice[0] if len(choice) > 0 else ''
+        aside  = choice[1] if len(choice) > 1 else ''
+        _lexicon_pick_cache[key] = (action, aside, now)
+
+    return {
+        'persona': persona,
+        'action':  action,
+        'aside':   aside,
+    }
+
+
+def interpret_event_label(raw_agent):
+    """Return the short event label for an agent (stable, not rotated)."""
+    lex = _load_lexicon()
+    if not raw_agent:
+        return (lex.get('idle') or _LEXICON_FALLBACK['idle']).get('event_label', 'activity')
+    canonical = _resolve_agent_key(raw_agent, lex)
+    if canonical is None:
+        return (lex.get('fallback') or _LEXICON_FALLBACK['fallback']).get('event_label', 'activity')
+    return lex['agents'][canonical].get('event_label', 'activity')
+
+
 def _get_customer_alpaca_creds():
     """Return (api_key, secret_key, base_url) for the current session's customer.
     Reads from auth.db (encrypted). Falls back to env vars for backward compatibility."""
@@ -5020,14 +5120,71 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <!-- market-chart moved to visible panel below -->
 
   <!-- AGENT STATUS -->
+  <style>
+    /* Synthos persona strip — view layer only, swaps raw agent names for persona lines */
+    .ap-status-strip {
+      padding: 2px 14px 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.5;
+      text-align: center;
+      min-height: 22px;
+    }
+    .ap-persona {
+      color: var(--teal);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-shadow: 0 0 8px rgba(0,245,212,0.28);
+    }
+    .ap-action-prefix, .ap-sep { color: var(--muted); }
+    .ap-action { color: var(--text); }
+    .ap-aside {
+      color: var(--pink);
+      font-style: italic;
+      text-shadow: 0 0 6px rgba(255,75,110,0.45);
+    }
+    /* "Time-traveled-in" chromatic-aberration warp — plays once per text change */
+    @keyframes ap-warp-in {
+      0% {
+        opacity: 0;
+        text-shadow:
+          -6px 0 0 rgba(0,245,212,0.9),
+           6px 0 0 rgba(255,75,110,0.9);
+        filter: blur(0.4px);
+      }
+      45% {
+        opacity: 1;
+        text-shadow:
+          -2px 0 0 rgba(0,245,212,0.6),
+           2px 0 0 rgba(255,75,110,0.6);
+        filter: blur(0);
+      }
+      70% {
+        opacity: 1;
+        text-shadow: 0 0 10px rgba(255,75,110,0.65);
+      }
+      100% {
+        opacity: 1;
+        text-shadow: 0 0 6px rgba(255,75,110,0.45);
+      }
+    }
+    .ap-aside.ap-warp-in { animation: ap-warp-in 300ms ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      .ap-aside.ap-warp-in { animation: none; }
+    }
+  </style>
   <div class="glass" style="overflow:hidden;margin-bottom:14px">
     <div class="dash-panel-head">
       <div class="dash-panel-title">Agent Status</div>
-      <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">IDLE</div>
+      <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">STANDBY</div>
     </div>
     <!-- SINE WAVE CANVAS -->
     <div style="position:relative;height:100px;overflow:hidden">
       <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
+    </div>
+    <!-- SYNTHOS PERSONA STRIP (hides raw agent names from customers) -->
+    <div class="ap-status-strip">
+      <span class="ap-persona" id="ap-persona">Synthos</span><span class="ap-action-prefix"> is </span><span class="ap-action" id="ap-action">on watch</span><span class="ap-sep"> · </span><span class="ap-aside" id="ap-aside">the tape is quiet</span>
     </div>
     <!-- STATUS DETAILS -->
     <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
@@ -5177,20 +5334,22 @@ function _apDrawWave() {
     }
   }
 
-  // Agent label
+  // Persona label on canvas (raw agent names are hidden; strip below shows activity)
   ctx.font = '700 10px "Inter", sans-serif';
   ctx.textAlign = 'center';
-  if (active && _apRunning.agent) {
+  if (active) {
     ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0.7)';
-    ctx.fillText(_apRunning.agent.toUpperCase() + '  •  SCANNING', w/2, h - 8);
+    ctx.fillText('SYNTHOS  •  SCANNING', w/2, h - 8);
   } else {
     ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (0.15 + heartbeat * 0.1) + ')';
-    ctx.fillText('MONITORING', w/2, h - 8);
+    ctx.fillText('SYNTHOS  •  STANDBY', w/2, h - 8);
   }
 
   _apFrame++;
   _apWaveId = requestAnimationFrame(_apDrawWave);
 }
+
+var _apLastAside = null;
 
 async function loadAgentPulse() {
   try {
@@ -5198,21 +5357,42 @@ async function loadAgentPulse() {
     var d = await r.json();
     _apRunning = d.running;
 
-    // Status pill
+    // Status pill — SCANNING when active, STANDBY when idle. Raw agent name never shown.
     var pill = document.getElementById('ap-status-pill');
     if (pill) {
       if (d.running) {
-        pill.textContent = d.running.agent;
+        pill.textContent = 'SCANNING';
         var pc = d.running.color || 'teal';
         var pcMap = {teal:'var(--teal)',purple:'var(--purple)',amber:'var(--amber)',pink:'var(--pink)'};
         pill.style.color = pcMap[pc] || 'var(--teal)';
         pill.style.borderColor = pcMap[pc] || 'var(--teal)';
         pill.style.background = 'rgba(' + (_apColors[pc]||_apColors.teal).r + ',' + (_apColors[pc]||_apColors.teal).g + ',' + (_apColors[pc]||_apColors.teal).b + ',0.08)';
       } else {
-        pill.textContent = 'IDLE';
+        pill.textContent = 'STANDBY';
         pill.style.color = 'var(--dim)';
         pill.style.borderColor = 'var(--border)';
         pill.style.background = 'transparent';
+      }
+    }
+
+    // Synthos persona strip — "Synthos is {action} · {aside}"
+    var stat = d.running || d.idle_status || null;
+    var persEl  = document.getElementById('ap-persona');
+    var actEl   = document.getElementById('ap-action');
+    var asideEl = document.getElementById('ap-aside');
+    if (stat) {
+      if (persEl) persEl.textContent = stat.persona || 'Synthos';
+      if (actEl)  actEl.textContent  = stat.action  || '';
+      if (asideEl) {
+        var newAside = stat.aside || '';
+        asideEl.textContent = newAside;
+        // Retrigger chromatic-aberration warp only when the aside changes
+        if (newAside && newAside !== _apLastAside) {
+          asideEl.classList.remove('ap-warp-in');
+          void asideEl.offsetWidth;  // force reflow so animation restarts
+          asideEl.classList.add('ap-warp-in');
+          _apLastAside = newAside;
+        }
       }
     }
 
@@ -5234,7 +5414,7 @@ async function loadAgentPulse() {
       regEl.style.color = reg.color;
     }
 
-    // Events
+    // Events — uses event_label from the lexicon (no raw agent names leaked).
     var evEl = document.getElementById('ap-events');
     if (evEl && d.events) {
       evEl.innerHTML = d.events.slice(0, 4).map(function(e) {
@@ -5242,7 +5422,8 @@ async function loadAgentPulse() {
         var isComplete = e.event === 'AGENT_COMPLETE';
         var isDec = e.event === 'TRADE_DECISION';
         var icon = isComplete ? '<span style="color:var(--teal)">&#x2713;</span>' : isDec ? '<span style="color:var(--amber)">&#x25C6;</span>' : '<span style="color:var(--purple)">&#x25B6;</span>';
-        var label = isDec ? 'Decision' : isComplete ? (e.agent || '') + ' done' : (e.agent || '') + ' started';
+        var lbl = e.event_label || 'activity';
+        var label = isDec ? 'decision recorded' : isComplete ? lbl + ' complete' : lbl + ' started';
         var det = (e.details || '').slice(0, 40);
         return '<div>' + time + ' ' + icon + ' ' + label + (det ? ' <span style="color:var(--dim)">' + det + '</span>' : '') + '</div>';
       }).join('');
@@ -7902,19 +8083,16 @@ async function loadLiveStatus() {
     }
     // Re-render modal if it's open
     if (document.getElementById('flags-modal').style.display !== 'none') renderFlagsModal();
-    // Agent running banner
+    // Agent running banner — shows Synthos persona only; raw agent names are hidden.
     const agentEl = document.getElementById('agent-running-banner');
     if (s.agent_running) {
-      const names = {'retail_trade_logic_agent.py':'Trade Logic','retail_news_agent.py':'News',
-                     'retail_market_sentiment_agent.py':'Market Sentiment','retail_sector_screener.py':'Sector Screener'};
-      const name = names[s.agent_running] || s.agent_running;
       const mins = Math.floor((s.agent_running_secs||0) / 60);
       const secs = (s.agent_running_secs||0) % 60;
       if (agentEl) {
         agentEl.style.display = 'flex';
         agentEl.innerHTML = '<div class="status-dot dot-on" style="background:var(--amber);box-shadow:0 0 6px var(--amber)"></div>'
           + '<span style="font-size:11px;font-weight:600;color:var(--amber)">'
-          + name + ' running</span>'
+          + 'Synthos scanning</span>'
           + '<span style="font-size:10px;color:var(--muted);margin-left:6px">'
           + (mins > 0 ? mins + 'm ' : '') + secs + 's · portal in read-only mode</span>';
       }
@@ -9859,17 +10037,6 @@ def api_agent_pulse():
                 "ORDER BY timestamp DESC LIMIT 8"
             ).fetchall()]
 
-        # Last complete scan summary
-        last_scan = None
-        for e in events:
-            if e['event'] == 'AGENT_COMPLETE' and e['agent'] in ('Trade Logic', 'News', 'The Pulse'):
-                last_scan = {
-                    'agent': e['agent'],
-                    'time': e['timestamp'],
-                    'details': e.get('details', ''),
-                }
-                break
-
         # Count today's decisions
         with db.conn() as c:
             from datetime import datetime
@@ -9886,15 +10053,21 @@ def api_agent_pulse():
             'Screener': 'pink', 'Sector Screener': 'pink', 'retail_sector_screener.py': 'pink',
         }
 
+        # View-layer translation: hide raw agent names from customer UI.
+        # Everything the customer sees is framed as "Synthos is {action} · {aside}".
+        status = interpret_agent_status(lock)
+
         running = None
         if lock:
             agent_name = lock['agent']
             running = {
-                'agent': agent_name,
-                'age_secs': lock.get('age_secs', 0),
-                'color': lock.get('color') or agent_colors.get(agent_name, 'teal'),
+                'persona':   status['persona'],
+                'action':    status['action'],
+                'aside':     status['aside'],
+                'age_secs':  lock.get('age_secs', 0),
+                'color':     lock.get('color') or agent_colors.get(agent_name, 'teal'),
                 'amplitude': lock.get('amplitude'),
-                'speed': lock.get('speed'),
+                'speed':     lock.get('speed'),
                 'frequency': lock.get('frequency'),
                 'direction': lock.get('direction'),
             }
@@ -9918,17 +10091,34 @@ def api_agent_pulse():
         except Exception:
             pass
 
+        # Translate events to user-facing event labels (hide raw agent names).
+        translated_events = []
+        for ev in events[:6]:
+            translated_events.append({
+                'event':      ev.get('event'),
+                'timestamp':  ev.get('timestamp'),
+                'event_label': interpret_event_label(ev.get('agent')),
+                'details':    ev.get('details'),
+            })
+
+        # Idle status (shown when nothing is actively running).
+        idle_status = None if running else {
+            'persona': status['persona'],
+            'action':  status['action'],
+            'aside':   status['aside'],
+        }
+
         return jsonify({
             'running': running,
+            'idle_status': idle_status,
             'queued_signals': queued,
             'watching': watching,
             'decisions_today': decisions,
             'regime': regime,
-            'last_scan': last_scan,
-            'events': events[:6],
+            'events': translated_events,
         })
     except Exception as e:
-        return jsonify({'running': None, 'queued_signals': 0, 'watching': 0,
+        return jsonify({'running': None, 'idle_status': None, 'queued_signals': 0, 'watching': 0,
                         'decisions_today': 0, 'regime': 'unknown', 'events': [], 'error': str(e)})
 
 
