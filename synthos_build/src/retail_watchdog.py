@@ -192,9 +192,13 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s watchdog: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    # FileHandler only.  synthos-watchdog.service has
+    # `StandardOutput=append:/…/watchdog.log` so systemd already captures
+    # stdout+stderr into the same file.  A StreamHandler here would
+    # duplicate every log line.  Raw uncaught-exception tracebacks still
+    # reach the log via the systemd redirect.
     handlers=[
         logging.FileHandler(WATCHDOG_LOG),
-        logging.StreamHandler(sys.stdout),
     ]
 )
 log = logging.getLogger("watchdog")

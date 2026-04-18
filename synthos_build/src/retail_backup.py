@@ -62,9 +62,12 @@ logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)-8s retail_backup: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    # FileHandler only.  Cron invokes this script with `>> backup.log
+    # 2>&1` which already captures stdout+stderr into the same file, so
+    # a StreamHandler(sys.stdout) here would duplicate every log line.
+    # Uncaught tracebacks still reach the log via the cron redirect.
     handlers=[
         logging.FileHandler(_LOG_DIR / "retail_backup.log"),
-        logging.StreamHandler(sys.stdout),
     ],
 )
 log = logging.getLogger("retail_backup")

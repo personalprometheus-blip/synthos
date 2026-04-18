@@ -94,9 +94,13 @@ logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s interrogation: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
+    # FileHandler only.  This listener is spawned by retail_watchdog.py
+    # via subprocess.Popen(stdout=logf, stderr=logf) where logf is
+    # interrogation.log — so stdout/stderr is already captured into the
+    # same file.  A StreamHandler here would duplicate every log line.
+    # Uncaught tracebacks still reach the log via the Popen redirect.
     handlers=[
         logging.FileHandler(LOG_DIR / 'interrogation.log'),
-        logging.StreamHandler(sys.stdout),
     ]
 )
 log = logging.getLogger('interrogation_listener')

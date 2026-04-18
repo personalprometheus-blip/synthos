@@ -67,9 +67,13 @@ logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s scheduler: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
+    # FileHandler only.  Cron invokes this script with `>> scheduler.log
+    # 2>&1` which already captures stdout+stderr into the same file, so
+    # a StreamHandler(sys.stdout) here would duplicate every log line.
+    # Uncaught tracebacks / raw prints still reach the log via the cron
+    # redirect — we're just not routing deliberate log records twice.
     handlers=[
         logging.FileHandler(_LOG_DIR / 'scheduler.log'),
-        logging.StreamHandler(sys.stdout),
     ],
 )
 log = logging.getLogger('scheduler')
