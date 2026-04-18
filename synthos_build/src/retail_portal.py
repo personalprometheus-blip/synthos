@@ -12487,20 +12487,61 @@ def api_admin_market_activity():
     now = datetime.now(_et)
 
     # ── SESSION DATE RESOLUTION ────────────────────────────────────────
-    # Most-recent trading day in ET:
+    # Client can pass ?date=YYYY-MM-DD to request a specific prior
+    # session. If omitted, resolve to the most-recent trading day in ET:
     #   - If today is a weekday and now >= 9:30 ET → today
     #   - Otherwise → the most recent prior weekday
     # Holidays aren't modeled; the chart will just show flat 0 bars on
     # a holiday session which is honest (nothing traded that day).
-    session_date = now.date()
     _market_start_t = _time(9, 30)
-    if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
-        session_date = session_date - timedelta(days=1)
-        while session_date.weekday() >= 5:
+    date_param = (request.args.get('date') or '').strip()
+    bad_date = False
+    if date_param:
+        try:
+            session_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+            # Reject unreasonable dates so we can't DoS on 10k days of
+            # empty iteration. 366 days back is plenty; anything further
+            # should use a proper analytics tool.
+            if session_date > now.date() or (now.date() - session_date).days > 366:
+                bad_date = True
+        except ValueError:
+            bad_date = True
+        if bad_date:
+            return jsonify({'error': f'invalid or out-of-range date {date_param!r}'}), 400
+    else:
+        session_date = now.date()
+        if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
             session_date = session_date - timedelta(days=1)
+            while session_date.weekday() >= 5:
+                session_date = session_date - timedelta(days=1)
 
     session_start = datetime.combine(session_date, _time(9, 30), tzinfo=_et)
     session_end   = datetime.combine(session_date, _time(16, 0), tzinfo=_et)
+
+    # Navigation metadata so the client knows which prev/next day to jump
+    # to without having to re-implement the weekday logic. Skips weekends
+    # and optionally holidays (not yet modeled — prev/next today just
+    # skips Sat/Sun).
+    def _shift_trading_day(d, delta):
+        step = 1 if delta > 0 else -1
+        remaining = abs(delta)
+        while remaining > 0:
+            d = d + timedelta(days=step)
+            if d.weekday() < 5:
+                remaining -= 1
+        return d
+
+    prev_session_date = _shift_trading_day(session_date, -1)
+    # Next trading day only useful if we're not already on the current
+    # session — otherwise the caller is "looking at today, can't go
+    # forward." Express as None so the client can disable the button.
+    _today_session = now.date()
+    if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
+        _today_session = _shift_trading_day(_today_session, -1)
+        while _today_session.weekday() >= 5:
+            _today_session = _today_session - timedelta(days=1)
+    next_session_date = _shift_trading_day(session_date, 1) \
+        if session_date < _today_session else None
 
     # 10-min bins across 9:30→16:00 ET (39 bins). Labels are "HH:MM"
     # for display; key is the bin-start minute-of-day (0-indexed) so
@@ -12683,9 +12724,15 @@ def api_admin_market_activity():
             'sells':        total_sells_bins_r,
             'net':          total_net_bins,
             'customers':    customers_data,
-            'session_date': session_date.isoformat(),
+            'session_date':      session_date.isoformat(),
             'session_open_iso':  session_start.isoformat(),
             'session_close_iso': session_end.isoformat(),
+            # Client uses these to wire prev/next nav without having to
+            # re-implement weekday skip / today-edge logic.
+            'prev_session_date': prev_session_date.isoformat(),
+            'next_session_date': (next_session_date.isoformat()
+                                  if next_session_date else None),
+            'is_current_session': session_date == _today_session,
         },
         # 24h user sessions (hourly bins, rolling window)
         'user_sessions': {
