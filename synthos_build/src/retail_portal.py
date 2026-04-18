@@ -5368,12 +5368,13 @@ function _apLogTick() {
       _apLogOffset += _apLogSpeed;
       inner.style.transform = 'translate3d(0,' + (-_apLogOffset) + 'px,0)';
       // Prune children that have fully scrolled past the viewport top.
-      // A child is "fully above" when its bottom (offsetTop + offsetHeight,
-      // in inner's natural coord space) is less than the current scroll offset.
+      // Inner starts with top:<viewportH> (so children enter at the bottom);
+      // a child's screen-y-bottom = viewportH - offset + offsetTop + offsetHeight.
+      // Prune when that drops below 0 → offset > viewportH + offsetTop + offsetHeight.
       while (inner.firstElementChild) {
         var first = inner.firstElementChild;
         var firstBottom = first.offsetTop + first.offsetHeight;
-        if (firstBottom < _apLogOffset) {
+        if (firstBottom + _apLogViewportH < _apLogOffset) {
           var h = first.offsetHeight;
           inner.removeChild(first);
           _apLogOffset -= h;
