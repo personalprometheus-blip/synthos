@@ -5174,7 +5174,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <div class="glass" style="overflow:hidden;margin-bottom:14px">
     <div class="dash-panel-head">
       <div class="dash-panel-title">Agent Status</div>
-      <div id="ap-status-pill" style="padding:2px 8px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;border:1px solid var(--border);color:var(--dim)">STANDBY</div>
     </div>
     <!-- LAST ACTIVITY — slow-rotating cylinder: new events roll up from bottom, disappear at top -->
     <div style="position:relative;height:60px;overflow:hidden;border-bottom:1px solid var(--border);
@@ -5417,24 +5416,6 @@ async function loadAgentPulse() {
     var r = await fetch('/api/agent-pulse');
     var d = await r.json();
     _apRunning = d.running;
-
-    // Status pill — SCANNING when active, STANDBY when idle. Raw agent name never shown.
-    var pill = document.getElementById('ap-status-pill');
-    if (pill) {
-      if (d.running) {
-        pill.textContent = 'SCANNING';
-        var pc = d.running.color || 'teal';
-        var pcMap = {teal:'var(--teal)',purple:'var(--purple)',amber:'var(--amber)',pink:'var(--pink)'};
-        pill.style.color = pcMap[pc] || 'var(--teal)';
-        pill.style.borderColor = pcMap[pc] || 'var(--teal)';
-        pill.style.background = 'rgba(' + (_apColors[pc]||_apColors.teal).r + ',' + (_apColors[pc]||_apColors.teal).g + ',' + (_apColors[pc]||_apColors.teal).b + ',0.08)';
-      } else {
-        pill.textContent = 'STANDBY';
-        pill.style.color = 'var(--dim)';
-        pill.style.borderColor = 'var(--border)';
-        pill.style.background = 'transparent';
-      }
-    }
 
     // Synthos persona strip — "Synthos is {action} · {aside}"
     var stat = d.running || d.idle_status || null;
