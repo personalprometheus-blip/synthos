@@ -1,0 +1,35 @@
+# Synthos company-node log rotation
+#
+# Applied daily by /usr/lib/systemd/system/logrotate.timer (already enabled
+# on Debian).  Rotates every *.log under /home/pi/synthos-company/logs/,
+# keeps 30 days of history, gzips archives older than 1 day.
+#
+# Matches the retention policy of pi5's rotate_logs.py (30-day window).
+# Pi5 keeps its Python rotator for historical continuity; pi4b uses the
+# system logrotate because the timer is already running here and a single
+# config file is simpler than another Python cron.
+#
+# Canonical source: synthos_build/ops/logrotate/pi4b/synthos-company
+# Live on pi4b:     /etc/logrotate.d/synthos-company
+#
+# Deploy:
+#   scp this to pi4b:/tmp/, then:
+#     sudo cp /tmp/synthos-company /etc/logrotate.d/synthos-company
+#     sudo logrotate -d /etc/logrotate.d/synthos-company   # dry-run check
+#
+# Test force-run (actually rotates, for first-time verification):
+#     sudo logrotate -f /etc/logrotate.d/synthos-company
+
+/home/pi/synthos-company/logs/*.log {
+    # logrotate defaults to running as root and refuses to touch a
+    # directory that's group-writable unless we tell it which user
+    # to act as.  su pi pi matches the owner of the logs.
+    su pi pi
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
