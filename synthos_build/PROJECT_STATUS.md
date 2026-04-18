@@ -119,8 +119,10 @@ These items must be completed before any live trading or adversarial deployment.
   - Retail Pi setup pending — `MONITOR_URL=http://192.168.203.10:5000`, token pre-filled
 - [ ] Verify company startup trust path under normal and break-glass modes
 - [ ] Implement retail boot-time license gate — FUTURE_RETAIL_ENTITLEMENT_WORK (deferred from current baseline; see docs/milestones.md)
+- [ ] **Backup pipeline hardening — encrypt-on-source + 3-stream split + schedule retail_backup** — DEFERRED (2026-04-18). Plan captured in `synthos-company/documentation/specs/BACKUP_ENCRYPT_AND_SPLIT_PLAN.md`. Closes: plaintext LAN transit of retail backups, co-mingled customer PII / operator config, missing retail_backup cron. Recovery-critical — execute only when current phase stabilizes.
+- [ ] **Installer restore UI — post-install "restore from file or R2" page** — DEFERRED (2026-04-18). Companion to backup hardening; tracked in same plan doc (`BACKUP_ENCRYPT_AND_SPLIT_PLAN.md` → Companion task). Depends on new R2 key layout; build after encrypt/split work.
 
-**Reference:** `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`, `docs/validation/TRUST_GATE_ALIGNMENT_NOTE.md`
+**Reference:** `docs/governance/COMPANY_INTEGRITY_GATE_SPEC.md`, `docs/validation/TRUST_GATE_ALIGNMENT_NOTE.md`, `synthos-company/documentation/specs/BACKUP_ENCRYPT_AND_SPLIT_PLAN.md`
 
 ---
 
