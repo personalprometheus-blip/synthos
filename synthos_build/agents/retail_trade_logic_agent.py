@@ -677,22 +677,36 @@ def interrogation_to_score(status: str) -> float:
 # get re-evaluated by run_pre_open_reeval() (in retail_market_daemon.py) on
 # the next market-open cycle. See docs/overnight_queue_plan.md.
 
-def is_market_hours_utc_now() -> bool:
-    """True during US regular session hours (13:30-20:00 UTC, weekdays).
+# US regular market session boundaries in ET. DST handled automatically by
+# the ZoneInfo comparison in is_market_hours_utc_now.
+_MARKET_OPEN_HOUR  = 9
+_MARKET_OPEN_MIN   = 30
+_MARKET_CLOSE_HOUR = 16
+_MARKET_CLOSE_MIN  = 0
 
-    Daylight-saving drift: US markets shift between EST/EDT but the UTC
-    window is fixed (13:30-20:00 / 14:30-21:00 depending on DST). We
-    use the tighter window here (EDT) — during EST months we queue
-    orders from 13:30-14:30 UTC that would actually be market-valid,
-    which is a mild false-positive. Fix when DST handling gets a proper
-    source of truth (exchange holiday calendar TODO).
+
+def is_market_hours_utc_now() -> bool:
+    """True during US regular session hours (9:30-16:00 ET, weekdays).
+
+    Naming kept `_utc_now` for backward-compat with early references; the
+    implementation is ET-based. ET handles DST automatically via
+    ZoneInfo, so the UTC window shifts correctly (13:30-20:00 UTC in
+    EDT, 14:30-21:00 UTC in EST) without needing hard-coded hours.
+    Matches the retail_market_daemon is_market_hours() implementation.
+
+    Does NOT check exchange holiday calendar — signals queued on a
+    market holiday would get `CANCELLED_PROTECTIVE` at the re-eval
+    max-age threshold, so the failure mode is benign (visible cancel
+    with a named reason). Holiday awareness is a TODO.
     """
-    now = datetime.now(timezone.utc)
-    if now.weekday() >= 5:
+    now_et = datetime.now(ET)
+    if now_et.weekday() >= 5:
         return False
-    open_time  = now.replace(hour=13, minute=30, second=0, microsecond=0)
-    close_time = now.replace(hour=20, minute=0,  second=0, microsecond=0)
-    return open_time <= now < close_time
+    open_time  = now_et.replace(hour=_MARKET_OPEN_HOUR,  minute=_MARKET_OPEN_MIN,
+                                second=0, microsecond=0)
+    close_time = now_et.replace(hour=_MARKET_CLOSE_HOUR, minute=_MARKET_CLOSE_MIN,
+                                second=0, microsecond=0)
+    return open_time <= now_et < close_time
 
 
 def _queue_overnight_order(ticker: str, qty, side: str,
