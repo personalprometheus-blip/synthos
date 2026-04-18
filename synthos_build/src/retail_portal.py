@@ -9358,11 +9358,13 @@ def api_customer_settings():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/status')
+@login_required
 def api_status():
     return jsonify(get_system_status())
 
 
 @app.route('/api/approvals')
+@login_required
 def api_approvals():
     data = load_pending_approvals()
     log.info(f'[DEBUG] api_approvals returning {len(data)} items, customer_id={session.get("customer_id", "MISSING")}')
@@ -9512,6 +9514,7 @@ def api_agent_pulse():
 
 
 @app.route('/api/portfolio-history')
+@login_required
 def api_portfolio_history():
     """Portfolio value over time for the graph."""
     days = int(request.args.get('days', 30))
@@ -9535,6 +9538,7 @@ def api_portfolio_history():
 
 
 @app.route('/api/performance-summary')
+@login_required
 def api_performance_summary():
     """Closed trade history + computed stats for the Performance tab."""
     try:
@@ -9626,10 +9630,13 @@ def api_performance_summary():
                         'trades': [], 'error': str(e)})
 
 
-@login_required
 @app.route('/api/watchlist')
+@login_required
 def api_watchlist():
-    """Signals from shared intelligence — all customers see the same market data."""
+    """Signals from shared intelligence — all customers see the same market data.
+    (Decorator order fixed — @app.route must be outermost so login_required
+    actually wraps the view; previously was inside the route binding and
+    likely bypassed entirely.)"""
     try:
         signals = _shared_db().get_watching_signals(limit=10)
         return jsonify({'signals': signals})
@@ -9638,6 +9645,7 @@ def api_watchlist():
 
 
 @app.route('/api/planning')
+@login_required
 def api_planning():
     """Planning panel — real signal queue first, intel fallback when empty."""
     try:
@@ -9650,8 +9658,8 @@ def api_planning():
         return jsonify({'signals': [], 'mode': 'intel', 'count': 0, 'error': str(e)})
 
 
-@login_required
 @app.route('/api/screening')
+@login_required
 def api_screening():
     """Latest sector screening — shared across all customers.
     Query ?sector=<name> to restrict to one sector; default is all sectors
@@ -9665,6 +9673,7 @@ def api_screening():
 
 
 @app.route('/api/screening/sectors')
+@login_required
 def api_screening_sectors():
     """Per-sector summary — sector / ETF / 5yr return / top ticker / top score.
     Sorted so the strongest sector (by best candidate combined_score) is
@@ -9676,8 +9685,8 @@ def api_screening_sectors():
         return jsonify({'sectors': [], 'error': str(e)})
 
 
-@login_required
 @app.route('/api/market-indices')
+@login_required
 def api_market_indices():
     """Fetch intraday quote for SPY (S&P 500), QQQ (Nasdaq), DIA (Dow)."""
     import requests as _req
@@ -9907,6 +9916,7 @@ def api_market_chart_data():
 
 
 @app.route('/api/system-health')
+@login_required
 def api_system_health():
     """Monitor server connectivity, Claude API status, Pi uptime."""
     health = {
@@ -10244,6 +10254,7 @@ def api_rss_stream():
 # ── BOOT ──────────────────────────────────────────────────────────────────
 
 @app.route('/api/improvement-backlog')
+@login_required
 def api_improvement_backlog():
     """Return the improvement backlog for the audit page."""
     backlog_path = os.path.join(PROJECT_DIR, '.improvement_backlog.json')
@@ -10692,6 +10703,7 @@ def api_logs_audit():
     })
 
 @app.route('/api/audit')
+@login_required
 def api_audit():
     """Latest audit result from agent4_audit.py."""
     audit_path = os.path.join(PROJECT_DIR, '.audit_latest.json')
