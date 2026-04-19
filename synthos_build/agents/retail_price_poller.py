@@ -78,8 +78,21 @@ def _get_all_customer_ids():
 
 
 def _get_held_tickers():
-    """Collect all unique tickers from OPEN positions across all customers."""
+    """Collect all unique tickers that need fresh prices.
+
+    Returns the UNION of:
+      - OPEN positions across all customers (existing behavior — needed
+        for dashboard P&L and trader exit logic)
+      - VALIDATED signals from the shared master DB (added for AUTO/USER
+        tagging: trader's bulk prefetch reads prices from live_prices,
+        so signals awaiting trader action also need fresh prices here)
+
+    This keeps all hot-path price fetches inside the 60s poller so the
+    trader itself never blocks on Alpaca HTTP during a dispatch cycle.
+    """
     tickers = set()
+
+    # Positions — per-customer DB
     for cid in _get_all_customer_ids():
         db_path = os.path.join(CUSTOMERS_DIR, cid, 'signals.db')
         try:
@@ -92,6 +105,21 @@ def _get_held_tickers():
             db.close()
         except Exception as e:
             log.warning(f"Could not read positions for {cid[:8]}: {e}")
+
+    # Validated signals — master DB is the single source of truth for
+    # intel that the trader is about to act on.
+    try:
+        sdb = sqlite3.connect(_shared_db_path(), timeout=5)
+        rows = sdb.execute(
+            "SELECT DISTINCT ticker FROM signals WHERE status='VALIDATED'"
+        ).fetchall()
+        for r in rows:
+            if r[0]:
+                tickers.add(r[0])
+        sdb.close()
+    except Exception as e:
+        log.warning(f"Could not read VALIDATED signals from shared DB: {e}")
+
     return tickers
 
 
