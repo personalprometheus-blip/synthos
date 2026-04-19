@@ -5274,7 +5274,7 @@ var _apColors = {
 // ── INTRO — cursive "Synthos" glides left→right, waves build in behind it ──
 var _apIntroActive = false;
 var _apIntroStart  = null;
-var _apIntroPaintMs = 3200;  // ms: pen traverses left→right while painting
+var _apIntroPaintMs = 5000;  // ms: pen traverses left→right while painting
 var _apIntroFadeMs  = 1800;  // ms: trail fades, normal waves fade in
 var _apIntroTotal   = _apIntroPaintMs + _apIntroFadeMs;
 var _apPenPath = [];         // history of pen positions during the paint phase
