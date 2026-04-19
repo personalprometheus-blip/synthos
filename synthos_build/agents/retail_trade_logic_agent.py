@@ -2397,6 +2397,16 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                 # Decision already logged inside gate7_sizing.
                 sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
                 sig_log.commit(db)
+                # Also log to signal_decisions so the cash-starved warning
+                # banner (phase 7) can count these skips over a rolling window.
+                try:
+                    db.log_signal_decision(
+                        agent='trade_logic', action='SKIP_INSUFFICIENT_CASH_AFTER_MANUAL',
+                        ticker=signal.get('ticker'), signal_id=signal.get('id'),
+                        reason='cash insufficient after manual/auto allocation',
+                    )
+                except Exception:
+                    pass
                 _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
                 continue
             risk = gate8_risk(candidate, atr, session, sig_log)
@@ -3048,13 +3058,20 @@ def run(session="open"):
 
                 # Sticky USER preference — user has marked this ticker "never auto".
                 # Bot respects this across all signals for the ticker, regardless of
-                # whether they currently hold a position. Skip silently (log once so
-                # the audit trail captures it, but don't re-evaluate gates).
+                # whether they currently hold a position.
                 _sticky = db.get_ticker_sticky(signal['ticker'])
                 if _sticky == 'user':
                     log.info(f"Signal {signal['ticker']} skipped — sticky USER preference")
                     db.log_event("SIGNAL_SKIPPED_STICKY_USER", agent="Trade Logic",
                                  details=f"ticker={signal['ticker']} signal_id={signal.get('id')}")
+                    try:
+                        db.log_signal_decision(
+                            agent='trade_logic', action='SKIP_STICKY_USER',
+                            ticker=signal['ticker'], signal_id=signal.get('id'),
+                            reason='ticker has sticky=user preference',
+                        )
+                    except Exception:
+                        pass
                     _mark_signal_evaluated(signal['id'], 'SKIP_STICKY_USER')
                     continue
 

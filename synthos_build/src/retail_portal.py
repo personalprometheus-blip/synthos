@@ -3448,6 +3448,41 @@ def get_system_status():
             for _p in all_positions:
                 _p['sticky'] = _sticky_map.get(_p.get('ticker'))
 
+            # User-facing warnings — computed per request, not persisted. Keeps
+            # the UI honest about pipeline health without spamming notifications.
+            _user_warnings = []
+            _auto_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'bot')
+            _user_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'user')
+            # Cap-underutilized: ≥ 1 position total, bot covering < 40% of cap.
+            # Suppressed on brand-new accounts (zero positions) so onboarding
+            # isn't noisy.
+            if (_auto_n + _user_n) >= 1 and _auto_n < max(2, int(AUTO_USER_POSITION_CAP * 0.4)):
+                _user_warnings.append({
+                    'type': 'cap_underutilized',
+                    'severity': 'info',
+                    'message': (f"Bot is only managing {_auto_n}/{AUTO_USER_POSITION_CAP} positions. "
+                                f"Promote USER positions to AUTO below if you want more bot coverage."),
+                })
+            # Cash-starved: recent SKIP_INSUFFICIENT_CASH_AFTER_MANUAL signals.
+            try:
+                with db.conn() as _c:
+                    _skip_row = _c.execute(
+                        "SELECT COUNT(*) AS n FROM signal_decisions "
+                        "WHERE action = 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL' "
+                        "AND ts >= datetime('now', '-7 days')"
+                    ).fetchone()
+                    _skip_count = int(_skip_row['n']) if _skip_row else 0
+            except Exception:
+                _skip_count = 0
+            if _skip_count >= 2:
+                _user_warnings.append({
+                    'type': 'cash_starved',
+                    'severity': 'warn',
+                    'message': (f"Bot skipped {_skip_count} signals in the last 7 days because "
+                                f"there wasn't enough cash after your manual positions. "
+                                f"Closing a USER position or adding funds would restore bot coverage."),
+                })
+
             # Enrich flags with human-readable context
             enriched_flags = _enrich_flags([dict(f) for f in flags], db.path)
             critical_count = sum(1 for f in enriched_flags if f['tier'] == 1)
@@ -3477,6 +3512,7 @@ def get_system_status():
                 "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":            PI_ID,
                 "agent_running":    None,
+                "user_warnings":    _user_warnings,
                 "admin_overrides": {
                     "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
                     "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
@@ -5220,6 +5256,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       </div>
     </div>
   </div>
+
+  <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
+  <div id="user-warnings-banner"></div>
 
   <!-- OPEN POSITIONS -->
   <div class="glass teal-glow" style="margin-bottom:14px">
@@ -7738,6 +7777,26 @@ async function toggleManagedBy(posId, current, ticker, event) {
   }
 }
 
+function renderUserWarnings(warnings) {
+  const el = document.getElementById('user-warnings-banner');
+  if (!el) return;
+  if (!warnings || !warnings.length) { el.innerHTML = ''; return; }
+  const palette = {
+    info: { bg:'rgba(0,245,212,0.06)', border:'rgba(0,245,212,0.25)', color:'var(--teal)', icon:'&#x1F4A1;' },
+    warn: { bg:'rgba(245,166,35,0.08)', border:'rgba(245,166,35,0.3)',  color:'#f5a623',    icon:'&#x26A0;'  },
+    err:  { bg:'rgba(255,75,110,0.08)', border:'rgba(255,75,110,0.3)',  color:'var(--pink)',icon:'&#x26A0;'  },
+  };
+  el.innerHTML = warnings.map(w => {
+    const p = palette[w.severity] || palette.info;
+    return '<div style="padding:10px 14px;margin-bottom:10px;border-radius:10px;'
+      + 'background:' + p.bg + ';border:1px solid ' + p.border + ';color:' + p.color + ';'
+      + 'font-size:11px;line-height:1.5;display:flex;gap:8px;align-items:flex-start">'
+      + '<span style="font-size:14px;line-height:1;flex-shrink:0;padding-top:1px">' + p.icon + '</span>'
+      + '<span style="color:var(--text);flex:1">' + (w.message||'').replace(/</g,'&lt;') + '</span>'
+      + '</div>';
+  }).join('');
+}
+
 async function toggleStickyUser(ticker, isSticky, event) {
   event.stopPropagation();
   const t = (ticker || '').toUpperCase();
@@ -8142,6 +8201,7 @@ async function loadLiveStatus() {
     // Render approvals and positions immediately — don't let status processing errors block them
     try { renderApprovals(a); } catch(ae) { console.log('Approvals render error:', ae); }
     try { renderPositions(s.positions||[]); } catch(pe) { console.log('Positions render error:', pe); }
+    try { renderUserWarnings(s.user_warnings||[]); } catch(we) { console.log('User warnings render error:', we); }
     // Stats
     const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
