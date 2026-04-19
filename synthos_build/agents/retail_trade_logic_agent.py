@@ -121,8 +121,9 @@ def _mark_signal_evaluated(signal_id, reason: str = ''):
     """Mark a QUEUED signal as EVALUATED so it is not re-processed on future runs.
 
     Called after Gates 4/5/6/11 decide SKIP or WATCH — the signal was seen,
-    evaluated, and intentionally not acted on.  The 72-hour expiry (auto-expire
-    in get_queued_signals) serves as a backstop for any signals that slip through.
+    evaluated, and intentionally not acted on. Tier-dependent expiry
+    (30d/7d/2d/1d per retail_database.py:1318) auto-moves unacted signals
+    to EXPIRED as a backstop for any that slip through this bookkeeping.
     """
     try:
         sdb = _shared_db()
@@ -553,8 +554,16 @@ class RegimeState:
 
 
 # ── KILL SWITCH ───────────────────────────────────────────────────────────────
+# Two halt layers (see docs/specs/HALT_AGENT_REWRITE.md):
+#   Admin halt:     system_halt row in MASTER DB (applies to every customer)
+#                   + legacy .kill_switch file check for emergency SSH kills
+#   Customer halt:  system_halt row in this customer's own DB
+#                   + legacy KILL_SWITCH='1' setting for backwards compat
+# The trader's run() entry-point skip check reads both and exits clean if
+# either is active, BEFORE opening an Alpaca client or doing any real work.
 
 def kill_switch_active():
+    """Legacy file-based admin kill check. Kept as emergency fallback."""
     return os.path.exists(KILL_SWITCH_FILE)
 
 def clear_kill_switch():
@@ -564,6 +573,51 @@ def clear_kill_switch():
             log.info("Kill switch cleared")
     except Exception as e:
         log.error(f"Could not clear kill switch: {e}")
+
+
+def _check_halt_state() -> 'tuple[str, str] | None':
+    """Return (source, reason) if halted, else None.
+
+    source ∈ {'admin', 'customer'}. Called at the very top of run() before
+    any other DB read or Alpaca call. Three checks layered in order:
+      1. Admin halt row in shared DB (master customer's signals.db)
+      2. Legacy .kill_switch file (emergency SSH kill — bypasses DB)
+      3. Customer halt row in this customer's own DB
+      4. Legacy KILL_SWITCH='1' setting in this customer's settings (bwd-compat)
+
+    Any failure reading the DB falls soft — we don't fabricate a halt state
+    just because a DB read hiccupped."""
+    # 1. Admin halt via system_halt table in master DB
+    try:
+        shared = _shared_db()
+        admin = shared.get_halt()
+        if admin and admin.get('active'):
+            return ('admin', admin.get('reason') or '')
+    except Exception as e:
+        log.debug(f"admin halt check (shared DB) failed: {e}")
+
+    # 2. Legacy .kill_switch file — still honored as emergency fallback
+    if kill_switch_active():
+        return ('admin', 'legacy .kill_switch file present')
+
+    # 3. Customer halt via system_halt table in this customer's DB
+    try:
+        db = _db()
+        cust = db.get_halt()
+        if cust and cust.get('active'):
+            return ('customer', cust.get('reason') or '')
+    except Exception as e:
+        log.debug(f"customer halt check (per-customer DB) failed: {e}")
+
+    # 4. Legacy per-customer KILL_SWITCH='1' setting (backwards-compat bridge)
+    try:
+        db = _db()
+        if db.get_setting('KILL_SWITCH') == '1':
+            return ('customer', 'legacy KILL_SWITCH=1 setting')
+    except Exception as e:
+        log.debug(f"legacy KILL_SWITCH setting check failed: {e}")
+
+    return None
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -1207,14 +1261,12 @@ def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bo
     }, "within market hours" if mtr["is_market_hours"] else "outside market hours (evaluation only)")
     # Non-fatal — agent runs 24/7, evaluates signals any time
 
-    # Kill switch — global file OR per-customer DB flag
-    _global_kill = kill_switch_active()
-    _customer_kill = getattr(C, '_customer_kill_switch', False)
-    if _global_kill or _customer_kill:
-        source = "global file" if _global_kill else "per-customer setting"
-        decision_log.gate("1_KILL_SWITCH", False, {"source": source}, f"kill switch active ({source})")
-        decision_log.decide("HALT", f"Kill switch active ({source})")
-        return False
+    # Halt check redundancy removed — run()'s first-line _check_halt_state
+    # already exited before this code ran. Keeping a legacy belt-and-
+    # suspenders check here would only fire in the impossible case that
+    # the halt state flipped between run() entry and Gate 1 (~milliseconds).
+    # If we ever want that defense-in-depth, it's a single _check_halt_state()
+    # call — no need for the old global-file / per-customer-setting split.
 
     # Portfolio drawdown limit
     # current_equity <= peak_equity * (1 - max_drawdown_pct)
@@ -2479,6 +2531,21 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
         log.error(f"[ROTATION] Unexpected error: {e}", exc_info=True)
 
 def run(session="open"):
+    # ── HALT CHECK — absolute first thing ────────────────────────────
+    # If admin or customer halt is active, exit immediately. This runs
+    # before ANY other work: no DB connection beyond the halt read, no
+    # Alpaca client creation, no state mutation. See HALT_AGENT_REWRITE.md.
+    _halt = _check_halt_state()
+    if _halt is not None:
+        _src, _reason = _halt
+        log.info(f"[HALT] {_src} halt active (reason={_reason!r}) — skipping trader run")
+        try:
+            _db().log_event("TRADER_SKIPPED_HALT", agent="Trade Logic",
+                            details=f"src={_src} reason={_reason[:200]}")
+        except Exception:
+            pass
+        sys.exit(0)
+
     # ── RUNTIME WATCHDOG ──────────────────────────────────────────────
     # Start the background watchdog BEFORE any blocking work so even a
     # hang on the very first Alpaca call gets a "still alive in phase X"
