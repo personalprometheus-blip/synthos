@@ -24,7 +24,7 @@ import hmac as _hmac
 import secrets
 import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
