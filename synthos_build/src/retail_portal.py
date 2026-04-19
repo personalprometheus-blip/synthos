@@ -5274,7 +5274,10 @@ var _apColors = {
 // ── INTRO — cursive "Synthos" glides left→right, waves build in behind it ──
 var _apIntroActive = false;
 var _apIntroStart  = null;
-var _apIntroTotal  = 4200;   // ms: total — longer so letters register
+var _apIntroPaintMs = 3200;  // ms: pen traverses left→right while painting
+var _apIntroFadeMs  = 1800;  // ms: trail fades, normal waves fade in
+var _apIntroTotal   = _apIntroPaintMs + _apIntroFadeMs;
+var _apPenPath = [];         // history of pen positions during the paint phase
 (function _apInitIntro() {
   try {
     // URL bypass for testing: ?replay=1 forces intro regardless of flag
@@ -5339,80 +5342,86 @@ function _apBuildIntroPath(canvasH) {
 
 function _apDrawIntroFrame(ctx, w, h, elapsed) {
   if (!_apIntroPath) _apBuildIntroPath(h);
-
-  var p = Math.min(1, elapsed / _apIntroTotal);
   var pathW = _apIntroPathW;
+  var midY  = h / 2;
 
-  // Phase split: ribbon traverses during the first RIBBON_FRAC of the time;
-  // the remaining time is the normal-wave fade-in handoff.
-  var RIBBON_FRAC = 0.78;
-  var LETTER_THRESHOLD = 0.06;
+  // Letter region occupies the middle 60% of the canvas; straight entry/exit
+  // lines flank it so the pen starts and ends at the baseline (midY).
+  var letterStart = w * 0.20;
+  var letterEnd   = w * 0.80;
+  var letterRegionW = letterEnd - letterStart;
 
-  var midY = h / 2;
-  var t_time = _apFrame * 0.015;
+  // ── PAINT PHASE — pen moves left→right, leaving a glowing trail ──
+  if (elapsed <= _apIntroPaintMs) {
+    var p = elapsed / _apIntroPaintMs;
+    // Gentle ease-in-out so the pen isn't linear-mechanical
+    var pe = 0.5 * (1 - Math.cos(Math.PI * p));
+    var penX = pe * w;
 
-  // ── RIBBON PHASE — draw ONLY where letter ink exists, nothing else ──
-  var letterMult = 0, settleMult = 0;
-  if (p < RIBBON_FRAC) {
-    var rp  = p / RIBBON_FRAC;                          // 0→1 within ribbon phase
-    var rpe = 0.5 * (1 - Math.cos(Math.PI * rp));       // ease-in-out
-    var L   = -pathW + rpe * (w + pathW);
-
-    // Letter visibility fades in the first 10% and out the last 10% of this phase
-    if (rp < 0.12)       letterMult = rp / 0.12;
-    else if (rp > 0.88)  letterMult = (1 - rp) / 0.12;
-    else                 letterMult = 1;
-
-    // Draw 3 convergent lines that trace the letter centroid, only where ink exists.
-    var offsets = [-1.6, 0, 1.6];
-    for (var k = 0; k < offsets.length; k++) {
-      var off = offsets[k];
-      var inPath = false;
-      ctx.beginPath();
-      for (var x = 0; x <= w; x += 1) {
-        var u = Math.floor(x - L);
-        var strength = 0, letterY = 0;
-        if (u >= 0 && u < pathW) {
-          strength = _apIntroStrength[u];
-          letterY  = _apIntroPath[u];
-        }
-        if (strength > LETTER_THRESHOLD) {
-          // When strength is high, lines converge exactly onto centroid
-          var y = midY + letterY + off * (1 - strength);
-          if (!inPath) { ctx.moveTo(x, y); inPath = true; }
-          else         ctx.lineTo(x, y);
-        } else if (inPath) {
-          // End of a contiguous letter segment
-          inPath = false;
-        }
+    var penY = midY;
+    if (penX >= letterStart && penX < letterEnd) {
+      var u = Math.floor((penX - letterStart) / letterRegionW * pathW);
+      if (u >= 0 && u < pathW) {
+        // Centroid is 0 where there's no ink → pen stays at midY there.
+        penY = midY + _apIntroPath[u];
       }
-      var alphaK = (0.55 + k * 0.15) * letterMult;
-      ctx.strokeStyle = 'rgba(0,245,212,' + alphaK + ')';
-      ctx.lineWidth = 2.0 - Math.abs(off) * 0.3;
-      ctx.stroke();
     }
-    return;
+
+    _apPenPath.push({ x: penX, y: penY });
   }
 
-  // ── SETTLE PHASE — normal waves fade in to full, no letter drawn ──
-  settleMult = Math.min(1, (p - RIBBON_FRAC) / (1 - RIBBON_FRAC));
-  var numWaves = 5;
-  var baseAmp  = 22;
-  for (var i = 0; i < numWaves; i++) {
-    var amp   = baseAmp * (0.4 + (i / numWaves) * 0.6);
-    var freq  = 0.010 + i * 0.003;
-    var phase = t_time + i * 0.8;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    for (var x = 0; x <= w; x += 2) {
-      var y = midY + Math.sin(x * freq - phase) * amp
-                   + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
-      ctx.lineTo(x, y);
+  // Draw the trail as one continuous stroke with a glow — looks like ink
+  if (_apPenPath.length > 1) {
+    // Fade phase: trail alpha ramps down 1 → 0 after the pen finishes
+    var trailAlpha = 1;
+    if (elapsed > _apIntroPaintMs) {
+      trailAlpha = Math.max(0, 1 - (elapsed - _apIntroPaintMs) / _apIntroFadeMs);
     }
-    var alpha = (0.12 + (i / numWaves) * 0.25) * settleMult;
-    ctx.strokeStyle = 'rgba(0,245,212,' + alpha + ')';
-    ctx.lineWidth = 1.7;
-    ctx.stroke();
+    if (trailAlpha > 0.01) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(_apPenPath[0].x, _apPenPath[0].y);
+      for (var i = 1; i < _apPenPath.length; i++) {
+        ctx.lineTo(_apPenPath[i].x, _apPenPath[i].y);
+      }
+      // Two passes: soft outer glow, then crisp inner stroke
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = 'rgba(0,245,212,' + (0.75 * trailAlpha) + ')';
+      ctx.strokeStyle = 'rgba(0,245,212,' + (0.55 * trailAlpha) + ')';
+      ctx.lineWidth = 4.5;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(220,250,255,' + (0.95 * trailAlpha) + ')';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ── SETTLE PHASE — normal waves fade in to full during trail fade-out ──
+  if (elapsed > _apIntroPaintMs) {
+    var settleMult = Math.min(1, (elapsed - _apIntroPaintMs) / _apIntroFadeMs);
+    var numWaves = 5;
+    var baseAmp  = 22;
+    var t_time   = _apFrame * 0.015;
+    for (var j = 0; j < numWaves; j++) {
+      var amp   = baseAmp * (0.4 + (j / numWaves) * 0.6);
+      var freq  = 0.010 + j * 0.003;
+      var phase = t_time + j * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (var x = 0; x <= w; x += 2) {
+        var y = midY + Math.sin(x * freq - phase) * amp
+                     + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
+        ctx.lineTo(x, y);
+      }
+      var alpha = (0.12 + (j / numWaves) * 0.25) * settleMult;
+      ctx.strokeStyle = 'rgba(0,245,212,' + alpha + ')';
+      ctx.lineWidth = 1.7;
+      ctx.stroke();
+    }
   }
 }
 
