@@ -1,0 +1,57 @@
+{
+  "cycle_id": "cycle_05",
+  "description": "Macro stress / regime signals — Fed hawkish surprise + VIX spike + single-name defensive rotation. Exercises gate 11 BENCHMARK_RELATIVE under negative sentiment and gate 16 IMPACT_MAGNITUDE for marketwide-scope items.",
+  "frozen_clock_utc": "2026-04-15T11:30:00Z",
+  "frozen_clock_et":  "2026-04-15T07:30:00-04:00",
+  "articles": [
+    {
+      "headline":       "Fed Chair Warns Inflation Progress Has Stalled, Rate Cuts Off The Table",
+      "subhead":        "Hawkish comments roil futures markets; odds of 2026 cuts collapse to under 20%.",
+      "source":         "Alpaca News (Reuters)",
+      "source_tier":    1,
+      "source_url":     "https://example-reuters.test/articles/fed-chair-hawkish",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "SPY",
+      "all_symbols":    ["SPY"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T11:20:00Z"
+    },
+    {
+      "headline":       "VIX Spikes Above 25 On Fed Commentary, Hedging Flows Surge",
+      "subhead":        "Volatility index jumps as traders re-price risk; puts active across index ETFs.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/vix-spike-apr-15",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "SPY",
+      "all_symbols":    ["SPY", "QQQ"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T11:25:00Z"
+    },
+    {
+      "headline":       "Utility Giant NextEra Outperforms As Defensive Rotation Accelerates",
+      "subhead":        "Flight to safety bids up regulated utilities; NEE up in premarket on no company news.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/nee-defensive-flow",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "NEE",
+      "all_symbols":    ["NEE"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T11:27:00Z"
+    }
+  ],
+  "bars": {
+    "SPY":  {"last_close": 520.10, "change_pct_1yr":  12.4, "high_52w": 535.00, "low_52w": 470.00, "avg_volume": 80000000, "bars_available": 252},
+    "QQQ":  {"last_close": 440.00, "change_pct_1yr":  16.0, "high_52w": 460.00, "low_52w": 370.00, "avg_volume": 45000000, "bars_available": 252},
+    "NEE":  {"last_close":  72.50, "change_pct_1yr":   3.5, "high_52w":  80.00, "low_52w":  62.00, "avg_volume": 10000000, "bars_available": 252},
+    "XLU":  {"last_close":  70.00, "change_pct_1yr":   6.0, "high_52w":  75.00, "low_52w":  58.00, "avg_volume":  9000000, "bars_available": 252}
+  },
+  "member_weights": []
+}

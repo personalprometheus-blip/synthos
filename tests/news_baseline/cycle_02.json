@@ -1,0 +1,187 @@
+{
+  "captured_at": "2026-04-19T13:13:43+00:00",
+  "cycle_id": "cycle_02",
+  "frozen_clock": "2026-04-15T11:30:00Z",
+  "input_summary": {
+    "article_count": 3,
+    "tickers": [
+      "AAPL",
+      "SPY"
+    ]
+  },
+  "output": {
+    "signal_decisions": [
+      {
+        "action": "STAMPED_TICKER",
+        "agent": "news",
+        "cycle_id": null,
+        "id": 1,
+        "meta": null,
+        "reason": "routing=WATCH adj=LOW",
+        "signal_id": 1,
+        "ticker": "AAPL",
+        "ts": "2026-04-15 11:30:00",
+        "value": "SKIPPED"
+      },
+      {
+        "action": "STAMPED_TICKER",
+        "agent": "news",
+        "cycle_id": null,
+        "id": 2,
+        "meta": null,
+        "reason": "routing=QUEUE adj=LOW",
+        "signal_id": 1,
+        "ticker": "AAPL",
+        "ts": "2026-04-15 11:30:00",
+        "value": "UNVALIDATED"
+      },
+      {
+        "action": "STAMPED_TICKER",
+        "agent": "news",
+        "cycle_id": null,
+        "id": 3,
+        "meta": null,
+        "reason": "routing=WATCH adj=MEDIUM",
+        "signal_id": 2,
+        "ticker": "SPY",
+        "ts": "2026-04-15 11:30:00",
+        "value": "SKIPPED"
+      }
+    ],
+    "signals": [
+      {
+        "amount_range": "",
+        "company": null,
+        "confidence": "LOW",
+        "corroborated": 0,
+        "corroboration_note": "article-first: watch_only signal, SPX backdrop=neutral",
+        "created_at": "2026-04-15 11:30:00",
+        "disc_date": "2026-04-15",
+        "discard_delete_at": "2026-05-15 11:30:00",
+        "entry_signal_score": "LOW",
+        "expires_at": "2026-05-15 11:30:00",
+        "headline": "Apple Crushes Q1 Expectations, Services Revenue Hits New High",
+        "id": 1,
+        "image_url": "",
+        "interrogation_status": "UNVALIDATED",
+        "is_amended": 0,
+        "is_spousal": 0,
+        "macro_regime_at_validation": null,
+        "market_state_at_validation": null,
+        "needs_reeval": 0,
+        "politician": "",
+        "price_history_used": "AAPL,XLK",
+        "screener_evaluated_at": null,
+        "screener_score": null,
+        "sector": "",
+        "sentiment_evaluated_at": null,
+        "sentiment_score": null,
+        "source": "Alpaca News (Reuters)",
+        "source_tier": 1,
+        "source_url": "https://example-reuters.test/articles/aapl-q1-2026-official",
+        "staleness": "Fresh",
+        "status": "QUEUED",
+        "ticker": "AAPL",
+        "tx_date": "2026-04-15",
+        "updated_at": "2026-04-15 11:30:00",
+        "validator_stamped_at": null
+      },
+      {
+        "amount_range": "",
+        "company": null,
+        "confidence": "MEDIUM",
+        "corroborated": 0,
+        "corroboration_note": "article-first: watch_only signal, SPX backdrop=neutral",
+        "created_at": "2026-04-15 11:30:00",
+        "disc_date": "2026-04-15",
+        "discard_delete_at": "2026-05-15 11:30:00",
+        "entry_signal_score": "MEDIUM",
+        "expires_at": "2026-05-15 11:30:00",
+        "headline": "Tech Megacap Earnings Lift S&P 500 Futures Ahead of Open",
+        "id": 2,
+        "image_url": "",
+        "interrogation_status": "SKIPPED",
+        "is_amended": 0,
+        "is_spousal": 0,
+        "macro_regime_at_validation": null,
+        "market_state_at_validation": null,
+        "needs_reeval": 0,
+        "politician": "",
+        "price_history_used": "SPY",
+        "screener_evaluated_at": null,
+        "screener_score": null,
+        "sector": "",
+        "sentiment_evaluated_at": null,
+        "sentiment_score": null,
+        "source": "Alpaca News (Reuters)",
+        "source_tier": 1,
+        "source_url": "https://example-reuters.test/articles/tech-megacap-lift",
+        "staleness": "Fresh",
+        "status": "QUEUED",
+        "ticker": "SPY",
+        "tx_date": "2026-04-15",
+        "updated_at": "2026-04-15 11:30:00",
+        "validator_stamped_at": null
+      }
+    ],
+    "system_log": [
+      {
+        "agent": "News",
+        "details": "session=market",
+        "event": "AGENT_START",
+        "id": 1,
+        "portfolio_value": null,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "news_agent",
+        "details": "RUNNING",
+        "event": "HEARTBEAT",
+        "id": 2,
+        "portfolio_value": null,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "News",
+        "details": "{\"ts\": \"2026-04-15T07:30:00-04:00\", \"ticker\": \"AAPL\", \"headline\": \"Apple Crushes Q1 Expectations, Services Revenue Hits New High\", \"source\": \"Alpaca News (Reuters)\", \"source_tier\": 1, \"gates\": [{\"gate\": \"GATE 01 \\u2014 SYSTEM\", \"inputs\": {\"headline_len\": \"61\", \"disc_date\": \"2026-04-15\", \"age_ok\": \"True\", \"best_sim\": \"0.00\", \"word_count\": \"18\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 03 \\u2014 SOURCE_RELEVANCE\", \"inputs\": {\"source_tier\": \"1\", \"credibility\": \"1.00\", \"relevance\": \"0.67\", \"opinion_flag\": \"False\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 04 \\u2014 TOPIC\", \"inputs\": {\"macro\": \"0\", \"earnings\": \"1\", \"geo\": \"0\", \"reg\": \"0\", \"mktstr\": \"0\", \"ticker\": \"AAPL\"}, \"result\": \"topic=company scope=single_name\", \"reason\": \"\"}, {\"gate\": \"GATE 05 \\u2014 ENTITY\", \"inputs\": {\"ticker\": \"AAPL\", \"unique_tickers\": \"0\", \"topic\": \"company\"}, \"result\": \"entity_state=company_linked\", \"reason\": \"\"}, {\"gate\": \"GATE 06 \\u2014 EVENT_DETECTION\", \"inputs\": {\"breaking\": \"True\", \"follow_up\": \"0.00\", \"rumor\": \"False\", \"uncertainty_density\": \"0.000\", \"scheduled\": \"True\", \"official\": \"False\"}, \"result\": \"event_type=breaking\", \"reason\": \"\"}, {\"gate\": \"GATE 07 \\u2014 SENTIMENT\", \"inputs\": {\"pos_tokens\": \"1\", \"neg_tokens\": \"0\", \"score\": \"0.056\", \"confidence\": \"0.83\", \"unc_density\": \"0.000\", \"exaggeration\": \"False\"}, \"result\": \"direction=NEUTRAL conf_ok=True\", \"reason\": \"\"}, {\"gate\": \"GATE 08 \\u2014 NOVELTY\", \"inputs\": {\"max_similarity\": \"0.00\", \"novelty_score\": \"1.00\", \"novelty_threshold\": \"0.4\"}, \"result\": \"novelty=1.00 repetition=False ok=True novelty_state=novelty_high\", \"reason\": \"\"}, {\"gate\": \"GATE 09 \\u2014 SCOPE\", \"inputs\": {\"topic\": \"company\", \"entity_state\": \"company_linked\"}, \"result\": \"scope_state=single_name benchmark_corr=LOW\", \"reason\": \"\"}, {\"gate\": \"GATE 10 \\u2014 HORIZON\", \"inputs\": {\"topic\": \"company\", \"breaking\": \"True\"}, \"result\": \"horizon_state=intraday decay_state=fast_decay\", \"reason\": \"\"}, {\"gate\": \"GATE 11 \\u2014 BENCHMARK_RELATIVE\", \"inputs\": {\"sentiment\": \"neutral\", \"spx_trend\": \"neutral\", \"benchmark_corr\": \"LOW\", \"scope_state\": \"single_name\"}, \"result\": \"benchmark_rel_state=neutral signal_type=alpha dominance=idiosyncratic_dominant\", \"reason\": \"\"}, {\"gate\": \"GATE 12 \\u2014 CONFIRMATION\", \"inputs\": {\"source_tier\": \"1\", \"source_count\": \"1\", \"has_primary_source\": \"True\", \"confirmed\": \"False\", \"misinfo_risk\": \"False\"}, \"result\": \"confirmation_state=primary_confirmed score=1.00\", \"reason\": \"\"}, {\"gate\": \"GATE 13 \\u2014 TIMING\", \"inputs\": {\"disc_date\": \"2026-04-15\", \"timing_state\": \"premarket\", \"stale\": \"False\"}, \"result\": \"tradeable=True\", \"reason\": \"\"}, {\"gate\": \"GATE 14 \\u2014 CROWDING\", \"inputs\": {\"cluster_volume\": \"1\", \"threshold\": \"8\", \"exhausted_threshold\": \"16\"}, \"result\": \"crowding_state=still_open discount=0.0\", \"reason\": \"\"}, {\"gate\": \"GATE 15 \\u2014 CONTRADICTION\", \"inputs\": {\"uncertainty_density\": \"0.000\", \"head_body_mismatch\": \"False\", \"internally_conflicted\": \"False\"}, \"result\": \"ambiguity_state=clear score=0.00\", \"reason\": \"\"}, {\"gate\": \"GATE 16 \\u2014 IMPACT_MAGNITUDE\", \"inputs\": {\"scope_state\": \"single_name\", \"topic\": \"company\", \"high_vol\": \"False\", \"drawdown\": \"False\"}, \"result\": \"impact_magnitude=low link=benchmark_weak base_score=0.20\", \"reason\": \"\"}, {\"gate\": \"GATE 17 \\u2014 ACTION\", \"inputs\": {\"direction\": \"NEUTRAL\", \"conf_ok\": \"True\"}, \"result\": \"watch_only\", \"reason\": \"neutral or mixed sentiment / low confidence\"}, {\"gate\": \"GATE 18 \\u2014 RISK_DISCOUNTS\", \"inputs\": {\"base_impact_score\": \"0.2\", \"discounts\": \"0\"}, \"result\": \"impact_score=0.2000 final_confidence=LOW\", \"reason\": \"none\"}, {\"gate\": \"GATE 19 \\u2014 PERSISTENCE\", \"inputs\": {\"topic\": \"company\", \"breaking\": \"True\"}, \"result\": \"persistence_state=rapid decay=high\", \"reason\": \"breaking news \\u2014 typically transient\"}, {\"gate\": \"GATE 20 \\u2014 EVALUATION_LOOP\", \"inputs\": {\"action_state\": \"watch_only\", \"ticker_active\": \"False\"}, \"result\": \"relevance_ok=True\", \"reason\": \"accuracy_tracking_pending\"}, {\"gate\": \"GATE 21 \\u2014 OUTPUT\", \"inputs\": {\"action_state\": \"watch_only\", \"impact_score\": \"0.2000\", \"output_mode\": \"uncertain\"}, \"result\": \"routing=WATCH output_action=no_signal\", \"reason\": \"article-first: watch_only signal, SPX backdrop=neutral\"}, {\"gate\": \"GATE 22 \\u2014 COMPOSITE\", \"inputs\": {\"composite_score\": \"0.8067\", \"quality_thresh\": \"0.45\", \"action_state\": \"watch_only\"}, \"result\": \"final_signal=neutral_or_watch routing=WATCH\", \"reason\": \"\"}], \"notes\": [], \"decision\": \"WATCH\", \"confidence\": \"LOW\", \"reason\": \"article-first: watch_only signal, SPX backdrop=neutral\"}",
+        "event": "NEWS_CLASSIFIED",
+        "id": 3,
+        "portfolio_value": null,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "News",
+        "details": "{\"ts\": \"2026-04-15T07:30:00-04:00\", \"ticker\": \"AAPL\", \"headline\": \"AAPL Earnings Beat Sends Shares Higher in Premarket\", \"source\": \"Alpaca News (Benzinga)\", \"source_tier\": 2, \"gates\": [{\"gate\": \"GATE 01 \\u2014 SYSTEM\", \"inputs\": {\"headline_len\": \"51\", \"disc_date\": \"2026-04-15\", \"age_ok\": \"True\", \"best_sim\": \"0.06\", \"word_count\": \"17\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 03 \\u2014 SOURCE_RELEVANCE\", \"inputs\": {\"source_tier\": \"2\", \"credibility\": \"0.70\", \"relevance\": \"0.67\", \"opinion_flag\": \"False\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 04 \\u2014 TOPIC\", \"inputs\": {\"macro\": \"0\", \"earnings\": \"1\", \"geo\": \"0\", \"reg\": \"0\", \"mktstr\": \"0\", \"ticker\": \"AAPL\"}, \"result\": \"topic=company scope=single_name\", \"reason\": \"\"}, {\"gate\": \"GATE 05 \\u2014 ENTITY\", \"inputs\": {\"ticker\": \"AAPL\", \"unique_tickers\": \"1\", \"topic\": \"company\"}, \"result\": \"entity_state=company_linked\", \"reason\": \"\"}, {\"gate\": \"GATE 06 \\u2014 EVENT_DETECTION\", \"inputs\": {\"breaking\": \"True\", \"follow_up\": \"0.04\", \"rumor\": \"False\", \"uncertainty_density\": \"0.000\", \"scheduled\": \"False\", \"official\": \"False\"}, \"result\": \"event_type=breaking\", \"reason\": \"\"}, {\"gate\": \"GATE 07 \\u2014 SENTIMENT\", \"inputs\": {\"pos_tokens\": \"3\", \"neg_tokens\": \"0\", \"score\": \"0.176\", \"confidence\": \"1.00\", \"unc_density\": \"0.000\", \"exaggeration\": \"False\"}, \"result\": \"direction=POSITIVE conf_ok=True\", \"reason\": \"\"}, {\"gate\": \"GATE 08 \\u2014 NOVELTY\", \"inputs\": {\"max_similarity\": \"0.04\", \"novelty_score\": \"0.96\", \"novelty_threshold\": \"0.4\"}, \"result\": \"novelty=0.96 repetition=False ok=True novelty_state=positive_surprise\", \"reason\": \"\"}, {\"gate\": \"GATE 09 \\u2014 SCOPE\", \"inputs\": {\"topic\": \"company\", \"entity_state\": \"company_linked\"}, \"result\": \"scope_state=single_name benchmark_corr=LOW\", \"reason\": \"\"}, {\"gate\": \"GATE 10 \\u2014 HORIZON\", \"inputs\": {\"topic\": \"company\", \"breaking\": \"True\"}, \"result\": \"horizon_state=intraday decay_state=fast_decay\", \"reason\": \"\"}, {\"gate\": \"GATE 11 \\u2014 BENCHMARK_RELATIVE\", \"inputs\": {\"sentiment\": \"positive\", \"spx_trend\": \"neutral\", \"benchmark_corr\": \"LOW\", \"scope_state\": \"single_name\"}, \"result\": \"benchmark_rel_state=neutral signal_type=alpha dominance=idiosyncratic_dominant\", \"reason\": \"\"}, {\"gate\": \"GATE 12 \\u2014 CONFIRMATION\", \"inputs\": {\"source_tier\": \"2\", \"source_count\": \"2\", \"has_primary_source\": \"False\", \"confirmed\": \"True\", \"misinfo_risk\": \"False\"}, \"result\": \"confirmation_state=strong score=0.70\", \"reason\": \"\"}, {\"gate\": \"GATE 13 \\u2014 TIMING\", \"inputs\": {\"disc_date\": \"2026-04-15\", \"timing_state\": \"premarket\", \"stale\": \"False\"}, \"result\": \"tradeable=True\", \"reason\": \"\"}, {\"gate\": \"GATE 14 \\u2014 CROWDING\", \"inputs\": {\"cluster_volume\": \"1\", \"threshold\": \"8\", \"exhausted_threshold\": \"16\"}, \"result\": \"crowding_state=still_open discount=0.0\", \"reason\": \"\"}, {\"gate\": \"GATE 15 \\u2014 CONTRADICTION\", \"inputs\": {\"uncertainty_density\": \"0.000\", \"head_body_mismatch\": \"False\", \"internally_conflicted\": \"False\"}, \"result\": \"ambiguity_state=clear score=0.00\", \"reason\": \"\"}, {\"gate\": \"GATE 16 \\u2014 IMPACT_MAGNITUDE\", \"inputs\": {\"scope_state\": \"single_name\", \"topic\": \"company\", \"high_vol\": \"False\", \"drawdown\": \"False\"}, \"result\": \"impact_magnitude=low link=benchmark_weak base_score=0.20\", \"reason\": \"\"}, {\"gate\": \"GATE 17 \\u2014 ACTION\", \"inputs\": {\"direction\": \"POSITIVE\", \"scope_state\": \"single_name\", \"bench_corr\": \"LOW\", \"conf_adj\": \"HIGH\"}, \"result\": \"relative_alpha\", \"reason\": \"company-specific POSITIVE signal with low benchmark correlation \\u2014 alpha opportunity\"}, {\"gate\": \"GATE 18 \\u2014 RISK_DISCOUNTS\", \"inputs\": {\"base_impact_score\": \"0.2\", \"discounts\": \"0\"}, \"result\": \"impact_score=0.2000 final_confidence=LOW\", \"reason\": \"none\"}, {\"gate\": \"GATE 19 \\u2014 PERSISTENCE\", \"inputs\": {\"topic\": \"company\", \"breaking\": \"True\"}, \"result\": \"persistence_state=rapid decay=high\", \"reason\": \"breaking news \\u2014 typically transient\"}, {\"gate\": \"GATE 20 \\u2014 EVALUATION_LOOP\", \"inputs\": {\"action_state\": \"relative_alpha\", \"ticker_active\": \"True\"}, \"result\": \"relevance_ok=True\", \"reason\": \"accuracy_tracking_pending\"}, {\"gate\": \"GATE 21 \\u2014 OUTPUT\", \"inputs\": {\"action_state\": \"relative_alpha\", \"impact_score\": \"0.2000\", \"output_mode\": \"uncertain\"}, \"result\": \"routing=QUEUE output_action=idiosyncratic_alpha_signal\", \"reason\": \"article-first: relative_alpha signal, SPX backdrop=neutral\"}, {\"gate\": \"GATE 22 \\u2014 COMPOSITE\", \"inputs\": {\"composite_score\": \"0.7440\", \"quality_thresh\": \"0.45\", \"action_state\": \"relative_alpha\"}, \"result\": \"final_signal=alpha_signal routing=QUEUE\", \"reason\": \"\"}], \"notes\": [], \"decision\": \"QUEUE\", \"confidence\": \"LOW\", \"reason\": \"article-first: relative_alpha signal, SPX backdrop=neutral\"}",
+        "event": "NEWS_CLASSIFIED",
+        "id": 4,
+        "portfolio_value": null,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "News",
+        "details": "{\"ts\": \"2026-04-15T07:30:00-04:00\", \"ticker\": \"SPY\", \"headline\": \"Tech Megacap Earnings Lift S&P 500 Futures Ahead of Open\", \"source\": \"Alpaca News (Reuters)\", \"source_tier\": 1, \"gates\": [{\"gate\": \"GATE 01 \\u2014 SYSTEM\", \"inputs\": {\"headline_len\": \"56\", \"disc_date\": \"2026-04-15\", \"age_ok\": \"True\", \"best_sim\": \"0.06\", \"word_count\": \"19\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 03 \\u2014 SOURCE_RELEVANCE\", \"inputs\": {\"source_tier\": \"1\", \"credibility\": \"1.00\", \"relevance\": \"0.33\", \"opinion_flag\": \"False\"}, \"result\": \"PROCEED\", \"reason\": \"\"}, {\"gate\": \"GATE 04 \\u2014 TOPIC\", \"inputs\": {\"macro\": \"0\", \"earnings\": \"1\", \"geo\": \"0\", \"reg\": \"0\", \"mktstr\": \"0\", \"ticker\": \"SPY\"}, \"result\": \"topic=earnings scope=single_name\", \"reason\": \"\"}, {\"gate\": \"GATE 05 \\u2014 ENTITY\", \"inputs\": {\"ticker\": \"SPY\", \"unique_tickers\": \"2\", \"topic\": \"earnings\"}, \"result\": \"entity_state=multi_company\", \"reason\": \"\"}, {\"gate\": \"GATE 06 \\u2014 EVENT_DETECTION\", \"inputs\": {\"breaking\": \"True\", \"follow_up\": \"0.04\", \"rumor\": \"False\", \"uncertainty_density\": \"0.000\", \"scheduled\": \"True\", \"official\": \"False\"}, \"result\": \"event_type=breaking\", \"reason\": \"\"}, {\"gate\": \"GATE 07 \\u2014 SENTIMENT\", \"inputs\": {\"pos_tokens\": \"0\", \"neg_tokens\": \"0\", \"score\": \"0.000\", \"confidence\": \"0.00\", \"unc_density\": \"0.000\", \"exaggeration\": \"False\"}, \"result\": \"direction=NEUTRAL conf_ok=False\", \"reason\": \"\"}, {\"gate\": \"GATE 08 \\u2014 NOVELTY\", \"inputs\": {\"max_similarity\": \"0.04\", \"novelty_score\": \"0.96\", \"novelty_threshold\": \"0.4\"}, \"result\": \"novelty=0.96 repetition=False ok=True novelty_state=novelty_high\", \"reason\": \"\"}, {\"gate\": \"GATE 09 \\u2014 SCOPE\", \"inputs\": {\"topic\": \"earnings\", \"entity_state\": \"multi_company\"}, \"result\": \"scope_state=peer_group benchmark_corr=MEDIUM\", \"reason\": \"\"}, {\"gate\": \"GATE 10 \\u2014 HORIZON\", \"inputs\": {\"topic\": \"earnings\", \"breaking\": \"True\"}, \"result\": \"horizon_state=multi_day decay_state=medium_decay\", \"reason\": \"\"}, {\"gate\": \"GATE 11 \\u2014 BENCHMARK_RELATIVE\", \"inputs\": {\"sentiment\": \"neutral\", \"spx_trend\": \"neutral\", \"benchmark_corr\": \"MEDIUM\", \"scope_state\": \"peer_group\"}, \"result\": \"benchmark_rel_state=neutral signal_type=beta dominance=idiosyncratic_dominant\", \"reason\": \"\"}, {\"gate\": \"GATE 12 \\u2014 CONFIRMATION\", \"inputs\": {\"source_tier\": \"1\", \"source_count\": \"1\", \"has_primary_source\": \"True\", \"confirmed\": \"False\", \"misinfo_risk\": \"False\"}, \"result\": \"confirmation_state=primary_confirmed score=1.00\", \"reason\": \"\"}, {\"gate\": \"GATE 13 \\u2014 TIMING\", \"inputs\": {\"disc_date\": \"2026-04-15\", \"timing_state\": \"premarket\", \"stale\": \"False\"}, \"result\": \"tradeable=True\", \"reason\": \"\"}, {\"gate\": \"GATE 14 \\u2014 CROWDING\", \"inputs\": {\"cluster_volume\": \"1\", \"threshold\": \"8\", \"exhausted_threshold\": \"16\"}, \"result\": \"crowding_state=still_open discount=0.0\", \"reason\": \"\"}, {\"gate\": \"GATE 15 \\u2014 CONTRADICTION\", \"inputs\": {\"uncertainty_density\": \"0.000\", \"head_body_mismatch\": \"False\", \"internally_conflicted\": \"False\"}, \"result\": \"ambiguity_state=clear score=0.00\", \"reason\": \"\"}, {\"gate\": \"GATE 16 \\u2014 IMPACT_MAGNITUDE\", \"inputs\": {\"scope_state\": \"peer_group\", \"topic\": \"earnings\", \"high_vol\": \"False\", \"drawdown\": \"False\"}, \"result\": \"impact_magnitude=medium link=benchmark_weak base_score=0.50\", \"reason\": \"\"}, {\"gate\": \"GATE 17 \\u2014 ACTION\", \"inputs\": {\"direction\": \"NEUTRAL\", \"conf_ok\": \"False\"}, \"result\": \"watch_only\", \"reason\": \"neutral or mixed sentiment / low confidence\"}, {\"gate\": \"GATE 18 \\u2014 RISK_DISCOUNTS\", \"inputs\": {\"base_impact_score\": \"0.5\", \"discounts\": \"1\"}, \"result\": \"impact_score=0.3500 final_confidence=MEDIUM\", \"reason\": \"low_sentiment_conf *0.7\"}, {\"gate\": \"GATE 19 \\u2014 PERSISTENCE\", \"inputs\": {\"topic\": \"earnings\", \"breaking\": \"True\"}, \"result\": \"persistence_state=medium_or_fast decay=medium\", \"reason\": \"earnings one-off \\u2014 fades unless guidance revision broad\"}, {\"gate\": \"GATE 20 \\u2014 EVALUATION_LOOP\", \"inputs\": {\"action_state\": \"watch_only\", \"ticker_active\": \"False\"}, \"result\": \"relevance_ok=True\", \"reason\": \"accuracy_tracking_pending\"}, {\"gate\": \"GATE 21 \\u2014 OUTPUT\", \"inputs\": {\"action_state\": \"watch_only\", \"impact_score\": \"0.3500\", \"output_mode\": \"probabilistic\"}, \"result\": \"routing=WATCH output_action=no_signal\", \"reason\": \"article-first: watch_only signal, SPX backdrop=neutral\"}, {\"gate\": \"GATE 22 \\u2014 COMPOSITE\", \"inputs\": {\"composite_score\": \"0.6637\", \"quality_thresh\": \"0.45\", \"action_state\": \"watch_only\"}, \"result\": \"final_signal=neutral_or_watch routing=WATCH\", \"reason\": \"\"}], \"notes\": [], \"decision\": \"WATCH\", \"confidence\": \"MEDIUM\", \"reason\": \"article-first: watch_only signal, SPX backdrop=neutral\"}",
+        "event": "NEWS_CLASSIFIED",
+        "id": 5,
+        "portfolio_value": null,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "news_agent",
+        "details": "OK",
+        "event": "HEARTBEAT",
+        "id": 6,
+        "portfolio_value": 100000.0,
+        "timestamp": "2026-04-15 11:30:00"
+      },
+      {
+        "agent": "News",
+        "details": "new=3 queued=3 discarded=0 skipped=0",
+        "event": "AGENT_COMPLETE",
+        "id": 7,
+        "portfolio_value": 100000.0,
+        "timestamp": "2026-04-15 11:30:00"
+      }
+    ]
+  },
+  "session": "market"
+}

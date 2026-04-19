@@ -1,0 +1,60 @@
+{
+  "cycle_id": "cycle_03",
+  "description": "Near-duplicate headlines — two very similar AMD articles (Jaccard similarity near the 0.60 duplicate threshold) plus a distinct TSLA article. Exercises gate 1 duplicate-detection and gate 8 NOVELTY (max_similarity vs. novelty_threshold).",
+  "frozen_clock_utc": "2026-04-15T11:30:00Z",
+  "frozen_clock_et":  "2026-04-15T07:30:00-04:00",
+  "articles": [
+    {
+      "headline":       "AMD Announces New MI400 AI Accelerator, Competes With Nvidia",
+      "subhead":        "Chipmaker unveils next-gen datacenter silicon targeting AI training workloads.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/amd-mi400-launch",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "AMD",
+      "all_symbols":    ["AMD"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T09:00:00Z"
+    },
+    {
+      "headline":       "AMD Unveils MI400 AI Accelerator To Compete With Nvidia Datacenter",
+      "subhead":        "New chip targets AI training; AMD shares active in premarket.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/amd-mi400-followup",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "AMD",
+      "all_symbols":    ["AMD"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T10:15:00Z"
+    },
+    {
+      "headline":       "Tesla Delivery Numbers Miss Consensus, Stock Slides",
+      "subhead":        "Q1 deliveries fall short of analyst expectations; guidance for Q2 unchanged.",
+      "source":         "Alpaca News (Reuters)",
+      "source_tier":    1,
+      "source_url":     "https://example-reuters.test/articles/tsla-deliveries-q1",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "TSLA",
+      "all_symbols":    ["TSLA"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T11:00:00Z"
+    }
+  ],
+  "bars": {
+    "SPY":  {"last_close": 520.10, "change_pct_1yr":  12.4, "high_52w": 535.00, "low_52w": 470.00, "avg_volume": 80000000, "bars_available": 252},
+    "AMD":  {"last_close": 168.00, "change_pct_1yr":  35.0, "high_52w": 195.00, "low_52w": 125.00, "avg_volume": 55000000, "bars_available": 252},
+    "NVDA": {"last_close": 820.00, "change_pct_1yr":  58.0, "high_52w": 900.00, "low_52w": 500.00, "avg_volume": 40000000, "bars_available": 252},
+    "TSLA": {"last_close": 235.00, "change_pct_1yr": -12.0, "high_52w": 290.00, "low_52w": 220.00, "avg_volume": 90000000, "bars_available": 252},
+    "XLK":  {"last_close": 210.00, "change_pct_1yr":  18.0, "high_52w": 220.00, "low_52w": 175.00, "avg_volume": 12000000, "bars_available": 252},
+    "SMH":  {"last_close": 240.00, "change_pct_1yr":  45.0, "high_52w": 260.00, "low_52w": 160.00, "avg_volume":  8000000, "bars_available": 252},
+    "XLY":  {"last_close": 190.00, "change_pct_1yr":   8.0, "high_52w": 205.00, "low_52w": 165.00, "avg_volume":  4500000, "bars_available": 252}
+  },
+  "member_weights": []
+}

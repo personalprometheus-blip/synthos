@@ -1,0 +1,60 @@
+{
+  "cycle_id": "cycle_04",
+  "description": "Timing boundary — one article just inside the 8h TRADEABLE_WINDOW_HOURS (should pass gate 13), one article right at the edge (age_hours near exactly 8), one distinctly fresh. Catches off-by-one regressions in gate 13 TIMING.",
+  "frozen_clock_utc": "2026-04-15T07:45:00Z",
+  "frozen_clock_et":  "2026-04-15T03:45:00-04:00",
+  "articles": [
+    {
+      "headline":       "Meta Platforms Unveils New Ad-Targeting AI Suite",
+      "subhead":        "Company pitches advertisers on generative creative tools; revenue impact Q3+.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/meta-ads-ai",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "META",
+      "all_symbols":    ["META"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T07:15:00Z"
+    },
+    {
+      "headline":       "Microsoft Expands Azure AI Partnership With Anthropic",
+      "subhead":        "Multi-year compute commitment targets enterprise adoption; neutral reception.",
+      "source":         "Alpaca News (Reuters)",
+      "source_tier":    1,
+      "source_url":     "https://example-reuters.test/articles/msft-anthropic",
+      "politician":     "",
+      "disc_date":      "2026-04-14",
+      "tx_date":        "2026-04-14",
+      "ticker":         "MSFT",
+      "all_symbols":    ["MSFT"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-14T23:30:00Z"
+    },
+    {
+      "headline":       "Exxon Raises Q2 Capex Guidance, Cites Permian Efficiency",
+      "subhead":        "Oil major increases capital budget on stronger well economics in US shale.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/xom-capex-q2",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "XOM",
+      "all_symbols":    ["XOM"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T05:30:00Z"
+    }
+  ],
+  "bars": {
+    "SPY":  {"last_close": 520.10, "change_pct_1yr":  12.4, "high_52w": 535.00, "low_52w": 470.00, "avg_volume": 80000000, "bars_available": 252},
+    "META": {"last_close": 540.00, "change_pct_1yr":  28.0, "high_52w": 580.00, "low_52w": 380.00, "avg_volume": 18000000, "bars_available": 252},
+    "MSFT": {"last_close": 430.00, "change_pct_1yr":  15.0, "high_52w": 445.00, "low_52w": 370.00, "avg_volume": 25000000, "bars_available": 252},
+    "XOM":  {"last_close": 118.00, "change_pct_1yr":   6.0, "high_52w": 125.00, "low_52w": 102.00, "avg_volume": 18000000, "bars_available": 252},
+    "XLK":  {"last_close": 210.00, "change_pct_1yr":  18.0, "high_52w": 220.00, "low_52w": 175.00, "avg_volume": 12000000, "bars_available": 252},
+    "XLC":  {"last_close":  90.00, "change_pct_1yr":  20.0, "high_52w":  95.00, "low_52w":  72.00, "avg_volume":  5000000, "bars_available": 252},
+    "XLE":  {"last_close":  95.00, "change_pct_1yr":   4.0, "high_52w": 100.00, "low_52w":  82.00, "avg_volume": 22000000, "bars_available": 252}
+  },
+  "member_weights": []
+}
