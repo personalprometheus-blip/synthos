@@ -7699,6 +7699,31 @@ function toggleSeries(idx, btn) {
 async function loadGraph(days, btn) { loadMarketChart(days <= 30 ? 36 : 720, btn); }
 
 // ── STATUS LOAD ──
+const AUTO_USER_CAP = 12;  // v1 hard cap; matches backend AUTO_USER_POSITION_CAP.
+
+async function toggleManagedBy(posId, current, ticker, event) {
+  event.stopPropagation();
+  const target = (current === 'user') ? 'bot' : 'user';
+  try {
+    const r = await fetch('/api/positions/' + encodeURIComponent(posId) + '/managed-by', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({managed_by: target}),
+    });
+    const d = await r.json().catch(() => ({ok: false, error: 'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    // Re-fetch status so positions + counter re-render in sync
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    toast((ticker || '?') + ' → ' + (target === 'bot' ? 'AUTO' : 'USER'), 'ok');
+  } catch(e) {
+    toast('Toggle failed: ' + e.message, 'err');
+  }
+}
+
 function renderPositions(positions) {
   const el = document.getElementById('positions-list');
   const ct = document.getElementById('positions-count');
@@ -7707,10 +7732,18 @@ function renderPositions(positions) {
   const orphans = (positions||[]).filter(p => p.is_orphan);
   if (!positions || !positions.length) {
     el.innerHTML = '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
-    ct.textContent = '0 open';
+    ct.textContent = '0/' + AUTO_USER_CAP + ' auto';
+    ct.title = 'Managed positions — current hardware budget caps each customer at ' + AUTO_USER_CAP + ' auto positions. This limit can grow in future iterations.';
     return;
   }
-  ct.textContent = tracked.length + ' tracked' + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
+  // Count auto vs user across tracked positions (orphans excluded — they adopt as user next trader cycle)
+  const autoN = tracked.filter(p => (p.managed_by || 'bot') === 'bot').length;
+  const userN = tracked.filter(p => (p.managed_by || 'bot') === 'user').length;
+  const canPromote = autoN < AUTO_USER_CAP;
+  ct.textContent = autoN + '/' + AUTO_USER_CAP + ' auto · ' + userN + ' user'
+                 + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
+  ct.title = 'Auto: bot manages · User: you manage · Cap is ' + AUTO_USER_CAP
+           + ' auto positions per customer at current capacity; future iterations may raise this.';
   if (ts) ts.textContent = 'Live · ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'}) + ' ET';
 
   const accentColors = ['#00f5d4','#7b61ff','#22d3ee','#a78bfa'];
@@ -7728,7 +7761,29 @@ function renderPositions(positions) {
     const dayCol   = dayPl >= 0  ? 'rgba(0,245,212,0.7)' : 'rgba(255,75,110,0.7)';
     const plSign   = unreal >= 0 ? '+' : '';
     const daySign  = dayPl >= 0  ? '+' : '';
-    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;
+    // AUTO/USER toggle — shows current tag, click to flip.
+    // Disabled when: row is orphan (tag set automatically on adoption) OR
+    // trying to promote USER→AUTO while cap is full (server would reject).
+    const mb = (p.managed_by || 'bot');
+    const canFlip = !isOrphan && (mb === 'bot' || canPromote);
+    const tagLabel = mb === 'user' ? 'USER' : 'AUTO';
+    const tagColor = mb === 'user' ? 'rgba(245,166,35,1)' : 'var(--teal)';
+    const tagBg    = mb === 'user' ? 'rgba(245,166,35,0.08)' : 'rgba(0,245,212,0.08)';
+    const tagBorder= mb === 'user' ? 'rgba(245,166,35,0.3)' : 'rgba(0,245,212,0.3)';
+    const cursorStyle = canFlip ? 'pointer' : 'not-allowed';
+    const opacity = canFlip ? '1' : '0.45';
+    const toggleTitle = isOrphan
+      ? 'Orphan positions auto-tag as USER after the next trader cycle'
+      : (mb === 'bot'
+          ? 'Click to hand off to USER management — bot will stop managing'
+          : (canPromote
+              ? 'Click to promote to AUTO — bot will begin managing'
+              : 'AUTO cap is full (' + AUTO_USER_CAP + '/' + AUTO_USER_CAP + ') — close an auto position first'));
+    const toggleOnClick = canFlip
+      ? `onclick=\"toggleManagedBy('${p.id || ''}','${mb}','${(p.ticker||'').replace(/'/g,'')}',event)\"`
+      : '';
+
+    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;
               padding:7px 16px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;
               ${isOrphan ? 'background:rgba(245,166,35,0.03)' : ''}"
               onclick="openPositionDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})"
@@ -7758,14 +7813,23 @@ function renderPositions(positions) {
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
+      <div style="text-align:right;min-width:54px" title="${toggleTitle}">
+        <div ${toggleOnClick}
+             style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
+                    background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
+                    cursor:${cursorStyle};opacity:${opacity};text-align:center">
+          ${tagLabel}
+        </div>
+      </div>
     </div>`;
   };
 
-  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
+  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
     + '<div></div><div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Position</div>'
     + '<div style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
     + '<div style="text-align:right;min-width:72px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
     + '<div style="text-align:right;min-width:68px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
+    + '<div style="text-align:right;min-width:54px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
     + '</div>';
   const rows = [
     ...tracked.map((p,i) => renderRow(p, i, false)),
@@ -10051,6 +10115,101 @@ def api_pending():
                         "operating_mode": "AUTOMATIC",
                         "error": str(e)}), 500
 
+
+# ── AUTO / USER POSITION MANAGEMENT ──────────────────────────────────────────
+# v1 hard cap — future iterations can raise this based on measured dispatch
+# time vs. customer count. Tooltip in the UI notes this is expandable.
+AUTO_USER_POSITION_CAP = 12
+
+
+def _count_auto_user_slots(positions: list) -> dict:
+    """Summarize AUTO / USER slot usage for a position list.
+    Excludes orphans (they get adopted as 'user' on next trader cycle)."""
+    auto = 0
+    user = 0
+    for p in positions or []:
+        if p.get('is_orphan'):
+            continue
+        mb = (p.get('managed_by') or 'bot').lower()
+        if mb == 'user':
+            user += 1
+        else:
+            auto += 1
+    return {
+        'auto': auto,
+        'user': user,
+        'capacity': AUTO_USER_POSITION_CAP,
+        'can_promote': auto < AUTO_USER_POSITION_CAP,
+    }
+
+
+@app.route('/api/positions/<pos_id>/managed-by', methods=['POST'])
+@login_required
+def api_set_managed_by(pos_id: str):
+    """Flip a position's AUTO/USER tag. Body: {managed_by: 'bot'|'user'}.
+
+    Rejects promotion to 'bot' when the auto cap is already full — UI
+    should disable the toggle in that case, but enforce server-side too.
+    Sticky USER preference overrides: if sticky=user is set for the
+    ticker, refuse promotion to 'bot' until sticky is cleared first.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        target = (data.get('managed_by') or '').lower().strip()
+        if target not in ('bot', 'user'):
+            return jsonify({'ok': False, 'error': "managed_by must be 'bot' or 'user'"}), 400
+
+        db = _customer_db()
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT id, ticker, managed_by FROM positions WHERE id=? AND status='OPEN'",
+                (pos_id,),
+            ).fetchone()
+        if not row:
+            return jsonify({'ok': False, 'error': 'position not found or already closed'}), 404
+
+        current = (row['managed_by'] or 'bot').lower()
+        if current == target:
+            return jsonify({'ok': True, 'noop': True, 'managed_by': current})
+
+        # Guard: promoting USER → AUTO hits server-side cap + sticky rules
+        if target == 'bot':
+            sticky = db.get_ticker_sticky(row['ticker'])
+            if sticky == 'user':
+                return jsonify({
+                    'ok': False,
+                    'error': f"ticker {row['ticker']} is marked sticky USER — clear the sticky lock before promoting",
+                }), 409
+            # Count auto (excluding this position, since we're about to flip it)
+            all_pos = db.get_open_positions()
+            auto_count = sum(1 for p in all_pos
+                             if p['id'] != pos_id and (p.get('managed_by') or 'bot') == 'bot')
+            if auto_count >= AUTO_USER_POSITION_CAP:
+                return jsonify({
+                    'ok': False,
+                    'error': f'AUTO cap reached ({auto_count}/{AUTO_USER_POSITION_CAP}) — close an auto position before promoting',
+                }), 409
+
+        db.set_position_managed_by(pos_id, target)
+        db.log_event('POSITION_MANAGED_BY_CHANGED', agent='Portal',
+                     details=f"{row['ticker']} {current}->{target} (pos_id={pos_id})")
+        return jsonify({'ok': True, 'managed_by': target, 'ticker': row['ticker']})
+    except Exception as e:
+        log.error(f"/api/positions/{pos_id}/managed-by failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auto-slots')
+@login_required
+def api_auto_slots():
+    """Slot usage summary for the Open Positions card header + promotion UX."""
+    try:
+        db = _customer_db()
+        positions = db.get_open_positions()
+        return jsonify(_count_auto_user_slots(positions))
+    except Exception as e:
+        return jsonify({'auto': 0, 'user': 0, 'capacity': AUTO_USER_POSITION_CAP,
+                        'can_promote': False, 'error': str(e)}), 500
 
 
 @app.route('/api/agent-pulse')
