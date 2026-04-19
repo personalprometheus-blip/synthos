@@ -5141,6 +5141,92 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
 
+<!-- HALT AGENT BANNER (kill switch v2) — collapsible thin strip → expanded -->
+<style>
+  #halt-banner { display:none; }
+  #halt-banner.active { display:block; }
+  .halt-strip {
+    padding: 3px 14px; font-size: 10px; line-height: 1.4;
+    font-family: var(--mono); letter-spacing: 0.05em;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: background 0.2s;
+  }
+  .halt-strip.customer { background: rgba(245,166,35,0.14); border-bottom-color: rgba(245,166,35,0.4); color: var(--amber); }
+  .halt-strip.admin    { background: rgba(255,75,110,0.16); border-bottom-color: rgba(255,75,110,0.45); color: var(--pink); }
+  .halt-strip:hover { filter: brightness(1.1); }
+  .halt-strip-msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .halt-strip-chevron { font-size: 10px; opacity: 0.7; }
+  .halt-expanded {
+    padding: 14px 18px; font-family: var(--sans); font-size: 12px; line-height: 1.6;
+  }
+  .halt-expanded.customer { background: rgba(245,166,35,0.06); border-bottom: 1px solid rgba(245,166,35,0.25); }
+  .halt-expanded.admin    { background: rgba(255,75,110,0.06); border-bottom: 1px solid rgba(255,75,110,0.3); }
+  .halt-expanded h4 { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .halt-expanded.customer h4 { color: var(--amber); }
+  .halt-expanded.admin h4 { color: var(--pink); }
+  .halt-expanded .halt-meta { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-bottom: 10px; }
+  .halt-expanded ul { list-style: none; padding: 0; margin: 8px 0; }
+  .halt-expanded li { padding: 2px 0; color: var(--text); }
+  .halt-expanded li.pos::before { content:'✓'; color: var(--teal); margin-right: 6px; font-weight: 700; }
+  .halt-expanded li.neg::before { content:'✗'; color: var(--pink); margin-right: 6px; font-weight: 700; }
+  .halt-expanded .halt-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; justify-content: flex-end; }
+  .halt-resume-btn {
+    padding: 6px 14px; border-radius: 7px; border: 1px solid var(--teal);
+    background: rgba(0,245,212,0.08); color: var(--teal); font-size: 11px;
+    font-weight: 700; letter-spacing: 0.05em; cursor: pointer; font-family: var(--sans);
+  }
+  .halt-resume-btn:hover { background: rgba(0,245,212,0.14); }
+  .halt-collapse-btn {
+    padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border2);
+    background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; font-family: var(--sans);
+  }
+  /* Halt reason modal (tiny) */
+  .halt-reason-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 800; align-items: center; justify-content: center;
+  }
+  .halt-reason-overlay.visible { display: flex; }
+  .halt-reason-modal {
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 12px;
+    padding: 20px; width: min(420px, 92vw);
+  }
+  .halt-reason-modal h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--text); }
+  .halt-reason-modal textarea {
+    width: 100%; min-height: 70px; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 8px 10px; color: var(--text); font-family: var(--sans); font-size: 12px;
+    resize: vertical; outline: none;
+  }
+  .halt-reason-modal .halt-reason-actions {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;
+  }
+  .halt-reason-modal .halt-reason-actions button {
+    padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border2);
+    font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--sans);
+  }
+  .halt-reason-modal .halt-reason-actions button.primary {
+    border-color: var(--pink); background: rgba(255,75,110,0.12); color: var(--pink);
+  }
+  .halt-reason-modal .halt-reason-actions button.primary.resume {
+    border-color: var(--teal); background: rgba(0,245,212,0.12); color: var(--teal);
+  }
+  .halt-reason-modal .halt-reason-actions button.cancel {
+    background: transparent; color: var(--muted);
+  }
+</style>
+<div id="halt-banner" aria-live="polite"></div>
+<div class="halt-reason-overlay" id="halt-reason-overlay" onclick="closeHaltReason(event)">
+  <div class="halt-reason-modal" onclick="event.stopPropagation()">
+    <h3 id="halt-reason-title">Halt Trade Agent</h3>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:10px" id="halt-reason-sub">Optionally note a reason — it's logged for your records.</p>
+    <textarea id="halt-reason-text" placeholder="Reason (optional)"></textarea>
+    <div class="halt-reason-actions">
+      <button class="cancel" onclick="closeHaltReason()">Cancel</button>
+      <button class="primary" id="halt-reason-submit" onclick="submitHaltReason()">Halt Agent</button>
+    </div>
+  </div>
+</div>
+
 <!-- NEW ACCOUNT BANNER -->
 <div id="new-account-banner" style="display:none;background:linear-gradient(90deg,rgba(245,166,35,0.12),rgba(245,166,35,0.04));border-bottom:2px solid var(--amber);padding:10px 24px;display:none;align-items:center;gap:10px">
   <span style="font-size:16px">&#x26A0;</span>
@@ -5293,7 +5379,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="stat-card amber">
       <div class="stat-label">Agent Mode</div>
       <div style="font-size:13px;font-weight:700;margin-top:4px;font-family:var(--mono)" id="mode-display">Loading</div>
-      <div style="margin-top:5px"><button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button></div>
+      <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button>
+        <button class="graph-tab" id="halt-agent-btn" style="font-size:9px;padding:2px 10px;border-color:rgba(245,166,35,0.4);color:var(--amber)" onclick="openHaltReason('activate',event)">Halt Agent</button>
+      </div>
     </div>
     <div class="stat-card pink">
       <div class="stat-label">Open Positions</div>
@@ -7777,6 +7866,140 @@ async function toggleManagedBy(posId, current, ticker, event) {
   }
 }
 
+// ── HALT AGENT banner (kill switch v2) ──
+let _haltPendingAction = null;   // 'activate' | 'deactivate'
+let _haltBannerExpanded = null;   // true/false — localStorage-backed
+
+function _haltLoadCollapseState() {
+  try {
+    const v = localStorage.getItem('halt_banner_expanded');
+    _haltBannerExpanded = (v === '1');
+  } catch (e) { _haltBannerExpanded = false; }
+}
+function _haltSaveCollapseState(expanded) {
+  _haltBannerExpanded = !!expanded;
+  try { localStorage.setItem('halt_banner_expanded', expanded ? '1' : '0'); } catch(e){}
+}
+
+function renderHaltBanner(status) {
+  const el = document.getElementById('halt-banner');
+  if (!el) return;
+  if (_haltBannerExpanded === null) _haltLoadCollapseState();
+  const src = status && status.active_source;
+  const haltBtn = document.getElementById('halt-agent-btn');
+  if (!src) {
+    el.classList.remove('active');
+    el.innerHTML = '';
+    // Offer the halt button only when not currently halted.
+    if (haltBtn) haltBtn.style.display = '';
+    return;
+  }
+  el.classList.add('active');
+  // Hide the "Halt Agent" button while already halted — avoids duplicate-halt UX.
+  if (haltBtn) haltBtn.style.display = 'none';
+  const halt = src === 'admin' ? (status.admin_halt || {}) : (status.customer_halt || {});
+  const expanded = !!_haltBannerExpanded;
+  const chev = expanded ? '∨' : '∧';
+  const label = src === 'admin'
+    ? 'Trade Agent Halted — Admin Maintenance'
+    : 'Trade Agent Halted — You paused this';
+
+  const reason = (halt.reason || '(no reason recorded)').toString().replace(/</g,'&lt;');
+  const setAt  = (halt.set_at || '').slice(0,16).replace('T',' ');
+  const expRet = (halt.expected_return || '').toString().replace(/</g,'&lt;');
+
+  let html = '<div class="halt-strip ' + src + '" onclick="toggleHaltBannerExpand()">'
+           + '<span>⚠</span>'
+           + '<span class="halt-strip-msg">' + label + ' — until ' + (src === 'admin' ? 'Admin' : 'You') + ' Resumes</span>'
+           + '<span class="halt-strip-chevron">' + chev + '</span>'
+           + '</div>';
+
+  if (expanded) {
+    html += '<div class="halt-expanded ' + src + '">';
+    html += '<h4>' + label + '</h4>';
+    html += '<div class="halt-meta">';
+    if (setAt)  html += 'Activated: ' + setAt + ' ET';
+    if (expRet) html += ' &middot; Expected return: ' + expRet;
+    html += '</div>';
+    html += '<div style="color:var(--text);margin-bottom:8px"><strong>Reason:</strong> ' + reason + '</div>';
+    html += '<ul>';
+    html += '<li class="pos">Existing Alpaca stop-loss orders remain active — positions are still protected</li>';
+    html += '<li class="pos">You can still trade directly on Alpaca</li>';
+    html += '<li class="pos">Your portfolio values and prices continue to update</li>';
+    html += '<li class="neg">The bot will not open, close, or manage any positions</li>';
+    html += '<li class="neg">Approval-queue trades wait — they execute when the Halt is lifted</li>';
+    html += '</ul>';
+    html += '<div class="halt-actions">';
+    if (src === 'customer') {
+      html += '<button class="halt-resume-btn" onclick="openHaltReason(\'deactivate\', event)">Resume Agent</button>';
+    } else {
+      html += '<span style="font-size:11px;color:var(--muted)">Only Admin can resume this halt.</span>';
+    }
+    html += '<button class="halt-collapse-btn" onclick="toggleHaltBannerExpand(event)">Collapse</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function toggleHaltBannerExpand(event) {
+  if (event) event.stopPropagation();
+  _haltSaveCollapseState(!_haltBannerExpanded);
+  // Re-render using last-known status (stored on window for simplicity)
+  if (window._lastHaltStatus) renderHaltBanner(window._lastHaltStatus);
+}
+
+function openHaltReason(action, event) {
+  if (event) event.stopPropagation();
+  _haltPendingAction = action;
+  const overlay = document.getElementById('halt-reason-overlay');
+  const title   = document.getElementById('halt-reason-title');
+  const sub     = document.getElementById('halt-reason-sub');
+  const submit  = document.getElementById('halt-reason-submit');
+  const txt     = document.getElementById('halt-reason-text');
+  if (txt) txt.value = '';
+  if (action === 'activate') {
+    title.textContent = 'Halt Trade Agent';
+    sub.textContent   = 'Optionally note a reason — it\u2019s logged for your records.';
+    submit.textContent = 'Halt Agent';
+    submit.className = 'primary';
+  } else {
+    title.textContent = 'Resume Trade Agent';
+    sub.textContent   = 'Trading resumes immediately. A reason is optional but helps your log.';
+    submit.textContent = 'Resume Agent';
+    submit.className = 'primary resume';
+  }
+  overlay.classList.add('visible');
+}
+function closeHaltReason(event) {
+  if (event && event.target && event.target.id !== 'halt-reason-overlay') return;
+  const overlay = document.getElementById('halt-reason-overlay');
+  if (overlay) overlay.classList.remove('visible');
+  _haltPendingAction = null;
+}
+async function submitHaltReason() {
+  const action = _haltPendingAction;
+  const reason = (document.getElementById('halt-reason-text')||{}).value || '';
+  closeHaltReason();
+  try {
+    const r = await fetch('/api/halt-agent', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({active: (action === 'activate'), reason: reason.slice(0,300)}),
+    });
+    const d = await r.json().catch(() => ({ok:false, error:'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    toast(action === 'activate' ? 'Trade agent halted' : 'Trade agent resumed', 'ok');
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+  } catch(e) {
+    toast('Halt action failed: ' + e.message, 'err');
+  }
+}
+
 function renderUserWarnings(warnings) {
   const el = document.getElementById('user-warnings-banner');
   if (!el) return;
@@ -8202,6 +8425,16 @@ async function loadLiveStatus() {
     try { renderApprovals(a); } catch(ae) { console.log('Approvals render error:', ae); }
     try { renderPositions(s.positions||[]); } catch(pe) { console.log('Positions render error:', pe); }
     try { renderUserWarnings(s.user_warnings||[]); } catch(we) { console.log('User warnings render error:', we); }
+    // Halt banner — fetched independently so a halt-API failure doesn't
+    // block other status rendering
+    try {
+      const hr = await fetch('/api/halt-status', {credentials:'same-origin'});
+      if (hr.ok) {
+        const hs = await hr.json();
+        window._lastHaltStatus = hs;
+        renderHaltBanner(hs);
+      }
+    } catch(he) { console.log('Halt status fetch error:', he); }
     // Stats
     const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
