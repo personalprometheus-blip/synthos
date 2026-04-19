@@ -335,17 +335,34 @@ def register_cron() -> bool:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         existing_content = existing.stdout if existing.returncode == 0 else ""
 
-        # Remove all existing Synthos lines
-        clean_lines = [
-            line for line in existing_content.splitlines()
-            if "SYNTHOS" not in line
-            and str(SYNTHOS_HOME) not in line
-            and "boot_sequence" not in line
-            and "watchdog" not in line.lower()
-            and "shutdown" not in line.lower()
-            and "portal" not in line
-            and "sudo reboot" not in line
-        ]
+        # Remove all existing Synthos lines — including the comment-only
+        # lines we generate so the block is clean on every re-register.
+        _synthos_markers = (
+            "SYNTHOS",
+            str(SYNTHOS_HOME),
+            "boot_sequence",
+            "sudo reboot",
+            "Tier-calibration",
+            "Daily health",
+            "tier_readout",
+            "daily_health_aggregator",
+            "retail scheduler",
+            "retail_boot",
+            "retail_watchdog",
+            "retail_portal",
+            "retail_scheduler",
+            "retail_heartbeat",
+            "retail_shutdown",
+        )
+        def _is_synthos_line(line: str) -> bool:
+            if any(m in line for m in _synthos_markers):
+                return True
+            low = line.lower()
+            # Catch bare comment-header lines
+            if "watchdog" in low or "shutdown" in low or low.strip().startswith("# retail"):
+                return True
+            return "portal" in line
+        clean_lines = [l for l in existing_content.splitlines() if not _is_synthos_line(l)]
         clean_existing = "\n".join(clean_lines).strip()
 
         final_crontab = (clean_existing + "\n" + new_entries).strip() + "\n"
