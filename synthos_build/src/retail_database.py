@@ -206,6 +206,18 @@ CREATE TABLE IF NOT EXISTS positions (
     FOREIGN KEY (signal_id) REFERENCES signals(id)
 );
 
+-- ── POSITION PREFERENCES ──────────────────────────────────────────────
+-- Sticky per-ticker overrides for AUTO/USER tagging. If a row exists with
+-- sticky='user', bot never takes positions in this ticker regardless of
+-- signal — instead, logs SIGNAL_SKIPPED_STICKY_USER in signal_decisions.
+-- sticky='bot' is reserved for a future iteration (see backlog Q2 deferral).
+CREATE TABLE IF NOT EXISTS position_preferences (
+    ticker          TEXT PRIMARY KEY,
+    sticky          TEXT NOT NULL CHECK (sticky IN ('user','bot')),
+    set_by          TEXT NOT NULL,         -- 'user' (manual) | 'system' (auto)
+    set_at          TEXT NOT NULL
+);
+
 -- ── SIGNALS ────────────────────────────────────────────────────────────
 -- Per-agent stamp ownership (enforce this convention when adding new fields):
 --   news_agent:      status (initial QUEUED), interrogation_status, needs_reeval,
@@ -795,6 +807,13 @@ class DB:
             # closes that gap and lets the trader lift the stamp from
             # a duplicative boolean bonus to a proportional ranking input.
             "ALTER TABLE signals ADD COLUMN screener_score REAL",
+            # v3.10 — AUTO/USER per-position tagging. Default 'bot' so all
+            # existing positions treat as bot-managed (pre-feature behavior).
+            # Check constraint not applicable via ALTER TABLE in SQLite; the
+            # application enforces the 'bot'|'user' domain (retail_trade_logic_agent
+            # + retail_portal). New positions inserted post-migration should set
+            # managed_by explicitly per the who-initiated-the-buy rule.
+            "ALTER TABLE positions ADD COLUMN managed_by TEXT NOT NULL DEFAULT 'bot'",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
