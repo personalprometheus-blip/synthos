@@ -5274,7 +5274,7 @@ var _apColors = {
 // ── INTRO — cursive "Synthos" glides left→right, waves build in behind it ──
 var _apIntroActive = false;
 var _apIntroStart  = null;
-var _apIntroTotal  = 2400;   // ms: total traversal time
+var _apIntroTotal  = 4200;   // ms: total — longer so letters register
 (function _apInitIntro() {
   try {
     // URL bypass for testing: ?replay=1 forces intro regardless of flag
@@ -5341,56 +5341,75 @@ function _apDrawIntroFrame(ctx, w, h, elapsed) {
   if (!_apIntroPath) _apBuildIntroPath(h);
 
   var p = Math.min(1, elapsed / _apIntroTotal);
-  // Ease-in-out — word enters + exits gently
-  var pe = 0.5 * (1 - Math.cos(Math.PI * p));
-
   var pathW = _apIntroPathW;
-  // Ribbon left edge L: from just off-left (-pathW) to just off-right (w)
-  var L = -pathW + pe * (w + pathW);
 
-  // Overall fade: empty canvas at t=0, fading in over first 22%, steady after
-  var globalAlpha;
-  if (p < 0.22)      globalAlpha = p / 0.22;
-  else if (p > 0.85) globalAlpha = 1;  // stay full through handoff
-  else               globalAlpha = 1;
+  // Phase split: ribbon traverses during the first RIBBON_FRAC of the time;
+  // the remaining time is the normal-wave fade-in handoff.
+  var RIBBON_FRAC = 0.78;
+  var LETTER_THRESHOLD = 0.06;
 
-  // Same wave parameters as the active state (see main loop) so the handoff
-  // into normal animation is seamless.
-  var midY     = h / 2;
-  var t_time   = _apFrame * 0.015;
-  var numWaves = 6;
-  var baseAmp  = 24;
+  var midY = h / 2;
+  var t_time = _apFrame * 0.015;
 
+  // ── RIBBON PHASE — draw ONLY where letter ink exists, nothing else ──
+  var letterMult = 0, settleMult = 0;
+  if (p < RIBBON_FRAC) {
+    var rp  = p / RIBBON_FRAC;                          // 0→1 within ribbon phase
+    var rpe = 0.5 * (1 - Math.cos(Math.PI * rp));       // ease-in-out
+    var L   = -pathW + rpe * (w + pathW);
+
+    // Letter visibility fades in the first 10% and out the last 10% of this phase
+    if (rp < 0.12)       letterMult = rp / 0.12;
+    else if (rp > 0.88)  letterMult = (1 - rp) / 0.12;
+    else                 letterMult = 1;
+
+    // Draw 3 convergent lines that trace the letter centroid, only where ink exists.
+    var offsets = [-1.6, 0, 1.6];
+    for (var k = 0; k < offsets.length; k++) {
+      var off = offsets[k];
+      var inPath = false;
+      ctx.beginPath();
+      for (var x = 0; x <= w; x += 1) {
+        var u = Math.floor(x - L);
+        var strength = 0, letterY = 0;
+        if (u >= 0 && u < pathW) {
+          strength = _apIntroStrength[u];
+          letterY  = _apIntroPath[u];
+        }
+        if (strength > LETTER_THRESHOLD) {
+          // When strength is high, lines converge exactly onto centroid
+          var y = midY + letterY + off * (1 - strength);
+          if (!inPath) { ctx.moveTo(x, y); inPath = true; }
+          else         ctx.lineTo(x, y);
+        } else if (inPath) {
+          // End of a contiguous letter segment
+          inPath = false;
+        }
+      }
+      var alphaK = (0.55 + k * 0.15) * letterMult;
+      ctx.strokeStyle = 'rgba(0,245,212,' + alphaK + ')';
+      ctx.lineWidth = 2.0 - Math.abs(off) * 0.3;
+      ctx.stroke();
+    }
+    return;
+  }
+
+  // ── SETTLE PHASE — normal waves fade in to full, no letter drawn ──
+  settleMult = Math.min(1, (p - RIBBON_FRAC) / (1 - RIBBON_FRAC));
+  var numWaves = 5;
+  var baseAmp  = 22;
   for (var i = 0; i < numWaves; i++) {
     var amp   = baseAmp * (0.4 + (i / numWaves) * 0.6);
     var freq  = 0.010 + i * 0.003;
     var phase = t_time + i * 0.8;
-    var layerOffset = (i - numWaves / 2) * 1.8;
-
     ctx.beginPath();
+    ctx.moveTo(0, midY);
     for (var x = 0; x <= w; x += 2) {
-      var u = Math.floor(x - L);
-      var strength = 0, letterY = 0;
-      if (u >= 0 && u < pathW) {
-        strength = _apIntroStrength[u];
-        letterY  = _apIntroPath[u];
-      }
-
-      var sineY = Math.sin(x * freq - phase) * amp
-                + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
-
-      // Blend: 0 strength → pure sine + stacked layer offset
-      //        1 strength → lines converge onto the letter centroid
-      var y = midY
-            + sineY * (1 - strength)
-            + letterY * strength
-            + layerOffset * (1 - strength);
-
-      if (x === 0) ctx.moveTo(x, y);
-      else         ctx.lineTo(x, y);
+      var y = midY + Math.sin(x * freq - phase) * amp
+                   + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
+      ctx.lineTo(x, y);
     }
-
-    var alpha = (0.12 + (i / numWaves) * 0.25) * globalAlpha;
+    var alpha = (0.12 + (i / numWaves) * 0.25) * settleMult;
     ctx.strokeStyle = 'rgba(0,245,212,' + alpha + ')';
     ctx.lineWidth = 1.7;
     ctx.stroke();
