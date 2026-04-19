@@ -218,6 +218,24 @@ CREATE TABLE IF NOT EXISTS position_preferences (
     set_at          TEXT NOT NULL
 );
 
+-- ── SYSTEM HALT (kill switch v2) ──────────────────────────────────────
+-- Singleton row. Two separate halt layers:
+--  * Admin halt:     the row in the MASTER customer's signals.db is the
+--                    authoritative source. All trader subprocesses read it
+--                    via _shared_db(). Applies to every customer.
+--  * Customer halt:  the row in that customer's OWN signals.db applies
+--                    only to that customer's trader subprocess.
+-- Trader's entry-point skip checks both — either one true = skip that
+-- customer's run. See HALT_AGENT_REWRITE.md for the full spec.
+CREATE TABLE IF NOT EXISTS system_halt (
+    id                INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
+    active            INTEGER NOT NULL DEFAULT 0,           -- boolean 0/1
+    reason            TEXT,
+    set_by            TEXT,                                 -- operator identifier
+    set_at            TEXT,
+    expected_return   TEXT                                  -- admin-only optional
+);
+
 -- ── SIGNALS ────────────────────────────────────────────────────────────
 -- Per-agent stamp ownership (enforce this convention when adding new fields):
 --   news_agent:      status (initial QUEUED), interrogation_status, needs_reeval,
@@ -1018,6 +1036,49 @@ class DB:
             c.execute(
                 "UPDATE positions SET managed_by = ? WHERE id = ?",
                 (managed_by, pos_id),
+            )
+
+    # ── SYSTEM HALT (kill switch v2) ──────────────────────────────────────
+
+    def get_halt(self) -> dict:
+        """Return this DB's halt row as a dict, or an 'inactive' placeholder.
+        Keys: active (bool), reason (str|None), set_by (str|None),
+              set_at (iso str|None), expected_return (iso str|None)."""
+        try:
+            with self.conn() as c:
+                row = c.execute(
+                    "SELECT active, reason, set_by, set_at, expected_return "
+                    "FROM system_halt WHERE id = 1"
+                ).fetchone()
+        except Exception:
+            row = None
+        if not row:
+            return {'active': False, 'reason': None, 'set_by': None,
+                    'set_at': None, 'expected_return': None}
+        return {
+            'active':          bool(row['active']),
+            'reason':          row['reason'],
+            'set_by':          row['set_by'],
+            'set_at':          row['set_at'],
+            'expected_return': row['expected_return'],
+        }
+
+    def set_halt(self, active: bool, reason: 'str | None' = None,
+                 set_by: str = 'unknown',
+                 expected_return: 'str | None' = None) -> None:
+        """Set this DB's halt state. Upsert the singleton row.
+        Clearing halt (active=False): reason/set_by still recorded for audit."""
+        now = self.now()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO system_halt "
+                "(id, active, reason, set_by, set_at, expected_return) "
+                "VALUES (1, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "active=excluded.active, reason=excluded.reason, "
+                "set_by=excluded.set_by, set_at=excluded.set_at, "
+                "expected_return=excluded.expected_return",
+                (1 if active else 0, reason, set_by, now, expected_return),
             )
 
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):

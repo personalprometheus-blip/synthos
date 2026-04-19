@@ -1,7 +1,16 @@
 # DEPLOY_NOTES — `patch/2026-05-03-auto-user-tagging`
 
 **Target merge date:** 2026-05-03
-**Purpose:** AUTO / USER per-position management + bulk prefetch extension
+**Purpose:** Two features bundled into one merge:
+
+1. **AUTO / USER per-position management** + bulk prefetch extension
+2. **Halt Agent rewrite** (kill-switch v2) — customer & admin halt,
+   collapsible banner, reason logging, move skip check to earliest point
+   in trader, remove daemon's dispatch-halting behavior
+
+Branch name reflects the original AUTO/USER scope; halt work was added
+on top mid-sprint per 2026-04-19 decision. At merge, the commit message
+/ PR description should mention both features.
 
 This file lives on `patch/2026-05-03-auto-user-tagging` only. Must be deleted
 (or rolled into the merge commit) before merging to `main`.
@@ -55,12 +64,53 @@ future-expandable based on session-time measurements.
 ### Meta
 - `DEPLOY_NOTES.md` (this file) — **DELETE before merging**
 
+## Halt Agent rewrite — added 2026-04-19
+
+See `synthos-company/documentation/specs/HALT_AGENT_REWRITE.md` for the full
+spec. Summary of what this patch adds:
+
+### Schema
+- `synthos_build/src/retail_database.py` — new `system_halt` singleton table
+  (active, reason, set_by, set_at, expected_return); DB helpers for
+  get/set on both admin (master-DB-scoped) and customer (per-DB) halt
+
+### Trader entry
+- `synthos_build/agents/retail_trade_logic_agent.py`
+  - Halt check moved to very first line of `run()` — before any DB/Alpaca work
+  - Gate 1's duplicate kill check removed (first-line already caught)
+  - Stale "72-hour expiry" comment at line ~124 corrected to reflect
+    actual tier-dependent expiry (30d/7d/2d/1d per retail_database.py:1318)
+
+### Daemon
+- `synthos_build/src/retail_market_daemon.py`
+  - Remove dispatch-halting file check at line 408; subprocesses skip
+    individually, dispatch loop keeps iterating for heartbeat/observability
+
+### API (retail portal)
+- `POST /api/halt-agent`       {active: bool, reason?: str}
+- `GET  /api/halt-status`      returns {customer_halt, admin_halt}
+
+### API (monitor / command portal)
+- `POST /api/admin/halt-agent` {active: bool, reason?: str, expected_return?: str}
+- Existing monitor-page kill button rewired to this endpoint
+
+### UI
+- Collapsible top-of-page halt banner (thin 10pt strip → expanded view
+  with protections list + Resume button for customer halts)
+- Reason modal on Halt / Resume click
+
+### Logging
+- system_log events: HALT_ACTIVATED / HALT_DEACTIVATED with src + reason
+
 ## Not in this patch
 
-- Sticky-BOT preference (Q2 deferred)
+- Sticky-BOT preference (AUTO/USER Q2 deferred)
 - Raising cap above 12 — waiting for Friday's dispatch-time measurements
-- Promotion queue (simplified to disabled-toggle UX; no queue table needed)
-- Email notifications for slot-free events (in-app visual feedback only)
+- AUTO/USER promotion queue (simplified to disabled-toggle UX)
+- Email notifications for AUTO/USER slot-free events (in-app only)
+- Halt: per-customer "pause for N hours" auto-resume
+- Halt: email/SMS alert on halt/resume
+- Halt: halt history widget on dashboard
 
 ## Phased commit plan
 
