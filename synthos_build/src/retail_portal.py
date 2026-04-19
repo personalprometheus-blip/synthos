@@ -10325,6 +10325,125 @@ def api_auto_slots():
                         'can_promote': False, 'error': str(e)}), 500
 
 
+# ── HALT AGENT (kill switch v2) ──────────────────────────────────────────────
+
+@app.route('/api/halt-status')
+@login_required
+def api_halt_status():
+    """Return halt state for the current customer + the admin halt (if any).
+
+    Shape: {
+      customer_halt: {active, reason, set_by, set_at, expected_return} | null,
+      admin_halt:    {active, reason, set_by, set_at, expected_return} | null,
+      active_source: 'admin' | 'customer' | null,
+    }
+
+    'active_source' is a convenience for the banner — the UI can render based
+    on whichever is active, with admin taking precedence if both are set.
+    """
+    try:
+        cust = _customer_db().get_halt()
+    except Exception:
+        cust = {'active': False, 'reason': None, 'set_by': None,
+                'set_at': None, 'expected_return': None}
+    try:
+        admin = _shared_db().get_halt()
+    except Exception:
+        admin = {'active': False, 'reason': None, 'set_by': None,
+                 'set_at': None, 'expected_return': None}
+
+    active_source = 'admin' if admin.get('active') else ('customer' if cust.get('active') else None)
+
+    return jsonify({
+        'customer_halt': cust,
+        'admin_halt':    admin,
+        'active_source': active_source,
+    })
+
+
+@app.route('/api/admin/halt-agent', methods=['POST'])
+def api_admin_halt_agent():
+    """Activate or deactivate the ADMIN halt (applies to every customer).
+
+    Token-authenticated (SECRET_TOKEN / MONITOR_TOKEN) — called from the
+    command portal's monitor page on pi4b, not browser-UI on pi5.
+
+    Body: {active: bool, reason?: str, expected_return?: str}
+
+    Writes the system_halt singleton row in the MASTER customer's
+    signals.db — the shared DB that every trader subprocess reads via
+    _shared_db(). Takes effect on the NEXT trader invocation per
+    customer; no existing subprocesses are interrupted.
+    """
+    # Token auth — accept either X-Token header or Authorization: Bearer
+    auth_ok = False
+    token = request.headers.get('X-Token', '')
+    if not token:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    expected = os.environ.get('MONITOR_TOKEN', '') or os.environ.get('SECRET_TOKEN', '')
+    if expected and token and token == expected:
+        auth_ok = True
+    if not auth_ok:
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+
+    try:
+        data = request.get_json(silent=True) or {}
+        active = bool(data.get('active'))
+        reason = (data.get('reason') or '').strip()[:300] or None
+        expected_return = (data.get('expected_return') or '').strip()[:80] or None
+        set_by = f"admin:{data.get('admin_id') or 'monitor'}"
+
+        master = _shared_db()
+        master.set_halt(active=active, reason=reason, set_by=set_by,
+                        expected_return=expected_return)
+        master.log_event(
+            'HALT_ACTIVATED' if active else 'HALT_DEACTIVATED',
+            agent='Admin Portal',
+            details=f"src=admin set_by={set_by} reason={reason or '(none given)'} "
+                    f"expected_return={expected_return or '(none)'}",
+        )
+        return jsonify({'ok': True, 'active': active, 'reason': reason,
+                        'expected_return': expected_return})
+    except Exception as e:
+        log.error(f"/api/admin/halt-agent failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/halt-agent', methods=['POST'])
+@login_required
+def api_halt_agent():
+    """Activate or deactivate the CUSTOMER halt for the logged-in customer.
+
+    Body: {active: bool, reason?: str}
+
+    Customer cannot clear admin halt — only the admin portal can. If admin
+    halt is active, the endpoint still accepts customer halt changes (so
+    preferences are recorded), but the banner will keep showing admin
+    precedence until admin clears their halt.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        active = bool(data.get('active'))
+        reason = (data.get('reason') or '').strip()[:300] or None
+
+        customer_id = session.get('customer_id') or 'unknown'
+        set_by = f'customer:{customer_id[:12]}'
+
+        db = _customer_db()
+        db.set_halt(active=active, reason=reason, set_by=set_by)
+        db.log_event(
+            'HALT_ACTIVATED' if active else 'HALT_DEACTIVATED',
+            agent='Portal',
+            details=f"src=customer set_by={set_by} reason={reason or '(none given)'}",
+        )
+        return jsonify({'ok': True, 'active': active, 'reason': reason})
+    except Exception as e:
+        log.error(f"/api/halt-agent failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 @app.route('/api/ticker-preferences/<ticker>', methods=['POST'])
 @login_required
 def api_set_ticker_preference(ticker: str):
