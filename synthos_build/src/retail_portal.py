@@ -11279,6 +11279,22 @@ def api_logs_audit():
         (_re.compile(r'] \w+ failed\b', _re.I),   'medium'),
         (_re.compile(r'\btimeout\b', _re.I),       'low'),
     ]
+    # Parse the `[YYYY-MM-DD HH:MM:SS]` prefix that every agent's logger emits
+    # so first_seen/last_seen reflect when the line was WRITTEN, not when the
+    # /api/logs-audit endpoint happened to run. Without this, the monitor UI
+    # shows "N seconds ago" for errors that are actually days old.
+    TS_RE = _re.compile(r'^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})')
+
+    def _parse_log_ts(line: str) -> 'str | None':
+        m = TS_RE.match(line)
+        if not m:
+            return None
+        try:
+            naive = _dt.strptime(m.group(1).replace('T', ' '), '%Y-%m-%d %H:%M:%S')
+            # Agent loggers emit local-time (ET) without a zone — tag as ET, convert to UTC ISO
+            return naive.replace(tzinfo=ET).astimezone(_tz.utc).isoformat()
+        except Exception:
+            return None
 
     issues   = []
     by_sev   = {}
@@ -11311,9 +11327,17 @@ def api_logs_audit():
                     if pat.search(line):
                         ctx = line[:120]
                         key = (fname, ctx[:80])
+                        # Use the log line's own timestamp when present;
+                        # fall back to scan-time only when absent.
+                        line_ts = _parse_log_ts(line) or now_iso
                         if key in seen:
                             seen[key]['hit_count'] += 1
-                            seen[key]['last_seen']  = now_iso
+                            # last_seen tracks the MOST RECENT occurrence of the
+                            # same line — keep the later of existing vs. this line.
+                            if line_ts > seen[key]['last_seen']:
+                                seen[key]['last_seen'] = line_ts
+                            if line_ts < seen[key]['first_seen']:
+                                seen[key]['first_seen'] = line_ts
                         else:
                             entry = {
                                 'id':          len(issues) + 1,
@@ -11321,8 +11345,8 @@ def api_logs_audit():
                                 'severity':    sev,
                                 'context':     ctx,
                                 'hit_count':   1,
-                                'first_seen':  now_iso,
-                                'last_seen':   now_iso,
+                                'first_seen':  line_ts,
+                                'last_seen':   line_ts,
                             }
                             seen[key] = entry
                             issues.append(entry)
