@@ -286,7 +286,9 @@ def register_cron() -> bool:
     scheduler    = str(CORE_DIR / "retail_scheduler.py")
     heartbeat    = str(CORE_DIR / "retail_heartbeat.py")
     shutdown_scr = str(CORE_DIR / "retail_shutdown.py")
+    tier_readout = str(SYNTHOS_HOME / "tools" / "tier_readout.py")
     boot_log     = str(LOG_DIR / "boot.log")
+    tier_readout_dir = str(LOG_DIR / "tier_readout")
 
     def logf(name: str) -> str:
         return str(LOG_DIR / f"{name}.log")
@@ -314,6 +316,9 @@ def register_cron() -> bool:
         f"5 1,5,21 * * 1-5 {py} {scheduler} --session overnight >> {logf('scheduler')} 2>&1",
         "# Sentiment — every 30 min during market hours",
         f"0,30 10-15 * * 1-5  {py} {scheduler} --session sentiment >> {logf('scheduler')} 2>&1",
+        "",
+        "# Tier-calibration readout — weekly Sunday 6am ET, dated output under logs/tier_readout/",
+        f"0 6 * * 0  mkdir -p {tier_readout_dir} && {py} {tier_readout} > {tier_readout_dir}/$(date +\\%Y-\\%m-\\%d).log 2>&1",
         "",
         "# Saturday maintenance",
         f"55 3 * * 6  {py} {shutdown_scr}",
