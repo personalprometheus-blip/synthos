@@ -3433,6 +3433,21 @@ def get_system_status():
             enriched, orphans    = _enrich_positions(positions, alpaca_map)
             all_positions        = enriched + orphans
 
+            # Attach sticky preference per position for the AUTO/USER lock UI.
+            # Single query + dict lookup so we don't hit the DB per-row.
+            try:
+                with db.conn() as _c:
+                    _sticky_map = {
+                        r['ticker']: r['sticky']
+                        for r in _c.execute(
+                            "SELECT ticker, sticky FROM position_preferences"
+                        ).fetchall()
+                    }
+            except Exception:
+                _sticky_map = {}
+            for _p in all_positions:
+                _p['sticky'] = _sticky_map.get(_p.get('ticker'))
+
             # Enrich flags with human-readable context
             enriched_flags = _enrich_flags([dict(f) for f in flags], db.path)
             critical_count = sum(1 for f in enriched_flags if f['tier'] == 1)
@@ -7716,11 +7731,37 @@ async function toggleManagedBy(posId, current, ticker, event) {
       toast(d.error || ('HTTP ' + r.status), 'err');
       return;
     }
-    // Re-fetch status so positions + counter re-render in sync
     if (typeof loadLiveStatus === 'function') loadLiveStatus();
     toast((ticker || '?') + ' → ' + (target === 'bot' ? 'AUTO' : 'USER'), 'ok');
   } catch(e) {
     toast('Toggle failed: ' + e.message, 'err');
+  }
+}
+
+async function toggleStickyUser(ticker, isSticky, event) {
+  event.stopPropagation();
+  const t = (ticker || '').toUpperCase();
+  const msg = isSticky
+    ? 'Remove the always-USER lock on ' + t + '?\n\nThe bot will become eligible to open AUTO positions in ' + t + ' again when a signal fires.'
+    : 'Always manage ' + t + ' yourself?\n\nThe bot will SKIP every signal for ' + t + ' — no new AUTO positions will open in this ticker until you remove the lock. Any existing AUTO position in ' + t + ' is NOT affected (use the row toggle to hand it off).';
+  if (!confirm(msg)) return;
+  const target = isSticky ? null : 'user';
+  try {
+    const r = await fetch('/api/ticker-preferences/' + encodeURIComponent(t), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({sticky: target}),
+    });
+    const d = await r.json().catch(() => ({ok: false, error: 'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    toast(t + (target === 'user' ? ' → sticky USER (bot will skip)' : ' sticky cleared'), 'ok');
+  } catch(e) {
+    toast('Sticky toggle failed: ' + e.message, 'err');
   }
 }
 
@@ -7813,13 +7854,25 @@ function renderPositions(positions) {
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
-      <div style="text-align:right;min-width:54px" title="${toggleTitle}">
+      <div style="text-align:right;min-width:54px;display:flex;flex-direction:column;gap:3px;align-items:flex-end" title="${toggleTitle}">
         <div ${toggleOnClick}
              style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
                     background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
-                    cursor:${cursorStyle};opacity:${opacity};text-align:center">
+                    cursor:${cursorStyle};opacity:${opacity};text-align:center;min-width:40px">
           ${tagLabel}
         </div>
+        ${isOrphan ? '' : (function(){
+          const isSticky = (p.sticky === 'user');
+          const lockIcon = isSticky ? '\u{1F512}' : '\u{1F513}';  // 🔒 vs 🔓
+          const lockColor = isSticky ? 'rgba(245,166,35,1)' : 'var(--muted)';
+          const lockTitle = isSticky
+            ? 'Sticky USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
+            : 'Lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker';
+          return '<div onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky ? 'true' : 'false') + ',event)" '
+               + 'title="' + lockTitle + '" '
+               + 'style="font-size:11px;cursor:pointer;padding:1px 3px;opacity:' + (isSticky ? '1' : '0.45') + ';color:' + lockColor + '">'
+               + lockIcon + '</div>';
+        })()}
       </div>
     </div>`;
   };
@@ -10210,6 +10263,39 @@ def api_auto_slots():
     except Exception as e:
         return jsonify({'auto': 0, 'user': 0, 'capacity': AUTO_USER_POSITION_CAP,
                         'can_promote': False, 'error': str(e)}), 500
+
+
+@app.route('/api/ticker-preferences/<ticker>', methods=['POST'])
+@login_required
+def api_set_ticker_preference(ticker: str):
+    """Set or clear the sticky preference for a ticker.
+
+    Body: {sticky: 'user' | null}
+
+    'user' → bot never takes this ticker, even if a signal fires.
+             Any currently-OPEN bot position on the ticker is NOT
+             auto-flipped; user decides whether to close/hand it off
+             via the per-position AUTO/USER toggle.
+    null   → clear the sticky; ticker becomes eligible for the bot
+             again (subject to per-position tagging of any open row).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        sticky = data.get('sticky')  # None or 'user' (explicit 'bot' reserved for future)
+        if sticky not in (None, 'user'):
+            return jsonify({'ok': False, 'error': "sticky must be 'user' or null"}), 400
+        ticker = (ticker or '').strip().upper()
+        if not ticker or len(ticker) > 10:
+            return jsonify({'ok': False, 'error': 'invalid ticker'}), 400
+
+        db = _customer_db()
+        db.set_ticker_sticky(ticker, sticky, set_by='user')
+        db.log_event('TICKER_PREFERENCE_SET', agent='Portal',
+                     details=f"{ticker} sticky={sticky}")
+        return jsonify({'ok': True, 'ticker': ticker, 'sticky': sticky})
+    except Exception as e:
+        log.error(f"/api/ticker-preferences/{ticker} failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @app.route('/api/agent-pulse')
