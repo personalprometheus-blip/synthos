@@ -120,6 +120,40 @@ Condition #3 is mandatory.
 
 ---
 
+## C10 — Centralize price polling on pi4b (deferred)
+
+**Why deferred.** Proposed 2026-04-19: move `retail_price_poller.py` from
+pi5 to a new agent on pi4b that polls Alpaca every 60s for the union of
+tickers in `open positions ∪ validated signals` across all customers,
+writes to a shared DB, and has pi5 trader read from there. Rejected
+in favor of evolving the existing pi5-local poller in place as part
+of the AUTO/USER tagging build (same centralization benefits, no SPOF,
+no network latency on every trader read).
+
+Revisit conditions (any one triggers reconsideration):
+1. We run more than one retail Pi, so centralized polling avoids
+   duplicate fetches across nodes.
+2. Measurements show pi5 is measurably CPU-bound specifically on
+   Alpaca HTTP calls (not on gate compute), AND the bulk-prefetch
+   evolution hasn't relieved it.
+3. Price history needs to survive pi5 rebuilds (today: rebuilds are
+   rare and price history is not load-bearing).
+
+**Scope if we ever build it.**
+- New agent on pi4b (`company_price_agent.py` or similar)
+- New DB / table for prices, with freshness timestamps
+- Fallback path: if pi4b unreachable, pi5 falls back to direct Alpaca
+- Staleness policy: what trader does if last update > threshold
+- Monitoring: pi4b price-agent heartbeat + alert on silence
+
+**Related context.**
+- Session 2026-04-19: idea raised while scoping the AUTO/USER tagging
+  build. Decided the bulk-prefetch evolution on pi5 captures the real
+  benefits (centralized cache, single admin API key, no duplicate
+  fetches) without the SPOF + network-latency costs.
+
+---
+
 ## C9 — News agent module split
 
 **Why deferred.** `retail_news_agent.py` is 3,181 lines. Single-file
