@@ -287,6 +287,7 @@ def register_cron() -> bool:
     heartbeat    = str(CORE_DIR / "retail_heartbeat.py")
     shutdown_scr = str(CORE_DIR / "retail_shutdown.py")
     tier_readout = str(SYNTHOS_HOME / "tools" / "tier_readout.py")
+    daily_health = str(SYNTHOS_HOME / "tools" / "daily_health_aggregator.py")
     boot_log     = str(LOG_DIR / "boot.log")
     tier_readout_dir = str(LOG_DIR / "tier_readout")
 
@@ -319,6 +320,10 @@ def register_cron() -> bool:
         "",
         "# Tier-calibration readout — weekly Sunday 6am ET, dated output under logs/tier_readout/",
         f"0 6 * * 0  mkdir -p {tier_readout_dir} && {py} {tier_readout} > {tier_readout_dir}/$(date +\\%Y-\\%m-\\%d).log 2>&1",
+        "# Daily health aggregator — 23:55 ET, runs BEFORE log rotation at midnight.",
+        "# Writes one row per day to system_health_daily in shared signals.db so we",
+        "# can query rolling N-day stability windows even after logs rotate away.",
+        f"55 23 * * *  {py} {daily_health} >> {logf('daily_health')} 2>&1",
         "",
         "# Saturday maintenance",
         f"55 3 * * 6  {py} {shutdown_scr}",
