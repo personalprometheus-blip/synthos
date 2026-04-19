@@ -25,6 +25,8 @@ Usage:
   python3 news_agent.py --session=overnight
 """
 
+from __future__ import annotations  # allow "X | Y" annotations on Python 3.9 (baseline harness)
+
 import os
 import re
 import sys

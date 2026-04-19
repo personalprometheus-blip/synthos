@@ -1,0 +1,61 @@
+{
+  "cycle_id": "cycle_01",
+  "description": "Minimal mixed-sentiment baseline — 3 Alpaca-source articles (tech positive, macro signal, health negative). Used by the news-agent gate-pipeline refactor (backlog C8) to verify byte-identical signal_decisions output across the rewrite.",
+  "frozen_clock_utc": "2026-04-15T11:30:00Z",
+  "frozen_clock_et":  "2026-04-15T07:30:00-04:00",
+  "articles": [
+    {
+      "headline":       "Nvidia Reports Record Q1 Earnings, Raises FY Guidance",
+      "subhead":        "Data center revenue tops $20B as AI demand accelerates; buyback expanded.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/nvda-q1-2026",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "NVDA",
+      "all_symbols":    ["NVDA"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T13:05:00Z"
+    },
+    {
+      "headline":       "Fed Minutes Signal Extended Pause on Rate Cuts",
+      "subhead":        "Policymakers cite sticky services inflation; market trims 2026 cut odds.",
+      "source":         "Alpaca News (Reuters)",
+      "source_tier":    1,
+      "source_url":     "https://example-reuters.test/articles/fed-minutes-apr-2026",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "SPY",
+      "all_symbols":    ["SPY"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T17:30:00Z"
+    },
+    {
+      "headline":       "Drugmaker Recalls Key Blockbuster After FDA Safety Review",
+      "subhead":        "Voluntary recall expected to weigh on Q2 revenue; stock down pre-market.",
+      "source":         "Alpaca News (Benzinga)",
+      "source_tier":    2,
+      "source_url":     "https://example-benzinga.test/articles/pharma-recall-apr-2026",
+      "politician":     "",
+      "disc_date":      "2026-04-15",
+      "tx_date":        "2026-04-15",
+      "ticker":         "PFE",
+      "all_symbols":    ["PFE"],
+      "image_url":      "",
+      "raw_created_at": "2026-04-15T11:45:00Z"
+    }
+  ],
+  "bars": {
+    "SPY": {"last_close": 520.10, "change_pct_1yr":  12.4, "high_52w": 535.00, "low_52w": 470.00, "avg_volume": 80000000, "bars_available": 252},
+    "NVDA":{"last_close": 820.00, "change_pct_1yr":  58.0, "high_52w": 900.00, "low_52w": 500.00, "avg_volume": 40000000, "bars_available": 252},
+    "PFE": {"last_close":  25.40, "change_pct_1yr":  -9.2, "high_52w":  31.00, "low_52w":  24.80, "avg_volume": 30000000, "bars_available": 252},
+    "XLK": {"last_close": 210.00, "change_pct_1yr":  18.0, "high_52w": 220.00, "low_52w": 175.00, "avg_volume": 12000000, "bars_available": 252},
+    "XLV": {"last_close": 140.00, "change_pct_1yr":   4.0, "high_52w": 150.00, "low_52w": 130.00, "avg_volume": 10000000, "bars_available": 252},
+    "XLF": {"last_close":  42.00, "change_pct_1yr":   8.0, "high_52w":  45.00, "low_52w":  36.00, "avg_volume": 55000000, "bars_available": 252},
+    "SMH": {"last_close": 240.00, "change_pct_1yr":  45.0, "high_52w": 260.00, "low_52w": 160.00, "avg_volume":  8000000, "bars_available": 252},
+    "IBB": {"last_close": 135.00, "change_pct_1yr":  -2.0, "high_52w": 145.00, "low_52w": 128.00, "avg_volume":  3000000, "bars_available": 252}
+  },
+  "member_weights": []
+}
