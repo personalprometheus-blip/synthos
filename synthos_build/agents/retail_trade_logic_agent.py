@@ -1676,14 +1676,40 @@ def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
 # ── GATE 7 — POSITION SIZING ─────────────────────────────────────────────────
 
 def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
-                 positions: list, atr: float, decision_log: TradeDecisionLog) -> float:
+                 positions: list, atr: float, decision_log: TradeDecisionLog,
+                 db=None) -> float:
     """
     Compute final position size in shares.
-    Logic: Doc 3 §7
+    Logic: Doc 3 §7 + AUTO/USER tagging (Model B sizing + Model C cash guard).
+
+    Sizing math runs off TOTAL account equity (Model B) so risk-per-trade
+    stays consistent regardless of whether the user has large USER-managed
+    positions taking up cash. Final size is then capped at available cash
+    (Model C) so orders don't fail at submission. If the cash cap shrinks
+    the order below 70% of intended, we SKIP this trade entirely — a
+    partially-sized order at sub-intended risk is worse than waiting a
+    cycle.
+
+    Returns 0 as a sentinel for "skip due to insufficient cash after USER
+    allocation." Callers that execute buys must guard with `if size > 0`.
     """
-    price    = candidate["price"]
-    equity   = portfolio.get("cash", 0)
-    tier     = get_portfolio_tier(equity)
+    price = candidate["price"]
+    cash  = portfolio.get("cash", 0)
+
+    # Model B: size off total account equity (Alpaca ground truth, cached
+    # to _ALPACA_EQUITY setting by GATE 0 earlier this cycle). Falls back
+    # to cash if equity unavailable — which preserves the pre-feature
+    # behavior for customers who haven't hit GATE 0 yet.
+    total_equity = 0.0
+    if db is not None:
+        try:
+            total_equity = float(db.get_setting('_ALPACA_EQUITY') or 0)
+        except (TypeError, ValueError):
+            total_equity = 0.0
+    if total_equity <= 0:
+        total_equity = cash
+    equity = total_equity
+    tier   = get_portfolio_tier(equity)
 
     # Drawdown-based scaling
     peak     = portfolio.get("peak_equity") or equity
@@ -1708,7 +1734,7 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
     # Drawdown scaling: size *= (1 - current_drawdown_pct)
     size *= max(0.1, 1.0 - drawdown)
 
-    # Max cap: size <= max_position_pct * portfolio
+    # Max cap: size <= max_position_pct * TOTAL equity
     max_shares = (equity * C.MAX_POSITION_PCT) / price if price > 0 else 0
     size       = min(size, max_shares)
 
@@ -1717,12 +1743,39 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
         max_by_usd = C.MAX_TRADE_USD / price
         size = min(size, max_by_usd)
 
-    size       = round(max(size, 0.0001), 4)
+    intended = size  # shares we wanted before the cash guard
 
+    # Model C guard: cap at available cash. If cash has been consumed by
+    # USER-managed positions (or just by other auto positions), we may
+    # not be able to execute the intended size. Skip (not partial-fill)
+    # if the constraint cuts below 70% of intent — a heavily under-sized
+    # trade has worse risk math than waiting.
+    if price > 0 and cash > 0:
+        max_by_cash = cash / price
+        size = min(size, max_by_cash)
+    else:
+        size = 0
+
+    if intended > 0 and size < intended * 0.70:
+        # Skip — cash is too tight after USER/other-auto allocation.
+        decision_log.gate("7_SIZING", "SKIP_INSUFFICIENT_CASH_AFTER_MANUAL", {
+            "intended_shares":  f"{intended:.4f}",
+            "intended_dollars": f"${intended * price:.2f}",
+            "cash_cap_shares":  f"{size:.4f}",
+            "available_cash":   f"${cash:.2f}",
+            "total_equity":     f"${equity:.2f}",
+            "equity_minus_cash":f"${equity - cash:.2f} (in positions)",
+            "price":            f"${price:.2f}",
+        }, f"SKIP — would size {intended:.4f}sh but cash caps at {size:.4f}sh "
+           f"(<70% of intent); insufficient cash after manual/auto allocation")
+        return 0
+
+    size = round(max(size, 0.0001), 4)
     dollar_value = size * price
 
     decision_log.gate("7_SIZING", f"{size:.4f} shares (${dollar_value:.2f})", {
-        "equity":          f"${equity:.2f}",
+        "total_equity":    f"${equity:.2f}",
+        "available_cash":  f"${cash:.2f}",
         "tier":            tier["label"],
         "atr":             f"${atr:.2f}" if atr else "estimated",
         "stop_distance":   f"${stop_dist:.2f}",
@@ -1731,7 +1784,8 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
         "vol_adjustment":  f"×{vol_adj:.3f}",
         "mode_adjustment": f"×{C.DEFENSIVE_SIZE_FACTOR if regime.mode=='DEFENSIVE' else C.AGGRESSIVE_SIZE_FACTOR if regime.mode=='AGGRESSIVE' else 1.0:.2f}",
         "drawdown_scale":  f"×{1.0-drawdown:.3f} (dd={drawdown*100:.1f}%)",
-        "max_cap":         f"{max_shares:.4f} shares",
+        "max_cap_equity":  f"{max_shares:.4f} shares (Model B)",
+        "cash_cap":        f"{cash/price:.4f} shares (Model C)" if price > 0 else "n/a",
         "usd_cap":         f"${C.MAX_TRADE_USD:.2f}" if C.MAX_TRADE_USD > 0 else "none",
         "final_size":      f"{size:.4f} shares @ ${price:.2f}",
     }, f"{size:.4f} shares × ${price:.2f} = ${dollar_value:.2f}")
@@ -2337,7 +2391,14 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             # Refresh positions list after sell (so sizing doesn't count sold position)
             fresh_positions = db.get_open_positions()
 
-            size = gate7_sizing(candidate, regime, portfolio, fresh_positions, atr, sig_log)
+            size = gate7_sizing(candidate, regime, portfolio, fresh_positions, atr, sig_log, db=db)
+            if size <= 0:
+                # Insufficient cash after manual/auto allocation — skip.
+                # Decision already logged inside gate7_sizing.
+                sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
+                continue
             risk = gate8_risk(candidate, atr, session, sig_log)
 
             if _is_supervised():
@@ -3031,8 +3092,14 @@ def run(session="open"):
                 if not atr:
                     atr = candidate['price'] * 0.02
 
-                # Gate 7: Position sizing
-                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log)
+                # Gate 7: Position sizing (Model B + Model C cash guard)
+                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log, db=db)
+                if size <= 0:
+                    # Insufficient cash — skip; gate7_sizing already logged reason.
+                    sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
+                    sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
+                    continue
 
                 # Gate 8: Risk setup
                 risk = gate8_risk(candidate, atr, session, sig_log)
