@@ -30,7 +30,7 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 SYNTHOS_HOME = Path(__file__).resolve().parent.parent
@@ -146,7 +146,7 @@ def write_row(stats: dict) -> Path:
                 stats["caution_verdicts"],
                 stats["agent_errors"],
                 stats["agent_completes"],
-                datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
             ),
         )
         conn.commit()
