@@ -5293,68 +5293,108 @@ var _apIntroTotal  = 2400;   // ms: total traversal time
   } catch (e) {}
 })();
 
-function _apDrawIntroWave(ctx, w, h, ampScale, layerCount, alphaMult) {
-  // Simplified ramp-in wave; mirrors the main loop's math so the handoff
-  // looks continuous when the intro ends.
-  if (alphaMult <= 0) return;
-  var midY = h / 2;
-  var t = _apFrame * 0.015;
-  var baseAmp = 22 * ampScale;
-  for (var i = 0; i < layerCount; i++) {
-    var amp   = baseAmp * (0.4 + (i / Math.max(1, layerCount)) * 0.6);
-    var freq  = 0.010 + i * 0.003;
-    var phase = t + i * 0.8;
-    var a     = (0.10 + (i / Math.max(1, layerCount)) * 0.22) * alphaMult;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    for (var x = 0; x <= w; x += 2) {
-      var y = midY + Math.sin(x * freq - phase) * amp
-                    + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
-      ctx.lineTo(x, y);
+// Letter-shape path extracted once from an offscreen cursive render.
+// _apIntroPath[u]     = y-offset (centered around 0) of the ink centroid at ribbon-x=u
+// _apIntroStrength[u] = 0..1 how much ink is at that column (controls blend depth)
+var _apIntroPath     = null;
+var _apIntroStrength = null;
+var _apIntroPathW    = 0;
+
+function _apBuildIntroPath(canvasH) {
+  // Pick a ribbon length proportional to canvas height so letters are legible
+  var pathH = canvasH;
+  var pathW = Math.max(360, canvasH * 5);
+  var off = document.createElement('canvas');
+  off.width = pathW;
+  off.height = pathH;
+  var octx = off.getContext('2d');
+  octx.fillStyle = '#fff';
+  octx.textAlign = 'center';
+  octx.textBaseline = 'middle';
+  octx.font = 'italic 700 ' + Math.floor(pathH * 0.78) +
+              'px "Brush Script MT", "Apple Chancery", "Savoye LET", "Lucida Handwriting", "Segoe Script", cursive, serif';
+  octx.fillText('Synthos', pathW / 2, pathH / 2);
+
+  var data;
+  try { data = octx.getImageData(0, 0, pathW, pathH).data; }
+  catch (e) { data = null; }
+  var path = new Float32Array(pathW);
+  var strength = new Float32Array(pathW);
+  if (data) {
+    for (var x = 0; x < pathW; x++) {
+      var sumY = 0, count = 0;
+      for (var y = 0; y < pathH; y++) {
+        if (data[(y * pathW + x) * 4 + 3] > 40) { sumY += y; count++; }
+      }
+      if (count > 0) {
+        path[x]     = (sumY / count) - pathH / 2;  // centered around 0
+        strength[x] = Math.min(1, count / (pathH * 0.15));
+      }
     }
-    ctx.strokeStyle = 'rgba(0,245,212,' + a + ')';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
   }
+  _apIntroPath     = path;
+  _apIntroStrength = strength;
+  _apIntroPathW    = pathW;
 }
 
 function _apDrawIntroFrame(ctx, w, h, elapsed) {
+  if (!_apIntroPath) _apBuildIntroPath(h);
+
   var p = Math.min(1, elapsed / _apIntroTotal);
-  // ease-in-out so the word enters and exits gently
+  // Ease-in-out — word enters + exits gently
   var pe = 0.5 * (1 - Math.cos(Math.PI * p));
 
-  ctx.save();
-  var fontSize = Math.floor(h * 0.72);
-  // Italic serif as fallback — always renders as "cursive-ish" even if
-  // named cursive fonts aren't installed.
-  ctx.font = 'italic 600 ' + fontSize + 'px "Brush Script MT", "Apple Chancery", "Savoye LET", "Lucida Handwriting", "Segoe Script", cursive, serif';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
-  var textW = ctx.measureText('Synthos').width;
-  if (!textW || textW < 20) textW = w * 0.55; // safety fallback
-  var travel = w + textW;
-  var textX = -textW + pe * travel;
-  var textY = h / 2 + 1;
+  var pathW = _apIntroPathW;
+  // Ribbon left edge L: from just off-left (-pathW) to just off-right (w)
+  var L = -pathW + pe * (w + pathW);
 
-  // Alpha peaks when word is centered, gentler edge fade so it's visible longer
-  var edgeDist = Math.abs(pe - 0.5) * 2;
-  var alpha = Math.max(0, 1 - Math.pow(edgeDist, 3));
+  // Overall fade: empty canvas at t=0, fading in over first 22%, steady after
+  var globalAlpha;
+  if (p < 0.22)      globalAlpha = p / 0.22;
+  else if (p > 0.85) globalAlpha = 1;  // stay full through handoff
+  else               globalAlpha = 1;
 
-  // Waves ramp in behind. Slow start, full by end.
-  var waveMult  = Math.pow(pe, 1.6);
-  var layers    = 1 + Math.floor(waveMult * 4);
-  _apDrawIntroWave(ctx, w, h, waveMult, layers, waveMult);
+  // Same wave parameters as the active state (see main loop) so the handoff
+  // into normal animation is seamless.
+  var midY     = h / 2;
+  var t_time   = _apFrame * 0.015;
+  var numWaves = 6;
+  var baseAmp  = 24;
 
-  // Fill + stroke for a solid, readable cursive rendering regardless of font
-  ctx.shadowBlur = 18;
-  ctx.shadowColor = 'rgba(0,245,212,' + (0.85 * alpha) + ')';
-  ctx.fillStyle   = 'rgba(0,245,212,' + (0.92 * alpha) + ')';
-  ctx.fillText('Synthos', textX, textY);
-  ctx.shadowBlur = 0;
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = 'rgba(220,250,255,' + (0.85 * alpha) + ')';
-  ctx.strokeText('Synthos', textX, textY);
-  ctx.restore();
+  for (var i = 0; i < numWaves; i++) {
+    var amp   = baseAmp * (0.4 + (i / numWaves) * 0.6);
+    var freq  = 0.010 + i * 0.003;
+    var phase = t_time + i * 0.8;
+    var layerOffset = (i - numWaves / 2) * 1.8;
+
+    ctx.beginPath();
+    for (var x = 0; x <= w; x += 2) {
+      var u = Math.floor(x - L);
+      var strength = 0, letterY = 0;
+      if (u >= 0 && u < pathW) {
+        strength = _apIntroStrength[u];
+        letterY  = _apIntroPath[u];
+      }
+
+      var sineY = Math.sin(x * freq - phase) * amp
+                + Math.sin(x * freq * 1.5 - phase * 0.7) * amp * 0.3;
+
+      // Blend: 0 strength → pure sine + stacked layer offset
+      //        1 strength → lines converge onto the letter centroid
+      var y = midY
+            + sineY * (1 - strength)
+            + letterY * strength
+            + layerOffset * (1 - strength);
+
+      if (x === 0) ctx.moveTo(x, y);
+      else         ctx.lineTo(x, y);
+    }
+
+    var alpha = (0.12 + (i / numWaves) * 0.25) * globalAlpha;
+    ctx.strokeStyle = 'rgba(0,245,212,' + alpha + ')';
+    ctx.lineWidth = 1.7;
+    ctx.stroke();
+  }
 }
 
 function _apDrawWave() {
