@@ -933,11 +933,22 @@ class DB:
     def open_position(self, ticker, company, sector, entry_price, shares,
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,
-                      interrogation_status=None, price_history_used=None):
+                      interrogation_status=None, price_history_used=None,
+                      managed_by='bot'):
         """
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
+
+        managed_by: 'bot' (default — trader's own buys) or 'user' (adopted
+        from a direct Alpaca purchase). Trader skips buy/sell/stop logic on
+        'user' rows; sticky preferences on a ticker further harden this.
+        If sticky='user' is set for this ticker, caller should normally NOT
+        be here — but if it gets called anyway, the trader's signal-eval
+        path already blocks sticky-user tickers upstream; we don't second-
+        guess the caller here.
         """
+        if managed_by not in ('bot', 'user'):
+            raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
         portfolio = self.get_portfolio()
@@ -950,13 +961,13 @@ class DB:
                      shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                      pnl, status, opened_at, signal_id,
                      entry_sentiment_score, entry_signal_score,
-                     interrogation_status, price_history_used)
-                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?)
+                     interrogation_status, price_history_used, managed_by)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?)
             """, (pos_id, ticker, company, sector, entry_price, entry_price,
                   shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                   self.now(), signal_id,
                   entry_sentiment_score, entry_signal_score,
-                  interrogation_status, price_history_used))
+                  interrogation_status, price_history_used, managed_by))
 
         self.update_portfolio(cash=new_cash)
         self.add_ledger_entry(
@@ -968,6 +979,46 @@ class DB:
         )
         log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
         return pos_id
+
+    # ── POSITION PREFERENCES (sticky AUTO/USER per ticker) ────────────────
+
+    def get_ticker_sticky(self, ticker: str) -> str | None:
+        """Return the sticky override for a ticker, or None if no preference set.
+        Possible return values: 'user' (sticky — bot never takes), 'bot' (reserved
+        for future use — currently unused in v1)."""
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT sticky FROM position_preferences WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
+        return row['sticky'] if row else None
+
+    def set_ticker_sticky(self, ticker: str, sticky: str | None, set_by: str = 'user') -> None:
+        """Set (or clear when sticky is None) a ticker's sticky preference.
+        set_by: 'user' (operator clicked the lock icon) or 'system' (auto-set)."""
+        if sticky is not None and sticky not in ('user', 'bot'):
+            raise ValueError(f"sticky must be 'user', 'bot', or None — got {sticky!r}")
+        with self.conn() as c:
+            if sticky is None:
+                c.execute("DELETE FROM position_preferences WHERE ticker = ?", (ticker,))
+            else:
+                c.execute(
+                    "INSERT INTO position_preferences (ticker, sticky, set_by, set_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(ticker) DO UPDATE SET "
+                    "sticky=excluded.sticky, set_by=excluded.set_by, set_at=excluded.set_at",
+                    (ticker, sticky, set_by, self.now()),
+                )
+
+    def set_position_managed_by(self, pos_id: str, managed_by: str) -> None:
+        """Flip a position's AUTO/USER tag. Called by the portal's toggle endpoint."""
+        if managed_by not in ('bot', 'user'):
+            raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET managed_by = ? WHERE id = ?",
+                (managed_by, pos_id),
+            )
 
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """

@@ -2501,18 +2501,23 @@ def run(session="open"):
             except Exception:
                 pass
             log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} sector={_orphan_sector or '?'} — auto-adopting")
+            # Orphans are positions on Alpaca with no matching DB row — by
+            # construction these are user-initiated (bot buys always record
+            # their own position row atomically). Tag managed_by='user' so
+            # the trader doesn't treat them as its own to manage.
             db.open_position(
                 ticker=t, company=t, sector=_orphan_sector,
                 entry_price=entry, shares=shares,
                 trail_stop_amt=0, trail_stop_pct=0, vol_bucket='normal',
                 signal_id=None, entry_signal_score=None,
                 entry_sentiment_score=None, interrogation_status=None,
+                managed_by='user',
             )
             db.log_event("ORPHAN_ADOPTED", agent="Trade Logic",
-                         details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca")
+                         details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca as USER-managed")
             db.add_notification('account', f'{t} position detected',
-                f'{shares:.2f} shares @ ${entry:.2f} added to your portfolio',
-                meta={'ticker': t, 'type': 'orphan_adopted'})
+                f'{shares:.2f} shares @ ${entry:.2f} added as user-managed',
+                meta={'ticker': t, 'type': 'orphan_adopted', 'managed_by': 'user'})
             healed += 1
 
     # Auto-close ghosts (customer sold on Alpaca directly, or trailing stop filled)
@@ -2683,6 +2688,12 @@ def run(session="open"):
         if budget_exceeded():
             log.warning("[GATE 10] Runtime budget exceeded — skipping remaining position reviews")
             break
+        # USER-managed positions are user's responsibility — trader does not
+        # apply trailing stops, stop-loss adjustments, or protective exits.
+        # Price is still updated in the pre-loop sync (line ~2552) so the
+        # dashboard shows correct P&L. See AUTO/USER tagging spec.
+        if (pos.get('managed_by') or 'bot') == 'user':
+            continue
         _set_phase('gate_10_position_review', f"ticker={pos['ticker']}")
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
@@ -2972,6 +2983,18 @@ def run(session="open"):
                 # Spousal filter (KEEP from v1.x)
                 if signal.get('is_spousal') and C.SPOUSAL_WEIGHT == 'skip':
                     log.info(f"Signal {signal['ticker']} skipped — spousal (SPOUSAL_WEIGHT=skip)")
+                    continue
+
+                # Sticky USER preference — user has marked this ticker "never auto".
+                # Bot respects this across all signals for the ticker, regardless of
+                # whether they currently hold a position. Skip silently (log once so
+                # the audit trail captures it, but don't re-evaluate gates).
+                _sticky = db.get_ticker_sticky(signal['ticker'])
+                if _sticky == 'user':
+                    log.info(f"Signal {signal['ticker']} skipped — sticky USER preference")
+                    db.log_event("SIGNAL_SKIPPED_STICKY_USER", agent="Trade Logic",
+                                 details=f"ticker={signal['ticker']} signal_id={signal.get('id')}")
+                    _mark_signal_evaluated(signal['id'], 'SKIP_STICKY_USER')
                     continue
 
                 sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
