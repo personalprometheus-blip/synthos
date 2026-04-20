@@ -1,9 +1,10 @@
 """
 retail_event_calendar.py — Earnings dates + macro event schedule.
 
-Phase 5.a of TRADER_RESTRUCTURE_PLAN. Gate 4 EVENT_RISK previously logged
-`"TODO: FOMC/CPI/earnings calendar still unintegrated"` and let every
-signal through. This module fills that gap.
+Phase 5.a of TRADER_RESTRUCTURE_PLAN. Gate 4 EVENT_RISK previously
+punted on scheduled event risk; this module fills that gap with
+actual earnings dates (bulk-fetched from Nasdaq) plus a macro-event
+table admin can populate for FOMC / CPI / NFP.
 
 Two data sources:
   1. earnings_cache — per-ticker next earnings date. Populated by a

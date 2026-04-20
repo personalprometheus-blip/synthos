@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-20T15:00:00-04:00",
-    "version": "3.4"
+    "last_updated": "2026-04-20T16:45:00-04:00",
+    "version": "3.5"
   },
   "nodes": [
     {
@@ -48,8 +48,16 @@
         {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "daemon", "status": "live"},
         {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "daemon", "status": "live"},
         {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "daemon", "status": "live"},
-        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads top-N per sector from sector_screening. Trader consumes in Phase 3c.", "how": "daemon", "status": "live"},
-        {"name": "retail_window_calculator.py", "desc": "Phase 3b — precomputes macro+minor entry/exit windows per signal × customer into trade_windows. Percentage-based in 3b; Phase 4 refines to ATR/VWAP.", "how": "daemon", "status": "live"},
+        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads top-N per sector from sector_screening. Trader consumes via windows (Phase 3c).", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_window_calculator.py", "desc": "Phase 3b/4 — precomputes macro+minor entry/exit windows per signal × customer into trade_windows. Phase 4.a adds ATR column; 4.b scales bands by ATR. Anchor still dynamic — pin revisit deferred post-Phase-5.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_event_calendar.py", "desc": "Phase 5.a — Gate 4 EVENT_RISK calendar. Nasdaq bulk earnings fetch + macro_events table. Called from market_daemon's enrichment tick.", "how": "module (called by market_daemon)", "status": "live"},
+        {"name": "retail_daily_master.py", "desc": "Phase 5.c — end-of-day audit rollup. Renders logs/daily_master/YYYY-MM-DD.md with opens/closes/candidates/cooling-off/earnings tables. Fires at market close from run_close_session.", "how": "module (called at 4PM ET by market_daemon)", "status": "live"},
+        {"name": "retail_macro_regime_agent.py", "desc": "Macro regime classifier (BEAR/BULL/NORMAL trend × volatility). Runs in enrichment pipeline.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_market_state_agent.py", "desc": "Market state detector (open/close/holiday) for session gating.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_bias_detection_agent.py", "desc": "Behavioral-bias detector (sector concentration, loss aversion, disposition effect).", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_fault_detection_agent.py", "desc": "Data freshness + system resources + account health checks.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_validator_stack_agent.py", "desc": "Final enrichment stamp — promotes QUEUED → VALIDATED when all prior stamps present.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_sector_backfill_agent.py", "desc": "One-off/periodic backfill for missing sector_screening rows.", "how": "manual / on-demand", "status": "tool"},
         {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "daemon", "status": "live"},
         {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
         {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b", "how": "per agent", "status": "cron"},
@@ -62,7 +70,7 @@
         {"name": "rebuild_default_template.py", "desc": "Nightly customer DB template rebuild", "how": "cron 3am", "status": "cron"},
         {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"}
       ],
-      "databases": ["auth.db", "customers/*/signals.db", "live_prices (shared)"],
+      "databases": ["auth.db", "customers/*/signals.db (tables: signals, positions, trade_windows, news_flags, earnings_cache, macro_events, cooling_off, outcomes, ...)", "live_prices (shared, in owner DB)"],
       "services": ["Cloudflare tunnel", "portal.synth-cloud.com"],
       "storage": "NVMe (Patriot M.2 P300 256GB) — migrated from SD 2026-04-18",
       "tools": ["synthos_build/tools/ (_fleet + 10 diagnostics: customer_audit, trader_audit, validator_investigate, sentiment_smoke, verify_schema, tier_readout, apply_tier_ladder, portal_lint, dead_code, lint, complexity)"]
@@ -149,6 +157,12 @@
     "Code-health trio added to tools/ (vulture, ruff, radon wrappers)",
     "Early-access TOS modal + non-restrictive setup overlay — built dormant behind EARLY_ACCESS_TOS_ENABLED=False",
     "rotate_logs.py landed in git (was running from cron on pi5 but untracked)",
-    "JS init-killer fixed: Jinja substitution inside a // comment produced a literal '<' that aborted dashboard init for all users (commit bba337a)"
+    "JS init-killer fixed: Jinja substitution inside a // comment produced a literal '<' that aborted dashboard init for all users (commit bba337a)",
+    "Phase 3c.a/b: Gate 5 window proximity nudge + trader window consumer (v1 news-triggered entry path removed)",
+    "Phase 4.a/b/d: ATR column on trade_windows + ATR-scaled bands + trader reads ATR from window (single source of truth)",
+    "Phase 5.a: Gate 4 EVENT_RISK scheduled-event calendar (Nasdaq earnings + macro_events table)",
+    "Phase 5.b: cooling_off after stop-out (24h default; Gate 4 sub-gate)",
+    "Phase 5.c: daily_master.md end-of-day audit rollup",
+    "Audit Round 1 (2026-04-20): 5 critical bugs fixed — missing time/timezone imports, out-of-scope trade_events, candidate-gen tx_date dedup, Gate 4 ticker dedup (killed AAPL runaway)"
   ]
 }
