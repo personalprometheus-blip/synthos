@@ -1468,17 +1468,22 @@ class DB:
             discard_del = (datetime.now(timezone.utc) + timedelta(days=30)).strftime(
                 '%Y-%m-%d %H:%M:%S'
             )
+            # IMPORTANT: tx_date is what the dedup SELECT above filters
+            # on. Earlier versions omitted it, so tx_date stayed NULL,
+            # and the per-day dedup silently never matched — every run
+            # emitted a fresh signal for the same ticker.
             cur = c.execute(
                 "INSERT INTO signals "
                 "(ticker, company, sector, source, source_tier, headline, "
                 "confidence, staleness, corroborated, status, "
-                "expires_at, discard_delete_at, created_at, updated_at, "
-                "entry_signal_score) "
+                "tx_date, expires_at, discard_delete_at, "
+                "created_at, updated_at, entry_signal_score) "
                 "VALUES (?, ?, ?, 'candidate', 2, ?, "
                 "'MEDIUM', 'Fresh', 0, 'WATCHING', "
-                "?, ?, ?, ?, ?)",
+                "?, ?, ?, ?, ?, ?)",
                 (ticker, None, sector, headline,
-                 expires_at, discard_del, self.now(), self.now(),
+                 today, expires_at, discard_del,
+                 self.now(), self.now(),
                  f"{combined_score:.4f}"),
             )
             return cur.lastrowid

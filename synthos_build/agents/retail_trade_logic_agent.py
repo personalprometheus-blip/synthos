@@ -42,7 +42,7 @@ import logging
 import argparse
 import requests
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from calendar import monthrange
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -1464,6 +1464,22 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
     ticker = signal['ticker']
     dlog = TradeDecisionLog(decision_log.session, ticker, signal.get('id'))
 
+    # Ticker dedup — Phase 5 post-audit fix. Previously absent, which
+    # is the root cause of the AAPL runaway: nothing in Gate 4 prevented
+    # the trader from re-entering a ticker it already held. Checked
+    # first because it's the cheapest reject (pure in-memory set lookup,
+    # no API calls).
+    _held_tickers = {p['ticker'] for p in positions
+                     if (p.get('status') or 'OPEN') == 'OPEN'}
+    ticker_dedup_ok = ticker not in _held_tickers
+    decision_log.gate("4_TICKER_DEDUP", ticker_dedup_ok, {
+        "ticker":        ticker,
+        "open_tickers":  ",".join(sorted(_held_tickers)) if _held_tickers else "none",
+    }, "ticker not in open positions" if ticker_dedup_ok
+       else f"SKIP — {ticker} already held in an OPEN position")
+    if not ticker_dedup_ok:
+        return False
+
     # Liquidity: avg_volume < volume_threshold
     avg_vol = alpaca.get_volume_avg(ticker, days=30)
     liq_ok  = avg_vol >= C.MIN_AVG_VOLUME
@@ -2523,9 +2539,14 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
     When portfolio is full, evaluate top signals against weakest holdings.
     Sell losing positions if a new signal significantly outscores them.
     Rules: only rotate losers, score gap >= 0.20, max 1 per session, never BIL.
+
+    Returns the number of rotations performed (int) so the caller can
+    update its trade_events counter. Previously the function referenced
+    an out-of-scope `trade_events` and would NameError if it ever fired.
     """
     ROTATION_THRESHOLD = 0.20
     MAX_ROTATIONS = 1
+    rotations = 0  # Hoisted so every early-return path returns a valid count
 
     try:
         # Phase 3c.b — window-driven candidate pool for rotation too.
@@ -2554,7 +2575,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             if _w['entry_low'] <= _price <= _w['entry_high']:
                 signals.append(_sig)
         if not signals:
-            return
+            return rotations
 
         # Build list of held positions with scores (excluding BIL)
         held = []
@@ -2573,17 +2594,17 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             })
 
         if not held:
-            return
+            return rotations
 
         # Only consider losing positions for rotation
         losers = [h for h in held if h['pnl_pct'] < 0]
         if not losers:
             log.info("[ROTATION] All positions in profit — no rotation candidates")
-            return
+            return rotations
 
         losers.sort(key=lambda x: x['entry_score'])
         weakest = losers[0]
-        rotations = 0
+        # rotations initialized at function top for early-return safety
 
         for signal in signals[:20]:
             if rotations >= MAX_ROTATIONS:
@@ -2642,7 +2663,8 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             db.add_notification('trade', f'Sold {weakest["ticker"]}',
                 f'Rotated out for stronger signal — P&L {_rp_sign}${_rot_pnl:.2f}',
                 meta={'ticker': weakest['ticker'], 'side': 'sell', 'pnl': round(_rot_pnl, 2), 'reason': 'ROTATED_OUT', 'replaced_by': signal['ticker']})
-            trade_events += 1
+            # Sell counted as part of the rotation; caller increments
+            # trade_events once per complete rotation (see return value).
 
             # ── BUY the stronger signal ──
             atr = alpaca.get_atr(signal['ticker'])
@@ -2718,7 +2740,6 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         db.add_notification('trade', f'Bought {signal["ticker"]}',
                             f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested (rotated from {weakest["ticker"]})',
                             meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2), 'rotation_from': weakest['ticker']})
-                        trade_events += 1
                         rotations += 1
                         sig_log.decide("ROTATE", f"Replaced {weakest['ticker']} (gap {score_gap:.3f})")
                         sig_log.commit(db)
@@ -2738,6 +2759,9 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
 
     except Exception as e:
         log.error(f"[ROTATION] Unexpected error: {e}", exc_info=True)
+
+    return rotations
+
 
 def run(session="open"):
     # ── HALT CHECK — absolute first thing ────────────────────────────
@@ -3268,8 +3292,9 @@ def run(session="open"):
 
         if not can_enter:
             log.info("Deployment/position cap reached — checking for position rotation")
-            _rotate_positions(db, _shared_db(), alpaca, positions, regime, tier,
-                              portfolio, tradeable, session, now)
+            _rot_count = _rotate_positions(db, _shared_db(), alpaca, positions, regime, tier,
+                                           portfolio, tradeable, session, now)
+            trade_events += int(_rot_count or 0)
 
         if can_enter:
             # Expire stale signals on different windows per status:
