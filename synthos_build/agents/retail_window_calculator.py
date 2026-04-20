@@ -60,7 +60,7 @@ import os
 import sys
 import logging
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -83,15 +83,23 @@ def _shared_db():
 
 
 def get_active_customers() -> list:
-    """Return list of active customer IDs from auth.db.
-    Mirrors retail_market_daemon.get_active_customers()."""
+    """Return list of active customer IDs. Delegates to the canonical
+    implementation in retail_market_daemon so there's a single source
+    of truth. Falls back to a local copy if market_daemon can't be
+    imported (should not happen in production — market_daemon is on
+    the sys.path by construction above)."""
     try:
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active')]
+        from retail_market_daemon import get_active_customers as _gac
+        return _gac()
     except Exception as e:
-        log.error(f"Could not list customers: {e}")
-        return []
+        log.debug(f"fallback to local get_active_customers: {e}")
+        try:
+            import auth
+            customers = auth.list_customers()
+            return [c['id'] for c in customers if c.get('is_active')]
+        except Exception as e2:
+            log.error(f"Could not list customers: {e2}")
+            return []
 
 logging.basicConfig(
     level=logging.INFO,
@@ -197,7 +205,7 @@ def _fetch_atr(ticker: str) -> float | None:
     if not headers:
         return None
     try:
-        end = datetime.utcnow()
+        end = datetime.now(timezone.utc)
         start = end - timedelta(days=_ATR_PERIOD + 12)
         r = requests.get(
             f"{_ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",

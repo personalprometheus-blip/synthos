@@ -486,18 +486,20 @@ def run():
     log.info(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S ET')}")
     log.info("=" * 55)
 
-    # Run all steps
-    net_ok    = step1_network()
-    env_ok    = step2_env()
-    files_ok  = step3_files()
-    db_ok     = step4_database()
-    hc_ok     = step5_health_check()
-    wd_ok     = step6_watchdog()
-    portal_ok = step7_portal()
-    mon_ok    = step8_monitor()
-    intg_ok   = step_interrogation_listener()
-    seed_ok   = step9_initial_seed()
-    sugg_ok   = step10_seed_suggestions()
+    # Run all steps. Each step appends its result to BOOT_STEPS (shared
+    # module list) which the summary below tallies. Return values are
+    # unused here — underscore-prefixed to signal intent and quiet ruff.
+    _net_ok    = step1_network()
+    _env_ok    = step2_env()
+    _files_ok  = step3_files()
+    _db_ok     = step4_database()
+    _hc_ok     = step5_health_check()
+    _wd_ok     = step6_watchdog()
+    _portal_ok = step7_portal()
+    _mon_ok    = step8_monitor()
+    _intg_ok   = step_interrogation_listener()
+    _seed_ok   = step9_initial_seed()
+    _sugg_ok   = step10_seed_suggestions()
 
     # Tally results
     passed = sum(1 for s in BOOT_STEPS if s['passed'])
