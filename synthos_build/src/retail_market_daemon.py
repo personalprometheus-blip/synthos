@@ -112,8 +112,13 @@ def _signal_handler(signum, frame):
     log.info(f"Received signal {signum} — shutting down gracefully")
     _shutdown_requested = True
 
-signal.signal(signal.SIGTERM, _signal_handler)
-signal.signal(signal.SIGINT, _signal_handler)
+
+def _install_signal_handlers():
+    """Register SIGTERM / SIGINT handlers. Called from main() so that
+    importing this module from another daemon (e.g. retail_trade_daemon)
+    does NOT clobber the importer's own handlers. Side-effect-free imports."""
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
 
 
 # ── Helpers ──
@@ -876,9 +881,12 @@ def run_premarket_prep():
     if _shutdown_requested:
         return
 
-    # Phase 5: Price poll + trade
+    # Phase 5: Price poll
+    # NOTE: trader dispatch moved to retail_trade_daemon.py (Phase 1 of
+    # TRADER_RESTRUCTURE_PLAN). Enrichment daemon no longer runs the
+    # trader — it only produces intel (signals, scores, verdicts) and
+    # lets the continuous trade daemon act on them.
     run_price_poller()
-    run_trade_all_customers(session='open')
     clear_agent_running()
     _end_cycle(cycle_id)
 
@@ -908,9 +916,10 @@ def run_market_loop():
     enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
     recon_interval = RECON_INTERVAL_MIN * 60
 
-    # First trade evaluation right at market open (pre-market prep already ran enrichment)
-    if not kill_switch_active():
-        run_trade_all_customers(session='open')
+    # NOTE: trader dispatch moved to retail_trade_daemon.py (Phase 1 of
+    # TRADER_RESTRUCTURE_PLAN). This daemon no longer triggers the
+    # trader — continuous trade daemon handles all dispatch during
+    # market hours.
     clear_agent_running()
 
     while not _shutdown_requested and not past_market_close():
@@ -949,24 +958,24 @@ def run_market_loop():
             # Last link: stamp validator + promote fully-validated signals
             if not _shutdown_requested:
                 promote_validated_signals()
-            # Trade execution (validator verdict gates decisions)
-            if not _shutdown_requested and not kill_switch_active():
-                run_trade_all_customers(session='open')
+            # Trader dispatch moved to retail_trade_daemon.py (Phase 1 of
+            # TRADER_RESTRUCTURE_PLAN). Enrichment daemon produces intel
+            # (VALIDATED signals, validator verdicts, sentiment scores);
+            # the continuous trade daemon acts on it.
             last_enrichment = time.monotonic()
-            last_recon = time.monotonic()  # enrichment includes reconciliation
+            last_recon = time.monotonic()
             clear_agent_running()
             send_retail_heartbeat('market_daemon', 'OK')
             _end_cycle(cycle_id)
 
-        # ── RECONCILIATION CYCLE (every 10 min between enrichments) ──
-        # Lightweight: catches trailing stop fills, exit conditions, approved trades
+        # ── RECONCILIATION CYCLE — REMOVED ──
+        # Previously ran the trader every 10 min between enrichments to
+        # catch trailing stop fills, exit conditions, approved trades.
+        # Continuous trade daemon now handles reconciliation naturally
+        # as part of its 30s cycle — this branch is now a no-op and the
+        # variable tracking is kept only for log compatibility.
         elif since_recon >= recon_interval:
-            if not kill_switch_active():
-                log.info(f"[RECON] {since_recon/60:.0f}m — reconciliation + exit checks")
-                run_trade_all_customers(session='open')
-                clear_agent_running()
             last_recon = time.monotonic()
-            send_retail_heartbeat('market_daemon', 'OK')
 
         # ── PRICE POLL (every 60 sec) ──
         if since_price >= PRICE_POLL_INTERVAL_SEC:
@@ -1362,6 +1371,7 @@ def main():
     overnight cycle otherwise. Cron invokes hourly 24/7 — same script,
     different path based on wall-clock time. See
     docs/overnight_queue_plan.md Phase 4."""
+    _install_signal_handlers()
     if not acquire_pidlock():
         return
 

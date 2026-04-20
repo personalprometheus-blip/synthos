@@ -1,12 +1,23 @@
-# SYNTHOS RETAIL — updated 2026-04-14
+# SYNTHOS RETAIL — updated 2026-04-20
 # All times America/New_York (Pi5 16GB system clock)
-# Market daemon owns 9:10-16:00 (news, sentiment, trade, screener, price poller)
+# Market daemon (intel): news, sentiment, macro, validator, screener, price poller (9:10-16:00)
+# Trade daemon (action): continuous trader during market hours 9:30-16:00
 # Cron handles: overnight news, boot, heartbeat, backup, maintenance
 
 # Boot services
 
-# ── MARKET DAEMON — owns trading hours 9:10-16:00 weekdays ──
+# ── MARKET DAEMON — enrichment pipeline 9:10-16:00 weekdays ──
+# Kicks at 9:10 to warm up pre-open. Runs news + sentiment + macro + validator +
+# screener + price poller on a 30-min enrichment cadence. Does NOT run the
+# trader — that's the trade daemon below.
 10 9 * * 1-5  cd /home/pi516gb/synthos/synthos_build && /usr/bin/python3 src/retail_market_daemon.py >> logs/market_daemon.log 2>&1
+
+# ── TRADE DAEMON — continuous trader 9:30-16:00 weekdays ──
+# Phase 1 of TRADER_RESTRUCTURE_PLAN: trader runs on its own continuous loop
+# (30s cycle) instead of every-30-min from market_daemon. Starts at 9:25 so
+# it's ready at market open; the daemon itself waits for 9:30 ET before
+# firing its first dispatch.
+25 9 * * 1-5  cd /home/pi516gb/synthos/synthos_build && /usr/bin/python3 src/retail_trade_daemon.py >> logs/trade_daemon.log 2>&1
 
 # ── OVERNIGHT NEWS — off-hours only (daemon handles 9-4) ──
 5 0-8,16-23 * * 1-5 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_scheduler.py --session overnight >> /home/pi516gb/synthos/synthos_build/logs/scheduler.log 2>&1
