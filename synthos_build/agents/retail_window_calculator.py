@@ -60,7 +60,7 @@ import os
 import sys
 import logging
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -72,6 +72,8 @@ from retail_database import get_customer_db  # noqa: E402
 ET = ZoneInfo("America/New_York")
 
 _OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+_ALPACA_DATA_URL = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+_ATR_PERIOD = 14
 
 
 def _shared_db():
@@ -126,6 +128,81 @@ def _compute_windows(current_price: float) -> tuple[dict, dict]:
         'tp':         None,
     }
     return macro, minor
+
+
+# ── ATR fetch (Phase 4.a) ────────────────────────────────────────────────
+
+def _alpaca_headers():
+    """Owner/master Alpaca creds for bars fetch. Returns None if unset."""
+    try:
+        import auth
+        api_key, secret_key = auth.get_alpaca_credentials(_OWNER_CID)
+        if api_key:
+            return {'APCA-API-KEY-ID': api_key, 'APCA-API-SECRET-KEY': secret_key}
+    except Exception as _e:
+        log.debug(f"auth.get_alpaca_credentials failed: {_e}")
+    # Env fallback (e.g. test/CI)
+    k = os.environ.get('ALPACA_API_KEY')
+    s = os.environ.get('ALPACA_SECRET_KEY')
+    return {'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': s} if k else None
+
+
+def _fetch_atr(ticker: str) -> float | None:
+    """Fetch ATR_14 from Alpaca daily bars.
+
+    Uses owner credentials (bars are account-agnostic for equities).
+    Returns None if fewer than _ATR_PERIOD+1 bars are available or the
+    API fails — caller records NULL in trade_windows and moves on.
+    """
+    import requests
+    headers = _alpaca_headers()
+    if not headers:
+        return None
+    try:
+        end = datetime.utcnow()
+        start = end - timedelta(days=_ATR_PERIOD + 12)
+        r = requests.get(
+            f"{_ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
+            params={
+                'timeframe': '1Day',
+                'start': start.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'end':   end.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'limit': _ATR_PERIOD + 20,
+                'feed':  'iex',
+            },
+            headers=headers, timeout=8,
+        )
+        if r.status_code != 200:
+            log.debug(f"ATR bars fetch {ticker} returned {r.status_code}")
+            return None
+        bars = (r.json() or {}).get('bars') or []
+        if len(bars) < 2:
+            return None
+        trs = []
+        for i in range(1, len(bars)):
+            h  = float(bars[i].get('h') or 0)
+            l  = float(bars[i].get('l') or 0)
+            pc = float(bars[i-1].get('c') or 0)
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        if not trs:
+            return None
+        window = trs[-_ATR_PERIOD:]
+        return round(sum(window) / len(window), 4)
+    except Exception as _e:
+        log.debug(f"ATR fetch {ticker} raised: {_e}")
+        return None
+
+
+def _atr_map_for(tickers) -> dict:
+    """Batch-fetch ATR for a set of tickers. Returns {ticker: atr_or_None}.
+    One HTTP call per ticker (Alpaca's bars API is per-symbol), but the
+    candidate + validated set stays small enough (<30) that this is fine."""
+    result = {}
+    for t in set(tickers or ()):
+        if not t:
+            continue
+        result[t] = _fetch_atr(t)
+    return result
 
 
 # ── Live price lookup ────────────────────────────────────────────────────
@@ -185,6 +262,15 @@ def run_enrichment_pass(customer_id: str | None = None) -> dict:
         log.info("No VALIDATED/WATCHING/CANDIDATE_PENDING signals — enrichment pass a no-op")
         return {'customers': len(customers), 'signals': 0, 'windows_written': 0, 'skipped_no_price': 0}
 
+    # Phase 4.a — batch ATR fetch for every unique ticker. Passed to
+    # write_trade_window so each row stores the ATR that was current at
+    # compute time. 4.a stores it only; 4.b switches band width to ATR-
+    # based; 4.d uses it for risk-per-trade sizing.
+    tickers_to_fetch = {s['ticker'] for s in signals}
+    atr_map = _atr_map_for(tickers_to_fetch)
+    _atr_ok = sum(1 for v in atr_map.values() if v is not None)
+    log.info(f"ATR fetched for {_atr_ok}/{len(tickers_to_fetch)} ticker(s)")
+
     total_signals = 0
     windows_written = 0
     skipped_no_price = 0
@@ -200,20 +286,20 @@ def run_enrichment_pass(customer_id: str | None = None) -> dict:
                     skipped_no_price += 1
                     continue
                 macro, minor = _compute_windows(price)
+                atr = atr_map.get(ticker)
                 # Windows live on the per-customer DB so per-customer
-                # price-history variance (when Phase 4 adds ATR) can
-                # differ. For now the computation is price-only so rows
-                # are identical across customers, but write per-customer
-                # anyway to match the forward shape.
+                # price-history variance can differ. In 4.a the
+                # computation is still price-only (percentage bands);
+                # 4.b swaps the widths to ATR-derived.
                 db.write_trade_window(
                     signal_id=sig['id'], customer_id=cid, tier='macro',
                     entry_low=macro['entry_low'], entry_high=macro['entry_high'],
-                    stop=macro['stop'], tp=macro['tp'],
+                    stop=macro['stop'], tp=macro['tp'], atr=atr,
                 )
                 db.write_trade_window(
                     signal_id=sig['id'], customer_id=cid, tier='minor',
                     entry_low=minor['entry_low'], entry_high=minor['entry_high'],
-                    stop=minor['stop'], tp=minor['tp'],
+                    stop=minor['stop'], tp=minor['tp'], atr=atr,
                 )
                 windows_written += 2
         except Exception as e:
