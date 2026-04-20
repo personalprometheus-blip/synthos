@@ -148,18 +148,19 @@ def _live_prices_map() -> dict:
 
 # ── Signal selection ─────────────────────────────────────────────────────
 
-def _candidate_signals_for_customer(db) -> list:
+def _active_signals_from_master() -> list:
     """
-    Signals that should have windows computed right now. Phase 3b scope:
-    VALIDATED signals (the ones trader currently acts on) + any future
-    CANDIDATE_PENDING signals (Candidate Generator output). This keeps the
-    Window Calculator relevant once Candidate Generator starts emitting in
-    Phase 3b without needing a schema change.
+    Signals that should have windows computed right now. Read from the
+    master/owner DB — signals are shared across customers (see
+    retail_trade_logic_agent._shared_db usage). Phase 3b scope: VALIDATED
+    signals (the ones trader currently acts on) + WATCHING (Candidate
+    Generator output) + CANDIDATE_PENDING (reserved for future promotion).
     """
-    with db.conn() as c:
+    mdb = _shared_db()
+    with mdb.conn() as c:
         rows = c.execute(
             "SELECT id, ticker FROM signals "
-            "WHERE status IN ('VALIDATED', 'CANDIDATE_PENDING') "
+            "WHERE status IN ('VALIDATED', 'WATCHING', 'CANDIDATE_PENDING') "
             "AND expires_at > datetime('now')"
         ).fetchall()
     return [{'id': r['id'], 'ticker': r['ticker']} for r in rows]
@@ -179,6 +180,11 @@ def run_enrichment_pass(customer_id: str | None = None) -> dict:
         return {'customers': 0, 'signals': 0, 'windows_written': 0, 'skipped_no_price': 0}
 
     customers = [customer_id] if customer_id else get_active_customers()
+    signals = _active_signals_from_master()
+    if not signals:
+        log.info("No VALIDATED/WATCHING/CANDIDATE_PENDING signals — enrichment pass a no-op")
+        return {'customers': len(customers), 'signals': 0, 'windows_written': 0, 'skipped_no_price': 0}
+
     total_signals = 0
     windows_written = 0
     skipped_no_price = 0
@@ -186,7 +192,6 @@ def run_enrichment_pass(customer_id: str | None = None) -> dict:
     for cid in customers:
         try:
             db = get_customer_db(cid)
-            signals = _candidate_signals_for_customer(db)
             total_signals += len(signals)
             for sig in signals:
                 ticker = sig['ticker']
