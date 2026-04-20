@@ -563,6 +563,13 @@ def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
                              timeout=REQUEST_TIMEOUT_TUPLE)
             r.raise_for_status()
             _fetch_consecutive_failures = 0
+            # R10-9: docstring promises "resets on every successful fetch",
+            # but historically only the failure counter was reset — leaving
+            # the circuit stuck open for the rest of the process lifetime
+            # once it tripped. Close it here so recovery is automatic.
+            if _fetch_circuit_open:
+                _fetch_circuit_open = False
+                log.info("[CIRCUIT] fetch_with_retry circuit closed — upstream recovered")
             return r
         except Exception as e:
             last_error = e

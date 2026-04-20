@@ -425,7 +425,7 @@ def _fetch_bars_yahoo(ticker, days):
                 c = closes[i]
                 if c is None:
                     continue
-                bar_t = datetime.utcfromtimestamp(int(ts)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                bar_t = datetime.fromtimestamp(int(ts), tz=timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%dT%H:%M:%SZ')
                 bars.append({
                     "t": bar_t,
                     "o": opens[i]  if i < len(opens)  and opens[i]  is not None else c,

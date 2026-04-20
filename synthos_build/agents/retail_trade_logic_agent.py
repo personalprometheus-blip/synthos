@@ -2531,10 +2531,12 @@ def sync_bil_reserve(db, alpaca):
             buy = min(delta, max(0.0, free_cash * 0.5), max_bil - bil_value)
             if buy < C.BIL_REBALANCE_THRESHOLD:
                 return
-            if buy >= C.BIL_REBALANCE_THRESHOLD:
-                if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
-                    db.log_event("BIL_BUY", agent="Trade Logic",
-                                 details=f"Bought ${buy:.2f} BIL")
+            # R10-8: the prior `if buy >= C.BIL_REBALANCE_THRESHOLD:` wrapper
+            # was unreachable dead code (we returned on the inverse above);
+            # removed to avoid suggesting a meaningful guard exists here.
+            if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
+                db.log_event("BIL_BUY", agent="Trade Logic",
+                             details=f"Bought ${buy:.2f} BIL")
         else:
             sell = abs(delta)
             if sell >= bil_value * 0.99:
