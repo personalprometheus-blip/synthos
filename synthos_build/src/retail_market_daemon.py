@@ -1260,12 +1260,16 @@ def _send_sms(phone, message):
 
     try:
         import requests as _req
-        _req.post('https://api.resend.com/emails',
+        r = _req.post('https://api.resend.com/emails',
             headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
             json={'from': alert_from, 'to': [to_addr], 'subject': '', 'text': message},
             timeout=10)
+        if not r.ok:
+            log.warning(f"_send_sms: Resend returned {r.status_code} — {r.text[:120]}")
+            return False
         return True
-    except Exception:
+    except Exception as _e:
+        log.debug(f"_send_sms suppressed: {_e}")
         return False
 
 
@@ -1277,12 +1281,16 @@ def _send_email(email, subject, body):
         return False
     try:
         import requests as _req
-        _req.post('https://api.resend.com/emails',
+        r = _req.post('https://api.resend.com/emails',
             headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
             json={'from': alert_from, 'to': [email], 'subject': subject, 'text': body},
             timeout=10)
+        if not r.ok:
+            log.warning(f"_send_email: Resend returned {r.status_code} — {r.text[:120]}")
+            return False
         return True
-    except Exception:
+    except Exception as _e:
+        log.debug(f"_send_email suppressed: {_e}")
         return False
 
 

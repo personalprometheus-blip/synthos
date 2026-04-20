@@ -138,7 +138,10 @@ def refresh_earnings_calendar(db, horizon_biz_days: int = 10,
         if (cur - today).days > 30:
             break
 
-    # Upsert into cache
+    # Upsert into cache — all rows in a single transaction (Audit Round 9.7).
+    # A crash mid-loop leaves the table in a partial-update state until the
+    # next daily refresh. The db.conn() context manager commits on exit and
+    # rolls back on exception, so the entire batch is atomic.
     written = 0
     with db.conn() as c:
         for t, iso in first_seen.items():

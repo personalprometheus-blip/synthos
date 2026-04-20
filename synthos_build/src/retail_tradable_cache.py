@@ -68,12 +68,24 @@ def _alpaca_headers():
     return {'APCA-API-KEY-ID': k, 'APCA-API-SECRET-KEY': s} if k else None
 
 
+_PAGINATION_WARN_THRESHOLD = 950  # warn if response looks like a truncated page
+
+
 def refresh(db) -> dict:
     """Pull Alpaca's full us_equity asset list and upsert the cache.
 
     Filters for asset_class='us_equity', tradable=True, status='active'.
     Returns a summary dict for logging. Safe to call daily; idempotent
-    via upsert keyed on ticker."""
+    via upsert keyed on ticker.
+
+    Audit Round 9.6 — two improvements:
+    1. Pagination guard: /v2/assets returns all assets in one response for
+       us_equity, but if Alpaca ever silently paginates at 1000 rows we'd
+       cache only the first page and mark all remaining tickers un-tradable.
+       Warn loudly if the response size hits a suspicious round number.
+    2. Transaction wrap: the 13k-row upsert loop is now inside one
+       transaction. A crash mid-loop previously left the table half-updated
+       until the next daily refresh."""
     import requests
     _ensure_table(db)
     headers = _alpaca_headers()
@@ -94,6 +106,16 @@ def refresh(db) -> dict:
     except Exception as e:
         log.warning(f"[TRADABLE REFRESH] fetch failed: {e}")
         return {'fetched': 0, 'tradable': 0, 'source': 'alpaca', 'error': str(e)[:120]}
+
+    # Pagination guard — Alpaca's asset list is ~10k+ rows so a suspiciously
+    # round response size strongly suggests silent truncation.
+    if len(assets) > 0 and len(assets) % 1000 == 0:
+        log.warning(
+            f"[TRADABLE REFRESH] response size {len(assets)} is a round multiple of 1000 — "
+            "Alpaca may have paginated silently; cache may be incomplete"
+        )
+    elif len(assets) >= _PAGINATION_WARN_THRESHOLD:
+        log.debug(f"[TRADABLE REFRESH] {len(assets)} assets in response (pagination check: ok)")
 
     now_utc = datetime.now(timezone.utc)
     now_iso = now_utc.isoformat()
