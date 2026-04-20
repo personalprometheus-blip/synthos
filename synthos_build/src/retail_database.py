@@ -1326,21 +1326,27 @@ class DB:
                            entry_low, entry_high, stop, tp=None,
                            ttl_seconds=None, atr=None):
         """
-        Upsert a window row. Primary key is (signal_id, customer_id, tier)
-        so successive recomputes overwrite in place rather than
-        accumulating rows.
+        Write a window row. Primary key is (signal_id, customer_id, tier).
+
+        Tier-specific semantics (Audit Round 4 — anchor-pinning fix):
+          - 'macro': INSERT-only. Once a macro band is written for a
+            signal+customer, subsequent writes are NO-OPs. This gives
+            the intended "wait for a real pullback into the entry
+            band" behavior — without pinning, every enrichment tick
+            recomputed the band around current price and the trader
+            effectively fired on any in-flight signal.
+          - 'minor': upsert. Short-TTL (90s) refire zone; designed to
+            track current price on every enrichment pass.
 
         Args:
-            signal_id: FK to signals.id (the candidate/signal this window targets)
-            customer_id: per-customer positions/cash differ, so windows
-                         can too (Phase 3c trader iterates per-customer)
+            signal_id: FK to signals.id
+            customer_id: per-customer
             tier: 'macro' | 'minor'
             entry_low / entry_high: price range where entry is acceptable
-            stop: stop-loss level if position gets filled
-            tp: optional take-profit level (ok for macro, null for minor)
+            stop: stop-loss level
+            tp: optional take-profit level
             ttl_seconds: override default TTL for this tier
-            atr: ATR_14 at compute time (Phase 4.a). Optional — rows
-                 written before ATR-fetch lands will store NULL.
+            atr: ATR_14 at compute time (Phase 4.a)
         """
         if tier not in ('macro', 'minor'):
             raise ValueError(f"tier must be 'macro' or 'minor', got {tier!r}")
@@ -1349,8 +1355,20 @@ class DB:
         now_dt = datetime.now(timezone.utc)
         computed_at = now_dt.isoformat()
         expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
-        with self.conn() as c:
-            c.execute(
+
+        if tier == 'macro':
+            # Pin the macro band: INSERT OR IGNORE. Stale-by-TTL rows
+            # still re-insert because expire_stale_trade_windows() has
+            # deleted them, so the PK is free.
+            sql = (
+                "INSERT OR IGNORE INTO trade_windows "
+                "(signal_id, customer_id, tier, entry_low, entry_high, "
+                "stop, tp, computed_at, expires_at, atr) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            )
+        else:
+            # Minor: upsert — refire zone follows current price
+            sql = (
                 "INSERT INTO trade_windows "
                 "(signal_id, customer_id, tier, entry_low, entry_high, "
                 "stop, tp, computed_at, expires_at, atr) "
@@ -1359,7 +1377,11 @@ class DB:
                 "entry_low=excluded.entry_low, entry_high=excluded.entry_high, "
                 "stop=excluded.stop, tp=excluded.tp, "
                 "computed_at=excluded.computed_at, expires_at=excluded.expires_at, "
-                "atr=excluded.atr",
+                "atr=excluded.atr"
+            )
+        with self.conn() as c:
+            c.execute(
+                sql,
                 (int(signal_id), customer_id, tier,
                  float(entry_low), float(entry_high), float(stop),
                  None if tp is None else float(tp),
