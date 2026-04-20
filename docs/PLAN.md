@@ -9,7 +9,7 @@ check-marks as work lands.
 - `[~]` deferred (with explicit trigger for when to revisit)
 - `[-]` in progress
 
-_Last updated: 2026-04-20 (Round 9 shipped)_
+_Last updated: 2026-04-20 (Phase C Patch 1 shipped — D4 + D6 complete)_
 
 ---
 
@@ -166,12 +166,12 @@ Documented fully in `docs/audit/AUDIT_2026-04-20-deferred.md`. Marked
   _Trigger: next admin-view addition._
 - [~] **D3** — `decimal.Decimal` money math replacement
   _Trigger: going live with real capital._
-- [~] **D4** — Blanket `datetime.utcnow()` → `datetime.now(timezone.utc)` (~27 sites)
-  _Trigger: Python 3.12 upgrade; deprecation becomes runtime warning._
+- [x] **D4** — Blanket `datetime.utcnow()` → `datetime.now(timezone.utc)` (~27 sites)
+  _Shipped: Phase C Patch 1 (2026-04-20) — 26 sites across 10 files; format-sensitive .isoformat() sites use .replace(tzinfo=None)._
 - [~] **D5** — Portal template var / unused-ID hand audit (32 warnings)
   _Trigger: next portal UI sprint._
-- [~] **D6** — Duplicate helper consolidation (`now_et`, `is_market_hours`, `kill_switch_active`, etc.)
-  _Trigger: when a caller needs to diverge from the canonical._
+- [x] **D6** — Duplicate helper consolidation (`now_et`, `is_market_hours`, `kill_switch_active`, etc.)
+  _Shipped: Phase C Patch 1 (2026-04-20) — retail_shared.py created; kill_switch_active, get_active_customers, is_market_hours consolidated. now_et and fetch_with_retry left local (diverged return types / stateful circuit breaker)._
 
 ---
 
