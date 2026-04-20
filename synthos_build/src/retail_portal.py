@@ -13089,7 +13089,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
     </div>
     <div class="metric-card">
       <div class="metric-label">Customers</div>
-      <div class="metric-val" id="m-customers">{{ customer_count }}</div>
+      <div class="metric-val" id="m-customers">—</div>
       <div class="metric-sub">Active accounts</div>
     </div>
   </div>
