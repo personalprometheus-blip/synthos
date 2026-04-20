@@ -1204,6 +1204,12 @@ def is_admin():
 
 @app.before_request
 def check_auth():
+    # Static assets (fonts, images, etc.) must be publicly fetchable — the
+    # login / signup pages themselves are public and need their fonts to
+    # load before any session exists. Without this the @font-face URLs
+    # get redirected to /login and fall back to system fonts.
+    if request.path.startswith('/static/'):
+        return
     # Routes that are always public — no session required
     public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email', '/reset-password',
                      '/admin/construction-verify'}
