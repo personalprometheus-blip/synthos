@@ -72,17 +72,55 @@ def _fetch_nasdaq_day(d: date) -> list[str]:
         return []
 
 
-def refresh_earnings_calendar(db, horizon_biz_days: int = 10) -> dict:
+_REFRESH_MIN_INTERVAL_HOURS = 12   # skip if another refresh ran within this window
+
+
+def refresh_earnings_calendar(db, horizon_biz_days: int = 10,
+                              force: bool = False) -> dict:
     """Bulk-refresh earnings_cache covering the next `horizon_biz_days`
     business days. Upserts the *earliest* date per ticker seen across
     the walked range. Returns a summary dict for logging.
 
-    Safe to run multiple times per day — cache TTL prevents stale rows
-    from surviving, and the upsert keeps the earliest date found.
+    Audit Round 6 — same-day guard. The market daemon's enrichment
+    tick fires this every 30 min. Walking 10 Nasdaq calendar days per
+    tick = ~10 HTTP calls × ~13 ticks/day = 130 calls/day. The
+    calendar doesn't change minute-to-minute, so we skip the fetch if
+    a prior refresh completed within _REFRESH_MIN_INTERVAL_HOURS. Pass
+    force=True to override (e.g. manual re-run after a bad fetch).
     """
     now_utc = datetime.now(timezone.utc)
     today = now_utc.date()
     expires_at = (now_utc + timedelta(days=_EARNINGS_TTL_DAYS)).isoformat()
+
+    # Guard: if the most recent fetched_at is within the min interval, skip.
+    if not force:
+        try:
+            with db.conn() as c:
+                row = c.execute(
+                    "SELECT MAX(fetched_at) FROM earnings_cache"
+                ).fetchone()
+            if row and row[0]:
+                try:
+                    last = datetime.fromisoformat(row[0])
+                    if last.tzinfo is None:
+                        last = last.replace(tzinfo=timezone.utc)
+                    age_hours = (now_utc - last).total_seconds() / 3600.0
+                    if age_hours < _REFRESH_MIN_INTERVAL_HOURS:
+                        log.info(
+                            f"[EARNINGS REFRESH] skipped — last refresh "
+                            f"{age_hours:.1f}h ago (< {_REFRESH_MIN_INTERVAL_HOURS}h)"
+                        )
+                        return {
+                            'days_scanned': 0,
+                            'tickers_seen': 0,
+                            'cache_rows':   0,
+                            'skipped':      True,
+                            'last_refresh': row[0],
+                        }
+                except ValueError:
+                    pass  # malformed timestamp — proceed with refresh
+        except Exception as e:
+            log.debug(f"same-day guard check failed (proceeding): {e}")
 
     # First earnings date per ticker in the horizon (earliest wins)
     first_seen: dict[str, str] = {}

@@ -115,8 +115,8 @@ def fetch_put_call_ratio(ticker):
     r = fetch_with_retry(url)
     try:
         _master_db().log_api_call('sentiment_agent', '/us/options/market_statistics/daily/', 'GET', 'cboe', status_code=getattr(r, 'status_code', None))
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
     if not r:
         return None, None
 
@@ -194,8 +194,8 @@ def fetch_sec_insider_transactions(ticker, days_back=30):
     r = fetch_with_retry(url, headers=headers)
     try:
         _master_db().log_api_call('sentiment_agent', '/LATEST/search-index', 'GET', 'sec_edgar', status_code=getattr(r, 'status_code', None))
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
     if not r:
         result = {"buys": 0, "sells": 0, "net_dollar": "$0", "available": False}
         with _CACHE_LOCK:
@@ -399,8 +399,8 @@ def fetch_alpaca_bars(ticker, days=60):
         r = fetch_with_retry(url, params=params, headers=headers)
         try:
             _master_db().log_api_call('sentiment_agent', f'/v2/stocks/{ticker}/bars', 'GET', 'alpaca_data', status_code=getattr(r, 'status_code', None))
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
         if not r:
             return []
         data = r.json()
@@ -424,8 +424,8 @@ def fetch_vix():
         r = fetch_with_retry(url, params=params, headers=headers)
         try:
             _master_db().log_api_call('sentiment_agent', '/v8/finance/chart/%5EVIX', 'GET', 'yahoo', status_code=getattr(r, 'status_code', None))
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
         if not r:
             return None, []
         data   = r.json()
@@ -486,8 +486,8 @@ def fetch_etf_returns(tickers, bars_per_ticker=5):
                     'sentiment_agent', '/v2/stocks/bars', 'GET', 'alpaca_data',
                     status_code=getattr(r, 'status_code', None)
                 )
-            except Exception:
-                pass
+            except Exception as _e:
+                log.debug(f"suppressed exception: {_e}")
             if not r:
                 continue
             data = r.json()
