@@ -83,7 +83,13 @@ REQUEST_TIMEOUT_TUPLE = (5, REQUEST_TIMEOUT)
 # goes slow.
 FETCH_CIRCUIT_BREAKER_N = 3
 
-COMPANY_SUBSCRIPTION = os.environ.get('COMPANY_SUBSCRIPTION', 'true').lower() == 'true'
+# Opt-in: set COMPANY_SUBSCRIPTION=true in .env only when the company node
+# actually exposes /api/news-feed. Default is 'false' because the endpoint
+# is not yet implemented on pi4b (investigated 2026-04-20 — POSTs return
+# 404, circuit-break after N failures, generating audit noise). Setting
+# this to 'false' by default stops the 404 cascade and lets the forwarding
+# feature be re-enabled explicitly when the endpoint ships.
+COMPANY_SUBSCRIPTION = os.environ.get('COMPANY_SUBSCRIPTION', 'false').lower() == 'true'
 MONITOR_URL          = os.environ.get('MONITOR_URL', '').rstrip('/')
 MONITOR_TOKEN        = os.environ.get('MONITOR_TOKEN', '')
 
