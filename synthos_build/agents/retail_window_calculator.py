@@ -100,33 +100,71 @@ logging.basicConfig(
 )
 log = logging.getLogger('window_calc')
 
-# ── Window computation (Phase 3b: percentage-based; Phase 4: ATR-based) ──
+# ── Window computation (Phase 4.b: ATR-derived widths) ──────────────────
+# Percentage-based fallbacks kicked in when ATR is unavailable — they
+# let the window still populate rather than skipping the signal. Floor
+# percentages mirror the old 3b constants so behavior is unchanged when
+# ATR is missing.
 
-MACRO_LOW_PCT   = 0.015   # 1.5% below current
-MACRO_HIGH_PCT  = 0.005   # 0.5% above current
-STOP_PCT        = 0.030   # 3% below current
-TP_PCT          = 0.050   # 5% above current (macro only)
+# ATR multipliers — tuned so bands are wider than the old percentage
+# defaults on typical tickers (AAPL ATR~2.3% → ~2.3% band), narrower on
+# low-vol tickers (BIL ATR~0.1% → ~0.1% band), which is the whole
+# point of switching off fixed percentages.
+MACRO_ATR_LOW   = 1.0   # entry_low  = anchor − 1.0 × ATR  (pullback bias)
+MACRO_ATR_HIGH  = 0.3   # entry_high = anchor + 0.3 × ATR  (mild chase)
+STOP_ATR        = 2.0   # stop       = anchor − 2.0 × ATR
+TP_ATR          = 3.0   # tp         = anchor + 3.0 × ATR  (1.5:1 RR)
 
-MINOR_LOW_PCT   = 0.005   # 0.5% below current
-MINOR_HIGH_PCT  = 0.002   # 0.2% above current
+MINOR_ATR_LOW   = 0.3
+MINOR_ATR_HIGH  = 0.1
+
+# Fallback percentages (used when ATR fetch failed — keeps window writing
+# rather than dropping the signal). Match the 3b values so the fallback
+# behavior degrades gracefully to 3b semantics for that row.
+MACRO_LOW_PCT   = 0.015
+MACRO_HIGH_PCT  = 0.005
+STOP_PCT        = 0.030
+TP_PCT          = 0.050
+MINOR_LOW_PCT   = 0.005
+MINOR_HIGH_PCT  = 0.002
 
 
-def _compute_windows(current_price: float) -> tuple[dict, dict]:
-    """Return (macro, minor) window dicts computed from current price.
-    Pure function — no DB access. Callers supply the price."""
+def _compute_windows(current_price: float, atr: float | None = None) -> tuple[dict, dict]:
+    """Return (macro, minor) window dicts. ATR-derived widths when ATR is
+    supplied, falls back to 3b percentage widths otherwise.
+
+    Anchor is still current_price (dynamic). The anchor-pinning revisit
+    is tracked as a separate post-Phase-5 item so Phase 4 can be
+    evaluated independently of the anchor change.
+    """
     p = float(current_price)
-    macro = {
-        'entry_low':  round(p * (1 - MACRO_LOW_PCT), 4),
-        'entry_high': round(p * (1 + MACRO_HIGH_PCT), 4),
-        'stop':       round(p * (1 - STOP_PCT), 4),
-        'tp':         round(p * (1 + TP_PCT), 4),
-    }
-    minor = {
-        'entry_low':  round(p * (1 - MINOR_LOW_PCT), 4),
-        'entry_high': round(p * (1 + MINOR_HIGH_PCT), 4),
-        'stop':       round(p * (1 - STOP_PCT), 4),
-        'tp':         None,
-    }
+    if atr is not None and atr > 0:
+        a = float(atr)
+        macro = {
+            'entry_low':  round(p - MACRO_ATR_LOW * a, 4),
+            'entry_high': round(p + MACRO_ATR_HIGH * a, 4),
+            'stop':       round(p - STOP_ATR * a, 4),
+            'tp':         round(p + TP_ATR * a, 4),
+        }
+        minor = {
+            'entry_low':  round(p - MINOR_ATR_LOW * a, 4),
+            'entry_high': round(p + MINOR_ATR_HIGH * a, 4),
+            'stop':       round(p - STOP_ATR * a, 4),
+            'tp':         None,
+        }
+    else:
+        macro = {
+            'entry_low':  round(p * (1 - MACRO_LOW_PCT), 4),
+            'entry_high': round(p * (1 + MACRO_HIGH_PCT), 4),
+            'stop':       round(p * (1 - STOP_PCT), 4),
+            'tp':         round(p * (1 + TP_PCT), 4),
+        }
+        minor = {
+            'entry_low':  round(p * (1 - MINOR_LOW_PCT), 4),
+            'entry_high': round(p * (1 + MINOR_HIGH_PCT), 4),
+            'stop':       round(p * (1 - STOP_PCT), 4),
+            'tp':         None,
+        }
     return macro, minor
 
 
@@ -285,8 +323,8 @@ def run_enrichment_pass(customer_id: str | None = None) -> dict:
                 if not price:
                     skipped_no_price += 1
                     continue
-                macro, minor = _compute_windows(price)
                 atr = atr_map.get(ticker)
+                macro, minor = _compute_windows(price, atr=atr)
                 # Windows live on the per-customer DB so per-customer
                 # price-history variance can differ. In 4.a the
                 # computation is still price-only (percentage bands);
