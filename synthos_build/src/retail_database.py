@@ -963,6 +963,20 @@ class DB:
                 PRIMARY KEY (event_date, event_type)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_macro_events_date ON macro_events(event_date)",
+
+            # Phase 5.b of TRADER_RESTRUCTURE_PLAN (2026-04-20) — cooling
+            # off. When a position closes at a loss, register the ticker
+            # with a cool_until timestamp. Gate 4 reads this and blocks
+            # re-entry until the window elapses, preventing stop → re-buy
+            # → stop chop patterns.
+            """CREATE TABLE IF NOT EXISTS cooling_off (
+                ticker      TEXT PRIMARY KEY,
+                cool_until  TEXT NOT NULL,
+                reason      TEXT,
+                pnl_pct     REAL,
+                created_at  TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_cooling_off_until ON cooling_off(cool_until)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1469,6 +1483,49 @@ class DB:
             )
             return cur.lastrowid
 
+    # ── COOLING OFF (Phase 5.b of TRADER_RESTRUCTURE_PLAN) ────────────────
+    # Default hold = 24 hours after a loss. Long enough to skip the
+    # same-ticker re-entry on the next trader cycle, short enough not
+    # to miss a legitimate next-day setup. Tunable via env var.
+    COOLING_OFF_HOURS = int(os.environ.get('COOLING_OFF_HOURS', '24'))
+
+    def register_cooling_off(self, ticker, reason, pnl_pct=None, hours=None):
+        """Mark `ticker` as cooling off for `hours` hours from now.
+        Upserts — a second stop-out extends/reinforces the cool-until
+        timestamp rather than stacking rows."""
+        if hours is None:
+            hours = self.COOLING_OFF_HOURS
+        now_dt = datetime.now(timezone.utc)
+        cool_until = (now_dt + timedelta(hours=int(hours))).isoformat()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO cooling_off (ticker, cool_until, reason, pnl_pct, created_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(ticker) DO UPDATE SET "
+                "cool_until=excluded.cool_until, reason=excluded.reason, "
+                "pnl_pct=excluded.pnl_pct, created_at=excluded.created_at",
+                (ticker, cool_until, reason, pnl_pct, now_dt.isoformat())
+            )
+
+    def is_cooling_off(self, ticker):
+        """Return dict {cool_until, reason, pnl_pct} if `ticker` is in
+        a fresh cooling-off window, else None."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT cool_until, reason, pnl_pct FROM cooling_off "
+                "WHERE ticker = ? AND cool_until > ?",
+                (ticker, now_iso)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def expire_cooling_off(self):
+        """Prune rows whose cool_until has passed. Returns count deleted."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            cur = c.execute("DELETE FROM cooling_off WHERE cool_until <= ?", (now_iso,))
+            return cur.rowcount
+
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """
         Closes a position. Adds proceeds to cash, records outcome,
@@ -1540,6 +1597,20 @@ class DB:
             )
         except Exception as _e:
             log.debug(f"record_exit_performance: {_e}")
+
+        # Phase 5.b — register cooling-off on losses. Keeps the trader
+        # from re-entering the same ticker on its next 30s cycle after a
+        # stop-out. Wins don't cool off; we're not trying to throttle
+        # winning tickers.
+        if verdict == "LOSS":
+            try:
+                self.register_cooling_off(
+                    ticker=pos['ticker'],
+                    reason=f"{exit_reason} {pnl_pct:+.2f}%",
+                    pnl_pct=pnl_pct,
+                )
+            except Exception as _e:
+                log.debug(f"register_cooling_off failed for {pos['ticker']}: {_e}")
 
         return pnl_dollar
 

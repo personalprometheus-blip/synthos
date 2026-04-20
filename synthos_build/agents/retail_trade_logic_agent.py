@@ -1568,6 +1568,25 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
     if not sector_count_ok:
         return False
 
+    # Phase 5.b — cooling off. Block re-entry for COOLING_OFF_HOURS after
+    # a loss-closed position. Prevents stop → re-buy → stop chop on the
+    # same ticker. Wins don't set cooling_off; only losses register.
+    _cool = None
+    try:
+        _cool = _shared_db().is_cooling_off(ticker)
+    except Exception as _e:
+        log.debug(f"cooling_off read failed for {ticker} at G4: {_e}")
+    cool_ok = _cool is None
+    decision_log.gate("4_COOLING_OFF", cool_ok, {
+        "ticker":      ticker,
+        "cool_until":  (_cool or {}).get('cool_until') or "n/a",
+        "reason":      (_cool or {}).get('reason') or "n/a",
+        "pnl_pct":     f"{(_cool or {}).get('pnl_pct'):+.2f}%" if (_cool and _cool.get('pnl_pct') is not None) else "n/a",
+    }, "cooling-off clear" if cool_ok
+       else f"SKIP — {ticker} cooling off until {_cool['cool_until']} ({_cool.get('reason')})")
+    if not cool_ok:
+        return False
+
     return True
 
 
