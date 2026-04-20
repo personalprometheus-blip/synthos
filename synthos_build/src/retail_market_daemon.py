@@ -501,6 +501,57 @@ def run_trade_all_customers(session='open'):
     return ok, fail
 
 
+def run_candidate_generator():
+    """Run retail_candidate_generator.py once. Phase 3b of
+    TRADER_RESTRUCTURE_PLAN. Emits sector-driven candidate signals with
+    status='WATCHING'. Safe to call every enrichment tick — dedup is
+    handled inside the agent (one candidate per ticker per day)."""
+    log.info("[CANDIDATE GEN] Starting")
+    write_agent_running('retail_candidate_generator.py')
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_candidate_generator.py')],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        if result.returncode != 0:
+            log.warning(f"[CANDIDATE GEN] Exit {result.returncode}: {result.stderr[-200:]}")
+        else:
+            log.info("[CANDIDATE GEN] Complete")
+        return result.returncode == 0
+    except Exception as e:
+        log.error(f"[CANDIDATE GEN] Error: {e}")
+        return False
+
+
+def run_window_calculator(mode='enrichment'):
+    """Run retail_window_calculator.py once in the requested mode.
+    Phase 3b of TRADER_RESTRUCTURE_PLAN. Computes macro + minor entry
+    windows per signal × customer into trade_windows. Populated only —
+    trader does not yet consume (Phase 3c cutover)."""
+    log.info(f"[WINDOW CALC] Starting ({mode})")
+    write_agent_running('retail_window_calculator.py', mode)
+    try:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable,
+             str(_ROOT_DIR / 'agents' / 'retail_window_calculator.py'),
+             f'--mode={mode}'],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(_ROOT_DIR / 'agents'),
+        )
+        if result.returncode != 0:
+            log.warning(f"[WINDOW CALC] Exit {result.returncode}: {result.stderr[-200:]}")
+        else:
+            log.info("[WINDOW CALC] Complete")
+        return result.returncode == 0
+    except Exception as e:
+        log.error(f"[WINDOW CALC] Error: {e}")
+        return False
+
+
 def run_price_poller():
     """Run price poller once (updates live_prices table for portal)."""
     try:
@@ -886,11 +937,27 @@ def run_premarket_prep():
     if _shutdown_requested:
         return
 
+    # Phase 4c: Candidate Generator (Phase 3b of TRADER_RESTRUCTURE_PLAN).
+    # Emits sector-driven candidate signals (source='candidate',
+    # status='WATCHING'). Trader doesn't consume until Phase 3c cutover.
+    run_candidate_generator()
+    if _shutdown_requested:
+        return
+
+    # Phase 4d: Window Calculator (Phase 3b of TRADER_RESTRUCTURE_PLAN).
+    # Computes macro+minor entry/exit zones for VALIDATED + WATCHING
+    # signals × each active customer. Populates trade_windows; trader
+    # doesn't read it until 3c.
+    run_window_calculator(mode='enrichment')
+    if _shutdown_requested:
+        return
+
     # Phase 5: Price poll
     # NOTE: trader dispatch moved to retail_trade_daemon.py (Phase 1 of
     # TRADER_RESTRUCTURE_PLAN). Enrichment daemon no longer runs the
-    # trader — it only produces intel (signals, scores, verdicts) and
-    # lets the continuous trade daemon act on them.
+    # trader — it only produces intel (signals, scores, verdicts, candidate
+    # signals, and precomputed windows) and lets the continuous trade
+    # daemon act on them.
     run_price_poller()
     clear_agent_running()
     _end_cycle(cycle_id)
@@ -964,11 +1031,19 @@ def run_market_loop():
             # Last link: stamp validator + promote fully-validated signals
             if not _shutdown_requested:
                 promote_validated_signals()
+            # Phase 3b of TRADER_RESTRUCTURE_PLAN — sector-driven candidate
+            # generation + window precomputation. Trader doesn't consume
+            # these until Phase 3c cutover; 3b populates only.
+            if not _shutdown_requested:
+                run_candidate_generator()
+            if not _shutdown_requested:
+                run_window_calculator(mode='enrichment')
             # Trader dispatch moved to retail_trade_daemon.py (Phase 1 of
             # TRADER_RESTRUCTURE_PLAN). Enrichment daemon produces intel
-            # (VALIDATED signals, validator verdicts, sentiment scores);
-            # the continuous trade daemon acts on it. Halt v2 is enforced
-            # inside the trader subprocess itself.
+            # (VALIDATED signals, validator verdicts, sentiment scores,
+            # candidate signals, precomputed windows); the continuous
+            # trade daemon acts on them. Halt v2 is enforced inside the
+            # trader subprocess itself.
             last_enrichment = time.monotonic()
             last_recon = time.monotonic()
             clear_agent_running()

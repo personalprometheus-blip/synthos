@@ -320,6 +320,38 @@ CREATE TABLE IF NOT EXISTS news_flags (
 CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until);
 CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at);
 
+-- ── TRADE WINDOWS (Phase 3b of TRADER_RESTRUCTURE_PLAN) ────────────────
+-- Precomputed entry/exit price windows per candidate, per customer,
+-- in two tiers:
+--   macro: thesis-level window, recomputed every enrichment tick
+--          (30 min). Represents "where we'd like to enter if the
+--          thesis holds." Long-lived (valid through end of day).
+--   minor: tactical window within the macro, recomputed every
+--          trader cycle (~30 s). Represents "right now, this specific
+--          price zone is a reasonable entry." Short-lived (2 cycles).
+--
+-- Trade daemon (Phase 3c) consults `minor` for fire decisions: only
+-- acts when live price falls inside [entry_low, entry_high] AND the
+-- minor window nests inside the macro (sanity check).
+--
+-- Phase 3b populates this table but trader does NOT read from it yet —
+-- that cutover lands in Phase 3c along with Gate 5 rebalance and trade
+-- daemon refactor to window-driven dispatch.
+CREATE TABLE IF NOT EXISTS trade_windows (
+    signal_id     INTEGER NOT NULL,
+    customer_id   TEXT    NOT NULL,
+    tier          TEXT    NOT NULL,    -- 'macro' | 'minor'
+    entry_low     REAL    NOT NULL,
+    entry_high    REAL    NOT NULL,
+    stop          REAL    NOT NULL,
+    tp            REAL,                -- nullable (optional take-profit)
+    computed_at   TEXT    NOT NULL,
+    expires_at    TEXT    NOT NULL,
+    PRIMARY KEY (signal_id, customer_id, tier)
+);
+CREATE INDEX IF NOT EXISTS idx_trade_windows_customer_tier
+    ON trade_windows(customer_id, tier, expires_at);
+
 -- ── LEDGER ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ledger (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -885,6 +917,24 @@ class DB:
             )""",
             "CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until)",
             "CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at)",
+
+            # Phase 3b of TRADER_RESTRUCTURE_PLAN (2026-04-20) — trade_windows
+            # table. Precomputed macro + minor entry/exit zones for each
+            # candidate. Populated by retail_window_calculator.py; consumed
+            # by trade daemon in Phase 3c.
+            """CREATE TABLE IF NOT EXISTS trade_windows (
+                signal_id     INTEGER NOT NULL,
+                customer_id   TEXT    NOT NULL,
+                tier          TEXT    NOT NULL,
+                entry_low     REAL    NOT NULL,
+                entry_high    REAL    NOT NULL,
+                stop          REAL    NOT NULL,
+                tp            REAL,
+                computed_at   TEXT    NOT NULL,
+                expires_at    TEXT    NOT NULL,
+                PRIMARY KEY (signal_id, customer_id, tier)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_trade_windows_customer_tier ON trade_windows(customer_id, tier, expires_at)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1220,6 +1270,154 @@ class DB:
                 "DELETE FROM news_flags WHERE fresh_until <= ?", (now,)
             )
             return cur.rowcount
+
+    # ── TRADE WINDOWS (Phase 3b of TRADER_RESTRUCTURE_PLAN) ───────────────
+    # Window TTL defaults. Macro = end-of-day-ish so enrichment tick
+    # (every 30 min) always finds a valid macro row to work from. Minor =
+    # 2 trade-daemon cycles at 30s each = 60s, with a small grace buffer.
+    WINDOW_TTL_SECONDS = {
+        'macro': 8 * 3600,     # 8h — covers 9:30 → 16:00 + morning pre-comp
+        'minor': 90,           # 1.5 min — ~2 trade daemon cycles at 30s
+    }
+
+    def write_trade_window(self, signal_id, customer_id, tier,
+                           entry_low, entry_high, stop, tp=None,
+                           ttl_seconds=None):
+        """
+        Upsert a window row. Primary key is (signal_id, customer_id, tier)
+        so successive recomputes overwrite in place rather than
+        accumulating rows.
+
+        Args:
+            signal_id: FK to signals.id (the candidate/signal this window targets)
+            customer_id: per-customer positions/cash differ, so windows
+                         can too (Phase 3c trader iterates per-customer)
+            tier: 'macro' | 'minor'
+            entry_low / entry_high: price range where entry is acceptable
+            stop: stop-loss level if position gets filled
+            tp: optional take-profit level (ok for macro, null for minor)
+            ttl_seconds: override default TTL for this tier
+        """
+        if tier not in ('macro', 'minor'):
+            raise ValueError(f"tier must be 'macro' or 'minor', got {tier!r}")
+        if ttl_seconds is None:
+            ttl_seconds = self.WINDOW_TTL_SECONDS[tier]
+        now_dt = datetime.now(timezone.utc)
+        computed_at = now_dt.isoformat()
+        expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO trade_windows "
+                "(signal_id, customer_id, tier, entry_low, entry_high, "
+                "stop, tp, computed_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(signal_id, customer_id, tier) DO UPDATE SET "
+                "entry_low=excluded.entry_low, entry_high=excluded.entry_high, "
+                "stop=excluded.stop, tp=excluded.tp, "
+                "computed_at=excluded.computed_at, expires_at=excluded.expires_at",
+                (int(signal_id), customer_id, tier,
+                 float(entry_low), float(entry_high), float(stop),
+                 None if tp is None else float(tp),
+                 computed_at, expires_at),
+            )
+
+    def get_windows_for_signal(self, signal_id, customer_id):
+        """Return {'macro': row, 'minor': row} for the given signal+customer.
+        Missing tier returns None. Fresh_until filter applied — stale rows
+        excluded from the result."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT tier, entry_low, entry_high, stop, tp, "
+                "computed_at, expires_at "
+                "FROM trade_windows "
+                "WHERE signal_id = ? AND customer_id = ? AND expires_at > ?",
+                (int(signal_id), customer_id, now),
+            ).fetchall()
+        out = {'macro': None, 'minor': None}
+        for r in rows:
+            out[r['tier']] = dict(r)
+        return out
+
+    def get_fresh_minor_windows(self, customer_id):
+        """
+        Used by trade daemon (Phase 3c) to find candidates ready to fire.
+        Returns all non-expired minor rows for the given customer.
+        Caller then joins to signals + live_prices to check entry bands.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT signal_id, entry_low, entry_high, stop, tp, "
+                "computed_at, expires_at "
+                "FROM trade_windows "
+                "WHERE customer_id = ? AND tier = 'minor' AND expires_at > ?",
+                (customer_id, now),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def expire_stale_trade_windows(self):
+        """Housekeeping — prune expired window rows. Returns count deleted."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            cur = c.execute(
+                "DELETE FROM trade_windows WHERE expires_at <= ?", (now,)
+            )
+            return cur.rowcount
+
+    # ── CANDIDATE SIGNALS (Phase 3b of TRADER_RESTRUCTURE_PLAN) ───────────
+    # Separate from upsert_signal() so we don't entangle candidate-source
+    # flow with news-source flow. Candidates enter the signals table with
+    # source='candidate', status='WATCHING' — explicitly NOT 'VALIDATED'.
+    # Trader's existing query (status='VALIDATED') skips them naturally
+    # until Phase 3c's cutover makes candidates a trader-visible source.
+    def add_candidate_signal(self, ticker, combined_score,
+                             sector=None, headline='sector-driven candidate',
+                             ttl_days=2):
+        """
+        Insert a sector-driven candidate signal. Returns the new signal id,
+        or None if a matching candidate already exists today.
+
+        Dedup: one candidate per ticker per day, keyed on source='candidate'
+        and tx_date=today. Subsequent calls for the same ticker today
+        update the combined_score (treated as entry_signal_score) rather
+        than inserting a duplicate.
+        """
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        with self.conn() as c:
+            existing = c.execute(
+                "SELECT id FROM signals "
+                "WHERE ticker = ? AND source = 'candidate' AND tx_date = ? "
+                "LIMIT 1",
+                (ticker, today),
+            ).fetchone()
+            if existing:
+                c.execute(
+                    "UPDATE signals SET entry_signal_score = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (f"{combined_score:.4f}", self.now(), existing['id']),
+                )
+                return None
+            expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            discard_del = (datetime.now(timezone.utc) + timedelta(days=30)).strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            cur = c.execute(
+                "INSERT INTO signals "
+                "(ticker, company, sector, source, source_tier, headline, "
+                "confidence, staleness, corroborated, status, "
+                "expires_at, discard_delete_at, created_at, updated_at, "
+                "entry_signal_score) "
+                "VALUES (?, ?, ?, 'candidate', 2, ?, "
+                "'MEDIUM', 'Fresh', 0, 'WATCHING', "
+                "?, ?, ?, ?, ?)",
+                (ticker, None, sector, headline,
+                 expires_at, discard_del, self.now(), self.now(),
+                 f"{combined_score:.4f}"),
+            )
+            return cur.lastrowid
 
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """

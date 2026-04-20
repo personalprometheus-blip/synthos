@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-20T14:00:00-04:00",
-    "version": "3.3"
+    "last_updated": "2026-04-20T15:00:00-04:00",
+    "version": "3.4"
   },
   "nodes": [
     {
@@ -48,6 +48,8 @@
         {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "daemon", "status": "live"},
         {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "daemon", "status": "live"},
         {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "daemon", "status": "live"},
+        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads top-N per sector from sector_screening. Trader consumes in Phase 3c.", "how": "daemon", "status": "live"},
+        {"name": "retail_window_calculator.py", "desc": "Phase 3b — precomputes macro+minor entry/exit windows per signal × customer into trade_windows. Percentage-based in 3b; Phase 4 refines to ATR/VWAP.", "how": "daemon", "status": "live"},
         {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "daemon", "status": "live"},
         {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
         {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b", "how": "per agent", "status": "cron"},
