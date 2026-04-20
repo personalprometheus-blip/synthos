@@ -288,7 +288,7 @@ logging.basicConfig(level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
 log = logging.getLogger('portal')
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../static', static_url_path='/static')
 _env_secret = os.environ.get('PORTAL_SECRET_KEY', '')
 if not _env_secret:
     log.warning("PORTAL_SECRET_KEY not set — generating ephemeral key (sessions won't survive restart)")
@@ -335,8 +335,8 @@ def _security_headers(response):
     h['Content-Security-Policy'] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
         "img-src 'self' data: https://cdn.benzinga.com https://*.benzinga.com; "
         "connect-src 'self'; "
         "frame-ancestors 'none';"
@@ -629,7 +629,9 @@ def admin_required(f):
 
 # Shared design tokens used across landing and login pages
 _SHARED_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Self-hosted fonts (CSP-safe) — variable files cover all weights */
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:90%;color-scheme:dark}
 :root{
@@ -1261,8 +1263,10 @@ _SIGNUP_PAGE_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Create Account</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* Self-hosted fonts (CSP-safe) — variable files cover all weights */
+  @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+  @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
   :root{
     --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
     --border:#1e2535;--border2:rgba(255,255,255,0.08);
@@ -1445,8 +1449,10 @@ def forgot_password_page():
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Reset Password</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
+  /* Self-hosted fonts (CSP-safe) — variable files cover all weights */
+  @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+  @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
   :root{
     --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
     --border:#1e2535;--border2:rgba(255,255,255,0.08);
@@ -1990,20 +1996,23 @@ _TERMS_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Terms of Service</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#f5f0e8;color:#1a1612;font-family:'IBM Plex Sans',sans-serif;
+body{background:#f5f0e8;color:#1a1612;font-family:'Inter',sans-serif;
      min-height:100vh;display:flex;flex-direction:column;align-items:center;
      justify-content:flex-start;padding:40px 20px}
-.wordmark{font-family:'IBM Plex Mono',monospace;font-size:0.9rem;font-weight:600;
+.wordmark{font-family:'JetBrains Mono',monospace;font-size:0.9rem;font-weight:600;
           letter-spacing:0.12em;color:#1a1612;margin-bottom:32px;opacity:0.5}
 .card{background:#ede8df;border:1px solid #c8bfaa;border-radius:4px;
       padding:2rem;width:100%;max-width:620px}
-h1{font-family:'IBM Plex Mono',monospace;font-size:1rem;font-weight:600;
+h1{font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:600;
    letter-spacing:0.06em;margin-bottom:6px}
 .version{font-size:0.72rem;color:#7a7060;margin-bottom:24px;
-         font-family:'IBM Plex Mono',monospace;letter-spacing:0.04em}
+         font-family:'JetBrains Mono',monospace;letter-spacing:0.04em}
 .tos-body{background:#f5f0e8;border:1px solid #c8bfaa;border-radius:2px;
           padding:1.25rem 1.5rem;max-height:340px;overflow-y:auto;
           font-size:0.82rem;line-height:1.8;color:#2a2420;margin-bottom:24px}
@@ -2016,13 +2025,13 @@ h1{font-family:'IBM Plex Mono',monospace;font-size:1rem;font-weight:600;
 .accept-row label{font-size:0.82rem;color:#2a2420;line-height:1.5;cursor:pointer}
 button[type=submit]{width:100%;background:#1a1612;color:#f5f0e8;border:none;
                     border-radius:2px;padding:11px 20px;
-                    font-family:'IBM Plex Mono',monospace;font-size:0.82rem;
+                    font-family:'JetBrains Mono',monospace;font-size:0.82rem;
                     font-weight:600;letter-spacing:0.1em;cursor:pointer;
                     text-transform:uppercase;transition:opacity 0.15s}
 button[type=submit]:hover{opacity:0.85}
 button[type=submit]:disabled{opacity:0.35;cursor:not-allowed}
 .meta{font-size:0.7rem;color:#7a7060;margin-top:16px;text-align:center;
-      font-family:'IBM Plex Mono',monospace;letter-spacing:0.04em}
+      font-family:'JetBrains Mono',monospace;letter-spacing:0.04em}
 </style>
 </head>
 <body>
@@ -3544,7 +3553,10 @@ PORTAL_HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Systematically Managed</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -10792,7 +10804,10 @@ def logs_page():
     html = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
 <title>Synthos Logs</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">"""
+<style>
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>"""
     html += LOGS_CSS
     log_content_escaped = content.replace('<', '&lt;').replace('>', '&gt;')
     html += f"""
@@ -11723,7 +11738,10 @@ FILE_MANAGER_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos Files</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0a0c14;color:rgba(255,255,255,0.88);font-family:'Inter',sans-serif;font-size:14px;min-height:100vh}
@@ -12009,9 +12027,12 @@ NEWS_FEED_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="60">
 <title>Synthos — News Feed</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#faf8f4;--card:#fff;--border:#e8e0d0;--text:#1a1612;--muted:#7a7060;--mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;}
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>
+<style>
+  :root{--bg:#faf8f4;--card:#fff;--border:#e8e0d0;--text:#1a1612;--muted:#7a7060;--mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;}
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:0.9rem;min-height:100vh}
   header{display:flex;justify-content:space-between;align-items:center;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--card)}
@@ -12162,7 +12183,10 @@ ADMIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos Admin</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+</style>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
