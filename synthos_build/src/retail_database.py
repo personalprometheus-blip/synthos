@@ -977,6 +977,11 @@ class DB:
                 created_at  TEXT NOT NULL
             )""",
             "CREATE INDEX IF NOT EXISTS idx_cooling_off_until ON cooling_off(cool_until)",
+            # Audit Round 9.4 — composite index covering is_cooling_off()'s
+            # WHERE clause which filters on both ticker AND cool_until.
+            # The single-column idx_cooling_off_until only helps if ticker
+            # is the leading column; this composite covers both filter columns.
+            "CREATE INDEX IF NOT EXISTS idx_cooling_off_ticker_until ON cooling_off(ticker, cool_until)",
 
             # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
             # daily by retail_tradable_cache.refresh() from Alpaca's
@@ -1067,9 +1072,20 @@ class DB:
             }
 
     def update_portfolio(self, cash=None, realized_gains=None, tax_withdrawn=None, month_start=None):
-        """Partial update — only changes fields you pass."""
-        portfolio = self.get_portfolio()
+        """Partial update — only changes fields you pass.
+
+        Audit Round 9.2 — the portfolio read and the UPDATE are now inside a
+        single transaction so concurrent callers (sweep_monthly_tax, admin
+        adjust, etc.) can't race-read the current values before either write
+        lands. Previously get_portfolio() and the UPDATE were in separate
+        connections."""
         with self.conn() as c:
+            pf_row = c.execute(
+                "SELECT id, cash, realized_gains, tax_withdrawn, month_start "
+                "FROM portfolio WHERE id=1"
+            ).fetchone()
+            if not pf_row:
+                raise RuntimeError("portfolio row missing — DB not initialized")
             c.execute("""
                 UPDATE portfolio SET
                     cash            = ?,
@@ -1079,12 +1095,12 @@ class DB:
                     updated_at      = ?
                 WHERE id = ?
             """, (
-                cash            if cash            is not None else portfolio['cash'],
-                realized_gains  if realized_gains  is not None else portfolio['realized_gains'],
-                tax_withdrawn   if tax_withdrawn    is not None else portfolio['tax_withdrawn'],
-                month_start     if month_start      is not None else portfolio['month_start'],
+                cash            if cash            is not None else float(pf_row['cash']),
+                realized_gains  if realized_gains  is not None else float(pf_row['realized_gains']),
+                tax_withdrawn   if tax_withdrawn    is not None else float(pf_row['tax_withdrawn']),
+                month_start     if month_start      is not None else pf_row['month_start'],
                 self.now(),
-                portfolio['id'],
+                pf_row['id'],
             ))
 
     def sweep_monthly_tax(self, tax_amount):
@@ -1229,7 +1245,8 @@ class DB:
                     "SELECT active, reason, set_by, set_at, expected_return "
                     "FROM system_halt WHERE id = 1"
                 ).fetchone()
-        except Exception:
+        except Exception as _e:
+            log.debug(f"get_halt suppressed: {_e}")
             row = None
         if not row:
             return {'active': False, 'reason': None, 'set_by': None,
@@ -1848,6 +1865,11 @@ class DB:
         Partial sell: reduce shares in-place, record outcome, update cash.
         Keeps original entry_price and position ID intact.
         Returns pnl_dollar for the sold portion.
+
+        Audit Round 9.1 — runs as a single transaction so concurrent partial
+        exits can't race-read the portfolio. Previously the portfolio read
+        and the subsequent update were in separate connections (same pattern
+        as close_position before Round 7.2). Fix mirrors Round 7.2.
         """
         with self.conn() as c:
             pos = c.execute("SELECT * FROM positions WHERE id=?", (pos_id,)).fetchone()
@@ -1855,30 +1877,37 @@ class DB:
                 raise ValueError(f"Position {pos_id} not found")
             pos = dict(pos)
 
-        remaining = round(float(pos['shares']) - sell_shares, 4)
-        if remaining < 0.0001:
-            return self.close_position(pos_id, sell_price, exit_reason)
+            remaining = round(float(pos['shares']) - sell_shares, 4)
+            if remaining < 0.0001:
+                # Delegate to close_position; it handles its own transaction.
+                # Must return before this context exits (no writes yet).
+                return self.close_position(pos_id, sell_price, exit_reason)
 
-        proceeds   = round(sell_price * sell_shares, 2)
-        cost_basis = round(float(pos['entry_price']) * sell_shares, 2)
-        pnl_dollar = round(proceeds - cost_basis, 2)
-        pnl_pct    = round((pnl_dollar / cost_basis) * 100, 2) if cost_basis else 0
-        verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
+            proceeds   = round(sell_price * sell_shares, 2)
+            cost_basis = round(float(pos['entry_price']) * sell_shares, 2)
+            pnl_dollar = round(proceeds - cost_basis, 2)
+            pnl_pct    = round((pnl_dollar / cost_basis) * 100, 2) if cost_basis else 0
+            verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
 
-        try:
-            # Stored naive UTC string → attach UTC tz for aware subtraction.
-            _opened_aware = datetime.strptime(
-                pos['opened_at'][:19], '%Y-%m-%d %H:%M:%S'
-            ).replace(tzinfo=timezone.utc)
-            hold_days = (datetime.now(timezone.utc) - _opened_aware).days
-        except (ValueError, TypeError):
-            hold_days = 0
+            try:
+                # Stored naive UTC string → attach UTC tz for aware subtraction.
+                _opened_aware = datetime.strptime(
+                    pos['opened_at'][:19], '%Y-%m-%d %H:%M:%S'
+                ).replace(tzinfo=timezone.utc)
+                hold_days = (datetime.now(timezone.utc) - _opened_aware).days
+            except (ValueError, TypeError):
+                hold_days = 0
 
-        portfolio = self.get_portfolio()
-        new_cash  = round(portfolio['cash'] + proceeds, 2)
-        new_gains = round(portfolio['realized_gains'] + pnl_dollar, 2)
+            # Read portfolio INSIDE the transaction so the update sees the
+            # fresh value, not a snapshot that may be stale under concurrency.
+            pf_row = c.execute(
+                "SELECT cash, realized_gains FROM portfolio WHERE id=1"
+            ).fetchone()
+            if not pf_row:
+                raise RuntimeError("portfolio row missing — DB not initialized")
+            new_cash  = round(float(pf_row['cash']) + proceeds, 2)
+            new_gains = round(float(pf_row['realized_gains']) + pnl_dollar, 2)
 
-        with self.conn() as c:
             c.execute(
                 "UPDATE positions SET shares=?, current_price=?, updated_at=? "
                 "WHERE id=? AND status='OPEN'",
@@ -1894,13 +1923,20 @@ class DB:
                   sell_shares, hold_days, pnl_pct, pnl_dollar,
                   pos.get('vol_bucket'), exit_reason, verdict, self.now()))
 
-        self.update_portfolio(cash=new_cash, realized_gains=new_gains)
-        self.add_ledger_entry(
-            entry_type="PARTIAL_EXIT",
-            description=f"{pos['ticker']} · {exit_reason} · sold {sell_shares:.4f}sh · "
-                        f"{'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
-            amount=proceeds, balance=new_cash, position_id=pos_id,
-        )
+            c.execute(
+                "UPDATE portfolio SET cash=?, realized_gains=?, updated_at=? WHERE id=1",
+                (new_cash, new_gains, self.now())
+            )
+            c.execute("""
+                INSERT INTO ledger
+                    (date, type, description, amount, balance, position_id, created_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, (datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+                  'PARTIAL_EXIT',
+                  f"{pos['ticker']} · {exit_reason} · sold {sell_shares:.4f}sh · "
+                  f"{'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
+                  proceeds, new_cash, pos_id, self.now()))
+
         log.info(f"Partial exit: {pos['ticker']} sold {sell_shares:.4f}sh "
                  f"{verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f}) — {remaining:.4f}sh remaining")
         return pnl_dollar
@@ -3587,12 +3623,20 @@ class DB:
             return {'date': date_str, 'total': 0, 'by_agent': [], 'by_service': [], 'recent': []}
 
     def get_api_call_history(self, days=5):
-        """Get daily API call totals for the last N market days."""
+        """Get daily API call totals for the last N market days.
+
+        Audit Round 9.3 — adds a WHERE timestamp >= ? bound so SQLite can
+        use idx_api_calls_ts instead of a full-table scan. The previous
+        query had no WHERE predicate at all. Mirrors the Round 6.2 fix
+        applied to get_api_call_counts()."""
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d 00:00:00')
         try:
             with self.conn() as c:
                 rows = c.execute(
                     "SELECT date(timestamp) as d, COUNT(*) FROM api_calls "
-                    "GROUP BY d ORDER BY d DESC LIMIT ?", (days,)).fetchall()
+                    "WHERE timestamp >= ? "
+                    "GROUP BY d ORDER BY d DESC LIMIT ?",
+                    (since, days)).fetchall()
                 return [{'date': r[0], 'total': r[1]} for r in rows]
         except Exception:
             return []
@@ -3604,8 +3648,8 @@ class DB:
                 c.execute(
                     "DELETE FROM api_calls WHERE date(timestamp) < date('now', ?)",
                     (f'-{keep_days} days',))
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"cleanup_api_calls suppressed: {_e}")
 
     def log_heartbeat(self, agent_name, status="OK", portfolio_value=None):
         with self.conn() as c:

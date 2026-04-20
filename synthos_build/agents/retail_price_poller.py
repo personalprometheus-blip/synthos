@@ -274,35 +274,50 @@ def run():
         log.warning("No prices returned from Alpaca")
         return
 
-    # Write to shared DB
+    # Write to shared DB — single transaction so a mid-loop crash leaves
+    # the table consistent. Audit Round 9.5: DELETE-stale moved before the
+    # upsert loop so stale rows are gone before new ones land (previously
+    # they were cleaned after, leaving a window where the poller could crash
+    # after N inserts and leave stale rows until the next full poll).
     db = sqlite3.connect(_shared_db_path(), timeout=10)
     _ensure_table(db)
 
     ts = now.isoformat()
     updated = 0
-    for ticker, data in prices.items():
-        db.execute("""
-            INSERT INTO live_prices (ticker, price, prev_close, day_change, day_change_pct, volume, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(ticker) DO UPDATE SET
-                price=excluded.price,
-                prev_close=excluded.prev_close,
-                day_change=excluded.day_change,
-                day_change_pct=excluded.day_change_pct,
-                volume=excluded.volume,
-                updated_at=excluded.updated_at
-        """, (ticker, data['price'], data['prev_close'], data['day_change'],
-              data['day_change_pct'], data['volume'], ts))
-        updated += 1
 
-    # Clean stale tickers no longer held
-    held = _get_held_tickers()
-    if held:
-        placeholders = ','.join('?' * len(held))
-        db.execute(f"DELETE FROM live_prices WHERE ticker NOT IN ({placeholders})", list(held))
+    db.execute("BEGIN")
+    try:
+        # 1. Prune stale tickers first (re-use the already-computed set)
+        if tickers:
+            placeholders = ','.join('?' * len(tickers))
+            db.execute(
+                f"DELETE FROM live_prices WHERE ticker NOT IN ({placeholders})",
+                list(tickers)
+            )
 
-    db.commit()
-    db.close()
+        # 2. Upsert fresh prices
+        for ticker, data in prices.items():
+            db.execute("""
+                INSERT INTO live_prices (ticker, price, prev_close, day_change, day_change_pct, volume, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    price=excluded.price,
+                    prev_close=excluded.prev_close,
+                    day_change=excluded.day_change,
+                    day_change_pct=excluded.day_change_pct,
+                    volume=excluded.volume,
+                    updated_at=excluded.updated_at
+            """, (ticker, data['price'], data['prev_close'], data['day_change'],
+                  data['day_change_pct'], data['volume'], ts))
+            updated += 1
+
+        db.execute("COMMIT")
+    except Exception as _e:
+        db.execute("ROLLBACK")
+        log.error(f"live_prices write failed, rolled back: {_e}")
+    finally:
+        db.close()
+
     log.info(f"Updated {updated} prices in live_prices table")
 
     # Post a heartbeat so fault detection's GATE1_LIVENESS check can see us.

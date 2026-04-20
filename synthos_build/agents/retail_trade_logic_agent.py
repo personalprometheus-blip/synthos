@@ -1113,12 +1113,16 @@ class AlpacaClient:
     def get_atr(self, ticker, period=14):
         bars = self.get_bars(ticker, days=period + 10)
         if len(bars) < 2:
+            log.debug(f"get_atr({ticker}): insufficient bars ({len(bars)}) — returning None")
             return None
         trs = []
         for i in range(1, len(bars)):
             h, l, pc = bars[i]["h"], bars[i]["l"], bars[i-1]["c"]
             trs.append(max(h - l, abs(h - pc), abs(l - pc)))
-        return round(sum(trs[-period:]) / min(len(trs), period), 2) if trs else None
+        result = round(sum(trs[-period:]) / min(len(trs), period), 2) if trs else None
+        if result is None:
+            log.debug(f"get_atr({ticker}): no true-range values computed — returning None")
+        return result
 
     def get_sma(self, ticker, window: int, days_back: int = None) -> float | None:
         bars = self.get_bars(ticker, days=days_back or window + 10)
@@ -1136,9 +1140,13 @@ class AlpacaClient:
     def get_volume_avg(self, ticker, days=30) -> int:
         bars = self.get_bars(ticker, days=days + 5)
         if not bars:
+            log.debug(f"get_volume_avg({ticker}): no bars returned — returning 0")
             return 0
         vols = [b["v"] for b in bars[-days:]]
-        return int(sum(vols) / len(vols)) if vols else 0
+        if not vols:
+            log.debug(f"get_volume_avg({ticker}): empty volume list — returning 0")
+            return 0
+        return int(sum(vols) / len(vols))
 
     def submit_order(self, ticker, qty, side, order_type="market",
                      trail_price=None, trail_percent=None):
@@ -1461,7 +1469,10 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
     Filter out signals that fail liquidity, spread, event, or correlation checks.
     Logic: Doc 3 §4
     """
-    ticker = signal['ticker']
+    ticker = signal.get('ticker') or ''
+    if not ticker:
+        decision_log.gate("4_ELIGIBILITY", "SKIP", {"reason": "missing ticker in signal"}, "no ticker")
+        return False
     dlog = TradeDecisionLog(decision_log.session, ticker, signal.get('id'))
 
     # Ticker dedup — Phase 5 post-audit fix. Previously absent, which
@@ -1614,7 +1625,10 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     Compute composite confidence score. Returns score in [0, 1].
     Logic: Doc 3 §5
     """
-    ticker = signal['ticker']
+    ticker = signal.get('ticker') or ''
+    if not ticker:
+        decision_log.gate("5_SIGNAL_SCORE", "SKIP", {"reason": "missing ticker in signal"}, "no ticker")
+        return 0.0
 
     # Component scores
     tier_score   = max(0.0, 1.0 - (int(signal.get('source_tier', 2) or 2) - 1) * 0.3)
@@ -1819,7 +1833,10 @@ NEWS_VETO_THRESHOLD = -0.7
 def gate5_5_news_veto(signal: dict, decision_log: TradeDecisionLog) -> bool:
     """Return True if the signal passes (no severe negative news_flag).
     False means veto — reject the signal regardless of composite score."""
-    ticker = signal['ticker']
+    ticker = signal.get('ticker') or ''
+    if not ticker:
+        decision_log.gate("5_5_NEWS_VETO", "SKIP", {"reason": "missing ticker in signal"}, "no ticker")
+        return False
     try:
         flags = _shared_db().get_fresh_news_flags_for_ticker(ticker)
     except Exception as e:
@@ -1850,7 +1867,10 @@ def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
     Returns candidate dict or None.
     Logic: Doc 3 §6
     """
-    ticker  = signal['ticker']
+    ticker  = signal.get('ticker') or ''
+    if not ticker:
+        decision_log.gate("6_ENTRY", "SKIP", {"reason": "missing ticker in signal"}, "no ticker")
+        return None
     bars    = alpaca.get_bars(ticker, days=max(C.BREAKOUT_LOOKBACK, 30) + 10)
     if len(bars) < 10:
         decision_log.gate("6_ENTRY", "SKIP", {"reason": "insufficient price data"}, "no price data")
@@ -3102,7 +3122,7 @@ def run(session="open"):
 
     portfolio = db.get_portfolio()
     positions = db.get_open_positions()
-    _equity   = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
+    _equity   = float(db.get_setting('_ALPACA_EQUITY') or portfolio.get('cash', 0))
     tier      = get_portfolio_tier(_equity)
 
     # ── GATE 10: Active trade management (every session — open positions)
@@ -3341,7 +3361,7 @@ def run(session="open"):
     # Gate 0 already verified at top of run() — proceed to new signal eval.
     positions = db.get_open_positions()
     portfolio = db.get_portfolio()
-    equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
+    equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio.get('cash', 0))
     tier      = get_portfolio_tier(equity)
     deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
     tradeable = equity * C.TRADEABLE_PCT
@@ -3623,9 +3643,10 @@ def run(session="open"):
     # ── Session complete
     portfolio   = db.get_portfolio()
     positions   = db.get_open_positions()
-    total_value = portfolio['cash'] + sum(p['entry_price'] * p['shares'] for p in positions)
+    _cash       = float(portfolio.get('cash') or 0)
+    total_value = _cash + sum(float(p.get('entry_price', 0)) * float(p.get('shares', 0)) for p in positions)
     log.info(f"Session complete — portfolio=${total_value:.2f} "
-             f"positions={len(positions)} cash=${portfolio['cash']:.2f}")
+             f"positions={len(positions)} cash=${_cash:.2f}")
     db.log_heartbeat("trade_logic_agent", "OK", portfolio_value=total_value)
     db.log_event("AGENT_COMPLETE", agent="Trade Logic",
                  details=f"session={session} positions={len(positions)}",
