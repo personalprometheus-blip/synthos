@@ -9,7 +9,7 @@ check-marks as work lands.
 - `[~]` deferred (with explicit trigger for when to revisit)
 - `[-]` in progress
 
-_Last updated: 2026-04-20 (Phase C Patch 2 shipped — D5 complete)_
+_Last updated: 2026-04-20 (Phase C Patch 3 shipped — D2 complete)_
 
 ---
 
@@ -162,8 +162,8 @@ Documented fully in `docs/audit/AUDIT_2026-04-20-deferred.md`. Marked
 
 - [~] **D1** — Trader `run()` complexity refactor (radon 184)
   _Trigger: next non-trivial trader change; or when we're afraid to touch the file._
-- [~] **D2** — Portal complexity hotspots (`api_admin_market_activity` F=67, `_enrich_positions` F=45, etc.)
-  _Trigger: next admin-view addition._
+- [x] **D2** — Portal complexity hotspots (`api_admin_market_activity` F=67, `_enrich_positions` F=45, etc.)
+  _Shipped: Phase C Patch 3 (2026-04-20) — 12 private helpers extracted; stripe_webhook 196→84 lines, _enrich_positions 112→14, get_system_status 182→99, api_admin_market_activity 366→165. Zero behavior changes._
 - [~] **D3** — `decimal.Decimal` money math replacement
   _Trigger: going live with real capital._
 - [x] **D4** — Blanket `datetime.utcnow()` → `datetime.now(timezone.utc)` (~27 sites)
