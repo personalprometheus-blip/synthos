@@ -106,19 +106,24 @@ def _get_held_tickers():
         except Exception as e:
             log.warning(f"Could not read positions for {cid[:8]}: {e}")
 
-    # Validated signals — master DB is the single source of truth for
-    # intel that the trader is about to act on.
+    # In-flight signals — master DB is the single source of truth for
+    # intel the trader may act on. Phase 3c.b expands this from
+    # VALIDATED-only to also include WATCHING (Candidate Generator output)
+    # so window_calculator has prices to compute entry bands against.
+    # Without WATCHING in the poll set, candidate windows never populate
+    # and window-driven entries can't fire.
     try:
         sdb = sqlite3.connect(_shared_db_path(), timeout=5)
         rows = sdb.execute(
-            "SELECT DISTINCT ticker FROM signals WHERE status='VALIDATED'"
+            "SELECT DISTINCT ticker FROM signals "
+            "WHERE status IN ('VALIDATED', 'WATCHING')"
         ).fetchall()
         for r in rows:
             if r[0]:
                 tickers.add(r[0])
         sdb.close()
     except Exception as e:
-        log.warning(f"Could not read VALIDATED signals from shared DB: {e}")
+        log.warning(f"Could not read VALIDATED/WATCHING signals from shared DB: {e}")
 
     return tickers
 
