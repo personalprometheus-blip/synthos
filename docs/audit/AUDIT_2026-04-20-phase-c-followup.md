@@ -192,25 +192,37 @@ Documented so a future audit doesn't re-flag them:
 
 ## 5. Triage → Round 10 patch plan
 
-Suggested grouping (lowest-to-highest blast radius):
+All 4 patches shipped and merged 2026-04-20 (same day as audit):
 
-**Patch 10A (mechanical)** — R10-6 (utcfromtimestamp), R10-8 (dead BIL
-guard), R10-9 (news circuit reset), R10-7 (scheduler is_market_hours via
-retail_shared). Four small, targeted edits across four files.
+**Patch 10A (mechanical)** — SHIPPED `290c629`
+- [x] R10-6: `datetime.utcfromtimestamp` → `fromtimestamp(tz=utc)` in sector_screener
+- [x] R10-7: scheduler `is_market_hours` now delegates to `retail_shared`
+- [x] R10-8: dead BIL rebalance guard removed
+- [x] R10-9: news_agent circuit breaker now closes on recovery
 
-**Patch 10B (database races)** — R10-1 (open_position), R10-2
-(sweep_monthly_tax), R10-10 (composite index). Same pattern as R9-1/R9-3.
-All three fit in one commit to `retail_database.py`.
+**Patch 10B (database atomicity)** — SHIPPED `9eab677`
+- [x] R10-1: `open_position()` — portfolio read + writes in one transaction
+- [x] R10-2: `sweep_monthly_tax()` — same fix
+- [x] R10-10: composite index `idx_approvals_status_queued`
 
-**Patch 10C (portal hardening)** — R10-4 (locked-mode user_warnings),
-R10-5 (connection leaks on exception), R10-3 (tax sweep dict access).
-Small targeted fixes in portal + trader.
+**Patch 10C (portal hardening)** — SHIPPED `1758d89`
+- [x] R10-3: `_run_monthly_tax_sweep` → `portfolio.get('realized_gains', 0)`
+- [x] R10-4: `_status_locked_mode` returns `user_warnings=[]` (and fixed
+  missing `critical_flags` + `user_warnings` on the error path too)
+- [x] R10-5: two sqlite3 connections wrapped in context managers
 
-**Patch 10D (deferred)** — R10-11 (stale SessionLock), R10-12 (circuit
-breaker divergence doc), R10-13/14 (minor). Low urgency, next trigger.
+**Patch 10D (cleanup + anti-re-flag docs)** — SHIPPED `18a05d8`
+- [x] R10-12: `retail_shared.py` docstring explains why `fetch_with_retry`
+  stays local
+- [x] R10-13: politician-weight bare-excepts now `log.debug`
+- [~] R10-11: NOOP — fcntl.flock is kernel-released on process death;
+  docstring now explains so it's not re-flagged
+- [~] R10-14: NOOP — `_business_day_offset` pairs with inclusive range
+  check, "earnings today" IS blocked; docstring now explains
 
 D3 (decimal money math) remains deferred until live capital.
 
 ---
 
-_Last updated: 2026-04-20 (post-Phase-C audit)_
+_Last updated: 2026-04-20 (Round 10 complete — all 14 findings addressed,
+  of which 12 were real code changes and 2 were doc-only triage NOOPs)_
