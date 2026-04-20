@@ -1830,7 +1830,7 @@ h1{font-size:22px;font-weight:700;letter-spacing:-0.01em}
     <button class="filter-btn" data-cat="account" onclick="setFilter(this,'account')">Account</button>
     <button class="filter-btn" data-cat="daily" onclick="setFilter(this,'daily')">Sessions</button>
     <button class="filter-btn" data-cat="system" onclick="setFilter(this,'system')">System</button>
-    <button class="filter-btn" id="unread-toggle" onclick="toggleUnread(this)">Unread only</button>
+    <button class="filter-btn" onclick="toggleUnread(this)">Unread only</button>
     <button class="mark-read" onclick="markAllRead()">Mark all read</button>
   </div>
   <div class="list" id="list"><div class="empty">Loading…</div></div>
@@ -4947,7 +4947,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 
 {% if grace_warning %}
 <!-- GRACE PERIOD WARNING BANNER -->
-<div id="grace-banner" style="
+<div style="
   background:linear-gradient(90deg,rgba(245,158,11,0.18) 0%,rgba(245,158,11,0.08) 100%);
   border-bottom:2px solid var(--amber,#f59e0b);
   padding:10px 24px;
@@ -5040,7 +5040,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         </div>
       </div>
       <!-- Notifications -->
-      <div id="pmod-notifications" style="padding:14px 18px">
+      <div style="padding:14px 18px">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:10px">Notifications</div>
         <div id="pmod-notif-list" style="display:flex;flex-direction:column;gap:8px">
           <div style="font-size:11px;color:var(--dim)">Loading...</div>
@@ -5686,7 +5686,7 @@ setInterval(loadAgentPulse, 10000);
   <div class="logic-modal">
     <div class="logic-modal-head">
       <div class="logic-modal-title" id="logic-modal-title">Agent Logic Breakdown</div>
-      <div id="logic-modal-conf"></div>
+      <div></div>
       <button class="logic-modal-close" onclick="closeLogicModal()">&#xD7;</button>
     </div>
     <div class="logic-modal-body" id="logic-modal-body">
@@ -5828,9 +5828,9 @@ setInterval(loadAgentPulse, 10000);
       <div style="padding:10px 14px 8px;border-bottom:1px solid var(--border)">
         <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase">P&amp;L Attribution</div>
       </div>
-      <div style="padding:12px 14px" id="pnl-attribution">
+      <div style="padding:12px 14px">
         <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Gains by sector this month</div>
-        <div id="attr-bars">
+        <div>
           <div style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Technology</span><span style="color:var(--teal);font-family:var(--mono)" id="attr-tech">+$0.00</span></div>
             <div class="gauge-bar"><div class="gauge-fill" id="attr-tech-bar" style="width:0%;background:linear-gradient(90deg,var(--teal),rgba(0,245,212,0.22))"></div></div>
@@ -5947,7 +5947,7 @@ setInterval(loadAgentPulse, 10000);
         </div>
         <div class="gauge-bar"><div class="gauge-fill" id="exposure-bar" style="width:0%;background:linear-gradient(90deg,var(--teal),var(--purple))"></div></div>
         <div class="gauge-label"><span>0% cash</span><span>100% invested</span></div>
-        <div style="margin-top:10px" id="sector-exposure">
+        <div style="margin-top:10px">
           <div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);margin-bottom:6px">By Sector</div>
           <div style="font-size:10px;color:var(--muted);font-family:var(--mono)" id="sector-bars">Loading...</div>
         </div>
@@ -5968,7 +5968,7 @@ setInterval(loadAgentPulse, 10000);
           <div class="gauge-bar"><div class="gauge-fill" style="width:{{ settings.max_sector_pct }}%;background:linear-gradient(90deg,var(--purple),rgba(123,97,255,0.22))"></div></div>
         </div>
         <div>
-          <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Max Trade Size</span><span style="color:var(--text);font-family:var(--mono)" id="risk-max-trade">{{ settings.max_trade_usd|int }} USD</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span style="color:var(--muted)">Max Trade Size</span><span style="color:var(--text);font-family:var(--mono)">{{ settings.max_trade_usd|int }} USD</span></div>
           <div class="gauge-bar"><div class="gauge-fill" style="width:60%;background:linear-gradient(90deg,var(--amber),rgba(245,166,35,0.4))"></div></div>
         </div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
@@ -6280,24 +6280,24 @@ setInterval(loadAgentPulse, 10000);
     <div class="settings-section">
       <div class="setting-row">
         <div><div class="setting-label">Trade Executed</div><div class="setting-desc">Email when the algo enters or exits a position</div></div>
-        <label class="toggle"><input type="checkbox" id="alert-trade" checked><div class="toggle-slider"></div></label>
+        <label class="toggle"><input type="checkbox" checked><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Kill Switch Triggered</div><div class="setting-desc">Immediate alert when trading is halted</div></div>
-        <label class="toggle"><input type="checkbox" id="alert-kill" checked><div class="toggle-slider"></div></label>
+        <label class="toggle"><input type="checkbox" checked><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Daily Digest</div><div class="setting-desc">Morning summary of signals and planned activity</div></div>
-        <label class="toggle"><input type="checkbox" id="alert-digest"><div class="toggle-slider"></div></label>
+        <label class="toggle"><input type="checkbox"><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Weekly Performance Summary</div><div class="setting-desc">Friday recap — returns, trades, vs benchmark</div></div>
-        <label class="toggle"><input type="checkbox" id="alert-weekly"><div class="toggle-slider"></div></label>
+        <label class="toggle"><input type="checkbox"><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Portfolio Drop Alert</div><div class="setting-desc">Alert if portfolio falls more than X% in a day</div></div>
         <div style="display:flex;align-items:center;gap:6px">
-          <input class="glass-input" type="number" id="alert-drop-pct" min="1" max="50" value="5" style="width:60px">
+          <input class="glass-input" type="number" min="1" max="50" value="5" style="width:60px">
           <span style="font-size:11px;color:var(--muted)">%</span>
         </div>
       </div>
@@ -13132,7 +13132,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
         </svg>
         <div style="position:absolute;bottom:2px;left:50%;transform:translateX(-50%);text-align:center">
           <div id="api-gauge-val" style="font-size:1.6rem;font-weight:700;font-family:var(--mono);color:var(--text)">—</div>
-          <div id="api-gauge-cap" style="font-size:10px;color:var(--muted)">/ 200 req/min</div>
+          <div style="font-size:10px;color:var(--muted)">/ 200 req/min</div>
         </div>
       </div>
       <div id="api-gauge-breakdown" style="font-size:11px;color:var(--muted);margin-top:4px">Loading...</div>
