@@ -57,6 +57,11 @@ _LOCK_DIR   = _ROOT_DIR / 'data'
 sys.path.insert(0, str(_SCRIPT_DIR))
 load_dotenv(_ROOT_DIR / 'user' / '.env')
 
+# R10-7 / D6: is_market_hours() is now canonical in retail_shared — the
+# local version used to differ by a single second at the close boundary
+# (inclusive vs exclusive end).
+from retail_shared import is_market_hours as _is_market_hours_shared
+
 ET               = ZoneInfo('America/New_York')
 KILL_SWITCH_FILE = _ROOT_DIR / '.kill_switch'
 HISTORY_FILE     = _LOG_DIR / 'scheduler_history.json'
@@ -168,13 +173,12 @@ HISTORY_MAX = 200
 # ── MARKET HOURS ───────────────────────────────────────────────────────────────
 
 def is_market_hours() -> bool:
-    """True if current ET time is within regular market hours (9:30am–4:00pm weekday)."""
-    now = datetime.now(ET)
-    if now.weekday() >= 5:          # Saturday=5, Sunday=6
-        return False
-    t = now.time()
-    from datetime import time as dtime
-    return dtime(9, 30) <= t <= dtime(16, 0)
+    """True if current ET time is within regular market hours (9:30am–4:00pm weekday).
+
+    R10-7 / D6: delegates to `retail_shared.is_market_hours()` so all callers
+    agree on the session boundary (exclusive at 16:00).
+    """
+    return _is_market_hours_shared()
 
 
 def resolve_trade_args() -> list:
