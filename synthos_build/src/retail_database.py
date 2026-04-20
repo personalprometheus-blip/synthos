@@ -942,6 +942,27 @@ class DB:
             # window_calculator starts populating it stay valid; fresh
             # computes after this migration always fill it.
             "ALTER TABLE trade_windows ADD COLUMN atr REAL",
+
+            # Phase 5.a of TRADER_RESTRUCTURE_PLAN (2026-04-20) — event
+            # calendar. earnings_cache is per-ticker (TTL 7 days, refreshed
+            # by the event_calendar module); macro_events is a manual
+            # schedule (FOMC/CPI) admin-populated or auto-updated on a
+            # separate cadence.
+            """CREATE TABLE IF NOT EXISTS earnings_cache (
+                ticker          TEXT PRIMARY KEY,
+                next_earnings   TEXT,           -- ISO date or NULL if none known
+                fetched_at      TEXT NOT NULL,
+                expires_at      TEXT NOT NULL,
+                source          TEXT DEFAULT 'yahoo'
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_earnings_cache_expires ON earnings_cache(expires_at)",
+            """CREATE TABLE IF NOT EXISTS macro_events (
+                event_date      TEXT NOT NULL,  -- ISO date
+                event_type      TEXT NOT NULL,  -- 'FOMC' | 'CPI' | 'NFP' | ...
+                notes           TEXT,
+                PRIMARY KEY (event_date, event_type)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_macro_events_date ON macro_events(event_date)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)

@@ -190,7 +190,9 @@ class TradingControls:
     MIN_AVG_VOLUME            = int(os.environ.get('MIN_AVG_VOLUME', '500000'))
     MAX_SPREAD_PCT            = float(os.environ.get('MAX_SPREAD_PCT', '0.005'))
     MAX_PORTFOLIO_CORR        = float(os.environ.get('MAX_PORTFOLIO_CORR', '0.70'))
-    # TODO: DATA_DEPENDENCY — EVENT_CALENDAR requires FOMC/CPI/earnings API
+    # Phase 5.a — business-day window for Gate 4 EVENT_RISK calendar block.
+    # Earnings or macro event within this many biz days → block entry.
+    EVENT_CALENDAR_WINDOW_DAYS = int(os.environ.get('EVENT_CALENDAR_WINDOW_DAYS', '2'))
 
     # Signal (Gate 5)
     MIN_CONFIDENCE_SCORE      = float(os.environ.get('MIN_CONFIDENCE_SCORE', '0.55'))
@@ -1517,16 +1519,38 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
         _flags = []
         _risk_hits = []
 
-    event_risk_ok = len(_risk_hits) == 0
+    # Phase 5.a — scheduled event calendar (earnings + macro). Blocks
+    # entries whose ticker has a known earnings release, or where an
+    # FOMC/CPI-class macro event, falls within EVENT_CALENDAR_WINDOW_DAYS
+    # business days. News-flag hits above are retrospective ("just
+    # happened"); this is prospective ("about to happen").
+    _calendar = {'blocked': False, 'reasons': [], 'next_earnings': None, 'macro_events': []}
+    try:
+        from retail_event_calendar import check_event_risk  # noqa: E402
+        _calendar = check_event_risk(
+            _shared_db(), ticker,
+            within_biz_days=getattr(C, 'EVENT_CALENDAR_WINDOW_DAYS', 2),
+        )
+    except Exception as _e:
+        log.debug(f"event_calendar check failed for {ticker} at G4: {_e}")
+
+    event_risk_ok = (len(_risk_hits) == 0) and (not _calendar['blocked'])
     decision_log.gate("4_EVENT_RISK", event_risk_ok, {
         "ticker":              ticker,
         "fresh_flags":         len(_flags),
         "event_risk_hits":     len(_risk_hits),
         "blocking_categories": ",".join(sorted({f['category'] for f in _risk_hits})) or "none",
-        "scheduled_events":    "TODO: FOMC/CPI/earnings calendar still unintegrated",
-    }, ("event risk OK — no fresh event-category flags" if event_risk_ok
-        else f"SKIP — {len(_risk_hits)} fresh event-risk flag(s): "
-             + ",".join(sorted({f['category'] for f in _risk_hits}))))
+        "next_earnings":       _calendar.get('next_earnings') or "none",
+        "macro_within_window": ",".join(f"{m['event_type']}@{m['event_date']}"
+                                        for m in _calendar.get('macro_events', [])) or "none",
+        "calendar_reasons":    "; ".join(_calendar.get('reasons', [])) or "none",
+    }, ("event risk OK — no flags and no scheduled events" if event_risk_ok
+        else "SKIP — " + "; ".join(
+            ([f"{len(_risk_hits)} fresh flag(s): "
+              + ",".join(sorted({f['category'] for f in _risk_hits}))]
+             if _risk_hits else [])
+            + _calendar.get('reasons', [])
+        )))
     if not event_risk_ok:
         return False
 
