@@ -1687,6 +1687,38 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         log.debug(f"news_flags read failed for {ticker} at G5: {_e}")
     final_score = round(max(0.0, min(final_score + news_modifier, 1.0)), 4)
 
+    # Window proximity modifier — Phase 3c of TRADER_RESTRUCTURE_PLAN.
+    # Rewards entries deep in the minor band. price at entry_low → +0.04,
+    # price at entry_high → 0. Signals without a current minor window
+    # (e.g. news-triggered path before 3c.b cutover) get 0 — unchanged
+    # behavior. Once 3c.b lands, every window-driven entry carries this
+    # nudge, mildly preferring pullback fills over chase fills.
+    window_proximity_adj = 0.0
+    window_proximity_info = "no window"
+    try:
+        sig_id = signal.get('id')
+        if sig_id is not None:
+            w = _shared_db().get_windows_for_signal(int(sig_id), _CUSTOMER_ID)
+            minor = (w or {}).get('minor')
+            if minor:
+                lo = float(minor['entry_low'])
+                hi = float(minor['entry_high'])
+                lp = _shared_db().get_live_price(ticker) if hasattr(_shared_db(), 'get_live_price') else None
+                if lp is None:
+                    with _shared_db().conn() as _c:
+                        _r = _c.execute(
+                            "SELECT price FROM live_prices WHERE ticker = ?", (ticker,)
+                        ).fetchone()
+                    lp = float(_r['price']) if _r and _r['price'] is not None else None
+                if lp is not None and hi > lo:
+                    proximity = max(0.0, min(1.0, (hi - float(lp)) / (hi - lo)))
+                    window_proximity_adj = round(proximity * 0.04, 4)
+                    window_proximity_info = (f"price={lp:.2f} in [{lo:.2f}, {hi:.2f}], "
+                                             f"prox={proximity:.2f} → {window_proximity_adj:+.3f}")
+    except Exception as _e:
+        log.debug(f"window_proximity read failed for {ticker} at G5: {_e}")
+    final_score = round(max(0.0, min(final_score + window_proximity_adj, 1.0)), 4)
+
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
     decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
@@ -1698,6 +1730,7 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
         "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
         "news_flags_mod":     f"{news_modifier:+.3f} ({news_modifier_info})",
+        "window_proximity":   f"{window_proximity_adj:+.3f} ({window_proximity_info})",
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
