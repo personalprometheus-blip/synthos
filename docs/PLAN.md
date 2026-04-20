@@ -9,7 +9,7 @@ check-marks as work lands.
 - `[~]` deferred (with explicit trigger for when to revisit)
 - `[-]` in progress
 
-_Last updated: 2026-04-20 (Phase C Patch 3 shipped — D2 complete)_
+_Last updated: 2026-04-20 (Phase C Patch 4 shipped — D1 complete — all Phase C items done)_
 
 ---
 
@@ -160,8 +160,8 @@ After Round 9 ships and smoke-verifies:
 Documented fully in `docs/audit/AUDIT_2026-04-20-deferred.md`. Marked
 `[~]` here for at-a-glance tracking.
 
-- [~] **D1** — Trader `run()` complexity refactor (radon 184)
-  _Trigger: next non-trivial trader change; or when we're afraid to touch the file._
+- [x] **D1** — Trader `run()` complexity refactor (radon 184)
+  _Shipped: Phase C Patch 4 (2026-04-20) — 897-line run() extracted into 11 private helpers; orchestrator is 15 lines. Zero behavior changes._
 - [x] **D2** — Portal complexity hotspots (`api_admin_market_activity` F=67, `_enrich_positions` F=45, etc.)
   _Shipped: Phase C Patch 3 (2026-04-20) — 12 private helpers extracted; stripe_webhook 196→84 lines, _enrich_positions 112→14, get_system_status 182→99, api_admin_market_activity 366→165. Zero behavior changes._
 - [~] **D3** — `decimal.Decimal` money math replacement
