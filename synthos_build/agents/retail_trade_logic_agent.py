@@ -3277,6 +3277,7 @@ def run(session="open"):
                 log.warning(f"live_prices read failed: {_e}")
 
             signals = []
+            _window_by_signal = {}  # Phase 4.d: sidecar for atr/stop passthrough
             _out_of_band = 0
             _no_price    = 0
             _no_signal   = 0
@@ -3294,6 +3295,7 @@ def run(session="open"):
                     _out_of_band += 1
                     continue
                 signals.append(_sig)
+                _window_by_signal[_sig['id']] = _w
 
             _set_phase('signal_evaluation', f"{len(signals)} in-band")
             log.info(
@@ -3387,8 +3389,14 @@ def run(session="open"):
                     _mark_signal_evaluated(signal['id'], 'NO_ENTRY')
                     continue
 
-                # Get ATR for sizing and risk
-                atr = alpaca.get_atr(signal['ticker'])
+                # Get ATR for sizing and risk. Phase 4.d — prefer the
+                # ATR stored on the macro window (window_calculator fetches
+                # it once per enrichment, so we avoid a per-signal HTTP
+                # call here). Falls through to alpaca.get_atr for rows
+                # written before 4.a landed, and to the 2% proxy if
+                # that also fails.
+                _win = _window_by_signal.get(signal['id']) or {}
+                atr = _win.get('atr') or alpaca.get_atr(signal['ticker'])
                 if not atr:
                     atr = candidate['price'] * 0.02
 
