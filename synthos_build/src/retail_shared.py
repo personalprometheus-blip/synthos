@@ -10,11 +10,22 @@ is one place to change and one place to test.
 Intentionally NOT consolidated here (still local per-file):
   - now_et()         — diverged return types (datetime object vs formatted
                        string); callers have different expectations
-  - fetch_with_retry() — news agent version has stateful circuit-breaker
-                       globals; sentiment agent version is simpler. Same
-                       pattern, but extracting the state would require a
-                       shared circuit-breaker object and is not worth it
-                       until a caller actually needs to diverge.
+  - fetch_with_retry() — R10-12: news agent version has MODULE-LEVEL
+                       stateful circuit-breaker globals
+                       (_fetch_consecutive_failures, _fetch_circuit_open);
+                       sentiment agent version is simpler and stateless.
+                       Sharing the breaker across agents would require
+                       either:
+                         (a) a shared mutable object with lock protection
+                             (the two agents run as separate processes so
+                             they'd need a file-based or DB-based breaker),
+                         (b) an abstraction where each caller passes in its
+                             own breaker state.
+                       Neither is justified by the current call pattern
+                       (each agent is a short-lived process and the breaker
+                       resets on exit). Revisit when a third caller needs
+                       retry logic or when the two agents want to share
+                       an outage signal.
 
 Import pattern:
     from retail_shared import kill_switch_active, get_active_customers, is_market_hours

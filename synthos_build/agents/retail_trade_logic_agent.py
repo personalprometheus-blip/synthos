@@ -3261,8 +3261,10 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                         sig = db.get_signal_by_id(pos.get('signal_id'))
                         if sig and sig.get('politician'):
                             db.update_member_weight_after_trade(sig['politician'], pnl)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        # R10-13 — politician accounting is best-effort; don't
+                        # swallow silently so a systemic breakage is visible.
+                        log.debug(f"update_member_weight_after_trade (profit-take) failed: {_e}")
                 pos_log.commit(db)
                 continue
 
@@ -3299,8 +3301,9 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                         sig = db.get_signal_by_id(pos.get('signal_id'))
                         if sig and sig.get('politician'):
                             db.update_member_weight_after_trade(sig['politician'], pnl)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        # R10-13 — best-effort politician accounting.
+                        log.debug(f"update_member_weight_after_trade (pulse-exit) failed: {_e}")
                     send_protective_exit_email(
                         ticker=pos['ticker'], reason=exit_reason,
                         reasoning="Cascade signal detected. Exit triggered per pre-authorized ruleset.",
