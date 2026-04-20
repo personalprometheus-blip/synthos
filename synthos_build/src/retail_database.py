@@ -983,6 +983,13 @@ class DB:
             # is the leading column; this composite covers both filter columns.
             "CREATE INDEX IF NOT EXISTS idx_cooling_off_ticker_until ON cooling_off(ticker, cool_until)",
 
+            # R10-10 — get_pending_approvals() filters on `status IN (...)`
+            # and orders by queued_at; the single-column indexes on each
+            # make the planner pick one and still scan-and-sort. Composite
+            # covers both, eliminating the sort. Portal hits this on every
+            # dashboard render.
+            "CREATE INDEX IF NOT EXISTS idx_approvals_status_queued ON pending_approvals(status, queued_at)",
+
             # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
             # daily by retail_tradable_cache.refresh() from Alpaca's
             # /v2/assets endpoint. Candidate Generator reads via
@@ -1107,22 +1114,39 @@ class DB:
         """
         Sweep 10% of gains at month end.
         Reduces cash, logs to ledger, resets realized_gains.
+
+        R10-2 — portfolio read + UPDATE + ledger INSERT all inside a single
+        transaction. Previously get_portfolio() and update_portfolio() ran
+        in separate connections; two concurrent sweeps could both read
+        cash=X and each write cash=X-tax_amount, losing one deduction.
+        Monthly cadence made the race rare but cash-destroying when it hit.
         """
-        portfolio = self.get_portfolio()
-        new_cash = portfolio['cash'] - tax_amount
-        new_withdrawn = portfolio['tax_withdrawn'] + tax_amount
-        self.update_portfolio(
-            cash=new_cash,
-            tax_withdrawn=new_withdrawn,
-            realized_gains=0.0,
-            month_start=new_cash,
-        )
-        self.add_ledger_entry(
-            entry_type="TAX",
-            description=f"10% monthly gain sweep",
-            amount=-tax_amount,
-            balance=new_cash,
-        )
+        with self.conn() as c:
+            pf = c.execute(
+                "SELECT cash, tax_withdrawn FROM portfolio WHERE id=1"
+            ).fetchone()
+            if not pf:
+                raise RuntimeError("portfolio row missing — DB not initialized")
+            new_cash      = round(float(pf['cash']) - tax_amount, 2)
+            new_withdrawn = round(float(pf['tax_withdrawn']) + tax_amount, 2)
+
+            c.execute("""
+                UPDATE portfolio SET
+                    cash            = ?,
+                    tax_withdrawn   = ?,
+                    realized_gains  = 0.0,
+                    month_start     = ?,
+                    updated_at      = ?
+                WHERE id = 1
+            """, (new_cash, new_withdrawn, new_cash, self.now()))
+
+            c.execute("""
+                INSERT INTO ledger
+                    (date, type, description, amount, balance, position_id, created_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, (datetime.now(timezone.utc).strftime('%Y-%m-%d'), "TAX",
+                  "10% monthly gain sweep", -tax_amount, new_cash, None, self.now()))
+
         log.info(f"Tax sweep: ${tax_amount:.2f} — new cash: ${new_cash:.2f}")
 
     # ── POSITIONS ──────────────────────────────────────────────────────────
@@ -1164,10 +1188,22 @@ class DB:
             raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
-        portfolio = self.get_portfolio()
-        new_cash  = round(portfolio['cash'] - cost, 2)
 
+        # R10-1 — portfolio read + position INSERT + portfolio UPDATE +
+        # ledger INSERT all happen in a single transaction. Previously the
+        # get_portfolio() read and the update_portfolio() write were in
+        # separate connections: two concurrent opens could each read cash=X,
+        # each insert their position, then each write cash=X-their_cost,
+        # losing one position's cash impact. Same fix pattern as R9-1/R9-3.
         with self.conn() as c:
+            pf = c.execute(
+                "SELECT cash, realized_gains, tax_withdrawn, month_start "
+                "FROM portfolio WHERE id=1"
+            ).fetchone()
+            if not pf:
+                raise RuntimeError("portfolio row missing — DB not initialized")
+            new_cash = round(float(pf['cash']) - cost, 2)
+
             c.execute("""
                 INSERT INTO positions
                     (id, ticker, company, sector, entry_price, current_price,
@@ -1182,14 +1218,18 @@ class DB:
                   entry_sentiment_score, entry_signal_score,
                   interrogation_status, price_history_used, managed_by))
 
-        self.update_portfolio(cash=new_cash)
-        self.add_ledger_entry(
-            entry_type="ENTRY",
-            description=f"{ticker} · {shares:.4f} sh @ ${entry_price:.2f}",
-            amount=-cost,
-            balance=new_cash,
-            position_id=pos_id,
-        )
+            c.execute("""
+                UPDATE portfolio SET cash=?, updated_at=? WHERE id=1
+            """, (new_cash, self.now()))
+
+            c.execute("""
+                INSERT INTO ledger
+                    (date, type, description, amount, balance, position_id, created_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, (datetime.now(timezone.utc).strftime('%Y-%m-%d'), "ENTRY",
+                  f"{ticker} · {shares:.4f} sh @ ${entry_price:.2f}",
+                  -cost, new_cash, pos_id, self.now()))
+
         log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
         return pos_id
 
