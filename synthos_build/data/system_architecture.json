@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-20T16:00:00-04:00",
-    "version": "3.2"
+    "last_updated": "2026-04-20T14:00:00-04:00",
+    "version": "3.3"
   },
   "nodes": [
     {
@@ -84,18 +84,18 @@
     {
       "id": "pi2w_sentinel",
       "name": "pi2w_sentinel",
-      "role": "Display Node",
+      "role": "Display Node (DISABLED)",
       "hardware": "Pi Zero 2W",
       "ip": "10.0.0.87",
       "network": "WiFi (SantaMcGuire)",
-      "status": "live",
+      "status": "disabled",
       "agents": [
-        {"name": "sentinel_wave.py", "desc": "Live agent sine wave animation on 3.5\" TFT", "how": "systemd", "status": "live"},
-        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 5m", "status": "cron"}
+        {"name": "sentinel_wave.py", "desc": "Live agent sine wave animation on 3.5\" TFT", "how": "systemd", "status": "disabled"},
+        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 5m", "status": "disabled"}
       ],
       "databases": [],
       "services": ["Sidecar HTTP on port 5100"],
-      "note": "Online — WiFi connected"
+      "note": "DISABLED 2026-04-20 — display powered off pending power-source relocation (was USB-powered from operator's main PC, needs standalone supply). No ETA for return. Removed from auditor NODES dict + system_architecture.json status 'disabled'. Restore when hardware comes back."
     }
   ],
   "data_flow": {
