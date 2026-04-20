@@ -1,0 +1,24 @@
+[Unit]
+Description=Synthos Retail Trade Daemon (continuous trader, 9:30-16:00 ET)
+# Kicked by synthos-trade-daemon.timer each weekday at 09:25 ET. The daemon
+# itself waits for 9:30 market open, then polls signals.db + live_prices
+# every ~30s dispatching the 14-gate trader across all customers. Exits
+# cleanly at 16:00 ET. Phase 1 of TRADER_RESTRUCTURE_PLAN.
+After=network.target synthos-boot-sequence.service
+Wants=network.target synthos-boot-sequence.service
+
+[Service]
+Type=simple
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build
+ExecStart=/usr/bin/python3 src/retail_trade_daemon.py
+# Restart only on crash. Normal 16:00 exit = 0, systemd respects it.
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/trade_daemon.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/trade_daemon.log
+
+[Install]
+# NOTE: enable the .timer instead of this service directly.
+WantedBy=multi-user.target
