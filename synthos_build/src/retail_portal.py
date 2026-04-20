@@ -38,7 +38,11 @@ import auth
 
 _SCRIPT_DIR          = os.path.dirname(os.path.abspath(__file__))   # src/
 _ROOT_DIR            = os.path.dirname(_SCRIPT_DIR)                  # synthos_build/
+sys.path.insert(0, _SCRIPT_DIR)
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
+
+# Phase C / D6 — shared helpers (2026-04-20)
+from retail_shared import kill_switch_active  # noqa: E402
 
 PROJECT_DIR          = _SCRIPT_DIR                                   # keep for co-located script references
 KILL_SWITCH_FILE     = os.path.join(_ROOT_DIR, '.kill_switch')
@@ -1230,7 +1234,7 @@ def check_auth():
     # ── Session activity tracking + non-admin auto-logout ──
     _cid = session.get('customer_id')
     if _cid:
-        _now = datetime.utcnow()
+        _now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Auto-polling endpoints don't count as user activity
         _passive_paths = {'/api/status', '/api/approvals', '/api/agent-pulse',
@@ -2867,8 +2871,7 @@ def _customer_db():
 def now_et():
     return datetime.now(ET).strftime('%Y-%m-%d %H:%M:%S ET')
 
-def kill_switch_active():
-    return os.path.exists(KILL_SWITCH_FILE)
+# kill_switch_active: imported from retail_shared above
 
 def _read_agent_running():
     """Check if scheduler has an agent session running (.agent_running file)."""
@@ -3066,7 +3069,7 @@ def _fetch_alpaca_positions():
                 latest = max(r['updated_at'] for r in rows if r['updated_at'])
                 from datetime import datetime
                 # live_prices timestamps are UTC (written via db.now()).
-                age = (datetime.utcnow() - datetime.fromisoformat(latest.replace('Z','+00:00').split('+')[0])).total_seconds()
+                age = (datetime.now(timezone.utc).replace(tzinfo=None) - datetime.fromisoformat(latest.replace('Z','+00:00').split('+')[0])).total_seconds()
                 freshness = age
             except Exception:
                 pass
@@ -10246,7 +10249,7 @@ def api_portfolio_info():
                 try:
                     from datetime import datetime, timezone
                     created_dt = datetime.fromisoformat(account_created.replace('Z', '+00:00')) if 'T' in account_created else datetime.strptime(account_created, '%Y-%m-%d %H:%M:%S')
-                    now = datetime.now(timezone.utc) if created_dt.tzinfo else datetime.utcnow()
+                    now = datetime.now(timezone.utc) if created_dt.tzinfo else datetime.now(timezone.utc).replace(tzinfo=None)
                     age_hours = (now - created_dt).total_seconds() / 3600
                     # 2 market days ~ 48+ hours (conservative: use 36 hours to account for weekends)
                     if age_hours >= 36:
@@ -10756,7 +10759,7 @@ def api_agent_pulse():
         # Count today's decisions
         with db.conn() as c:
             from datetime import datetime
-            today = datetime.utcnow().strftime('%Y-%m-%d')
+            today = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')
             decisions = c.execute(
                 "SELECT COUNT(*) FROM system_log WHERE event='TRADE_DECISION' AND timestamp >= ?",
                 (today,)).fetchone()[0]
@@ -11071,7 +11074,7 @@ def api_market_chart_data():
     alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
     headers_alp   = {'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret}
 
-    now_utc  = datetime.utcnow()
+    now_utc  = datetime.now(timezone.utc).replace(tzinfo=None)
     start_dt = now_utc - timedelta(hours=hours)
     start_s  = start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
 
@@ -14125,7 +14128,7 @@ def api_admin_market_activity():
             active_now = 0
             active_customers = []
             for cid, v in _session_activity.items():
-                idle = (datetime.utcnow() - v['last_activity']).total_seconds()
+                idle = (datetime.now(timezone.utc).replace(tzinfo=None) - v['last_activity']).total_seconds()
                 if idle < 900:
                     active_now += 1
                     try:
@@ -14291,7 +14294,7 @@ def _session_snapshot_loop():
     while True:
         _t.sleep(60)
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             ts = now.strftime('%Y-%m-%dT%H:%M')
             with _session_activity_lock:
                 active_names = []

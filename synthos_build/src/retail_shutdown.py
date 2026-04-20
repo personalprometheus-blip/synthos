@@ -20,7 +20,7 @@ Safe to run manually:
 import os
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
@@ -57,7 +57,7 @@ def run():
             result = c.execute("""
                 UPDATE signals SET status='INTERRUPTED', updated_at=?
                 WHERE status='PROCESSING'
-            """, (datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),))
+            """, (datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S'),))
             if result.rowcount:
                 log.info(f"Marked {result.rowcount} in-progress signal(s) as INTERRUPTED")
             c.commit()

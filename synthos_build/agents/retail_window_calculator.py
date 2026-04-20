@@ -68,6 +68,8 @@ _ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT_DIR / 'src'))
 
 from retail_database import get_customer_db  # noqa: E402
+# Phase C / D6 — shared helpers (2026-04-20)
+from retail_shared import get_active_customers  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 
@@ -82,24 +84,7 @@ def _shared_db():
     return get_customer_db(_OWNER_CID)
 
 
-def get_active_customers() -> list:
-    """Return list of active customer IDs. Delegates to the canonical
-    implementation in retail_market_daemon so there's a single source
-    of truth. Falls back to a local copy if market_daemon can't be
-    imported (should not happen in production — market_daemon is on
-    the sys.path by construction above)."""
-    try:
-        from retail_market_daemon import get_active_customers as _gac
-        return _gac()
-    except Exception as e:
-        log.debug(f"fallback to local get_active_customers: {e}")
-        try:
-            import auth
-            customers = auth.list_customers()
-            return [c['id'] for c in customers if c.get('is_active')]
-        except Exception as e2:
-            log.error(f"Could not list customers: {e2}")
-            return []
+# get_active_customers: imported from retail_shared above
 
 logging.basicConfig(
     level=logging.INFO,

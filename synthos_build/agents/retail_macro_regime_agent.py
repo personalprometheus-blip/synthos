@@ -34,7 +34,7 @@ import logging
 import argparse
 import requests as _req
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from dotenv import load_dotenv
@@ -140,7 +140,7 @@ def _fetch_alpaca_bars(ticker, days=10):
     # UTC — Alpaca reads the 'Z' suffix as UTC. Using datetime.now(ET) here
     # would encode ET-local time but label it UTC, yielding a 4-5 hour
     # offset and either missed or duplicated bars around market boundaries.
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
     end = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
     try:

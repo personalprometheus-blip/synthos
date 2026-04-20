@@ -33,7 +33,7 @@ import sys
 import time
 import logging
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -308,7 +308,7 @@ def fetch_bars(ticker, days):
 def _fetch_bars_alpaca(ticker, days):
     """Primary Alpaca path, with retry + tuple timeout. Returns [] on
     permanent failure (so the caller can try Yahoo)."""
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
     start = (now_utc - timedelta(days=days + 10)).strftime('%Y-%m-%dT%H:%M:%SZ')
     url   = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"

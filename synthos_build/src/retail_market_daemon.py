@@ -71,6 +71,13 @@ _SRC_DIR = Path(__file__).resolve().parent
 _ROOT_DIR = _SRC_DIR.parent
 sys.path.insert(0, str(_SRC_DIR))
 
+# Phase C / D6 — shared helpers consolidated into retail_shared (2026-04-20)
+from retail_shared import (  # noqa: E402
+    kill_switch_active,
+    get_active_customers,
+    is_market_hours as _is_market_hours_shared,
+)
+
 from dotenv import load_dotenv
 load_dotenv(_ROOT_DIR / 'user' / '.env')
 
@@ -140,11 +147,8 @@ def is_premarket():
 
 
 def is_market_hours():
-    """Between 9:30 and 16:00 ET."""
-    t = now_et()
-    open_time = t.replace(hour=MARKET_OPEN_HOUR, minute=MARKET_OPEN_MIN, second=0)
-    close_time = t.replace(hour=MARKET_CLOSE_HOUR, minute=MARKET_CLOSE_MIN, second=0)
-    return open_time <= t < close_time
+    """Between 9:30 and 16:00 ET. Delegates to retail_shared canonical."""
+    return _is_market_hours_shared()
 
 
 def past_market_close():
@@ -153,9 +157,7 @@ def past_market_close():
     return t >= close_time
 
 
-def kill_switch_active():
-    kill_file = _ROOT_DIR / '.kill_switch'
-    return kill_file.exists()
+# kill_switch_active: imported from retail_shared above
 
 
 PID_FILE = _ROOT_DIR / '.market_daemon.pid'
@@ -232,15 +234,7 @@ def send_retail_heartbeat(agent_name='market_daemon', status='OK'):
         log.debug(f"Retail heartbeat failed: {e}")
 
 
-def get_active_customers():
-    """Return list of active customer IDs from auth.db."""
-    try:
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active')]
-    except Exception as e:
-        log.error(f"Could not list customers: {e}")
-        return []
+# get_active_customers: imported from retail_shared above
 
 
 # ── Agent Runners ──
