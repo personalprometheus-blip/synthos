@@ -487,14 +487,15 @@ def run():
     log.info("=" * 55)
 
     # Run all steps. Each step appends its result to BOOT_STEPS (shared
-    # module list) which the summary below tallies. Return values are
-    # unused here — underscore-prefixed to signal intent and quiet ruff.
-    _net_ok    = step1_network()
+    # module list) which the summary below tallies. Three of these
+    # locals (net_ok, hc_ok, wd_ok) ARE read later — don't rename.
+    # The rest are effect-only; '_' prefix signals intentional unused.
+    net_ok     = step1_network()
     _env_ok    = step2_env()
     _files_ok  = step3_files()
     _db_ok     = step4_database()
-    _hc_ok     = step5_health_check()
-    _wd_ok     = step6_watchdog()
+    hc_ok      = step5_health_check()
+    wd_ok      = step6_watchdog()
     _portal_ok = step7_portal()
     _mon_ok    = step8_monitor()
     _intg_ok   = step_interrogation_listener()
