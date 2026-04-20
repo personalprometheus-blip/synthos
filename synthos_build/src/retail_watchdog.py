@@ -1038,7 +1038,7 @@ def check_pipeline_health() -> None:
         bottleneck = ', '.join(f"{k}={v}" for k, v in top_miss) or 'unknown'
 
         if not _pipeline_stall_alerted:
-            send_alert(
+            alert_company_pi(
                 level="warning",
                 category="PIPELINE_STALL",
                 message=(

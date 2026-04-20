@@ -2662,7 +2662,7 @@ def stripe_webhook():
 
         # Generate setup token and build link
         token      = auth.generate_verify_token(customer_id)
-        base       = PORTAL_BASE_URL or f"http://localhost:{PORTAL_PORT}"
+        base       = PORTAL_BASE_URL or f"http://localhost:{PORT}"
         setup_link = f"{base}/setup-account/{token}"
 
         email_ok = _send_setup_email(customer_email, setup_link, display_name)
@@ -9725,7 +9725,7 @@ def api_admin_override():
 
     # POST — verify token (monitor sends X-Token header)
     token = request.headers.get('X-Token', '')
-    if token != MONITOR_TOKEN and not _authorized():
+    if token != MONITOR_TOKEN and not is_authenticated():
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
