@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-18T02:30:00-04:00",
-    "version": "3.1"
+    "last_updated": "2026-04-20T16:00:00-04:00",
+    "version": "3.2"
   },
   "nodes": [
     {
@@ -40,7 +40,8 @@
       "agents": [
         {"name": "retail_portal.py", "desc": "Customer dashboard + API", "how": "watchdog", "status": "live"},
         {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "@reboot", "status": "live"},
-        {"name": "retail_market_daemon.py", "desc": "Continuous trading daemon 9:10-16:00 ET", "how": "cron 9:10", "status": "live"},
+        {"name": "retail_market_daemon.py", "desc": "Enrichment pipeline 9:10-16:00 ET (news/sentiment/macro/validator/screener/price_poller). No longer runs trader — see retail_trade_daemon.", "how": "cron 9:10", "status": "live"},
+        {"name": "retail_trade_daemon.py", "desc": "Continuous trader 9:30-16:00 ET, 30s cycle. Same 14-gate logic as before, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN.", "how": "cron 9:25", "status": "live"},
         {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator (overnight news)", "how": "cron", "status": "cron"},
         {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
         {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution + screener integration", "how": "daemon", "status": "live"},
