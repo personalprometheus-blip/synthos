@@ -2093,13 +2093,28 @@ def gate8_risk(candidate: dict, atr: float, session: str,
 # ── GATE 11 — PORTFOLIO CONTROLS ─────────────────────────────────────────────
 
 def gate11_portfolio(positions: list, portfolio: dict, signal: dict,
-                     size: float, alpaca, decision_log: TradeDecisionLog) -> bool:
+                     size: float, alpaca, decision_log: TradeDecisionLog,
+                     db=None) -> bool:
     """
     Enforce portfolio-wide limits before allowing new entry.
     Logic: Doc 3 §11
+
+    Audit Round 7.4 — use total equity (`_ALPACA_EQUITY` setting written
+    by Gate 0) instead of cash-only. Previously Gate 7 sized off equity
+    but Gate 11 checked exposure against cash, so two gates disagreed
+    when USER-managed positions tied up cash. Falls back to cash when
+    equity isn't in settings (preserves old behavior for pre-Gate-0
+    callers).
     """
-    equity         = portfolio.get("cash", 0)
-    tier           = get_portfolio_tier(equity)
+    equity = 0.0
+    if db is not None:
+        try:
+            equity = float(db.get_setting('_ALPACA_EQUITY') or 0)
+        except (TypeError, ValueError):
+            equity = 0.0
+    if equity <= 0:
+        equity = float(portfolio.get("cash", 0) or 0)
+    tier = get_portfolio_tier(equity)
 
     # Total gross exposure cap
     deployed = sum(p["entry_price"] * p["shares"] for p in positions)
@@ -2727,7 +2742,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                             shares=size, trail_stop_amt=trail_amt,
                             trail_stop_pct=trail_pct, vol_bucket=vol_label,
                             signal_id=_sig_id,
-                            entry_signal_score=str(score),
+                            entry_signal_score=round(float(score), 4),
                             entry_sentiment_score=signal.get('sentiment_score'),
                             interrogation_status=signal.get('interrogation_status'),
                         )
@@ -3528,7 +3543,7 @@ def run(session="open"):
             risk = gate8_risk(candidate, atr, session, sig_log)
 
             # Gate 11: Portfolio controls
-            if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log):
+            if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log, db=db):
                 sig_log.decide("SKIP", "portfolio limits block entry")
                 sig_log.commit(db)
                 _mark_signal_evaluated(signal['id'], 'SKIP_PORTFOLIO')
@@ -3571,7 +3586,7 @@ def run(session="open"):
                         shares=size, trail_stop_amt=trail_amt,
                         trail_stop_pct=trail_pct, vol_bucket=vol_label,
                         signal_id=(signal['id'] if _CUSTOMER_ID == _OWNER_CID else None),
-                        entry_signal_score=str(score),
+                        entry_signal_score=round(float(score), 4),
                         entry_sentiment_score=signal.get('sentiment_score'),
                         interrogation_status=signal.get('interrogation_status'),
                     )
