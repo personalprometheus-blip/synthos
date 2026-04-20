@@ -2543,6 +2543,117 @@ def subscribe_page():
     return render_template_string(_SUBSCRIBE_HTML, reason=reason)
 
 
+def _verify_stripe_signature(payload, sig_header):
+    """Verify Stripe-Signature header using HMAC-SHA256.
+    Returns None on success, or a Flask (response, status_code) tuple on failure.
+    """
+    import hmac as _hmac
+    import hashlib
+    import time as _time
+
+    if not STRIPE_WEBHOOK_SECRET:
+        log.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET not set — rejecting")
+        return jsonify({"error": "webhook secret not configured"}), 500
+
+    try:
+        parts     = {k: v for k, v in (p.split('=', 1) for p in sig_header.split(',')
+                                        if '=' in p)}
+        timestamp = parts.get('t', '')
+        v1_sigs   = [v for k, v in parts.items() if k == 'v1']
+
+        if not timestamp or not v1_sigs:
+            log.warning("Stripe webhook: malformed Stripe-Signature header")
+            return jsonify({"error": "invalid signature header"}), 400
+
+        try:
+            ts_age = abs(_time.time() - int(timestamp))
+            if ts_age > 300:
+                log.warning(f"Stripe webhook: timestamp too old ({ts_age:.0f}s) — replay?")
+                return jsonify({"error": "timestamp too old"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        signed_payload = f"{timestamp}.".encode() + payload
+        expected_sig = _hmac.new(
+            STRIPE_WEBHOOK_SECRET.encode(),
+            signed_payload,
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not any(_hmac.compare_digest(expected_sig, sig) for sig in v1_sigs):
+            log.warning("Stripe webhook: signature mismatch — rejecting")
+            return jsonify({"error": "signature verification failed"}), 400
+
+    except Exception as e:
+        log.error(f"Stripe webhook signature check error: {e}")
+        return jsonify({"error": "signature check failed"}), 400
+
+    return None  # success
+
+
+def _handle_checkout_completed(obj):
+    """Handle checkout.session.completed Stripe event.
+    Returns a Flask (response, status_code) tuple.
+    """
+    stripe_customer_id = obj.get('customer', '')
+    stripe_sub_id      = obj.get('subscription', '')
+    customer_email     = (
+        obj.get('customer_details', {}).get('email')
+        or obj.get('customer_email', '')
+    )
+
+    if not customer_email or not stripe_customer_id:
+        log.error(
+            f"checkout.session.completed missing email or customer id — "
+            f"email={bool(customer_email)} cid={bool(stripe_customer_id)}"
+        )
+        return jsonify({"error": "missing customer data"}), 400
+
+    existing = auth.get_customer_by_stripe_id(stripe_customer_id)
+    if existing:
+        customer_id   = existing['id']
+        display_name  = auth.get_display_name(existing) or ''
+        log.info(f"checkout.session.completed: customer already exists {customer_id} — resending setup email")
+    else:
+        try:
+            customer_id = auth.create_unverified_customer(
+                email=customer_email,
+                stripe_customer_id=stripe_customer_id,
+                pricing_tier='standard',
+            )
+            display_name = ''
+            log.info(f"New customer created: {customer_id} via checkout.session.completed")
+        except ValueError as e:
+            log.warning(f"checkout.session.completed duplicate: {e}")
+            row = auth.get_customer_by_email(customer_email)
+            if row:
+                customer_id  = row['id']
+                display_name = auth.get_display_name(row) or ''
+            else:
+                return jsonify({"error": str(e)}), 409
+
+    token      = auth.generate_verify_token(customer_id)
+    base       = PORTAL_BASE_URL or f"http://localhost:{PORT}"
+    setup_link = f"{base}/setup-account/{token}"
+
+    email_ok = _send_setup_email(customer_email, setup_link, display_name)
+    if not email_ok:
+        log.warning(
+            f"Setup email failed for {customer_id} — token={token[:8]}… "
+            f"link={setup_link}"
+        )
+
+    if stripe_sub_id:
+        auth.update_subscription(
+            customer_id=customer_id,
+            stripe_customer_id=stripe_customer_id,
+            subscription_id=stripe_sub_id,
+            status='inactive',
+        )
+
+    return jsonify({"ok": True, "customer_id": customer_id}), 200
+
+
 @app.route('/webhook/stripe', methods=['POST'])
 def stripe_webhook():
     """
@@ -2563,54 +2674,13 @@ def stripe_webhook():
     Stripe requires a 200 within 30s or it retries — heavy work runs inline
     (Pi is idle during non-market hours; acceptable latency).
     """
-    import hmac
-    import hashlib
-
-    payload   = request.data          # raw bytes — must not use request.json
+    payload    = request.data
     sig_header = request.headers.get('Stripe-Signature', '')
 
-    # ── Signature verification ────────────────────────────────────────────────
-    if not STRIPE_WEBHOOK_SECRET:
-        log.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET not set — rejecting")
-        return jsonify({"error": "webhook secret not configured"}), 500
+    err = _verify_stripe_signature(payload, sig_header)
+    if err:
+        return err
 
-    try:
-        # Stripe-Signature format: t=<timestamp>,v1=<sig>[,v1=<sig2>...]
-        parts     = {k: v for k, v in (p.split('=', 1) for p in sig_header.split(',')
-                                        if '=' in p)}
-        timestamp = parts.get('t', '')
-        v1_sigs   = [v for k, v in parts.items() if k == 'v1']
-
-        if not timestamp or not v1_sigs:
-            log.warning("Stripe webhook: malformed Stripe-Signature header")
-            return jsonify({"error": "invalid signature header"}), 400
-
-        # Guard against replay attacks (5-minute tolerance)
-        import time as _time
-        try:
-            ts_age = abs(_time.time() - int(timestamp))
-            if ts_age > 300:
-                log.warning(f"Stripe webhook: timestamp too old ({ts_age:.0f}s) — replay?")
-                return jsonify({"error": "timestamp too old"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "invalid timestamp"}), 400
-
-        signed_payload = f"{timestamp}.".encode() + payload
-        expected_sig = hmac.new(
-            STRIPE_WEBHOOK_SECRET.encode(),
-            signed_payload,
-            hashlib.sha256,
-        ).hexdigest()
-
-        if not any(hmac.compare_digest(expected_sig, sig) for sig in v1_sigs):
-            log.warning("Stripe webhook: signature mismatch — rejecting")
-            return jsonify({"error": "signature verification failed"}), 400
-
-    except Exception as e:
-        log.error(f"Stripe webhook signature check error: {e}")
-        return jsonify({"error": "signature check failed"}), 400
-
-    # ── Parse event ───────────────────────────────────────────────────────────
     try:
         event      = json.loads(payload)
         event_type = event.get('type', '')
@@ -2621,81 +2691,16 @@ def stripe_webhook():
 
     log.info(f"Stripe webhook: {event_type} id={event.get('id','?')[:20]}")
 
-    # ── Event handlers ────────────────────────────────────────────────────────
-
     if event_type == 'checkout.session.completed':
-        # New subscriber — create account, email setup link
-        stripe_customer_id = obj.get('customer', '')
-        stripe_sub_id      = obj.get('subscription', '')
-        customer_email     = (
-            obj.get('customer_details', {}).get('email')
-            or obj.get('customer_email', '')
-        )
-
-        if not customer_email or not stripe_customer_id:
-            log.error(
-                f"checkout.session.completed missing email or customer id — "
-                f"email={bool(customer_email)} cid={bool(stripe_customer_id)}"
-            )
-            return jsonify({"error": "missing customer data"}), 400
-
-        # Idempotency: if account already exists, just resend setup email
-        existing = auth.get_customer_by_stripe_id(stripe_customer_id)
-        if existing:
-            customer_id   = existing['id']
-            display_name  = auth.get_display_name(existing) or ''
-            log.info(f"checkout.session.completed: customer already exists {customer_id} — resending setup email")
-        else:
-            try:
-                customer_id = auth.create_unverified_customer(
-                    email=customer_email,
-                    stripe_customer_id=stripe_customer_id,
-                    pricing_tier='standard',
-                )
-                display_name = ''
-                log.info(f"New customer created: {customer_id} via checkout.session.completed")
-            except ValueError as e:
-                # Email already registered (duplicate webhook delivery)
-                log.warning(f"checkout.session.completed duplicate: {e}")
-                row = auth.get_customer_by_email(customer_email)
-                if row:
-                    customer_id  = row['id']
-                    display_name = auth.get_display_name(row) or ''
-                else:
-                    return jsonify({"error": str(e)}), 409
-
-        # Generate setup token and build link
-        token      = auth.generate_verify_token(customer_id)
-        base       = PORTAL_BASE_URL or f"http://localhost:{PORT}"
-        setup_link = f"{base}/setup-account/{token}"
-
-        email_ok = _send_setup_email(customer_email, setup_link, display_name)
-        if not email_ok:
-            log.warning(
-                f"Setup email failed for {customer_id} — token={token[:8]}… "
-                f"link={setup_link}"
-            )
-
-        # Update subscription record if we have a subscription ID
-        if stripe_sub_id:
-            auth.update_subscription(
-                customer_id=customer_id,
-                stripe_customer_id=stripe_customer_id,
-                subscription_id=stripe_sub_id,
-                status='inactive',   # becomes 'active' on invoice.payment_succeeded
-            )
-
-        return jsonify({"ok": True, "customer_id": customer_id}), 200
+        return _handle_checkout_completed(obj)
 
     elif event_type == 'invoice.payment_succeeded':
         stripe_customer_id = obj.get('customer', '')
         stripe_sub_id      = obj.get('subscription', '')
-
         customer = auth.get_customer_by_stripe_id(stripe_customer_id)
         if not customer:
             log.warning(f"invoice.payment_succeeded: no customer for stripe_id={stripe_customer_id}")
             return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
-
         auth.update_subscription(
             customer_id=customer['id'],
             stripe_customer_id=stripe_customer_id,
@@ -2707,12 +2712,10 @@ def stripe_webhook():
 
     elif event_type == 'invoice.payment_failed':
         stripe_customer_id = obj.get('customer', '')
-
         customer = auth.get_customer_by_stripe_id(stripe_customer_id)
         if not customer:
             log.warning(f"invoice.payment_failed: no customer for stripe_id={stripe_customer_id}")
             return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
-
         auth.mark_grace_period(customer['id'], days=7)
         log.info(f"Grace period started for {customer['id']} (invoice.payment_failed)")
         return jsonify({"ok": True}), 200
@@ -2720,12 +2723,10 @@ def stripe_webhook():
     elif event_type == 'customer.subscription.deleted':
         stripe_customer_id = obj.get('customer', '')
         stripe_sub_id      = obj.get('id', '')
-
         customer = auth.get_customer_by_stripe_id(stripe_customer_id)
         if not customer:
             log.warning(f"subscription.deleted: no customer for stripe_id={stripe_customer_id}")
             return jsonify({"ok": True, "note": "customer not found — ignored"}), 200
-
         auth.update_subscription(
             customer_id=customer['id'],
             stripe_customer_id=stripe_customer_id,
@@ -2736,7 +2737,6 @@ def stripe_webhook():
         return jsonify({"ok": True}), 200
 
     else:
-        # Acknowledge all other event types — Stripe retries on non-2xx
         log.debug(f"Stripe webhook: unhandled event type '{event_type}' — acknowledged")
         return jsonify({"ok": True, "note": f"event type '{event_type}' not handled"}), 200
 
@@ -3111,89 +3111,86 @@ def _fetch_alpaca_positions():
         return {}
 
 
-def _enrich_positions(db_positions, alpaca_pos_map):
+def _enrich_single_db_position(p, alpaca_pos_map):
+    """Enrich a single DB position dict with Alpaca live data and signal metadata.
+    Returns the enriched position dict.
     """
-    Merge DB positions with live Alpaca data.
-    Returns (enriched_list, orphan_list).
-      enriched: DB positions with current_price / market_value / pl fields populated
-      orphans:  Alpaca positions not in DB (shown as warnings)
+    ticker = p.get('ticker', '')
+    ap = alpaca_pos_map.get(ticker, {})
+    entry = float(p.get('entry_price', 0) or 0)
+    shares = float(p.get('shares', 0) or 0)
+    cost = round(entry * shares, 2)
+    if ap:
+        cur_price   = float(ap.get('current_price', entry) or entry)
+        avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
+        mkt_value   = round(cur_price * shares, 2) if cur_price else cost
+        unreal_pl   = float(ap.get('unrealized_pl', 0) or 0)
+        unreal_plpc = float(ap.get('unrealized_plpc', 0) or 0)
+        if unreal_pl == 0.0 and cur_price and entry and cur_price != entry:
+            unreal_pl   = round((cur_price - entry) * shares, 2)
+            unreal_plpc = round((cur_price - entry) / entry, 4) if entry else 0.0
+        day_pl      = float(ap.get('unrealized_intraday_pl', 0) or 0)
+        day_plpc    = float(ap.get('unrealized_intraday_plpc', 0) or 0)
+        if day_pl == 0.0 and cur_price:
+            prev_close = float(ap.get('lastday_price', 0) or 0)
+            if prev_close and prev_close != cur_price:
+                day_pl   = round((cur_price - prev_close) * shares, 2)
+                day_plpc = round((cur_price - prev_close) / prev_close, 4) if prev_close else 0.0
+    else:
+        cur_price   = float(p.get('current_price', 0) or 0) or entry
+        mkt_value   = round(cur_price * shares, 2) if cur_price else cost
+        unreal_pl   = round((cur_price - entry) * shares, 2) if cur_price and entry else 0.0
+        unreal_plpc = round((cur_price - entry) / entry, 4) if entry and cur_price else 0.0
+        day_pl      = 0.0
+        day_plpc    = 0.0
+        avg_entry   = entry
+
+    # Signal metadata lookup
+    _sig_headline = _sig_source = _sig_confidence = _sig_image_url = _sig_source_url = None
+    _sig_id = p.get('signal_id')
+    if _sig_id:
+        try:
+            import sqlite3 as _sql
+            _shared_path = _shared_db().path
+            _sc = _sql.connect(_shared_path, timeout=5)
+            _sc.row_factory = _sql.Row
+            _sig = _sc.execute(
+                "SELECT headline, source, confidence, image_url, source_url FROM signals WHERE id=?",
+                (_sig_id,)
+            ).fetchone()
+            if _sig:
+                _sig_headline   = _sig['headline']
+                _sig_source     = _sig['source']
+                _sig_confidence = _sig['confidence']
+                _sig_image_url  = _sig['image_url'] if 'image_url' in _sig.keys() else None
+                _sig_source_url = _sig['source_url'] if 'source_url' in _sig.keys() else None
+            _sc.close()
+        except Exception as _e:
+            log.warning(f"Signal lookup failed for id={_sig_id}: {_e}")
+
+    return {
+        **p,
+        'current_price':     round(cur_price, 4),
+        'market_value':      round(mkt_value, 2),
+        'unrealized_pl':     round(unreal_pl, 2),
+        'unrealized_plpc':   round(unreal_plpc * 100, 2),
+        'day_pl':            round(day_pl, 2),
+        'day_plpc':          round(day_plpc * 100, 2),
+        'avg_entry_price':   round(avg_entry, 4),
+        'cost_basis':        round(cost, 2),
+        'is_orphan':         False,
+        'signal_headline':   _sig_headline,
+        'signal_source':     _sig_source,
+        'signal_confidence': _sig_confidence,
+        'signal_image_url':  _sig_image_url,
+        'signal_source_url': _sig_source_url,
+    }
+
+
+def _extract_orphan_positions(alpaca_pos_map, db_tickers):
+    """Build orphan position dicts for Alpaca positions not tracked in DB.
+    Returns list of orphan position dicts.
     """
-    db_tickers = set()
-    enriched = []
-    for p in db_positions:
-        ticker = p.get('ticker', '')
-        db_tickers.add(ticker)
-        ap = alpaca_pos_map.get(ticker, {})
-        entry = float(p.get('entry_price', 0) or 0)
-        shares = float(p.get('shares', 0) or 0)
-        cost = round(entry * shares, 2)
-        if ap:
-            cur_price   = float(ap.get('current_price', entry) or entry)
-            avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
-            mkt_value   = round(cur_price * shares, 2) if cur_price else cost
-            # Calculate P&L from prices (works for both Alpaca API and live_prices table)
-            unreal_pl   = float(ap.get('unrealized_pl', 0) or 0)
-            unreal_plpc = float(ap.get('unrealized_plpc', 0) or 0)
-            if unreal_pl == 0.0 and cur_price and entry and cur_price != entry:
-                unreal_pl   = round((cur_price - entry) * shares, 2)
-                unreal_plpc = round((cur_price - entry) / entry, 4) if entry else 0.0
-            day_pl      = float(ap.get('unrealized_intraday_pl', 0) or 0)
-            day_plpc    = float(ap.get('unrealized_intraday_plpc', 0) or 0)
-            if day_pl == 0.0 and cur_price:
-                prev_close = float(ap.get('lastday_price', 0) or 0)
-                if prev_close and prev_close != cur_price:
-                    day_pl   = round((cur_price - prev_close) * shares, 2)
-                    day_plpc = round((cur_price - prev_close) / prev_close, 4) if prev_close else 0.0
-        else:
-            cur_price   = float(p.get('current_price', 0) or 0) or entry
-            mkt_value   = round(cur_price * shares, 2) if cur_price else cost
-            unreal_pl   = round((cur_price - entry) * shares, 2) if cur_price and entry else 0.0
-            unreal_plpc = round((cur_price - entry) / entry, 4) if entry and cur_price else 0.0
-            day_pl      = 0.0
-            day_plpc    = 0.0
-            avg_entry   = entry
-        # Look up signal source for this position
-        _sig_headline = None
-        _sig_source = None
-        _sig_confidence = None
-        _sig_image_url = None
-        _sig_source_url = None
-        _sig_id = p.get('signal_id')
-        if _sig_id:
-            try:
-                import sqlite3 as _sql
-                _shared_path = _shared_db().path
-                _sc = _sql.connect(_shared_path, timeout=5)
-                _sc.row_factory = _sql.Row
-                _sig = _sc.execute("SELECT headline, source, confidence, image_url, source_url FROM signals WHERE id=?", (_sig_id,)).fetchone()
-                if _sig:
-                    _sig_headline = _sig['headline']
-                    _sig_source = _sig['source']
-                    _sig_confidence = _sig['confidence']
-                    _sig_image_url = _sig['image_url'] if 'image_url' in _sig.keys() else None
-                    _sig_source_url = _sig['source_url'] if 'source_url' in _sig.keys() else None
-                _sc.close()
-            except Exception as _e:
-                log.warning(f"Signal lookup failed for id={_sig_id}: {_e}")
-
-        enriched.append({
-            **p,
-            'current_price':    round(cur_price, 4),
-            'market_value':     round(mkt_value, 2),
-            'unrealized_pl':    round(unreal_pl, 2),
-            'unrealized_plpc':  round(unreal_plpc * 100, 2),
-            'day_pl':           round(day_pl, 2),
-            'day_plpc':         round(day_plpc * 100, 2),
-            'avg_entry_price':  round(avg_entry, 4),
-            'cost_basis':       round(cost, 2),
-            'is_orphan':        False,
-            'signal_headline':  _sig_headline,
-            'signal_source':    _sig_source,
-            'signal_confidence': _sig_confidence,
-            'signal_image_url': _sig_image_url,
-            'signal_source_url': _sig_source_url,
-        })
-
     orphans = []
     for sym, ap in alpaca_pos_map.items():
         if sym in db_tickers:
@@ -3222,6 +3219,22 @@ def _enrich_positions(db_positions, alpaca_pos_map):
             'is_orphan':        True,
             'pnl':              round(unreal_pl, 2),
         })
+    return orphans
+
+
+def _enrich_positions(db_positions, alpaca_pos_map):
+    """
+    Merge DB positions with live Alpaca data.
+    Returns (enriched_list, orphan_list).
+      enriched: DB positions with current_price / market_value / pl fields populated
+      orphans:  Alpaca positions not in DB (shown as warnings)
+    """
+    db_tickers = set()
+    enriched = []
+    for p in db_positions:
+        db_tickers.add(p.get('ticker', ''))
+        enriched.append(_enrich_single_db_position(p, alpaca_pos_map))
+    orphans = _extract_orphan_positions(alpaca_pos_map, db_tickers)
     return enriched, orphans
 
 
@@ -3381,60 +3394,100 @@ def _enrich_flags(raw_flags, db_path):
     return enriched
 
 
+def _status_locked_mode(db, agent_running_info):
+    """Fast-path status response when agent is actively running (no Alpaca enrichment).
+    Returns the status dict.
+    """
+    portfolio = db.get_portfolio()
+    positions = db.get_open_positions()
+    last_hb   = db.get_last_heartbeat()
+    basic_positions = []
+    for p in positions:
+        entry = float(p.get('entry_price', 0) or 0)
+        shares = float(p.get('shares', 0) or 0)
+        cur = float(p.get('current_price', 0) or 0) or entry
+        basic_positions.append({
+            **p,
+            'current_price':    round(cur, 4),
+            'market_value':     round(cur * shares, 2),
+            'unrealized_pl':    round((cur - entry) * shares, 2),
+            'unrealized_plpc':  round(((cur - entry) / entry * 100) if entry else 0, 2),
+            'day_pl': 0.0, 'day_plpc': 0.0,
+            'avg_entry_price':  round(entry, 4),
+            'cost_basis':       round(entry * shares, 2),
+            'is_orphan':        False,
+        })
+    mkt_total = sum(p['market_value'] for p in basic_positions)
+    return {
+        "portfolio_value":    round(portfolio['cash'] + mkt_total, 2),
+        "cash":               round(portfolio['cash'], 2),
+        "realized_gains":     round(portfolio.get('realized_gains', 0), 2),
+        "open_positions":     len(basic_positions),
+        "orphan_count":       0,
+        "positions":          basic_positions,
+        "urgent_flags":       0,
+        "critical_flags":     0,
+        "flags_detail":       [],
+        "last_heartbeat":     last_hb['timestamp'] if last_hb else "Never",
+        "kill_switch":        db.get_setting('KILL_SWITCH') == '1' or kill_switch_active(),
+        "operating_mode":     db.get_setting('OPERATING_MODE') or OPERATING_MODE,
+        "trading_mode":       os.environ.get('TRADING_MODE', 'PAPER'),
+        "max_trade_usd":      float(os.environ.get('MAX_TRADE_USD', '0')),
+        "pi_id":              PI_ID,
+        "agent_running":      agent_running_info['agent'],
+        "agent_running_secs": agent_running_info.get('age_secs', 0),
+        "admin_overrides": {
+            "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
+            "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
+        },
+    }
+
+
+def _compute_user_warnings(enriched, db):
+    """Compute user-facing warnings about cap utilization and cash starvation.
+    Returns list of warning dicts.
+    """
+    warnings = []
+    _auto_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'bot')
+    _user_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'user')
+    if (_auto_n + _user_n) >= 1 and _auto_n < max(2, int(AUTO_USER_POSITION_CAP * 0.4)):
+        warnings.append({
+            'type': 'cap_underutilized',
+            'severity': 'info',
+            'message': (f"Bot is only managing {_auto_n}/{AUTO_USER_POSITION_CAP} positions. "
+                        f"Promote USER positions to AUTO below if you want more bot coverage."),
+        })
+    try:
+        with db.conn() as _c:
+            _skip_row = _c.execute(
+                "SELECT COUNT(*) AS n FROM signal_decisions "
+                "WHERE action = 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL' "
+                "AND ts >= datetime('now', '-7 days')"
+            ).fetchone()
+            _skip_count = int(_skip_row['n']) if _skip_row else 0
+    except Exception:
+        _skip_count = 0
+    if _skip_count >= 2:
+        warnings.append({
+            'type': 'cash_starved',
+            'severity': 'warn',
+            'message': (f"Bot skipped {_skip_count} signals in the last 7 days because "
+                        f"there wasn't enough cash after your manual positions. "
+                        f"Closing a USER position or adding funds would restore bot coverage."),
+        })
+    return warnings
+
+
 def get_system_status():
     """Read live status from database, enriched with Alpaca real-time prices."""
     import time as _time
 
-    # Check if agent is actually running (skip Alpaca to avoid contention)
     _agent_running = _read_agent_running()
     if _agent_running:
         log.debug(f"Agent running: {_agent_running['agent']} — using DB-only data (no Alpaca enrichment)")
         try:
             db = _customer_db()
-            portfolio = db.get_portfolio()
-            positions = db.get_open_positions()
-            last_hb   = db.get_last_heartbeat()
-            # Use DB prices (last known) without live Alpaca enrichment
-            basic_positions = []
-            for p in positions:
-                entry = float(p.get('entry_price', 0) or 0)
-                shares = float(p.get('shares', 0) or 0)
-                cur = float(p.get('current_price', 0) or 0) or entry
-                basic_positions.append({
-                    **p,
-                    'current_price': round(cur, 4),
-                    'market_value': round(cur * shares, 2),
-                    'unrealized_pl': round((cur - entry) * shares, 2),
-                    'unrealized_plpc': round(((cur - entry) / entry * 100) if entry else 0, 2),
-                    'day_pl': 0.0, 'day_plpc': 0.0,
-                    'avg_entry_price': round(entry, 4),
-                    'cost_basis': round(entry * shares, 2),
-                    'is_orphan': False,
-                })
-            mkt_total = sum(p['market_value'] for p in basic_positions)
-            return {
-                "portfolio_value": round(portfolio['cash'] + mkt_total, 2),
-                "cash":            round(portfolio['cash'], 2),
-                "realized_gains":  round(portfolio.get('realized_gains', 0), 2),
-                "open_positions":  len(basic_positions),
-                "orphan_count":    0,
-                "positions":       basic_positions,
-                "urgent_flags":    0,
-                "critical_flags":  0,
-                "flags_detail":    [],
-                "last_heartbeat":  last_hb['timestamp'] if last_hb else "Never",
-                "kill_switch":     db.get_setting('KILL_SWITCH') == '1' or kill_switch_active(),
-                "operating_mode":  db.get_setting('OPERATING_MODE') or OPERATING_MODE,
-                "trading_mode":    os.environ.get('TRADING_MODE', 'PAPER'),
-                "max_trade_usd":   float(os.environ.get('MAX_TRADE_USD', '0')),
-                "pi_id":           PI_ID,
-                "agent_running":   _agent_running['agent'],
-                "agent_running_secs": _agent_running.get('age_secs', 0),
-                "admin_overrides": {
-                    "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
-                    "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
-                },
-            }
+            return _status_locked_mode(db, _agent_running)
         except Exception as e:
             log.warning(f"Lock-mode status read failed: {e}")
 
@@ -3446,13 +3499,10 @@ def get_system_status():
             last_hb    = db.get_last_heartbeat()
             flags      = db.get_urgent_flags()
 
-            # Enrich with Alpaca real-time data
             alpaca_map           = _fetch_alpaca_positions()
             enriched, orphans    = _enrich_positions(positions, alpaca_map)
             all_positions        = enriched + orphans
 
-            # Attach sticky preference per position for the AUTO/USER lock UI.
-            # Single query + dict lookup so we don't hit the DB per-row.
             try:
                 with db.conn() as _c:
                     _sticky_map = {
@@ -3466,50 +3516,14 @@ def get_system_status():
             for _p in all_positions:
                 _p['sticky'] = _sticky_map.get(_p.get('ticker'))
 
-            # User-facing warnings — computed per request, not persisted. Keeps
-            # the UI honest about pipeline health without spamming notifications.
-            _user_warnings = []
-            _auto_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'bot')
-            _user_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'user')
-            # Cap-underutilized: ≥ 1 position total, bot covering < 40% of cap.
-            # Suppressed on brand-new accounts (zero positions) so onboarding
-            # isn't noisy.
-            if (_auto_n + _user_n) >= 1 and _auto_n < max(2, int(AUTO_USER_POSITION_CAP * 0.4)):
-                _user_warnings.append({
-                    'type': 'cap_underutilized',
-                    'severity': 'info',
-                    'message': (f"Bot is only managing {_auto_n}/{AUTO_USER_POSITION_CAP} positions. "
-                                f"Promote USER positions to AUTO below if you want more bot coverage."),
-                })
-            # Cash-starved: recent SKIP_INSUFFICIENT_CASH_AFTER_MANUAL signals.
-            try:
-                with db.conn() as _c:
-                    _skip_row = _c.execute(
-                        "SELECT COUNT(*) AS n FROM signal_decisions "
-                        "WHERE action = 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL' "
-                        "AND ts >= datetime('now', '-7 days')"
-                    ).fetchone()
-                    _skip_count = int(_skip_row['n']) if _skip_row else 0
-            except Exception:
-                _skip_count = 0
-            if _skip_count >= 2:
-                _user_warnings.append({
-                    'type': 'cash_starved',
-                    'severity': 'warn',
-                    'message': (f"Bot skipped {_skip_count} signals in the last 7 days because "
-                                f"there wasn't enough cash after your manual positions. "
-                                f"Closing a USER position or adding funds would restore bot coverage."),
-                })
+            _user_warnings = _compute_user_warnings(enriched, db)
 
-            # Enrich flags with human-readable context
             enriched_flags = _enrich_flags([dict(f) for f in flags], db.path)
             critical_count = sum(1 for f in enriched_flags if f['tier'] == 1)
 
-            # Portfolio value: cash + sum of current market values
             market_value_total = sum(p['market_value'] for p in all_positions)
             total = round(portfolio['cash'] + market_value_total, 2)
 
-            # Per-customer operating mode (fallback to global)
             _cust_mode = db.get_setting('OPERATING_MODE') or OPERATING_MODE
             _cust_kill = db.get_setting('KILL_SWITCH') == '1' or kill_switch_active()
 
@@ -13821,6 +13835,195 @@ def _get_customer_trading_modes():
     return counts
 
 
+def _parse_db_dt_to_et(ts_str):
+    """Parse a DB timestamp (naive UTC or ISO+tz) and return tz-aware ET datetime, or None."""
+    from zoneinfo import ZoneInfo
+    if not ts_str:
+        return None
+    _et = ZoneInfo("America/New_York")
+    s = str(ts_str).strip()
+    try:
+        if '+' in s or s.endswith('Z'):
+            dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+            return dt.astimezone(_et)
+        dt = datetime.fromisoformat(s.replace(' ', 'T')[:19])
+        return dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(_et)
+    except Exception:
+        return None
+
+
+def _session_bin_index(dt_et, session_start, session_end, n_bins, bin_minutes):
+    """Return the bin index [0..n_bins) for a session-day timestamp, or None if outside window."""
+    if dt_et is None:
+        return None
+    if dt_et < session_start or dt_et >= session_end:
+        return None
+    delta = int((dt_et - session_start).total_seconds() // 60)
+    idx = delta // bin_minutes
+    return idx if 0 <= idx < n_bins else None
+
+
+def _resolve_trading_session_date(date_param, now):
+    """Resolve ?date= param to a trading session date (ET date object).
+    Returns (session_date, error_response) — error_response is a Flask
+    (response, status) tuple or None on success.
+    """
+    from datetime import time as _time, timedelta
+    _market_start_t = _time(9, 30)
+    if date_param:
+        try:
+            session_date = datetime.strptime(date_param, '%Y-%m-%d').date()
+            if session_date > now.date() or (now.date() - session_date).days > 366:
+                raise ValueError('out of range')
+        except ValueError:
+            return None, (jsonify({'error': f'invalid or out-of-range date {date_param!r}'}), 400)
+    else:
+        session_date = now.date()
+        if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
+            session_date = session_date - timedelta(days=1)
+            while session_date.weekday() >= 5:
+                session_date = session_date - timedelta(days=1)
+    return session_date, None
+
+
+def _build_market_bins(session_start, session_end, bin_minutes=10):
+    """Build bin metadata for a trading session.
+    Returns (n_bins, bin_labels, bin_starts).
+    """
+    from datetime import timedelta
+    session_minutes = int((session_end - session_start).total_seconds() // 60)
+    n_bins = session_minutes // bin_minutes
+    labels = []
+    starts = []
+    for i in range(n_bins):
+        t = session_start + timedelta(minutes=i * bin_minutes)
+        labels.append(t.strftime('%H:%M'))
+        starts.append(t.isoformat())
+    return n_bins, labels, starts
+
+
+def _aggregate_customer_market_activity(n_bins, session_start, session_end,
+                                          session_start_cutoff, session_end_cutoff,
+                                          customer_names):
+    """Aggregate buy/sell activity across all customers for a trading session.
+    Returns (customers_data, total_buys_bins, total_sells_bins, buy_count, sell_count).
+    """
+    BIN_MINUTES = 10
+    customers_data   = {}
+    total_buys_bins  = [0.0] * n_bins
+    total_sells_bins = [0.0] * n_bins
+    total_buy_count  = 0
+    total_sell_count = 0
+
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    for cid in os.listdir(customers_dir):
+        if cid == 'default':
+            continue
+        db_path = os.path.join(customers_dir, cid, 'signals.db')
+        if not os.path.exists(db_path):
+            continue
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path, timeout=5)
+            conn.row_factory = sqlite3.Row
+            cust_buys  = [0.0] * n_bins
+            cust_sells = [0.0] * n_bins
+            has_activity = False
+
+            for r in conn.execute(
+                "SELECT opened_at, entry_price * shares AS amt FROM positions "
+                "WHERE opened_at IS NOT NULL AND opened_at >= ? AND opened_at < ?",
+                (session_start_cutoff, session_end_cutoff)
+            ).fetchall():
+                idx = _session_bin_index(
+                    _parse_db_dt_to_et(r['opened_at']),
+                    session_start, session_end, n_bins, BIN_MINUTES,
+                )
+                if idx is None:
+                    continue
+                amt = float(r['amt'] or 0)
+                cust_buys[idx]        += amt
+                total_buys_bins[idx]  += amt
+                total_buy_count       += 1
+                has_activity = True
+
+            for r in conn.execute(
+                "SELECT closed_at, entry_price * shares AS amt FROM positions "
+                "WHERE closed_at IS NOT NULL AND closed_at >= ? AND closed_at < ?",
+                (session_start_cutoff, session_end_cutoff)
+            ).fetchall():
+                idx = _session_bin_index(
+                    _parse_db_dt_to_et(r['closed_at']),
+                    session_start, session_end, n_bins, BIN_MINUTES,
+                )
+                if idx is None:
+                    continue
+                amt = float(r['amt'] or 0)
+                cust_sells[idx]        += amt
+                total_sells_bins[idx]  += amt
+                total_sell_count       += 1
+                has_activity = True
+
+            conn.close()
+            if has_activity:
+                customers_data[cid] = {
+                    'name':  customer_names.get(cid, cid[:8]),
+                    'buys':  [round(v, 2) for v in cust_buys],
+                    'sells': [round(v, 2) for v in cust_sells],
+                }
+        except Exception as e:
+            log.warning(f"market-activity scan for {cid[:8]}: {e}")
+
+    return customers_data, total_buys_bins, total_sells_bins, total_buy_count, total_sell_count
+
+
+def _aggregate_user_sessions_historical(session_date):
+    """Aggregate user sessions for a historical ET calendar day from session_history.
+    Returns (hour_keys, session_bins, session_names).
+    """
+    from datetime import timedelta, time as _time
+    from zoneinfo import ZoneInfo
+    import json as _json_local
+    _et = ZoneInfo("America/New_York")
+    session_day_start_et = datetime.combine(session_date, _time(0, 0), tzinfo=_et)
+    hour_keys = [
+        (session_day_start_et + timedelta(hours=i)).strftime('%Y-%m-%dT%H:00')
+        for i in range(24)
+    ]
+    day_start_utc = session_day_start_et.astimezone(ZoneInfo("UTC"))
+    day_end_utc   = day_start_utc + timedelta(hours=24)
+    u_lo = day_start_utc.strftime('%Y-%m-%dT%H:%M')
+    u_hi = day_end_utc.strftime('%Y-%m-%dT%H:%M')
+    session_bins  = {k: 0     for k in hour_keys}
+    session_names = {k: set() for k in hour_keys}
+    try:
+        shared = _shared_db()
+        with shared.conn() as c:
+            rows = c.execute(
+                "SELECT ts, count, names FROM session_history "
+                "WHERE ts >= ? AND ts < ? ORDER BY ts ASC",
+                (u_lo, u_hi),
+            ).fetchall()
+        for r in rows:
+            try:
+                utc_dt = datetime.fromisoformat(r['ts']).replace(tzinfo=ZoneInfo("UTC"))
+            except Exception:
+                continue
+            et_dt = utc_dt.astimezone(_et)
+            hkey = et_dt.strftime('%Y-%m-%dT%H:00')
+            if hkey not in session_bins:
+                continue
+            session_bins[hkey] = max(session_bins[hkey], int(r['count'] or 0))
+            try:
+                for n in (_json_local.loads(r['names']) if r['names'] else []):
+                    session_names[hkey].add(n)
+            except Exception:
+                pass
+    except Exception as e:
+        log.debug(f"session_history historical fetch failed: {e}")
+    return hour_keys, session_bins, session_names
+
+
 @app.route('/api/admin/market-activity')
 @admin_required
 def api_admin_market_activity():
@@ -13842,50 +14045,24 @@ def api_admin_market_activity():
     always the most-recent session — not configurable because the
     monitor chart is always "how did today go", not a rolling window.
     """
-    from datetime import datetime, timedelta, date as _date, time as _time
+    from datetime import datetime, timedelta, time as _time
     from zoneinfo import ZoneInfo
     import auth as _auth
 
     hours = int(request.args.get('hours', 24))
     _et = ZoneInfo("America/New_York")
     now = datetime.now(_et)
-
-    # ── SESSION DATE RESOLUTION ────────────────────────────────────────
-    # Client can pass ?date=YYYY-MM-DD to request a specific prior
-    # session. If omitted, resolve to the most-recent trading day in ET:
-    #   - If today is a weekday and now >= 9:30 ET → today
-    #   - Otherwise → the most recent prior weekday
-    # Holidays aren't modeled; the chart will just show flat 0 bars on
-    # a holiday session which is honest (nothing traded that day).
-    _market_start_t = _time(9, 30)
     date_param = (request.args.get('date') or '').strip()
-    bad_date = False
-    if date_param:
-        try:
-            session_date = datetime.strptime(date_param, '%Y-%m-%d').date()
-            # Reject unreasonable dates so we can't DoS on 10k days of
-            # empty iteration. 366 days back is plenty; anything further
-            # should use a proper analytics tool.
-            if session_date > now.date() or (now.date() - session_date).days > 366:
-                bad_date = True
-        except ValueError:
-            bad_date = True
-        if bad_date:
-            return jsonify({'error': f'invalid or out-of-range date {date_param!r}'}), 400
-    else:
-        session_date = now.date()
-        if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
-            session_date = session_date - timedelta(days=1)
-            while session_date.weekday() >= 5:
-                session_date = session_date - timedelta(days=1)
+
+    # ── Session date ────────────────────────────────────────────────────
+    session_date, err = _resolve_trading_session_date(date_param, now)
+    if err:
+        return err
 
     session_start = datetime.combine(session_date, _time(9, 30), tzinfo=_et)
     session_end   = datetime.combine(session_date, _time(16, 0), tzinfo=_et)
 
-    # Navigation metadata so the client knows which prev/next day to jump
-    # to without having to re-implement the weekday logic. Skips weekends
-    # and optionally holidays (not yet modeled — prev/next today just
-    # skips Sat/Sun).
+    # ── Navigation metadata ─────────────────────────────────────────────
     def _shift_trading_day(d, delta):
         step = 1 if delta > 0 else -1
         remaining = abs(delta)
@@ -13895,65 +14072,20 @@ def api_admin_market_activity():
                 remaining -= 1
         return d
 
+    _market_start_t = _time(9, 30)
     prev_session_date = _shift_trading_day(session_date, -1)
-    # Next trading day only useful if we're not already on the current
-    # session — otherwise the caller is "looking at today, can't go
-    # forward." Express as None so the client can disable the button.
     _today_session = now.date()
     if now.weekday() >= 5 or (now.weekday() < 5 and now.time() < _market_start_t):
         _today_session = _shift_trading_day(_today_session, -1)
         while _today_session.weekday() >= 5:
             _today_session = _today_session - timedelta(days=1)
-    next_session_date = _shift_trading_day(session_date, 1) \
-        if session_date < _today_session else None
+    next_session_date = _shift_trading_day(session_date, 1) if session_date < _today_session else None
 
-    # 10-min bins across 9:30→16:00 ET (39 bins). Labels are "HH:MM"
-    # for display; key is the bin-start minute-of-day (0-indexed) so
-    # lookups are deterministic even across DST boundaries.
+    # ── Bins ────────────────────────────────────────────────────────────
     BIN_MINUTES = 10
-    session_minutes = int((session_end - session_start).total_seconds() // 60)   # 390
-    n_bins = session_minutes // BIN_MINUTES                                      # 39
-    market_bin_labels = []
-    market_bin_starts = []                                                       # ISO strings for tooltip
-    for i in range(n_bins):
-        start = session_start + timedelta(minutes=i * BIN_MINUTES)
-        market_bin_labels.append(start.strftime('%H:%M'))
-        market_bin_starts.append(start.isoformat())
+    n_bins, market_bin_labels, market_bin_starts = _build_market_bins(session_start, session_end, BIN_MINUTES)
 
-    def _parse_to_et(ts_str):
-        """Parse a DB timestamp (usually naive UTC or ISO+tz) and return
-        a tz-aware ET datetime, or None if unparseable."""
-        if not ts_str:
-            return None
-        s = str(ts_str).strip()
-        try:
-            if '+' in s or s.endswith('Z'):
-                dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
-                return dt.astimezone(_et)
-            # Naive — DB stores UTC-naive, so attach UTC then convert.
-            dt = datetime.fromisoformat(s.replace(' ', 'T')[:19])
-            return dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(_et)
-        except Exception:
-            return None
-
-    def _market_bin_index(dt_et):
-        """Return the 10-min bin index [0..n_bins) for a session-day
-        timestamp, or None if outside the session window."""
-        if dt_et is None:
-            return None
-        if dt_et < session_start or dt_et >= session_end:
-            return None
-        delta = int((dt_et - session_start).total_seconds() // 60)
-        idx = delta // BIN_MINUTES
-        return idx if 0 <= idx < n_bins else None
-
-    # ── 24h USER-SESSIONS BINS (existing shape, unchanged) ─────────────
-    hour_keys = []
-    for i in range(hours):
-        h = (now - timedelta(hours=hours - 1 - i))
-        hour_keys.append(h.strftime('%Y-%m-%dT%H:00'))
-
-    # ── CUSTOMER NAME LOOKUP ───────────────────────────────────────────
+    # ── Customer name lookup ────────────────────────────────────────────
     customer_names = {}
     try:
         with _auth._auth_conn() as c:
@@ -13965,154 +14097,32 @@ def api_admin_market_activity():
     except Exception:
         pass
 
-    # ── PER-CUSTOMER MARKET BINS (10-min) + TOTAL BINS ─────────────────
-    customers_data   = {}   # {cid: {name, buys[n_bins], sells[n_bins]}}
-    total_buys_bins  = [0.0] * n_bins
-    total_sells_bins = [0.0] * n_bins
-    total_buy_count  = 0
-    total_sell_count = 0
-
-    # SQL-level pre-filter to avoid pulling a customer's full trade
-    # history into Python just to bin today's session.
-    #
-    # DB stores opened_at / closed_at as naive UTC strings with a SPACE
-    # separator: "2026-04-17 16:03:09" — see DB.now() in retail_database.
-    # My previous version emitted cutoffs with a 'T' separator, which
-    # made lexical comparisons break silently: space (ASCII 32) sorts
-    # BEFORE 'T' (ASCII 84), so "2026-04-17 16:03:09" < "2026-04-17T13:29:00"
-    # even though 16:03 is clearly after 13:29. Result: every real row
-    # was filtered out as "before the cutoff" and today's chart was empty.
-    # Format matches DB.now() exactly so the SQL comparison is honest.
+    # ── Market activity ─────────────────────────────────────────────────
     session_start_utc = session_start.astimezone(ZoneInfo("UTC"))
     session_end_utc   = session_end.astimezone(ZoneInfo("UTC"))
-    _session_start_cutoff = (session_start_utc - timedelta(minutes=1)
-                             ).strftime('%Y-%m-%d %H:%M:%S')
-    _session_end_cutoff   = (session_end_utc + timedelta(minutes=1)
-                             ).strftime('%Y-%m-%d %H:%M:%S')
+    _session_start_cutoff = (session_start_utc - timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S')
+    _session_end_cutoff   = (session_end_utc + timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S')
 
-    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
-    for cid in os.listdir(customers_dir):
-        if cid == 'default':
-            continue
-        db_path = os.path.join(customers_dir, cid, 'signals.db')
-        if not os.path.exists(db_path):
-            continue
-        try:
-            import sqlite3
-            conn = sqlite3.connect(db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
-            cust_buys  = [0.0] * n_bins
-            cust_sells = [0.0] * n_bins
-            has_activity = False
+    customers_data, total_buys_bins, total_sells_bins, total_buy_count, total_sell_count = \
+        _aggregate_customer_market_activity(
+            n_bins, session_start, session_end,
+            _session_start_cutoff, _session_end_cutoff, customer_names,
+        )
 
-            # Buys — opened_at within today's session window
-            for r in conn.execute(
-                "SELECT opened_at, entry_price * shares AS amt FROM positions "
-                "WHERE opened_at IS NOT NULL "
-                "AND opened_at >= ? AND opened_at < ?",
-                (_session_start_cutoff, _session_end_cutoff)
-            ).fetchall():
-                idx = _market_bin_index(_parse_to_et(r['opened_at']))
-                if idx is None:
-                    continue
-                amt = float(r['amt'] or 0)
-                cust_buys[idx]        += amt
-                total_buys_bins[idx]  += amt
-                total_buy_count       += 1
-                has_activity = True
-
-            # Sells — closed_at within today's session window
-            for r in conn.execute(
-                "SELECT closed_at, entry_price * shares AS amt FROM positions "
-                "WHERE closed_at IS NOT NULL "
-                "AND closed_at >= ? AND closed_at < ?",
-                (_session_start_cutoff, _session_end_cutoff)
-            ).fetchall():
-                idx = _market_bin_index(_parse_to_et(r['closed_at']))
-                if idx is None:
-                    continue
-                amt = float(r['amt'] or 0)
-                cust_sells[idx]        += amt
-                total_sells_bins[idx]  += amt
-                total_sell_count       += 1
-                has_activity = True
-
-            conn.close()
-            if has_activity:
-                customers_data[cid] = {
-                    'name':  customer_names.get(cid, cid[:8]),
-                    'buys':  [round(v, 2) for v in cust_buys],
-                    'sells': [round(v, 2) for v in cust_sells],
-                }
-        except Exception as e:
-            log.warning(f"market-activity scan for {cid[:8]}: {e}")
-
-    # Round + compute net for the total series
     total_buys_bins_r  = [round(v, 2) for v in total_buys_bins]
     total_sells_bins_r = [round(v, 2) for v in total_sells_bins]
     total_net_bins     = [round(b - s, 2) for b, s in zip(total_buys_bins, total_sells_bins)]
 
-    # ── USER SESSIONS BINS ─────────────────────────────────────────────
-    # Two modes:
-    #   date NOT set → rolling last 24h (read from in-memory deque).
-    #                  Existing behavior, preserved.
-    #   date SET     → that ET calendar day (0:00-23:59), read from the
-    #                  persistent session_history table so we can page
-    #                  back through history the same way the market
-    #                  chart does. "Attached to the same controls."
+    # ── User sessions ────────────────────────────────────────────────────
     if date_param:
-        # Build 24 ET-hour keys spanning the selected date.
-        session_day_start_et = datetime.combine(session_date, _time(0, 0), tzinfo=_et)
-        session_user_hours = []
-        for i in range(24):
-            h_et = session_day_start_et + timedelta(hours=i)
-            session_user_hours.append(h_et.strftime('%Y-%m-%dT%H:00'))
-
-        # session_history stores timestamps as naive UTC minute strings
-        # (format '%Y-%m-%dT%H:%M', see the persistence loop below in
-        # this file). Query the ET-date window converted to UTC.
-        day_start_utc = session_day_start_et.astimezone(ZoneInfo("UTC"))
-        day_end_utc   = day_start_utc + timedelta(hours=24)
-        u_lo = day_start_utc.strftime('%Y-%m-%dT%H:%M')
-        u_hi = day_end_utc.strftime('%Y-%m-%dT%H:%M')
-
-        session_bins  = {k: 0     for k in session_user_hours}
-        session_names = {k: set() for k in session_user_hours}
-        try:
-            shared = _shared_db()
-            import json as _json_local
-            with shared.conn() as c:
-                rows = c.execute(
-                    "SELECT ts, count, names FROM session_history "
-                    "WHERE ts >= ? AND ts < ? ORDER BY ts ASC",
-                    (u_lo, u_hi),
-                ).fetchall()
-            for r in rows:
-                try:
-                    utc_dt = datetime.fromisoformat(r['ts']).replace(tzinfo=ZoneInfo("UTC"))
-                except Exception:
-                    continue
-                et_dt = utc_dt.astimezone(_et)
-                hkey = et_dt.strftime('%Y-%m-%dT%H:00')
-                if hkey not in session_bins:
-                    continue
-                session_bins[hkey] = max(session_bins[hkey], int(r['count'] or 0))
-                try:
-                    for n in (_json_local.loads(r['names']) if r['names'] else []):
-                        session_names[hkey].add(n)
-                except Exception:
-                    pass
-        except Exception as e:
-            log.debug(f"session_history historical fetch failed: {e}")
-
-        hour_keys = session_user_hours
-        # No active_now on a historical view — use 0 so the UI doesn't
-        # imply "3 users are active right now" when the user is looking
-        # at last Thursday.
+        hour_keys, session_bins, session_names = _aggregate_user_sessions_historical(session_date)
         active_now = 0
         active_customers = []
     else:
-        # Default rolling 24h — existing behavior.
+        hour_keys = [
+            (now - timedelta(hours=hours - 1 - i)).strftime('%Y-%m-%dT%H:00')
+            for i in range(hours)
+        ]
         session_bins  = {k: 0     for k in hour_keys}
         session_names = {k: set() for k in hour_keys}
         with _session_activity_lock:
@@ -14137,33 +14147,27 @@ def api_admin_market_activity():
                         name = cid[:8]
                     active_customers.append({'name': name, 'idle_secs': int(idle)})
 
-    hours_list = sorted(session_bins.keys())
+    hours_list    = sorted(session_bins.keys())
     sessions_list = [session_bins[h] for h in hours_list]
-    peak = max(sessions_list) if sessions_list else 0
-    total_buys_all = sum(total_buys_bins)
+    peak          = max(sessions_list) if sessions_list else 0
+    total_buys_all  = sum(total_buys_bins)
     total_sells_all = sum(total_sells_bins)
 
     return jsonify({
-        # Market-hours activity (10-min bins, most recent session)
         'market_activity': {
-            'bins':         market_bin_labels,
-            'bin_starts':   market_bin_starts,
-            'buys':         total_buys_bins_r,
-            'sells':        total_sells_bins_r,
-            'net':          total_net_bins,
-            'customers':    customers_data,
-            'session_date':      session_date.isoformat(),
-            'session_open_iso':  session_start.isoformat(),
-            'session_close_iso': session_end.isoformat(),
-            # Client uses these to wire prev/next nav without having to
-            # re-implement weekday skip / today-edge logic.
-            'prev_session_date': prev_session_date.isoformat(),
-            'next_session_date': (next_session_date.isoformat()
-                                  if next_session_date else None),
+            'bins':               market_bin_labels,
+            'bin_starts':         market_bin_starts,
+            'buys':               total_buys_bins_r,
+            'sells':              total_sells_bins_r,
+            'net':                total_net_bins,
+            'customers':          customers_data,
+            'session_date':       session_date.isoformat(),
+            'session_open_iso':   session_start.isoformat(),
+            'session_close_iso':  session_end.isoformat(),
+            'prev_session_date':  prev_session_date.isoformat(),
+            'next_session_date':  (next_session_date.isoformat() if next_session_date else None),
             'is_current_session': session_date == _today_session,
         },
-        # User sessions. Rolling 24h when no date param; else the
-        # session_date's ET calendar day read from session_history.
         'user_sessions': {
             'hours':            hours_list,
             'counts':           sessions_list,
@@ -14172,11 +14176,9 @@ def api_admin_market_activity():
             'active_now':       active_now,
             'active_customers': active_customers,
             'peak':             max(peak, active_now),
-            # Metadata so the UI can show "Tue Apr 15 · hourly" vs "24h rolling"
             'session_date':     session_date.isoformat() if date_param else None,
             'mode':             'historical' if date_param else 'rolling_24h',
         },
-        # Summary totals — same fields the monitor's summary strip reads
         'summary': {
             'total_buys':       round(total_buys_all, 2),
             'total_sells':      round(total_sells_all, 2),
