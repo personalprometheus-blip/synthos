@@ -2981,6 +2981,53 @@ def run(session="open"):
         db.log_heartbeat("trade_logic_agent", "OK")
         return
 
+    # Audit Round 5 — BIL concentration alert. Informational sub-gate:
+    # if the customer is parking > BIL_CONCENTRATION_THRESHOLD (default
+    # 65%) of capital in BIL, surface it in the decision log and log a
+    # warning. Doesn't block anything — just makes an otherwise-silent
+    # condition visible.
+    try:
+        _bil = db.check_bil_concentration()
+        session_log.gate(
+            "0_BIL_CONCENTRATION",
+            "HIGH" if _bil['over_threshold'] else "OK",
+            {
+                "bil_value":    f"${_bil['bil_value']:.2f}",
+                "total_value":  f"${_bil['total_value']:.2f}",
+                "bil_pct":      f"{_bil['bil_pct']*100:.1f}%",
+                "threshold":    f"{_bil['threshold_pct']*100:.0f}%",
+            },
+            (f"BIL at {_bil['bil_pct']*100:.1f}% of portfolio — "
+             f"above {_bil['threshold_pct']*100:.0f}% threshold"
+             if _bil['over_threshold']
+             else f"BIL at {_bil['bil_pct']*100:.1f}% of portfolio"),
+        )
+        if _bil['over_threshold']:
+            log.warning(
+                f"[BIL ALERT] concentration {_bil['bil_pct']*100:.1f}% "
+                f"(${_bil['bil_value']:.0f} of ${_bil['total_value']:.0f}) "
+                f">= threshold {_bil['threshold_pct']*100:.0f}% — "
+                f"check for signal starvation or regime hold"
+            )
+            try:
+                db.add_notification(
+                    'alert',
+                    f'BIL concentration {_bil["bil_pct"]*100:.0f}%',
+                    f"Portfolio parking ${_bil['bil_value']:.0f} of "
+                    f"${_bil['total_value']:.0f} in BIL. Usually means no "
+                    f"entries qualifying or intentional risk-off stance.",
+                    meta={
+                        'bil_pct':     round(_bil['bil_pct'], 4),
+                        'bil_value':   _bil['bil_value'],
+                        'total_value': _bil['total_value'],
+                    },
+                    dedup_key=f'bil_concentration_{datetime.now().strftime("%Y%m%d")}',
+                )
+            except Exception as _e:
+                log.debug(f"BIL notification write failed: {_e}")
+    except Exception as _e:
+        log.debug(f"BIL concentration check failed: {_e}")
+
     session_log.gate("0_HEALTH", "OK", {
         "equity": alpaca_equity, "cash": alpaca_cash,
         "positions_db": len(positions_after), "positions_alpaca": len(alpaca_positions),

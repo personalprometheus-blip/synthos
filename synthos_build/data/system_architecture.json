@@ -51,6 +51,7 @@
         {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads top-N per sector from sector_screening. Trader consumes via windows (Phase 3c).", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_window_calculator.py", "desc": "Phase 3b/4 — precomputes macro+minor entry/exit windows per signal × customer into trade_windows. Phase 4.a adds ATR column; 4.b scales bands by ATR. Anchor still dynamic — pin revisit deferred post-Phase-5.", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_event_calendar.py", "desc": "Phase 5.a — Gate 4 EVENT_RISK calendar. Nasdaq bulk earnings fetch + macro_events table. Called from market_daemon's enrichment tick.", "how": "module (called by market_daemon)", "status": "live"},
+        {"name": "retail_tradable_cache.py", "desc": "Audit Round 5 — Alpaca /v2/assets cache (~11k us_equity symbols). Candidate Generator uses is_tradable() to filter out crypto/delisted/OTC before emission. Refreshed once per trading day in premarket.", "how": "module (refreshed by market_daemon)", "status": "live"},
         {"name": "retail_daily_master.py", "desc": "Phase 5.c — end-of-day audit rollup. Renders logs/daily_master/YYYY-MM-DD.md with opens/closes/candidates/cooling-off/earnings tables. Fires at market close from run_close_session.", "how": "module (called at 4PM ET by market_daemon)", "status": "live"},
         {"name": "retail_macro_regime_agent.py", "desc": "Macro regime classifier (BEAR/BULL/NORMAL trend × volatility). Runs in enrichment pipeline.", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_market_state_agent.py", "desc": "Market state detector (open/close/holiday) for session gating.", "how": "daemon subprocess", "status": "live"},
@@ -163,6 +164,8 @@
     "Phase 5.a: Gate 4 EVENT_RISK scheduled-event calendar (Nasdaq earnings + macro_events table)",
     "Phase 5.b: cooling_off after stop-out (24h default; Gate 4 sub-gate)",
     "Phase 5.c: daily_master.md end-of-day audit rollup",
-    "Audit Round 1 (2026-04-20): 5 critical bugs fixed — missing time/timezone imports, out-of-scope trade_events, candidate-gen tx_date dedup, Gate 4 ticker dedup (killed AAPL runaway)"
+    "Audit Round 1 (2026-04-20): 5 critical bugs fixed — missing time/timezone imports, out-of-scope trade_events, candidate-gen tx_date dedup, Gate 4 ticker dedup (killed AAPL runaway)",
+    "Audit Round 4 (2026-04-20): macro window anchor pinned (INSERT OR IGNORE) + .known_good/ cleanup (832K snapshot deleted) + portal customer_count template-var fix",
+    "Audit Round 5 (2026-04-20): BIL concentration alert (Gate 0 sub-gate + daily notification) + tradable-asset cache (Alpaca /v2/assets filter in Candidate Generator)"
   ]
 }

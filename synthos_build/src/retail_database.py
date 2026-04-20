@@ -1510,6 +1510,46 @@ class DB:
             )
             return cur.lastrowid
 
+    # ── BIL CONCENTRATION ALERT (Audit Round 5) ─────────────────────────
+    # BIL is our cash-parking ETF. In normal operation it ranges 5-30%
+    # of portfolio. Above ~65% usually means Alpaca holding most of the
+    # funds in BIL because the trader isn't finding entries — could be
+    # a regime issue (risk-off), a deployment cap being hit, or an upstream
+    # data problem (no signals flowing). Alert is informational, not a
+    # block — we don't want to force capital deployment in a bear tape.
+    BIL_CONCENTRATION_THRESHOLD = float(
+        os.environ.get('BIL_CONCENTRATION_THRESHOLD', '0.65')
+    )
+
+    def check_bil_concentration(self, threshold_pct=None):
+        """Return {'bil_pct', 'bil_value', 'total_value', 'over_threshold'}.
+
+        total_value = cash + sum(position market values). bil_value uses
+        the current_price snapshot when available, falling back to
+        entry_price for OPEN positions that haven't been priced yet."""
+        if threshold_pct is None:
+            threshold_pct = self.BIL_CONCENTRATION_THRESHOLD
+        portfolio = self.get_portfolio() or {}
+        positions = self.get_open_positions() or []
+        cash = float(portfolio.get('cash') or 0)
+        total = cash
+        bil_value = 0.0
+        for p in positions:
+            shares = float(p.get('shares') or 0)
+            price = float(p.get('current_price') or p.get('entry_price') or 0)
+            mv = shares * price
+            total += mv
+            if p.get('ticker') == 'BIL':
+                bil_value += mv
+        pct = (bil_value / total) if total > 0 else 0.0
+        return {
+            'bil_pct':        round(pct, 4),
+            'bil_value':      round(bil_value, 2),
+            'total_value':    round(total, 2),
+            'threshold_pct':  threshold_pct,
+            'over_threshold': pct >= threshold_pct,
+        }
+
     # ── COOLING OFF (Phase 5.b of TRADER_RESTRUCTURE_PLAN) ────────────────
     # Default hold = 24 hours after a loss. Long enough to skip the
     # same-ticker re-entry on the next trader cycle, short enough not
