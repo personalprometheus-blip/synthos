@@ -1091,8 +1091,8 @@ class AlpacaClient:
                     agent='trade_logic', endpoint=f'/v2/stocks/{ticker}/bars',
                     method='GET', service='alpaca_data',
                     customer_id=_CUSTOMER_ID, status_code=r.status_code)
-            except Exception:
-                pass
+            except Exception as _e:
+                log.debug(f"suppressed exception: {_e}")
             if r.status_code == 200:
                 bars = r.json().get("bars") or []
                 # Cache for reuse within this run (including empty = negative cache)
@@ -1187,8 +1187,8 @@ class AlpacaClient:
                     agent='trade_logic', endpoint=f'/v2/positions/{ticker}',
                     method='GET', service='alpaca',
                     customer_id=_CUSTOMER_ID, status_code=r.status_code)
-            except Exception:
-                pass
+            except Exception as _e:
+                log.debug(f"suppressed exception: {_e}")
             if r.status_code == 404:
                 # 404 is a valid "no such position" response, not a failure —
                 # don't count it against the circuit breaker.
@@ -3217,18 +3217,18 @@ def run(session="open"):
                     "last_tier":  f"{last_tier*100:.0f}%",
                 }, f"profit target {rule['label']} triggered")
                 pos_log.decide("PARTIAL_EXIT", rule['label'])
-                if True:  # Gate 0 already verified account health
-                    order = alpaca.submit_order(pos['ticker'], sell_shares, "sell")
-                    if order:
-                        pnl = db.reduce_position(pos['id'], sell_shares, current_price,
-                                                  exit_reason="PROFIT_TAKE")
-                        db.update_profit_tier(pos['id'], rule['gain_pct'])
-                        try:
-                            sig = db.get_signal_by_id(pos.get('signal_id'))
-                            if sig and sig.get('politician'):
-                                db.update_member_weight_after_trade(sig['politician'], pnl)
-                        except Exception:
-                            pass
+                # Gate 0 already verified account health at this cycle's start.
+                order = alpaca.submit_order(pos['ticker'], sell_shares, "sell")
+                if order:
+                    pnl = db.reduce_position(pos['id'], sell_shares, current_price,
+                                              exit_reason="PROFIT_TAKE")
+                    db.update_profit_tier(pos['id'], rule['gain_pct'])
+                    try:
+                        sig = db.get_signal_by_id(pos.get('signal_id'))
+                        if sig and sig.get('politician'):
+                            db.update_member_weight_after_trade(sig['politician'], pnl)
+                    except Exception:
+                        pass
                 pos_log.commit(db)
                 continue
 
@@ -3246,41 +3246,41 @@ def run(session="open"):
         # Execute exit
         if exit_reason:
             pos_log.decide("EXIT", f"reason={exit_reason} price=${current_price:.2f}")
-            if True:  # Gate 0 already verified account health
-                order = alpaca.close_position(pos['ticker'])
-                if order is not None:
-                    _ac = {
-                        'atr_trail_multiplier': C.ATR_TRAIL_MULTIPLIER,
-                        'late_day_tighten_pct': C.LATE_DAY_TIGHTEN_PCT,
-                        'benchmark_corr_widen': C.BENCHMARK_CORR_WIDEN,
-                        'benchmark_corr_tighten': C.BENCHMARK_CORR_TIGHTEN,
-                        'max_holding_days': C.MAX_HOLDING_DAYS,
-                    }
-                    pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason, active_controls=_ac)
-                    if exit_reason == "PULSE_EXIT":
-                        flag_info = next((f for f in urgent_flags
-                                          if f['ticker'] == pos['ticker']), {})
-                        db.acknowledge_urgent_flag(flag_info.get('id'))
-                        try:
-                            sig = db.get_signal_by_id(pos.get('signal_id'))
-                            if sig and sig.get('politician'):
-                                db.update_member_weight_after_trade(sig['politician'], pnl)
-                        except Exception:
-                            pass
-                        send_protective_exit_email(
-                            ticker=pos['ticker'], reason=exit_reason,
-                            reasoning=f"Cascade signal detected. Exit triggered per pre-authorized ruleset.",
-                            entry_price=pos['entry_price'], exit_price=current_price,
-                            shares=pos['shares'], pnl_dollar=pnl,
-                        )
-                    db.log_event(exit_reason, agent="Trade Logic",
-                                 details=f"{pos['ticker']} exit=${current_price:.2f} pnl=${pnl:+.2f}")
-                    log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
-                    _exit_sign = '+' if pnl >= 0 else ''
-                    db.add_notification('trade', f'Sold {pos["ticker"]}',
-                        f'Exit @ ${current_price:.2f} — P&L {_exit_sign}${pnl:.2f} ({exit_reason.replace("_"," ").lower()})',
-                        meta={'ticker': pos['ticker'], 'side': 'sell', 'pnl': round(pnl, 2), 'reason': exit_reason})
-                    trade_events += 1
+            # Gate 0 already verified account health at this cycle's start.
+            order = alpaca.close_position(pos['ticker'])
+            if order is not None:
+                _ac = {
+                    'atr_trail_multiplier': C.ATR_TRAIL_MULTIPLIER,
+                    'late_day_tighten_pct': C.LATE_DAY_TIGHTEN_PCT,
+                    'benchmark_corr_widen': C.BENCHMARK_CORR_WIDEN,
+                    'benchmark_corr_tighten': C.BENCHMARK_CORR_TIGHTEN,
+                    'max_holding_days': C.MAX_HOLDING_DAYS,
+                }
+                pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason, active_controls=_ac)
+                if exit_reason == "PULSE_EXIT":
+                    flag_info = next((f for f in urgent_flags
+                                      if f['ticker'] == pos['ticker']), {})
+                    db.acknowledge_urgent_flag(flag_info.get('id'))
+                    try:
+                        sig = db.get_signal_by_id(pos.get('signal_id'))
+                        if sig and sig.get('politician'):
+                            db.update_member_weight_after_trade(sig['politician'], pnl)
+                    except Exception:
+                        pass
+                    send_protective_exit_email(
+                        ticker=pos['ticker'], reason=exit_reason,
+                        reasoning="Cascade signal detected. Exit triggered per pre-authorized ruleset.",
+                        entry_price=pos['entry_price'], exit_price=current_price,
+                        shares=pos['shares'], pnl_dollar=pnl,
+                    )
+                db.log_event(exit_reason, agent="Trade Logic",
+                             details=f"{pos['ticker']} exit=${current_price:.2f} pnl=${pnl:+.2f}")
+                log.info(f"Exit complete: {pos['ticker']} reason={exit_reason} P&L=${pnl:+.2f}")
+                _exit_sign = '+' if pnl >= 0 else ''
+                db.add_notification('trade', f'Sold {pos["ticker"]}',
+                    f'Exit @ ${current_price:.2f} — P&L {_exit_sign}${pnl:.2f} ({exit_reason.replace("_"," ").lower()})',
+                    meta={'ticker': pos['ticker'], 'side': 'sell', 'pnl': round(pnl, 2), 'reason': exit_reason})
+                trade_events += 1
             pos_log.commit(db)
 
     # ── MANAGED MODE: execute user-approved trades
@@ -3323,272 +3323,272 @@ def run(session="open"):
                 log.error(f"[MANAGED] Execution error: {e}")
 
     # ── NEW SIGNAL EVALUATION (Gates 4–9 + 11)
-    if True:  # Gate 0 already verified — always proceed
-        positions = db.get_open_positions()
-        portfolio = db.get_portfolio()
-        equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
-        tier      = get_portfolio_tier(equity)
-        deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
-        tradeable = equity * C.TRADEABLE_PCT
-        deployed_pct = deployed / tradeable if tradeable > 0 else 0
+    # Gate 0 already verified at top of run() — proceed to new signal eval.
+    positions = db.get_open_positions()
+    portfolio = db.get_portfolio()
+    equity    = float(db.get_setting('_ALPACA_EQUITY') or portfolio['cash'])
+    tier      = get_portfolio_tier(equity)
+    deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
+    tradeable = equity * C.TRADEABLE_PCT
+    deployed_pct = deployed / tradeable if tradeable > 0 else 0
 
-        can_enter = (
-            deployed_pct < tier["max_deployed"] and
-            len([p for p in positions if p['ticker'] != C.BIL_TICKER]) < tier["max_positions"]
+    can_enter = (
+        deployed_pct < tier["max_deployed"] and
+        len([p for p in positions if p['ticker'] != C.BIL_TICKER]) < tier["max_positions"]
+    )
+
+    if not can_enter:
+        log.info("Deployment/position cap reached — checking for position rotation")
+        _rot_count = _rotate_positions(db, _shared_db(), alpaca, positions, regime, tier,
+                                       portfolio, tradeable, session, now)
+        trade_events += int(_rot_count or 0)
+
+    if can_enter:
+        # Expire stale signals on different windows per status:
+        #   QUEUED     — 72h (never made it through validation; keep
+        #                around long enough for a slow agent to catch up)
+        #   VALIDATED  — 12h (news-driven trade signals decay in hours;
+        #                anything validated but unacted after 12h is
+        #                noise, and letting it linger pushes the cap's
+        #                quota against younger, still-actionable signals)
+        try:
+            with _shared_db().conn() as _c:
+                _q_expired = _c.execute(
+                    "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
+                    "WHERE status='QUEUED' "
+                    "AND created_at < datetime('now', '-3 days')"
+                ).rowcount
+                _v_expired = _c.execute(
+                    "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
+                    "WHERE status IN ('VALIDATED', 'WATCHING') "
+                    "AND created_at < datetime('now', '-12 hours')"
+                ).rowcount
+                if _q_expired or _v_expired:
+                    log.info(
+                        f"[SIGNALS] Expired {_q_expired} QUEUED (>72h) + "
+                        f"{_v_expired} VALIDATED/WATCHING (>12h) stale signal(s)"
+                    )
+        except Exception:
+            pass
+
+        # Phase 3c.b — window-driven entry selection. Replaces the v1
+        # "evaluate every VALIDATED signal" loop. Flow:
+        #   1. Pull fresh macro windows for this customer
+        #   2. Look up live price for each window's ticker (via signal_id)
+        #   3. Keep only windows where live_price ∈ [entry_low, entry_high]
+        #   4. Feed the resulting signal list into the gate chain
+        # Macro TTL is 8h so the enrichment-tick cadence (30min) is
+        # sufficient to keep windows fresh. Refresh mode wiring is
+        # deferred to Phase 4 (ATR-anchored recompute).
+        _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
+        _price_map = {}
+        try:
+            with _shared_db().conn() as _c:
+                _pr = _c.execute(
+                    "SELECT ticker, price FROM live_prices WHERE price IS NOT NULL"
+                ).fetchall()
+                _price_map = {r['ticker']: float(r['price']) for r in _pr if r['price']}
+        except Exception as _e:
+            log.warning(f"live_prices read failed: {_e}")
+
+        signals = []
+        _window_by_signal = {}  # Phase 4.d: sidecar for atr/stop passthrough
+        _out_of_band = 0
+        _no_price    = 0
+        _no_signal   = 0
+        for _w in _windows:
+            _sig = _shared_db().get_signal_by_id(_w['signal_id'])
+            if not _sig:
+                _no_signal += 1
+                continue
+            _tkr = _sig.get('ticker')
+            _price = _price_map.get(_tkr)
+            if _price is None:
+                _no_price += 1
+                continue
+            if not (_w['entry_low'] <= _price <= _w['entry_high']):
+                _out_of_band += 1
+                continue
+            signals.append(_sig)
+            _window_by_signal[_sig['id']] = _w
+
+        _set_phase('signal_evaluation', f"{len(signals)} in-band")
+        log.info(
+            f"[WINDOW] {len(_windows)} macro window(s) → "
+            f"{len(signals)} in-band | skipped: "
+            f"{_out_of_band} out-of-band, {_no_price} no-price, "
+            f"{_no_signal} no-signal"
         )
 
-        if not can_enter:
-            log.info("Deployment/position cap reached — checking for position rotation")
-            _rot_count = _rotate_positions(db, _shared_db(), alpaca, positions, regime, tier,
-                                           portfolio, tradeable, session, now)
-            trade_events += int(_rot_count or 0)
+        for signal in signals:
+            if budget_exceeded():
+                log.warning(
+                    f"[EVAL] Runtime budget exceeded — stopping signal evaluation "
+                    f"(processed before ticker={signal.get('ticker')})"
+                )
+                break
+            _set_phase('signal_evaluation', f"ticker={signal.get('ticker')}")
+            positions = db.get_open_positions()
+            deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
+            deployed_pct = deployed / tradeable if tradeable > 0 else 0
 
-        if can_enter:
-            # Expire stale signals on different windows per status:
-            #   QUEUED     — 72h (never made it through validation; keep
-            #                around long enough for a slow agent to catch up)
-            #   VALIDATED  — 12h (news-driven trade signals decay in hours;
-            #                anything validated but unacted after 12h is
-            #                noise, and letting it linger pushes the cap's
-            #                quota against younger, still-actionable signals)
-            try:
-                with _shared_db().conn() as _c:
-                    _q_expired = _c.execute(
-                        "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
-                        "WHERE status='QUEUED' "
-                        "AND created_at < datetime('now', '-3 days')"
-                    ).rowcount
-                    _v_expired = _c.execute(
-                        "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
-                        "WHERE status IN ('VALIDATED', 'WATCHING') "
-                        "AND created_at < datetime('now', '-12 hours')"
-                    ).rowcount
-                    if _q_expired or _v_expired:
-                        log.info(
-                            f"[SIGNALS] Expired {_q_expired} QUEUED (>72h) + "
-                            f"{_v_expired} VALIDATED/WATCHING (>12h) stale signal(s)"
-                        )
-            except Exception:
-                pass
+            if (deployed_pct >= tier["max_deployed"] or
+                    len([p for p in positions if p['ticker'] != C.BIL_TICKER]) >= tier["max_positions"]):
+                log.info("Deployment cap reached mid-session — stopping")
+                break
 
-            # Phase 3c.b — window-driven entry selection. Replaces the v1
-            # "evaluate every VALIDATED signal" loop. Flow:
-            #   1. Pull fresh macro windows for this customer
-            #   2. Look up live price for each window's ticker (via signal_id)
-            #   3. Keep only windows where live_price ∈ [entry_low, entry_high]
-            #   4. Feed the resulting signal list into the gate chain
-            # Macro TTL is 8h so the enrichment-tick cadence (30min) is
-            # sufficient to keep windows fresh. Refresh mode wiring is
-            # deferred to Phase 4 (ATR-anchored recompute).
-            _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
-            _price_map = {}
-            try:
-                with _shared_db().conn() as _c:
-                    _pr = _c.execute(
-                        "SELECT ticker, price FROM live_prices WHERE price IS NOT NULL"
-                    ).fetchall()
-                    _price_map = {r['ticker']: float(r['price']) for r in _pr if r['price']}
-            except Exception as _e:
-                log.warning(f"live_prices read failed: {_e}")
-
-            signals = []
-            _window_by_signal = {}  # Phase 4.d: sidecar for atr/stop passthrough
-            _out_of_band = 0
-            _no_price    = 0
-            _no_signal   = 0
-            for _w in _windows:
-                _sig = _shared_db().get_signal_by_id(_w['signal_id'])
-                if not _sig:
-                    _no_signal += 1
+            # Late-day conservatism: after CONSERVATIVE_AFTER_HOUR, only HIGH confidence
+            _mtr = get_market_time_regime(now)
+            if _mtr['is_late_day'] and C.CLOSE_SESSION_MODE == 'conservative':
+                if (signal.get('confidence', 'LOW') or 'LOW').upper() != 'HIGH':
+                    log.info(f"Signal {signal['ticker']} skipped — late-day conservative (after {C.CONSERVATIVE_AFTER_HOUR}:00 ET)")
                     continue
-                _tkr = _sig.get('ticker')
-                _price = _price_map.get(_tkr)
-                if _price is None:
-                    _no_price += 1
-                    continue
-                if not (_w['entry_low'] <= _price <= _w['entry_high']):
-                    _out_of_band += 1
-                    continue
-                signals.append(_sig)
-                _window_by_signal[_sig['id']] = _w
 
-            _set_phase('signal_evaluation', f"{len(signals)} in-band")
-            log.info(
-                f"[WINDOW] {len(_windows)} macro window(s) → "
-                f"{len(signals)} in-band | skipped: "
-                f"{_out_of_band} out-of-band, {_no_price} no-price, "
-                f"{_no_signal} no-signal"
-            )
+            # Spousal filter (KEEP from v1.x)
+            if signal.get('is_spousal') and C.SPOUSAL_WEIGHT == 'skip':
+                log.info(f"Signal {signal['ticker']} skipped — spousal (SPOUSAL_WEIGHT=skip)")
+                continue
 
-            for signal in signals:
-                if budget_exceeded():
-                    log.warning(
-                        f"[EVAL] Runtime budget exceeded — stopping signal evaluation "
-                        f"(processed before ticker={signal.get('ticker')})"
+            # Sticky USER preference — user has marked this ticker "never auto".
+            # Bot respects this across all signals for the ticker, regardless of
+            # whether they currently hold a position.
+            _sticky = db.get_ticker_sticky(signal['ticker'])
+            if _sticky == 'user':
+                log.info(f"Signal {signal['ticker']} skipped — sticky USER preference")
+                db.log_event("SIGNAL_SKIPPED_STICKY_USER", agent="Trade Logic",
+                             details=f"ticker={signal['ticker']} signal_id={signal.get('id')}")
+                try:
+                    db.log_signal_decision(
+                        agent='trade_logic', action='SKIP_STICKY_USER',
+                        ticker=signal['ticker'], signal_id=signal.get('id'),
+                        reason='ticker has sticky=user preference',
                     )
-                    break
-                _set_phase('signal_evaluation', f"ticker={signal.get('ticker')}")
-                positions = db.get_open_positions()
-                deployed  = sum(p['entry_price'] * p['shares'] for p in positions if p['ticker'] != C.BIL_TICKER)
-                deployed_pct = deployed / tradeable if tradeable > 0 else 0
+                except Exception:
+                    pass
+                _mark_signal_evaluated(signal['id'], 'SKIP_STICKY_USER')
+                continue
 
-                if (deployed_pct >= tier["max_deployed"] or
-                        len([p for p in positions if p['ticker'] != C.BIL_TICKER]) >= tier["max_positions"]):
-                    log.info("Deployment cap reached mid-session — stopping")
-                    break
+            sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
+                                       signal_id=(signal.get('id') if _CUSTOMER_ID == _OWNER_CID else None))
+            sig_log.note(f"politician={signal.get('politician','?')} "
+                         f"staleness={signal.get('staleness','?')} "
+                         f"headline={signal.get('headline','')[:60]}")
 
-                # Late-day conservatism: after CONSERVATIVE_AFTER_HOUR, only HIGH confidence
-                _mtr = get_market_time_regime(now)
-                if _mtr['is_late_day'] and C.CLOSE_SESSION_MODE == 'conservative':
-                    if (signal.get('confidence', 'LOW') or 'LOW').upper() != 'HIGH':
-                        log.info(f"Signal {signal['ticker']} skipped — late-day conservative (after {C.CONSERVATIVE_AFTER_HOUR}:00 ET)")
-                        continue
-
-                # Spousal filter (KEEP from v1.x)
-                if signal.get('is_spousal') and C.SPOUSAL_WEIGHT == 'skip':
-                    log.info(f"Signal {signal['ticker']} skipped — spousal (SPOUSAL_WEIGHT=skip)")
-                    continue
-
-                # Sticky USER preference — user has marked this ticker "never auto".
-                # Bot respects this across all signals for the ticker, regardless of
-                # whether they currently hold a position.
-                _sticky = db.get_ticker_sticky(signal['ticker'])
-                if _sticky == 'user':
-                    log.info(f"Signal {signal['ticker']} skipped — sticky USER preference")
-                    db.log_event("SIGNAL_SKIPPED_STICKY_USER", agent="Trade Logic",
-                                 details=f"ticker={signal['ticker']} signal_id={signal.get('id')}")
-                    try:
-                        db.log_signal_decision(
-                            agent='trade_logic', action='SKIP_STICKY_USER',
-                            ticker=signal['ticker'], signal_id=signal.get('id'),
-                            reason='ticker has sticky=user preference',
-                        )
-                    except Exception:
-                        pass
-                    _mark_signal_evaluated(signal['id'], 'SKIP_STICKY_USER')
-                    continue
-
-                sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
-                                           signal_id=(signal.get('id') if _CUSTOMER_ID == _OWNER_CID else None))
-                sig_log.note(f"politician={signal.get('politician','?')} "
-                             f"staleness={signal.get('staleness','?')} "
-                             f"headline={signal.get('headline','')[:60]}")
-
-                # Gate 4: Eligibility
-                if not gate4_eligibility(signal, positions, alpaca, sig_log):
-                    sig_log.decide("SKIP", "failed eligibility gate")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'SKIP_ELIGIBILITY')
-                    continue
-
-                # Gate 5: Signal score
-                score = gate5_signal_score(signal, positions, alpaca, sig_log)
-                if score == 0.0:
-                    sig_log.decide("SKIP", f"score below threshold {C.MIN_CONFIDENCE_SCORE}")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'SKIP_SCORE')
-                    continue
-
-                # Gate 5.5: Severe-negative news veto (Phase 3a)
-                if not gate5_5_news_veto(signal, sig_log):
-                    sig_log.decide("SKIP", "severe-negative news veto")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'SKIP_NEWS_VETO')
-                    continue
-
-                # Gate 6: Entry decision
-                candidate = gate6_entry(signal, score, regime, alpaca, sig_log)
-                if candidate is None:
-                    sig_log.decide("WATCH", "no entry condition met — signal retained in queue")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'NO_ENTRY')
-                    continue
-
-                # Get ATR for sizing and risk. Phase 4.d — prefer the
-                # ATR stored on the macro window (window_calculator fetches
-                # it once per enrichment, so we avoid a per-signal HTTP
-                # call here). Falls through to alpaca.get_atr for rows
-                # written before 4.a landed, and to the 2% proxy if
-                # that also fails.
-                _win = _window_by_signal.get(signal['id']) or {}
-                atr = _win.get('atr') or alpaca.get_atr(signal['ticker'])
-                if not atr:
-                    atr = candidate['price'] * 0.02
-
-                # Gate 7: Position sizing (Model B + Model C cash guard)
-                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log, db=db)
-                if size <= 0:
-                    # Insufficient cash — skip; gate7_sizing already logged reason.
-                    sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
-                    continue
-
-                # Gate 8: Risk setup
-                risk = gate8_risk(candidate, atr, session, sig_log)
-
-                # Gate 11: Portfolio controls
-                if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log):
-                    sig_log.decide("SKIP", "portfolio limits block entry")
-                    sig_log.commit(db)
-                    _mark_signal_evaluated(signal['id'], 'SKIP_PORTFOLIO')
-                    continue
-
-                # Entry approved — MIRROR
-                sig_log.decide("MIRROR", f"{candidate['type']} entry | "
-                               f"{size:.4f} shares @ ${candidate['price']:.2f} | "
-                               f"stop=${risk['stop_loss']} target=${risk['profit_target']}")
-
-                trail_amt, trail_pct, vol_label = calculate_trail_stop(
-                    atr, candidate['price'], signal.get('sector', ''))
-
-                decision_data = {
-                    "price":     candidate['price'],
-                    "shares":    size,
-                    "max_trade": round(size * candidate['price'], 2),
-                    "trail_amt": trail_amt,
-                    "trail_pct": trail_pct,
-                    "vol_label": vol_label,
-                    "reasoning": f"Entry type: {candidate['type']} | Score: {score:.4f} | "
-                                 f"Mode: {regime.mode} | Regime: {regime.trend}/{regime.volatility}",
-                    "session":   session,
-                }
-
-                if _is_supervised():
-                    queue_for_approval(signal, decision_data)
-                    # Acknowledge the signal so it leaves the QUEUED pool and is not
-                    # re-processed on the next session run. The approval row in
-                    # pending_approvals is the source of truth until user decides.
-                    _shared_db().acknowledge_signal(signal['id'])
-                    log.info(f"[MANAGED] {signal['ticker']} queued for portal approval")
-                else:
-                    # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
-                    order = alpaca.submit_order(signal['ticker'], size, "buy")
-                    if order:
-                        db.open_position(
-                            ticker=signal['ticker'], company=signal.get('company'),
-                            sector=signal.get('sector'), entry_price=candidate['price'],
-                            shares=size, trail_stop_amt=trail_amt,
-                            trail_stop_pct=trail_pct, vol_bucket=vol_label,
-                            signal_id=(signal['id'] if _CUSTOMER_ID == _OWNER_CID else None),
-                            entry_signal_score=str(score),
-                            entry_sentiment_score=signal.get('sentiment_score'),
-                            interrogation_status=signal.get('interrogation_status'),
-                        )
-                        alpaca.submit_order(signal['ticker'], size, "sell",
-                                            order_type="trailing_stop", trail_price=trail_amt)
-                        _shared_db().acknowledge_signal(signal['id'])
-                        log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
-                                 f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
-                        _cost = round(candidate['price'] * size, 2)
-                        db.add_notification('trade', f'Bought {signal["ticker"]}',
-                            f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested',
-                            meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2)})
-                        trade_events += 1
-                    else:
-                        log.error(f"Order failed: {signal['ticker']}")
-
+            # Gate 4: Eligibility
+            if not gate4_eligibility(signal, positions, alpaca, sig_log):
+                sig_log.decide("SKIP", "failed eligibility gate")
                 sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_ELIGIBILITY')
+                continue
+
+            # Gate 5: Signal score
+            score = gate5_signal_score(signal, positions, alpaca, sig_log)
+            if score == 0.0:
+                sig_log.decide("SKIP", f"score below threshold {C.MIN_CONFIDENCE_SCORE}")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_SCORE')
+                continue
+
+            # Gate 5.5: Severe-negative news veto (Phase 3a)
+            if not gate5_5_news_veto(signal, sig_log):
+                sig_log.decide("SKIP", "severe-negative news veto")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_NEWS_VETO')
+                continue
+
+            # Gate 6: Entry decision
+            candidate = gate6_entry(signal, score, regime, alpaca, sig_log)
+            if candidate is None:
+                sig_log.decide("WATCH", "no entry condition met — signal retained in queue")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'NO_ENTRY')
+                continue
+
+            # Get ATR for sizing and risk. Phase 4.d — prefer the
+            # ATR stored on the macro window (window_calculator fetches
+            # it once per enrichment, so we avoid a per-signal HTTP
+            # call here). Falls through to alpaca.get_atr for rows
+            # written before 4.a landed, and to the 2% proxy if
+            # that also fails.
+            _win = _window_by_signal.get(signal['id']) or {}
+            atr = _win.get('atr') or alpaca.get_atr(signal['ticker'])
+            if not atr:
+                atr = candidate['price'] * 0.02
+
+            # Gate 7: Position sizing (Model B + Model C cash guard)
+            size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log, db=db)
+            if size <= 0:
+                # Insufficient cash — skip; gate7_sizing already logged reason.
+                sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
+                continue
+
+            # Gate 8: Risk setup
+            risk = gate8_risk(candidate, atr, session, sig_log)
+
+            # Gate 11: Portfolio controls
+            if not gate11_portfolio(positions, portfolio, signal, size, alpaca, sig_log):
+                sig_log.decide("SKIP", "portfolio limits block entry")
+                sig_log.commit(db)
+                _mark_signal_evaluated(signal['id'], 'SKIP_PORTFOLIO')
+                continue
+
+            # Entry approved — MIRROR
+            sig_log.decide("MIRROR", f"{candidate['type']} entry | "
+                           f"{size:.4f} shares @ ${candidate['price']:.2f} | "
+                           f"stop=${risk['stop_loss']} target=${risk['profit_target']}")
+
+            trail_amt, trail_pct, vol_label = calculate_trail_stop(
+                atr, candidate['price'], signal.get('sector', ''))
+
+            decision_data = {
+                "price":     candidate['price'],
+                "shares":    size,
+                "max_trade": round(size * candidate['price'], 2),
+                "trail_amt": trail_amt,
+                "trail_pct": trail_pct,
+                "vol_label": vol_label,
+                "reasoning": f"Entry type: {candidate['type']} | Score: {score:.4f} | "
+                             f"Mode: {regime.mode} | Regime: {regime.trend}/{regime.volatility}",
+                "session":   session,
+            }
+
+            if _is_supervised():
+                queue_for_approval(signal, decision_data)
+                # Acknowledge the signal so it leaves the QUEUED pool and is not
+                # re-processed on the next session run. The approval row in
+                # pending_approvals is the source of truth until user decides.
+                _shared_db().acknowledge_signal(signal['id'])
+                log.info(f"[MANAGED] {signal['ticker']} queued for portal approval")
+            else:
+                # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
+                order = alpaca.submit_order(signal['ticker'], size, "buy")
+                if order:
+                    db.open_position(
+                        ticker=signal['ticker'], company=signal.get('company'),
+                        sector=signal.get('sector'), entry_price=candidate['price'],
+                        shares=size, trail_stop_amt=trail_amt,
+                        trail_stop_pct=trail_pct, vol_bucket=vol_label,
+                        signal_id=(signal['id'] if _CUSTOMER_ID == _OWNER_CID else None),
+                        entry_signal_score=str(score),
+                        entry_sentiment_score=signal.get('sentiment_score'),
+                        interrogation_status=signal.get('interrogation_status'),
+                    )
+                    alpaca.submit_order(signal['ticker'], size, "sell",
+                                        order_type="trailing_stop", trail_price=trail_amt)
+                    _shared_db().acknowledge_signal(signal['id'])
+                    log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
+                             f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
+                    _cost = round(candidate['price'] * size, 2)
+                    db.add_notification('trade', f'Bought {signal["ticker"]}',
+                        f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested',
+                        meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2)})
+                    trade_events += 1
+                else:
+                    log.error(f"Order failed: {signal['ticker']}")
+
+            sig_log.commit(db)
 
     # ── Monthly tax sweep — runs once on last trading day, after 3pm
     if is_last_trading_day_of_month() and now.hour >= 15:

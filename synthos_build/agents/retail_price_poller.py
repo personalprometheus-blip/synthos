@@ -135,8 +135,8 @@ def _get_alpaca_creds_for_customer(cid):
         api_key, secret_key = auth.get_alpaca_credentials(cid)
         if api_key:
             return api_key, secret_key
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
     # Fallback to env for admin
     if cid == MASTER_CID:
         return os.environ.get('ALPACA_API_KEY', ''), os.environ.get('ALPACA_SECRET_KEY', '')
@@ -184,8 +184,8 @@ def _fetch_prices_from_alpaca(needed_tickers=None):
                     (cid, r.status_code))
                 _db.commit()
                 _db.close()
-            except Exception:
-                pass
+            except Exception as _e:
+                log.debug(f"suppressed exception: {_e}")
             if r.status_code != 200:
                 continue
             for pos in r.json():
@@ -226,8 +226,8 @@ def _fetch_prices_from_alpaca(needed_tickers=None):
                             (MASTER_CID, r.status_code))
                         _db.commit()
                         _db.close()
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        log.debug(f"suppressed exception: {_e}")
                     if r.status_code == 200:
                         trades = (r.json() or {}).get('trades', {}) or {}
                         for sym, t in trades.items():

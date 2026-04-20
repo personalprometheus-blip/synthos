@@ -102,8 +102,8 @@ def _fetch_yahoo_chart(symbol, range_str="5d", interval="1d"):
             _master_db().log_api_call(
                 agent='macro_regime', endpoint=f'/chart/{symbol}',
                 method='GET', service='yahoo')
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
         if r.status_code != 200:
             log.warning(f"Yahoo chart {symbol}: HTTP {r.status_code}")
             return []
@@ -156,8 +156,8 @@ def _fetch_alpaca_bars(ticker, days=10):
                 agent='macro_regime', endpoint=f'/v2/stocks/{ticker}/bars',
                 method='GET', service='alpaca_data',
                 status_code=r.status_code)
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
         if r.status_code == 200:
             return r.json().get("bars", []) or []
         log.warning(f"Alpaca bars {ticker}: HTTP {r.status_code}")

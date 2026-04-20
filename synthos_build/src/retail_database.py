@@ -993,6 +993,15 @@ class DB:
                 expires_at   TEXT NOT NULL
             )""",
             "CREATE INDEX IF NOT EXISTS idx_tradable_expires ON tradable_assets(expires_at)",
+
+            # Audit Round 6 (2026-04-20) — news-agent upsert_signal()
+            # dedup hot path queries `WHERE ticker=? AND tx_date=? AND
+            # status NOT IN (...)`. Previously covered by the separate
+            # single-column idx_signals_ticker / idx_signals_status
+            # (SQLite uses at most one), forcing a ticker-scan then
+            # filter. Composite index lets the whole predicate resolve
+            # against the index directly.
+            "CREATE INDEX IF NOT EXISTS idx_signals_ticker_txdate_status ON signals(ticker, tx_date, status)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -3498,24 +3507,39 @@ class DB:
             return 0
 
     def get_api_call_counts(self, date_str=None):
-        """Get API call counts for a given date (default today). Returns dict with totals and per-agent breakdown."""
+        """Get API call counts for a given date (default today). Returns dict with totals and per-agent breakdown.
+
+        Audit Round 6 — rewritten to use a range predicate
+        `timestamp >= day AND timestamp < day+1` so SQLite can use
+        `idx_api_calls_ts`. The previous `date(timestamp) = ?` call
+        forced a full-table scan because the function wraps the
+        indexed column. This is a hot path (portal dashboard fetches
+        it on every refresh)."""
         if not date_str:
             date_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        # Day boundaries as ISO prefixes so SQLite string compares work
+        day_start = f"{date_str} 00:00:00"
+        day_end   = f"{date_str} 23:59:59"
         try:
             with self.conn() as c:
                 total = c.execute(
-                    "SELECT COUNT(*) FROM api_calls WHERE date(timestamp) = ?",
-                    (date_str,)).fetchone()[0]
+                    "SELECT COUNT(*) FROM api_calls WHERE timestamp >= ? AND timestamp <= ?",
+                    (day_start, day_end)).fetchone()[0]
                 by_agent = c.execute(
-                    "SELECT agent, COUNT(*) FROM api_calls WHERE date(timestamp) = ? GROUP BY agent ORDER BY COUNT(*) DESC",
-                    (date_str,)).fetchall()
+                    "SELECT agent, COUNT(*) FROM api_calls "
+                    "WHERE timestamp >= ? AND timestamp <= ? "
+                    "GROUP BY agent ORDER BY COUNT(*) DESC",
+                    (day_start, day_end)).fetchall()
                 by_service = c.execute(
-                    "SELECT service, COUNT(*) FROM api_calls WHERE date(timestamp) = ? GROUP BY service ORDER BY COUNT(*) DESC",
-                    (date_str,)).fetchall()
+                    "SELECT service, COUNT(*) FROM api_calls "
+                    "WHERE timestamp >= ? AND timestamp <= ? "
+                    "GROUP BY service ORDER BY COUNT(*) DESC",
+                    (day_start, day_end)).fetchall()
                 recent = c.execute(
                     "SELECT timestamp, agent, service, endpoint, method FROM api_calls "
-                    "WHERE date(timestamp) = ? ORDER BY id DESC LIMIT 10",
-                    (date_str,)).fetchall()
+                    "WHERE timestamp >= ? AND timestamp <= ? "
+                    "ORDER BY id DESC LIMIT 10",
+                    (day_start, day_end)).fetchall()
                 return {
                     'date': date_str,
                     'total': total,

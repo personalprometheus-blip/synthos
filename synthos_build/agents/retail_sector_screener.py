@@ -345,8 +345,8 @@ def _fetch_bars_alpaca(ticker, days):
         _master_db().log_api_call(
             'sector_screener', f'/v2/stocks/{ticker}/bars',
             'GET', 'alpaca_data', status_code=status)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
     return []
 
 
@@ -399,8 +399,8 @@ def _fetch_bars_yahoo(ticker, days):
         _master_db().log_api_call(
             'sector_screener', f'/v8/finance/chart/{ticker}',
             'GET', 'yahoo', status_code=status)
-    except Exception:
-        pass
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
 
     try:
         data = r.json()
