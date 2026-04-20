@@ -36,7 +36,13 @@ for cid in os.listdir(customers_dir):
 
         if port and total_value > 0:
             equity = float(port['cash']) + total_value
-            if equity > 0 and bil_value / equity > 0.5:
+            # BIL over-allocation alert — fires when BIL exceeds 50% of equity.
+            # Exempt sub-$500 accounts: on a $61 test account, "BIL 65% of
+            # equity ($39/$61)" is noise, not a real concentration risk.
+            # Real customer accounts are well above $500, so this keeps the
+            # defensive-posture signal (the $39,997/$59,995 case) while
+            # silencing near-empty test accounts.
+            if equity >= 500 and bil_value / equity > 0.5:
                 results.append({'cid': cid[:12], 'severity': 'high', 'issue': 'BIL_OVER_ALLOCATED',
                     'detail': f'BIL is {bil_value/equity*100:.0f}% of equity (${bil_value:,.0f}/${equity:,.0f})'})
 
