@@ -51,7 +51,11 @@ log = logging.getLogger('candidate_gen')
 
 _OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
 
-MIN_CANDIDATE_SCORE = 0.70    # sector_screening.combined_score threshold
+MIN_CANDIDATE_SCORE = 0.55    # sector_screening.combined_score threshold
+                              # observed distribution (Apr 2026): max ~0.66,
+                              # avg ~0.45 across 110 tickers × ~5 sector scores.
+                              # 0.55 cuts roughly the top third. Phase 4 may
+                              # re-tune once ATR-based sizing lands.
 MAX_PER_SECTOR      = 3       # top-N per sector to emit as candidates
 MAX_TOTAL           = 30      # global cap per run
 
