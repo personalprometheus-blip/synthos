@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily trigger for Synthos Market Daemon (09:10 ET weekdays)
+Requires=synthos-market-daemon.service
+
+[Timer]
+# Pi5 system clock is America/New_York — 09:10 here = 09:10 ET directly.
+OnCalendar=Mon..Fri *-*-* 09:10:00
+# If the machine was down at 09:10 (e.g. reboot), fire immediately on boot
+# catching up the missed trigger. Desired: if pi reboots at 11 AM weekday,
+# we want the daemon to start (11 AM is still market hours).
+Persistent=true
+# Unit to start when the timer fires.
+Unit=synthos-market-daemon.service
+
+[Install]
+WantedBy=timers.target

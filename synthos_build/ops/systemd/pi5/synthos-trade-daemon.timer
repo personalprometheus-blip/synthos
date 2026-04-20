@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily trigger for Synthos Trade Daemon (09:25 ET weekdays)
+Requires=synthos-trade-daemon.service
+
+[Timer]
+# 09:25 ET — daemon itself waits the remaining 5 minutes for 9:30 market
+# open. Starting earlier than 9:30 gives the daemon time to acquire its
+# pidlock, verify connections, etc. before the first dispatch cycle.
+OnCalendar=Mon..Fri *-*-* 09:25:00
+Persistent=true
+Unit=synthos-trade-daemon.service
+
+[Install]
+WantedBy=timers.target
