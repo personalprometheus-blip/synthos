@@ -143,14 +143,28 @@ def _get_alpaca_creds_for_customer(cid):
     return None, None
 
 
-def _fetch_prices_from_alpaca():
-    """Fetch current prices for all held tickers. Uses Alpaca positions API
-    for customers who have keys, giving us real-time prices."""
+def _fetch_prices_from_alpaca(needed_tickers=None):
+    """Fetch current prices for tickers.
+
+    Two-stage fetch:
+      1. Per-customer /v2/positions — returns current price AND unrealized
+         P&L for held tickers. Preferred source for held positions because
+         the P&L data feeds the dashboard and trader exit logic.
+      2. Market-data /v2/stocks/trades/latest — bulk fetch for any ticker
+         still missing after stage 1. Covers WATCHING candidate signals
+         and VALIDATED signals that aren't yet held (Phase 3c.b —
+         window_calculator needs these prices).
+
+    Stage 2 uses owner/master credentials since market-data is account-
+    agnostic for equities. Falls through silently if owner creds missing.
+    """
     import requests
 
     prices = {}  # ticker → {price, prev_close, day_change, ...}
     alpaca_url = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+    alpaca_data_url = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 
+    # Stage 1: per-customer positions (gives P&L for held)
     for cid in _get_all_customer_ids():
         api_key, secret_key = _get_alpaca_creds_for_customer(cid)
         if not api_key:
@@ -162,7 +176,6 @@ def _fetch_prices_from_alpaca():
         }
         try:
             r = requests.get(f"{alpaca_url}/v2/positions", headers=headers, timeout=8)
-            # Track API call
             try:
                 _db = sqlite3.connect(_shared_db_path(), timeout=5)
                 _db.execute(
@@ -182,10 +195,58 @@ def _fetch_prices_from_alpaca():
                     'prev_close':     float(pos.get('lastday_price', 0) or 0),
                     'day_change':     float(pos.get('unrealized_intraday_pl', 0) or 0),
                     'day_change_pct': float(pos.get('unrealized_intraday_plpc', 0) or 0) * 100,
-                    'volume':         0,  # Not available from positions endpoint
+                    'volume':         0,
                 }
         except Exception as e:
-            log.warning(f"Alpaca fetch failed for {cid[:8]}: {e}")
+            log.warning(f"Alpaca positions fetch failed for {cid[:8]}: {e}")
+
+    # Stage 2: market-data fallback for requested-but-unheld tickers
+    if needed_tickers:
+        missing = set(needed_tickers) - set(prices.keys())
+        if missing:
+            api_key, secret_key = _get_alpaca_creds_for_customer(MASTER_CID)
+            if not api_key:
+                log.debug(f"No owner creds for market-data fallback — {len(missing)} ticker(s) will lack prices")
+            else:
+                headers = {
+                    'APCA-API-KEY-ID': api_key,
+                    'APCA-API-SECRET-KEY': secret_key,
+                }
+                try:
+                    r = requests.get(
+                        f"{alpaca_data_url}/v2/stocks/trades/latest",
+                        params={'symbols': ','.join(sorted(missing))},
+                        headers=headers, timeout=8,
+                    )
+                    try:
+                        _db = sqlite3.connect(_shared_db_path(), timeout=5)
+                        _db.execute(
+                            "INSERT INTO api_calls (timestamp, agent, service, endpoint, method, customer_id, status_code) "
+                            "VALUES (datetime('now'), 'price_poller', 'alpaca_data', '/v2/stocks/trades/latest', 'GET', ?, ?)",
+                            (MASTER_CID, r.status_code))
+                        _db.commit()
+                        _db.close()
+                    except Exception:
+                        pass
+                    if r.status_code == 200:
+                        trades = (r.json() or {}).get('trades', {}) or {}
+                        for sym, t in trades.items():
+                            if t is None:
+                                continue
+                            p = t.get('p')
+                            if p is None:
+                                continue
+                            prices[sym] = {
+                                'price':          float(p or 0),
+                                'prev_close':     0.0,
+                                'day_change':     0.0,
+                                'day_change_pct': 0.0,
+                                'volume':         int(t.get('s', 0) or 0),
+                            }
+                    else:
+                        log.warning(f"Market-data fallback returned {r.status_code}")
+                except Exception as e:
+                    log.warning(f"Market-data fallback fetch failed: {e}")
 
     return prices
 
@@ -207,7 +268,7 @@ def run():
         return
 
     log.info(f"Polling prices for {len(tickers)} tickers")
-    prices = _fetch_prices_from_alpaca()
+    prices = _fetch_prices_from_alpaca(needed_tickers=tickers)
 
     if not prices:
         log.warning("No prices returned from Alpaca")
