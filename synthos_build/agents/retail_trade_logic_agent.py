@@ -121,8 +121,9 @@ def _mark_signal_evaluated(signal_id, reason: str = ''):
     """Mark a QUEUED signal as EVALUATED so it is not re-processed on future runs.
 
     Called after Gates 4/5/6/11 decide SKIP or WATCH — the signal was seen,
-    evaluated, and intentionally not acted on.  The 72-hour expiry (auto-expire
-    in get_queued_signals) serves as a backstop for any signals that slip through.
+    evaluated, and intentionally not acted on. Tier-dependent expiry
+    (30d/7d/2d/1d per retail_database.py:1318) auto-moves unacted signals
+    to EXPIRED as a backstop for any that slip through this bookkeeping.
     """
     try:
         sdb = _shared_db()
@@ -553,8 +554,16 @@ class RegimeState:
 
 
 # ── KILL SWITCH ───────────────────────────────────────────────────────────────
+# Two halt layers (see docs/specs/HALT_AGENT_REWRITE.md):
+#   Admin halt:     system_halt row in MASTER DB (applies to every customer)
+#                   + legacy .kill_switch file check for emergency SSH kills
+#   Customer halt:  system_halt row in this customer's own DB
+#                   + legacy KILL_SWITCH='1' setting for backwards compat
+# The trader's run() entry-point skip check reads both and exits clean if
+# either is active, BEFORE opening an Alpaca client or doing any real work.
 
 def kill_switch_active():
+    """Legacy file-based admin kill check. Kept as emergency fallback."""
     return os.path.exists(KILL_SWITCH_FILE)
 
 def clear_kill_switch():
@@ -564,6 +573,51 @@ def clear_kill_switch():
             log.info("Kill switch cleared")
     except Exception as e:
         log.error(f"Could not clear kill switch: {e}")
+
+
+def _check_halt_state() -> 'tuple[str, str] | None':
+    """Return (source, reason) if halted, else None.
+
+    source ∈ {'admin', 'customer'}. Called at the very top of run() before
+    any other DB read or Alpaca call. Three checks layered in order:
+      1. Admin halt row in shared DB (master customer's signals.db)
+      2. Legacy .kill_switch file (emergency SSH kill — bypasses DB)
+      3. Customer halt row in this customer's own DB
+      4. Legacy KILL_SWITCH='1' setting in this customer's settings (bwd-compat)
+
+    Any failure reading the DB falls soft — we don't fabricate a halt state
+    just because a DB read hiccupped."""
+    # 1. Admin halt via system_halt table in master DB
+    try:
+        shared = _shared_db()
+        admin = shared.get_halt()
+        if admin and admin.get('active'):
+            return ('admin', admin.get('reason') or '')
+    except Exception as e:
+        log.debug(f"admin halt check (shared DB) failed: {e}")
+
+    # 2. Legacy .kill_switch file — still honored as emergency fallback
+    if kill_switch_active():
+        return ('admin', 'legacy .kill_switch file present')
+
+    # 3. Customer halt via system_halt table in this customer's DB
+    try:
+        db = _db()
+        cust = db.get_halt()
+        if cust and cust.get('active'):
+            return ('customer', cust.get('reason') or '')
+    except Exception as e:
+        log.debug(f"customer halt check (per-customer DB) failed: {e}")
+
+    # 4. Legacy per-customer KILL_SWITCH='1' setting (backwards-compat bridge)
+    try:
+        db = _db()
+        if db.get_setting('KILL_SWITCH') == '1':
+            return ('customer', 'legacy KILL_SWITCH=1 setting')
+    except Exception as e:
+        log.debug(f"legacy KILL_SWITCH setting check failed: {e}")
+
+    return None
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -1207,14 +1261,12 @@ def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bo
     }, "within market hours" if mtr["is_market_hours"] else "outside market hours (evaluation only)")
     # Non-fatal — agent runs 24/7, evaluates signals any time
 
-    # Kill switch — global file OR per-customer DB flag
-    _global_kill = kill_switch_active()
-    _customer_kill = getattr(C, '_customer_kill_switch', False)
-    if _global_kill or _customer_kill:
-        source = "global file" if _global_kill else "per-customer setting"
-        decision_log.gate("1_KILL_SWITCH", False, {"source": source}, f"kill switch active ({source})")
-        decision_log.decide("HALT", f"Kill switch active ({source})")
-        return False
+    # Halt check redundancy removed — run()'s first-line _check_halt_state
+    # already exited before this code ran. Keeping a legacy belt-and-
+    # suspenders check here would only fire in the impossible case that
+    # the halt state flipped between run() entry and Gate 1 (~milliseconds).
+    # If we ever want that defense-in-depth, it's a single _check_halt_state()
+    # call — no need for the old global-file / per-customer-setting split.
 
     # Portfolio drawdown limit
     # current_equity <= peak_equity * (1 - max_drawdown_pct)
@@ -1676,14 +1728,40 @@ def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
 # ── GATE 7 — POSITION SIZING ─────────────────────────────────────────────────
 
 def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
-                 positions: list, atr: float, decision_log: TradeDecisionLog) -> float:
+                 positions: list, atr: float, decision_log: TradeDecisionLog,
+                 db=None) -> float:
     """
     Compute final position size in shares.
-    Logic: Doc 3 §7
+    Logic: Doc 3 §7 + AUTO/USER tagging (Model B sizing + Model C cash guard).
+
+    Sizing math runs off TOTAL account equity (Model B) so risk-per-trade
+    stays consistent regardless of whether the user has large USER-managed
+    positions taking up cash. Final size is then capped at available cash
+    (Model C) so orders don't fail at submission. If the cash cap shrinks
+    the order below 70% of intended, we SKIP this trade entirely — a
+    partially-sized order at sub-intended risk is worse than waiting a
+    cycle.
+
+    Returns 0 as a sentinel for "skip due to insufficient cash after USER
+    allocation." Callers that execute buys must guard with `if size > 0`.
     """
-    price    = candidate["price"]
-    equity   = portfolio.get("cash", 0)
-    tier     = get_portfolio_tier(equity)
+    price = candidate["price"]
+    cash  = portfolio.get("cash", 0)
+
+    # Model B: size off total account equity (Alpaca ground truth, cached
+    # to _ALPACA_EQUITY setting by GATE 0 earlier this cycle). Falls back
+    # to cash if equity unavailable — which preserves the pre-feature
+    # behavior for customers who haven't hit GATE 0 yet.
+    total_equity = 0.0
+    if db is not None:
+        try:
+            total_equity = float(db.get_setting('_ALPACA_EQUITY') or 0)
+        except (TypeError, ValueError):
+            total_equity = 0.0
+    if total_equity <= 0:
+        total_equity = cash
+    equity = total_equity
+    tier   = get_portfolio_tier(equity)
 
     # Drawdown-based scaling
     peak     = portfolio.get("peak_equity") or equity
@@ -1708,7 +1786,7 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
     # Drawdown scaling: size *= (1 - current_drawdown_pct)
     size *= max(0.1, 1.0 - drawdown)
 
-    # Max cap: size <= max_position_pct * portfolio
+    # Max cap: size <= max_position_pct * TOTAL equity
     max_shares = (equity * C.MAX_POSITION_PCT) / price if price > 0 else 0
     size       = min(size, max_shares)
 
@@ -1717,12 +1795,39 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
         max_by_usd = C.MAX_TRADE_USD / price
         size = min(size, max_by_usd)
 
-    size       = round(max(size, 0.0001), 4)
+    intended = size  # shares we wanted before the cash guard
 
+    # Model C guard: cap at available cash. If cash has been consumed by
+    # USER-managed positions (or just by other auto positions), we may
+    # not be able to execute the intended size. Skip (not partial-fill)
+    # if the constraint cuts below 70% of intent — a heavily under-sized
+    # trade has worse risk math than waiting.
+    if price > 0 and cash > 0:
+        max_by_cash = cash / price
+        size = min(size, max_by_cash)
+    else:
+        size = 0
+
+    if intended > 0 and size < intended * 0.70:
+        # Skip — cash is too tight after USER/other-auto allocation.
+        decision_log.gate("7_SIZING", "SKIP_INSUFFICIENT_CASH_AFTER_MANUAL", {
+            "intended_shares":  f"{intended:.4f}",
+            "intended_dollars": f"${intended * price:.2f}",
+            "cash_cap_shares":  f"{size:.4f}",
+            "available_cash":   f"${cash:.2f}",
+            "total_equity":     f"${equity:.2f}",
+            "equity_minus_cash":f"${equity - cash:.2f} (in positions)",
+            "price":            f"${price:.2f}",
+        }, f"SKIP — would size {intended:.4f}sh but cash caps at {size:.4f}sh "
+           f"(<70% of intent); insufficient cash after manual/auto allocation")
+        return 0
+
+    size = round(max(size, 0.0001), 4)
     dollar_value = size * price
 
     decision_log.gate("7_SIZING", f"{size:.4f} shares (${dollar_value:.2f})", {
-        "equity":          f"${equity:.2f}",
+        "total_equity":    f"${equity:.2f}",
+        "available_cash":  f"${cash:.2f}",
         "tier":            tier["label"],
         "atr":             f"${atr:.2f}" if atr else "estimated",
         "stop_distance":   f"${stop_dist:.2f}",
@@ -1731,7 +1836,8 @@ def gate7_sizing(candidate: dict, regime: RegimeState, portfolio: dict,
         "vol_adjustment":  f"×{vol_adj:.3f}",
         "mode_adjustment": f"×{C.DEFENSIVE_SIZE_FACTOR if regime.mode=='DEFENSIVE' else C.AGGRESSIVE_SIZE_FACTOR if regime.mode=='AGGRESSIVE' else 1.0:.2f}",
         "drawdown_scale":  f"×{1.0-drawdown:.3f} (dd={drawdown*100:.1f}%)",
-        "max_cap":         f"{max_shares:.4f} shares",
+        "max_cap_equity":  f"{max_shares:.4f} shares (Model B)",
+        "cash_cap":        f"{cash/price:.4f} shares (Model C)" if price > 0 else "n/a",
         "usd_cap":         f"${C.MAX_TRADE_USD:.2f}" if C.MAX_TRADE_USD > 0 else "none",
         "final_size":      f"{size:.4f} shares @ ${price:.2f}",
     }, f"{size:.4f} shares × ${price:.2f} = ${dollar_value:.2f}")
@@ -2337,7 +2443,24 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             # Refresh positions list after sell (so sizing doesn't count sold position)
             fresh_positions = db.get_open_positions()
 
-            size = gate7_sizing(candidate, regime, portfolio, fresh_positions, atr, sig_log)
+            size = gate7_sizing(candidate, regime, portfolio, fresh_positions, atr, sig_log, db=db)
+            if size <= 0:
+                # Insufficient cash after manual/auto allocation — skip.
+                # Decision already logged inside gate7_sizing.
+                sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
+                sig_log.commit(db)
+                # Also log to signal_decisions so the cash-starved warning
+                # banner (phase 7) can count these skips over a rolling window.
+                try:
+                    db.log_signal_decision(
+                        agent='trade_logic', action='SKIP_INSUFFICIENT_CASH_AFTER_MANUAL',
+                        ticker=signal.get('ticker'), signal_id=signal.get('id'),
+                        reason='cash insufficient after manual/auto allocation',
+                    )
+                except Exception:
+                    pass
+                _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
+                continue
             risk = gate8_risk(candidate, atr, session, sig_log)
 
             if _is_supervised():
@@ -2408,6 +2531,21 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
         log.error(f"[ROTATION] Unexpected error: {e}", exc_info=True)
 
 def run(session="open"):
+    # ── HALT CHECK — absolute first thing ────────────────────────────
+    # If admin or customer halt is active, exit immediately. This runs
+    # before ANY other work: no DB connection beyond the halt read, no
+    # Alpaca client creation, no state mutation. See HALT_AGENT_REWRITE.md.
+    _halt = _check_halt_state()
+    if _halt is not None:
+        _src, _reason = _halt
+        log.info(f"[HALT] {_src} halt active (reason={_reason!r}) — skipping trader run")
+        try:
+            _db().log_event("TRADER_SKIPPED_HALT", agent="Trade Logic",
+                            details=f"src={_src} reason={_reason[:200]}")
+        except Exception:
+            pass
+        sys.exit(0)
+
     # ── RUNTIME WATCHDOG ──────────────────────────────────────────────
     # Start the background watchdog BEFORE any blocking work so even a
     # hang on the very first Alpaca call gets a "still alive in phase X"
@@ -2501,18 +2639,23 @@ def run(session="open"):
             except Exception:
                 pass
             log.warning(f"[GATE 0] ORPHAN: {t} {shares:.4f}sh @ ${entry:.2f} sector={_orphan_sector or '?'} — auto-adopting")
+            # Orphans are positions on Alpaca with no matching DB row — by
+            # construction these are user-initiated (bot buys always record
+            # their own position row atomically). Tag managed_by='user' so
+            # the trader doesn't treat them as its own to manage.
             db.open_position(
                 ticker=t, company=t, sector=_orphan_sector,
                 entry_price=entry, shares=shares,
                 trail_stop_amt=0, trail_stop_pct=0, vol_bucket='normal',
                 signal_id=None, entry_signal_score=None,
                 entry_sentiment_score=None, interrogation_status=None,
+                managed_by='user',
             )
             db.log_event("ORPHAN_ADOPTED", agent="Trade Logic",
-                         details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca")
+                         details=f"{t} {shares:.4f}sh @ ${entry:.2f} adopted from Alpaca as USER-managed")
             db.add_notification('account', f'{t} position detected',
-                f'{shares:.2f} shares @ ${entry:.2f} added to your portfolio',
-                meta={'ticker': t, 'type': 'orphan_adopted'})
+                f'{shares:.2f} shares @ ${entry:.2f} added as user-managed',
+                meta={'ticker': t, 'type': 'orphan_adopted', 'managed_by': 'user'})
             healed += 1
 
     # Auto-close ghosts (customer sold on Alpaca directly, or trailing stop filled)
@@ -2683,6 +2826,12 @@ def run(session="open"):
         if budget_exceeded():
             log.warning("[GATE 10] Runtime budget exceeded — skipping remaining position reviews")
             break
+        # USER-managed positions are user's responsibility — trader does not
+        # apply trailing stops, stop-loss adjustments, or protective exits.
+        # Price is still updated in the pre-loop sync (line ~2552) so the
+        # dashboard shows correct P&L. See AUTO/USER tagging spec.
+        if (pos.get('managed_by') or 'bot') == 'user':
+            continue
         _set_phase('gate_10_position_review', f"ticker={pos['ticker']}")
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
@@ -2974,6 +3123,25 @@ def run(session="open"):
                     log.info(f"Signal {signal['ticker']} skipped — spousal (SPOUSAL_WEIGHT=skip)")
                     continue
 
+                # Sticky USER preference — user has marked this ticker "never auto".
+                # Bot respects this across all signals for the ticker, regardless of
+                # whether they currently hold a position.
+                _sticky = db.get_ticker_sticky(signal['ticker'])
+                if _sticky == 'user':
+                    log.info(f"Signal {signal['ticker']} skipped — sticky USER preference")
+                    db.log_event("SIGNAL_SKIPPED_STICKY_USER", agent="Trade Logic",
+                                 details=f"ticker={signal['ticker']} signal_id={signal.get('id')}")
+                    try:
+                        db.log_signal_decision(
+                            agent='trade_logic', action='SKIP_STICKY_USER',
+                            ticker=signal['ticker'], signal_id=signal.get('id'),
+                            reason='ticker has sticky=user preference',
+                        )
+                    except Exception:
+                        pass
+                    _mark_signal_evaluated(signal['id'], 'SKIP_STICKY_USER')
+                    continue
+
                 sig_log = TradeDecisionLog(session=session, ticker=signal['ticker'],
                                            signal_id=(signal.get('id') if _CUSTOMER_ID == _OWNER_CID else None))
                 sig_log.note(f"politician={signal.get('politician','?')} "
@@ -3008,8 +3176,14 @@ def run(session="open"):
                 if not atr:
                     atr = candidate['price'] * 0.02
 
-                # Gate 7: Position sizing
-                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log)
+                # Gate 7: Position sizing (Model B + Model C cash guard)
+                size = gate7_sizing(candidate, regime, portfolio, positions, atr, sig_log, db=db)
+                if size <= 0:
+                    # Insufficient cash — skip; gate7_sizing already logged reason.
+                    sig_log.decide("SKIP", "insufficient cash after manual/auto allocation")
+                    sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL')
+                    continue
 
                 # Gate 8: Risk setup
                 risk = gate8_risk(candidate, atr, session, sig_log)

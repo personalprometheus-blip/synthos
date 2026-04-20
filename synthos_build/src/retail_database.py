@@ -206,6 +206,36 @@ CREATE TABLE IF NOT EXISTS positions (
     FOREIGN KEY (signal_id) REFERENCES signals(id)
 );
 
+-- ── POSITION PREFERENCES ──────────────────────────────────────────────
+-- Sticky per-ticker overrides for AUTO/USER tagging. If a row exists with
+-- sticky='user', bot never takes positions in this ticker regardless of
+-- signal — instead, logs SIGNAL_SKIPPED_STICKY_USER in signal_decisions.
+-- sticky='bot' is reserved for a future iteration (see backlog Q2 deferral).
+CREATE TABLE IF NOT EXISTS position_preferences (
+    ticker          TEXT PRIMARY KEY,
+    sticky          TEXT NOT NULL CHECK (sticky IN ('user','bot')),
+    set_by          TEXT NOT NULL,         -- 'user' (manual) | 'system' (auto)
+    set_at          TEXT NOT NULL
+);
+
+-- ── SYSTEM HALT (kill switch v2) ──────────────────────────────────────
+-- Singleton row. Two separate halt layers:
+--  * Admin halt:     the row in the MASTER customer's signals.db is the
+--                    authoritative source. All trader subprocesses read it
+--                    via _shared_db(). Applies to every customer.
+--  * Customer halt:  the row in that customer's OWN signals.db applies
+--                    only to that customer's trader subprocess.
+-- Trader's entry-point skip checks both — either one true = skip that
+-- customer's run. See HALT_AGENT_REWRITE.md for the full spec.
+CREATE TABLE IF NOT EXISTS system_halt (
+    id                INTEGER PRIMARY KEY CHECK (id = 1),  -- singleton row
+    active            INTEGER NOT NULL DEFAULT 0,           -- boolean 0/1
+    reason            TEXT,
+    set_by            TEXT,                                 -- operator identifier
+    set_at            TEXT,
+    expected_return   TEXT                                  -- admin-only optional
+);
+
 -- ── SIGNALS ────────────────────────────────────────────────────────────
 -- Per-agent stamp ownership (enforce this convention when adding new fields):
 --   news_agent:      status (initial QUEUED), interrogation_status, needs_reeval,
@@ -795,6 +825,13 @@ class DB:
             # closes that gap and lets the trader lift the stamp from
             # a duplicative boolean bonus to a proportional ranking input.
             "ALTER TABLE signals ADD COLUMN screener_score REAL",
+            # v3.10 — AUTO/USER per-position tagging. Default 'bot' so all
+            # existing positions treat as bot-managed (pre-feature behavior).
+            # Check constraint not applicable via ALTER TABLE in SQLite; the
+            # application enforces the 'bot'|'user' domain (retail_trade_logic_agent
+            # + retail_portal). New positions inserted post-migration should set
+            # managed_by explicitly per the who-initiated-the-buy rule.
+            "ALTER TABLE positions ADD COLUMN managed_by TEXT NOT NULL DEFAULT 'bot'",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -914,11 +951,22 @@ class DB:
     def open_position(self, ticker, company, sector, entry_price, shares,
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,
-                      interrogation_status=None, price_history_used=None):
+                      interrogation_status=None, price_history_used=None,
+                      managed_by='bot'):
         """
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
+
+        managed_by: 'bot' (default — trader's own buys) or 'user' (adopted
+        from a direct Alpaca purchase). Trader skips buy/sell/stop logic on
+        'user' rows; sticky preferences on a ticker further harden this.
+        If sticky='user' is set for this ticker, caller should normally NOT
+        be here — but if it gets called anyway, the trader's signal-eval
+        path already blocks sticky-user tickers upstream; we don't second-
+        guess the caller here.
         """
+        if managed_by not in ('bot', 'user'):
+            raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
         portfolio = self.get_portfolio()
@@ -931,13 +979,13 @@ class DB:
                      shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                      pnl, status, opened_at, signal_id,
                      entry_sentiment_score, entry_signal_score,
-                     interrogation_status, price_history_used)
-                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?)
+                     interrogation_status, price_history_used, managed_by)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?)
             """, (pos_id, ticker, company, sector, entry_price, entry_price,
                   shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                   self.now(), signal_id,
                   entry_sentiment_score, entry_signal_score,
-                  interrogation_status, price_history_used))
+                  interrogation_status, price_history_used, managed_by))
 
         self.update_portfolio(cash=new_cash)
         self.add_ledger_entry(
@@ -949,6 +997,89 @@ class DB:
         )
         log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
         return pos_id
+
+    # ── POSITION PREFERENCES (sticky AUTO/USER per ticker) ────────────────
+
+    def get_ticker_sticky(self, ticker: str) -> str | None:
+        """Return the sticky override for a ticker, or None if no preference set.
+        Possible return values: 'user' (sticky — bot never takes), 'bot' (reserved
+        for future use — currently unused in v1)."""
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT sticky FROM position_preferences WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
+        return row['sticky'] if row else None
+
+    def set_ticker_sticky(self, ticker: str, sticky: str | None, set_by: str = 'user') -> None:
+        """Set (or clear when sticky is None) a ticker's sticky preference.
+        set_by: 'user' (operator clicked the lock icon) or 'system' (auto-set)."""
+        if sticky is not None and sticky not in ('user', 'bot'):
+            raise ValueError(f"sticky must be 'user', 'bot', or None — got {sticky!r}")
+        with self.conn() as c:
+            if sticky is None:
+                c.execute("DELETE FROM position_preferences WHERE ticker = ?", (ticker,))
+            else:
+                c.execute(
+                    "INSERT INTO position_preferences (ticker, sticky, set_by, set_at) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(ticker) DO UPDATE SET "
+                    "sticky=excluded.sticky, set_by=excluded.set_by, set_at=excluded.set_at",
+                    (ticker, sticky, set_by, self.now()),
+                )
+
+    def set_position_managed_by(self, pos_id: str, managed_by: str) -> None:
+        """Flip a position's AUTO/USER tag. Called by the portal's toggle endpoint."""
+        if managed_by not in ('bot', 'user'):
+            raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
+        with self.conn() as c:
+            c.execute(
+                "UPDATE positions SET managed_by = ? WHERE id = ?",
+                (managed_by, pos_id),
+            )
+
+    # ── SYSTEM HALT (kill switch v2) ──────────────────────────────────────
+
+    def get_halt(self) -> dict:
+        """Return this DB's halt row as a dict, or an 'inactive' placeholder.
+        Keys: active (bool), reason (str|None), set_by (str|None),
+              set_at (iso str|None), expected_return (iso str|None)."""
+        try:
+            with self.conn() as c:
+                row = c.execute(
+                    "SELECT active, reason, set_by, set_at, expected_return "
+                    "FROM system_halt WHERE id = 1"
+                ).fetchone()
+        except Exception:
+            row = None
+        if not row:
+            return {'active': False, 'reason': None, 'set_by': None,
+                    'set_at': None, 'expected_return': None}
+        return {
+            'active':          bool(row['active']),
+            'reason':          row['reason'],
+            'set_by':          row['set_by'],
+            'set_at':          row['set_at'],
+            'expected_return': row['expected_return'],
+        }
+
+    def set_halt(self, active: bool, reason: 'str | None' = None,
+                 set_by: str = 'unknown',
+                 expected_return: 'str | None' = None) -> None:
+        """Set this DB's halt state. Upsert the singleton row.
+        Clearing halt (active=False): reason/set_by still recorded for audit."""
+        now = self.now()
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO system_halt "
+                "(id, active, reason, set_by, set_at, expected_return) "
+                "VALUES (1, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "active=excluded.active, reason=excluded.reason, "
+                "set_by=excluded.set_by, set_at=excluded.set_at, "
+                "expected_return=excluded.expected_return",
+                (1 if active else 0, reason, set_by, now, expected_return),
+            )
 
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """

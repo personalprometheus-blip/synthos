@@ -405,10 +405,15 @@ def run_trade_all_customers(session='open'):
         # Launch up to MAX_TRADE_PARALLEL
         while pending and len(active) < MAX_TRADE_PARALLEL:
             cid = pending.pop(0)
-            if _shutdown_requested or kill_switch_active():
-                log.info("[DISPATCH] Shutdown/kill switch — stopping launches")
+            if _shutdown_requested:
+                log.info("[DISPATCH] Shutdown requested — stopping launches")
                 pending.clear()
                 break
+            # NOTE (halt v2): admin halt no longer halts dispatch here.
+            # Each trader subprocess checks the halt state at its own entry
+            # point and exits cleanly if halted. This preserves heartbeats,
+            # scheduler ticks, and observability during admin maintenance.
+            # See docs/specs/HALT_AGENT_REWRITE.md.
             try:
                 cmd = [
                     sys.executable,
@@ -908,9 +913,10 @@ def run_market_loop():
     enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
     recon_interval = RECON_INTERVAL_MIN * 60
 
-    # First trade evaluation right at market open (pre-market prep already ran enrichment)
-    if not kill_switch_active():
-        run_trade_all_customers(session='open')
+    # First trade evaluation right at market open (pre-market prep already ran enrichment).
+    # Halt v2: dispatch always runs; each trader subprocess checks halt state at entry
+    # and exits cleanly if admin/customer halt is active.
+    run_trade_all_customers(session='open')
     clear_agent_running()
 
     while not _shutdown_requested and not past_market_close():
@@ -949,8 +955,9 @@ def run_market_loop():
             # Last link: stamp validator + promote fully-validated signals
             if not _shutdown_requested:
                 promote_validated_signals()
-            # Trade execution (validator verdict gates decisions)
-            if not _shutdown_requested and not kill_switch_active():
+            # Trade execution (validator verdict gates decisions).
+            # Halt v2: subprocesses handle their own halt-skip; dispatch runs.
+            if not _shutdown_requested:
                 run_trade_all_customers(session='open')
             last_enrichment = time.monotonic()
             last_recon = time.monotonic()  # enrichment includes reconciliation
@@ -959,12 +966,12 @@ def run_market_loop():
             _end_cycle(cycle_id)
 
         # ── RECONCILIATION CYCLE (every 10 min between enrichments) ──
-        # Lightweight: catches trailing stop fills, exit conditions, approved trades
+        # Lightweight: catches trailing stop fills, exit conditions, approved trades.
+        # Halt v2: subprocesses handle their own halt-skip; dispatch runs.
         elif since_recon >= recon_interval:
-            if not kill_switch_active():
-                log.info(f"[RECON] {since_recon/60:.0f}m — reconciliation + exit checks")
-                run_trade_all_customers(session='open')
-                clear_agent_running()
+            log.info(f"[RECON] {since_recon/60:.0f}m — reconciliation + exit checks")
+            run_trade_all_customers(session='open')
+            clear_agent_running()
             last_recon = time.monotonic()
             send_retail_heartbeat('market_daemon', 'OK')
 
@@ -1137,15 +1144,13 @@ def _send_email(email, subject, body):
 
 
 def run_close_session():
-    """4:00 PM: Final evaluation with close session parameters."""
+    """4:00 PM: Final evaluation with close session parameters.
+    Halt v2: always dispatch; trader subprocesses skip individually if halted."""
     log.info("=" * 60)
     log.info("MARKET CLOSE — final evaluation")
     log.info("=" * 60)
 
-    if not kill_switch_active():
-        run_trade_all_customers(session='close')
-    else:
-        log.info("[CLOSE] Kill switch active — skipping close session trades")
+    run_trade_all_customers(session='close')
     clear_agent_running()
 
     # Post-close: backfill exit performance data, then run optimizer

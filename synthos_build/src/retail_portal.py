@@ -3448,6 +3448,56 @@ def get_system_status():
             enriched, orphans    = _enrich_positions(positions, alpaca_map)
             all_positions        = enriched + orphans
 
+            # Attach sticky preference per position for the AUTO/USER lock UI.
+            # Single query + dict lookup so we don't hit the DB per-row.
+            try:
+                with db.conn() as _c:
+                    _sticky_map = {
+                        r['ticker']: r['sticky']
+                        for r in _c.execute(
+                            "SELECT ticker, sticky FROM position_preferences"
+                        ).fetchall()
+                    }
+            except Exception:
+                _sticky_map = {}
+            for _p in all_positions:
+                _p['sticky'] = _sticky_map.get(_p.get('ticker'))
+
+            # User-facing warnings — computed per request, not persisted. Keeps
+            # the UI honest about pipeline health without spamming notifications.
+            _user_warnings = []
+            _auto_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'bot')
+            _user_n = sum(1 for p in enriched if (p.get('managed_by') or 'bot') == 'user')
+            # Cap-underutilized: ≥ 1 position total, bot covering < 40% of cap.
+            # Suppressed on brand-new accounts (zero positions) so onboarding
+            # isn't noisy.
+            if (_auto_n + _user_n) >= 1 and _auto_n < max(2, int(AUTO_USER_POSITION_CAP * 0.4)):
+                _user_warnings.append({
+                    'type': 'cap_underutilized',
+                    'severity': 'info',
+                    'message': (f"Bot is only managing {_auto_n}/{AUTO_USER_POSITION_CAP} positions. "
+                                f"Promote USER positions to AUTO below if you want more bot coverage."),
+                })
+            # Cash-starved: recent SKIP_INSUFFICIENT_CASH_AFTER_MANUAL signals.
+            try:
+                with db.conn() as _c:
+                    _skip_row = _c.execute(
+                        "SELECT COUNT(*) AS n FROM signal_decisions "
+                        "WHERE action = 'SKIP_INSUFFICIENT_CASH_AFTER_MANUAL' "
+                        "AND ts >= datetime('now', '-7 days')"
+                    ).fetchone()
+                    _skip_count = int(_skip_row['n']) if _skip_row else 0
+            except Exception:
+                _skip_count = 0
+            if _skip_count >= 2:
+                _user_warnings.append({
+                    'type': 'cash_starved',
+                    'severity': 'warn',
+                    'message': (f"Bot skipped {_skip_count} signals in the last 7 days because "
+                                f"there wasn't enough cash after your manual positions. "
+                                f"Closing a USER position or adding funds would restore bot coverage."),
+                })
+
             # Enrich flags with human-readable context
             enriched_flags = _enrich_flags([dict(f) for f in flags], db.path)
             critical_count = sum(1 for f in enriched_flags if f['tier'] == 1)
@@ -3477,6 +3527,7 @@ def get_system_status():
                 "max_trade_usd":    float(os.environ.get('MAX_TRADE_USD', '0')),
                 "pi_id":            PI_ID,
                 "agent_running":    None,
+                "user_warnings":    _user_warnings,
                 "admin_overrides": {
                     "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
                     "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
@@ -5108,6 +5159,92 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 <!-- ══════════════ DASHBOARD TAB ══════════════ -->
 <div class="page" id="tab-dashboard">
 
+<!-- HALT AGENT BANNER (kill switch v2) — collapsible thin strip → expanded -->
+<style>
+  #halt-banner { display:none; }
+  #halt-banner.active { display:block; }
+  .halt-strip {
+    padding: 3px 14px; font-size: 10px; line-height: 1.4;
+    font-family: var(--mono); letter-spacing: 0.05em;
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: background 0.2s;
+  }
+  .halt-strip.customer { background: rgba(245,166,35,0.14); border-bottom-color: rgba(245,166,35,0.4); color: var(--amber); }
+  .halt-strip.admin    { background: rgba(255,75,110,0.16); border-bottom-color: rgba(255,75,110,0.45); color: var(--pink); }
+  .halt-strip:hover { filter: brightness(1.1); }
+  .halt-strip-msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .halt-strip-chevron { font-size: 10px; opacity: 0.7; }
+  .halt-expanded {
+    padding: 14px 18px; font-family: var(--sans); font-size: 12px; line-height: 1.6;
+  }
+  .halt-expanded.customer { background: rgba(245,166,35,0.06); border-bottom: 1px solid rgba(245,166,35,0.25); }
+  .halt-expanded.admin    { background: rgba(255,75,110,0.06); border-bottom: 1px solid rgba(255,75,110,0.3); }
+  .halt-expanded h4 { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .halt-expanded.customer h4 { color: var(--amber); }
+  .halt-expanded.admin h4 { color: var(--pink); }
+  .halt-expanded .halt-meta { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-bottom: 10px; }
+  .halt-expanded ul { list-style: none; padding: 0; margin: 8px 0; }
+  .halt-expanded li { padding: 2px 0; color: var(--text); }
+  .halt-expanded li.pos::before { content:'✓'; color: var(--teal); margin-right: 6px; font-weight: 700; }
+  .halt-expanded li.neg::before { content:'✗'; color: var(--pink); margin-right: 6px; font-weight: 700; }
+  .halt-expanded .halt-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; justify-content: flex-end; }
+  .halt-resume-btn {
+    padding: 6px 14px; border-radius: 7px; border: 1px solid var(--teal);
+    background: rgba(0,245,212,0.08); color: var(--teal); font-size: 11px;
+    font-weight: 700; letter-spacing: 0.05em; cursor: pointer; font-family: var(--sans);
+  }
+  .halt-resume-btn:hover { background: rgba(0,245,212,0.14); }
+  .halt-collapse-btn {
+    padding: 4px 10px; border-radius: 5px; border: 1px solid var(--border2);
+    background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; font-family: var(--sans);
+  }
+  /* Halt reason modal (tiny) */
+  .halt-reason-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 800; align-items: center; justify-content: center;
+  }
+  .halt-reason-overlay.visible { display: flex; }
+  .halt-reason-modal {
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 12px;
+    padding: 20px; width: min(420px, 92vw);
+  }
+  .halt-reason-modal h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; color: var(--text); }
+  .halt-reason-modal textarea {
+    width: 100%; min-height: 70px; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 8px 10px; color: var(--text); font-family: var(--sans); font-size: 12px;
+    resize: vertical; outline: none;
+  }
+  .halt-reason-modal .halt-reason-actions {
+    display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;
+  }
+  .halt-reason-modal .halt-reason-actions button {
+    padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border2);
+    font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--sans);
+  }
+  .halt-reason-modal .halt-reason-actions button.primary {
+    border-color: var(--pink); background: rgba(255,75,110,0.12); color: var(--pink);
+  }
+  .halt-reason-modal .halt-reason-actions button.primary.resume {
+    border-color: var(--teal); background: rgba(0,245,212,0.12); color: var(--teal);
+  }
+  .halt-reason-modal .halt-reason-actions button.cancel {
+    background: transparent; color: var(--muted);
+  }
+</style>
+<div id="halt-banner" aria-live="polite"></div>
+<div class="halt-reason-overlay" id="halt-reason-overlay" onclick="closeHaltReason(event)">
+  <div class="halt-reason-modal" onclick="event.stopPropagation()">
+    <h3 id="halt-reason-title">Halt Trade Agent</h3>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:10px" id="halt-reason-sub">Optionally note a reason — it's logged for your records.</p>
+    <textarea id="halt-reason-text" placeholder="Reason (optional)"></textarea>
+    <div class="halt-reason-actions">
+      <button class="cancel" onclick="closeHaltReason()">Cancel</button>
+      <button class="primary" id="halt-reason-submit" onclick="submitHaltReason()">Halt Agent</button>
+    </div>
+  </div>
+</div>
+
 <!-- NEW ACCOUNT BANNER -->
 <div id="new-account-banner" style="display:none;background:linear-gradient(90deg,rgba(245,166,35,0.12),rgba(245,166,35,0.04));border-bottom:2px solid var(--amber);padding:10px 24px;display:none;align-items:center;gap:10px">
   <span style="font-size:16px">&#x26A0;</span>
@@ -5224,6 +5361,9 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
+  <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
+  <div id="user-warnings-banner"></div>
+
   <!-- OPEN POSITIONS -->
   <div class="glass teal-glow" style="margin-bottom:14px">
     <div class="dash-panel-head">
@@ -5257,7 +5397,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="stat-card amber">
       <div class="stat-label">Agent Mode</div>
       <div style="font-size:13px;font-weight:700;margin-top:4px;font-family:var(--mono)" id="mode-display">Loading</div>
-      <div style="margin-top:5px"><button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button></div>
+      <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button>
+        <button class="graph-tab" id="halt-agent-btn" style="font-size:9px;padding:2px 10px;border-color:rgba(245,166,35,0.4);color:var(--amber)" onclick="openHaltReason('activate',event)">Halt Agent</button>
+      </div>
     </div>
     <div class="stat-card pink">
       <div class="stat-label">Open Positions</div>
@@ -7717,6 +7860,211 @@ function toggleSeries(idx, btn) {
 async function loadGraph(days, btn) { loadMarketChart(days <= 30 ? 36 : 720, btn); }
 
 // ── STATUS LOAD ──
+const AUTO_USER_CAP = 12;  // v1 hard cap; matches backend AUTO_USER_POSITION_CAP.
+
+async function toggleManagedBy(posId, current, ticker, event) {
+  event.stopPropagation();
+  const target = (current === 'user') ? 'bot' : 'user';
+  try {
+    const r = await fetch('/api/positions/' + encodeURIComponent(posId) + '/managed-by', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({managed_by: target}),
+    });
+    const d = await r.json().catch(() => ({ok: false, error: 'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    toast((ticker || '?') + ' → ' + (target === 'bot' ? 'AUTO' : 'USER'), 'ok');
+  } catch(e) {
+    toast('Toggle failed: ' + e.message, 'err');
+  }
+}
+
+// ── HALT AGENT banner (kill switch v2) ──
+let _haltPendingAction = null;   // 'activate' | 'deactivate'
+let _haltBannerExpanded = null;   // true/false — localStorage-backed
+
+function _haltLoadCollapseState() {
+  try {
+    const v = localStorage.getItem('halt_banner_expanded');
+    _haltBannerExpanded = (v === '1');
+  } catch (e) { _haltBannerExpanded = false; }
+}
+function _haltSaveCollapseState(expanded) {
+  _haltBannerExpanded = !!expanded;
+  try { localStorage.setItem('halt_banner_expanded', expanded ? '1' : '0'); } catch(e){}
+}
+
+function renderHaltBanner(status) {
+  const el = document.getElementById('halt-banner');
+  if (!el) return;
+  if (_haltBannerExpanded === null) _haltLoadCollapseState();
+  const src = status && status.active_source;
+  const haltBtn = document.getElementById('halt-agent-btn');
+  if (!src) {
+    el.classList.remove('active');
+    el.innerHTML = '';
+    // Offer the halt button only when not currently halted.
+    if (haltBtn) haltBtn.style.display = '';
+    return;
+  }
+  el.classList.add('active');
+  // Hide the "Halt Agent" button while already halted — avoids duplicate-halt UX.
+  if (haltBtn) haltBtn.style.display = 'none';
+  const halt = src === 'admin' ? (status.admin_halt || {}) : (status.customer_halt || {});
+  const expanded = !!_haltBannerExpanded;
+  const chev = expanded ? '∨' : '∧';
+  const label = src === 'admin'
+    ? 'Trade Agent Halted — Admin Maintenance'
+    : 'Trade Agent Halted — You paused this';
+
+  const reason = (halt.reason || '(no reason recorded)').toString().replace(/</g,'&lt;');
+  const setAt  = (halt.set_at || '').slice(0,16).replace('T',' ');
+  const expRet = (halt.expected_return || '').toString().replace(/</g,'&lt;');
+
+  let html = '<div class="halt-strip ' + src + '" onclick="toggleHaltBannerExpand()">'
+           + '<span>⚠</span>'
+           + '<span class="halt-strip-msg">' + label + ' — until ' + (src === 'admin' ? 'Admin' : 'You') + ' Resumes</span>'
+           + '<span class="halt-strip-chevron">' + chev + '</span>'
+           + '</div>';
+
+  if (expanded) {
+    html += '<div class="halt-expanded ' + src + '">';
+    html += '<h4>' + label + '</h4>';
+    html += '<div class="halt-meta">';
+    if (setAt)  html += 'Activated: ' + setAt + ' ET';
+    if (expRet) html += ' &middot; Expected return: ' + expRet;
+    html += '</div>';
+    html += '<div style="color:var(--text);margin-bottom:8px"><strong>Reason:</strong> ' + reason + '</div>';
+    html += '<ul>';
+    html += '<li class="pos">Existing Alpaca stop-loss orders remain active — positions are still protected</li>';
+    html += '<li class="pos">You can still trade directly on Alpaca</li>';
+    html += '<li class="pos">Your portfolio values and prices continue to update</li>';
+    html += '<li class="neg">The bot will not open, close, or manage any positions</li>';
+    html += '<li class="neg">Approval-queue trades wait — they execute when the Halt is lifted</li>';
+    html += '</ul>';
+    html += '<div class="halt-actions">';
+    if (src === 'customer') {
+      html += '<button class="halt-resume-btn" onclick="openHaltReason(\'deactivate\', event)">Resume Agent</button>';
+    } else {
+      html += '<span style="font-size:11px;color:var(--muted)">Only Admin can resume this halt.</span>';
+    }
+    html += '<button class="halt-collapse-btn" onclick="toggleHaltBannerExpand(event)">Collapse</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function toggleHaltBannerExpand(event) {
+  if (event) event.stopPropagation();
+  _haltSaveCollapseState(!_haltBannerExpanded);
+  // Re-render using last-known status (stored on window for simplicity)
+  if (window._lastHaltStatus) renderHaltBanner(window._lastHaltStatus);
+}
+
+function openHaltReason(action, event) {
+  if (event) event.stopPropagation();
+  _haltPendingAction = action;
+  const overlay = document.getElementById('halt-reason-overlay');
+  const title   = document.getElementById('halt-reason-title');
+  const sub     = document.getElementById('halt-reason-sub');
+  const submit  = document.getElementById('halt-reason-submit');
+  const txt     = document.getElementById('halt-reason-text');
+  if (txt) txt.value = '';
+  if (action === 'activate') {
+    title.textContent = 'Halt Trade Agent';
+    sub.textContent   = 'Optionally note a reason — it\u2019s logged for your records.';
+    submit.textContent = 'Halt Agent';
+    submit.className = 'primary';
+  } else {
+    title.textContent = 'Resume Trade Agent';
+    sub.textContent   = 'Trading resumes immediately. A reason is optional but helps your log.';
+    submit.textContent = 'Resume Agent';
+    submit.className = 'primary resume';
+  }
+  overlay.classList.add('visible');
+}
+function closeHaltReason(event) {
+  if (event && event.target && event.target.id !== 'halt-reason-overlay') return;
+  const overlay = document.getElementById('halt-reason-overlay');
+  if (overlay) overlay.classList.remove('visible');
+  _haltPendingAction = null;
+}
+async function submitHaltReason() {
+  const action = _haltPendingAction;
+  const reason = (document.getElementById('halt-reason-text')||{}).value || '';
+  closeHaltReason();
+  try {
+    const r = await fetch('/api/halt-agent', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({active: (action === 'activate'), reason: reason.slice(0,300)}),
+    });
+    const d = await r.json().catch(() => ({ok:false, error:'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    toast(action === 'activate' ? 'Trade agent halted' : 'Trade agent resumed', 'ok');
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+  } catch(e) {
+    toast('Halt action failed: ' + e.message, 'err');
+  }
+}
+
+function renderUserWarnings(warnings) {
+  const el = document.getElementById('user-warnings-banner');
+  if (!el) return;
+  if (!warnings || !warnings.length) { el.innerHTML = ''; return; }
+  const palette = {
+    info: { bg:'rgba(0,245,212,0.06)', border:'rgba(0,245,212,0.25)', color:'var(--teal)', icon:'&#x1F4A1;' },
+    warn: { bg:'rgba(245,166,35,0.08)', border:'rgba(245,166,35,0.3)',  color:'#f5a623',    icon:'&#x26A0;'  },
+    err:  { bg:'rgba(255,75,110,0.08)', border:'rgba(255,75,110,0.3)',  color:'var(--pink)',icon:'&#x26A0;'  },
+  };
+  el.innerHTML = warnings.map(w => {
+    const p = palette[w.severity] || palette.info;
+    return '<div style="padding:10px 14px;margin-bottom:10px;border-radius:10px;'
+      + 'background:' + p.bg + ';border:1px solid ' + p.border + ';color:' + p.color + ';'
+      + 'font-size:11px;line-height:1.5;display:flex;gap:8px;align-items:flex-start">'
+      + '<span style="font-size:14px;line-height:1;flex-shrink:0;padding-top:1px">' + p.icon + '</span>'
+      + '<span style="color:var(--text);flex:1">' + (w.message||'').replace(/</g,'&lt;') + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+async function toggleStickyUser(ticker, isSticky, event) {
+  event.stopPropagation();
+  const t = (ticker || '').toUpperCase();
+  const msg = isSticky
+    ? 'Remove the always-USER lock on ' + t + '?\n\nThe bot will become eligible to open AUTO positions in ' + t + ' again when a signal fires.'
+    : 'Always manage ' + t + ' yourself?\n\nThe bot will SKIP every signal for ' + t + ' — no new AUTO positions will open in this ticker until you remove the lock. Any existing AUTO position in ' + t + ' is NOT affected (use the row toggle to hand it off).';
+  if (!confirm(msg)) return;
+  const target = isSticky ? null : 'user';
+  try {
+    const r = await fetch('/api/ticker-preferences/' + encodeURIComponent(t), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({sticky: target}),
+    });
+    const d = await r.json().catch(() => ({ok: false, error: 'invalid JSON'}));
+    if (!r.ok || !d.ok) {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+      return;
+    }
+    if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    toast(t + (target === 'user' ? ' → sticky USER (bot will skip)' : ' sticky cleared'), 'ok');
+  } catch(e) {
+    toast('Sticky toggle failed: ' + e.message, 'err');
+  }
+}
+
 function renderPositions(positions) {
   const el = document.getElementById('positions-list');
   const ct = document.getElementById('positions-count');
@@ -7725,10 +8073,18 @@ function renderPositions(positions) {
   const orphans = (positions||[]).filter(p => p.is_orphan);
   if (!positions || !positions.length) {
     el.innerHTML = '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
-    ct.textContent = '0 open';
+    ct.textContent = '0/' + AUTO_USER_CAP + ' auto';
+    ct.title = 'Managed positions — current hardware budget caps each customer at ' + AUTO_USER_CAP + ' auto positions. This limit can grow in future iterations.';
     return;
   }
-  ct.textContent = tracked.length + ' tracked' + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
+  // Count auto vs user across tracked positions (orphans excluded — they adopt as user next trader cycle)
+  const autoN = tracked.filter(p => (p.managed_by || 'bot') === 'bot').length;
+  const userN = tracked.filter(p => (p.managed_by || 'bot') === 'user').length;
+  const canPromote = autoN < AUTO_USER_CAP;
+  ct.textContent = autoN + '/' + AUTO_USER_CAP + ' auto · ' + userN + ' user'
+                 + (orphans.length ? ' · ' + orphans.length + ' orphan' : '');
+  ct.title = 'Auto: bot manages · User: you manage · Cap is ' + AUTO_USER_CAP
+           + ' auto positions per customer at current capacity; future iterations may raise this.';
   if (ts) ts.textContent = 'Live · ' + new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'}) + ' ET';
 
   const accentColors = ['#00f5d4','#7b61ff','#22d3ee','#a78bfa'];
@@ -7746,7 +8102,29 @@ function renderPositions(positions) {
     const dayCol   = dayPl >= 0  ? 'rgba(0,245,212,0.7)' : 'rgba(255,75,110,0.7)';
     const plSign   = unreal >= 0 ? '+' : '';
     const daySign  = dayPl >= 0  ? '+' : '';
-    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;
+    // AUTO/USER toggle — shows current tag, click to flip.
+    // Disabled when: row is orphan (tag set automatically on adoption) OR
+    // trying to promote USER→AUTO while cap is full (server would reject).
+    const mb = (p.managed_by || 'bot');
+    const canFlip = !isOrphan && (mb === 'bot' || canPromote);
+    const tagLabel = mb === 'user' ? 'USER' : 'AUTO';
+    const tagColor = mb === 'user' ? 'rgba(245,166,35,1)' : 'var(--teal)';
+    const tagBg    = mb === 'user' ? 'rgba(245,166,35,0.08)' : 'rgba(0,245,212,0.08)';
+    const tagBorder= mb === 'user' ? 'rgba(245,166,35,0.3)' : 'rgba(0,245,212,0.3)';
+    const cursorStyle = canFlip ? 'pointer' : 'not-allowed';
+    const opacity = canFlip ? '1' : '0.45';
+    const toggleTitle = isOrphan
+      ? 'Orphan positions auto-tag as USER after the next trader cycle'
+      : (mb === 'bot'
+          ? 'Click to hand off to USER management — bot will stop managing'
+          : (canPromote
+              ? 'Click to promote to AUTO — bot will begin managing'
+              : 'AUTO cap is full (' + AUTO_USER_CAP + '/' + AUTO_USER_CAP + ') — close an auto position first'));
+    const toggleOnClick = canFlip
+      ? `onclick=\"toggleManagedBy('${p.id || ''}','${mb}','${(p.ticker||'').replace(/'/g,'')}',event)\"`
+      : '';
+
+    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;
               padding:7px 16px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;
               ${isOrphan ? 'background:rgba(245,166,35,0.03)' : ''}"
               onclick="openPositionDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})"
@@ -7776,14 +8154,35 @@ function renderPositions(positions) {
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
+      <div style="text-align:right;min-width:54px;display:flex;flex-direction:column;gap:3px;align-items:flex-end" title="${toggleTitle}">
+        <div ${toggleOnClick}
+             style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
+                    background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
+                    cursor:${cursorStyle};opacity:${opacity};text-align:center;min-width:40px">
+          ${tagLabel}
+        </div>
+        ${isOrphan ? '' : (function(){
+          const isSticky = (p.sticky === 'user');
+          const lockIcon = isSticky ? '\u{1F512}' : '\u{1F513}';  // 🔒 vs 🔓
+          const lockColor = isSticky ? 'rgba(245,166,35,1)' : 'var(--muted)';
+          const lockTitle = isSticky
+            ? 'Sticky USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
+            : 'Lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker';
+          return '<div onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky ? 'true' : 'false') + ',event)" '
+               + 'title="' + lockTitle + '" '
+               + 'style="font-size:11px;cursor:pointer;padding:1px 3px;opacity:' + (isSticky ? '1' : '0.45') + ';color:' + lockColor + '">'
+               + lockIcon + '</div>';
+        })()}
+      </div>
     </div>`;
   };
 
-  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
+  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
     + '<div></div><div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Position</div>'
     + '<div style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
     + '<div style="text-align:right;min-width:72px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
     + '<div style="text-align:right;min-width:68px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
+    + '<div style="text-align:right;min-width:54px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
     + '</div>';
   const rows = [
     ...tracked.map((p,i) => renderRow(p, i, false)),
@@ -8043,6 +8442,17 @@ async function loadLiveStatus() {
     // Render approvals and positions immediately — don't let status processing errors block them
     try { renderApprovals(a); } catch(ae) { console.log('Approvals render error:', ae); }
     try { renderPositions(s.positions||[]); } catch(pe) { console.log('Positions render error:', pe); }
+    try { renderUserWarnings(s.user_warnings||[]); } catch(we) { console.log('User warnings render error:', we); }
+    // Halt banner — fetched independently so a halt-API failure doesn't
+    // block other status rendering
+    try {
+      const hr = await fetch('/api/halt-status', {credentials:'same-origin'});
+      if (hr.ok) {
+        const hs = await hr.json();
+        window._lastHaltStatus = hs;
+        renderHaltBanner(hs);
+      }
+    } catch(he) { console.log('Halt status fetch error:', he); }
     // Stats
     const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
@@ -10069,6 +10479,253 @@ def api_pending():
                         "operating_mode": "AUTOMATIC",
                         "error": str(e)}), 500
 
+
+# ── AUTO / USER POSITION MANAGEMENT ──────────────────────────────────────────
+# v1 hard cap — future iterations can raise this based on measured dispatch
+# time vs. customer count. Tooltip in the UI notes this is expandable.
+AUTO_USER_POSITION_CAP = 12
+
+
+def _count_auto_user_slots(positions: list) -> dict:
+    """Summarize AUTO / USER slot usage for a position list.
+    Excludes orphans (they get adopted as 'user' on next trader cycle)."""
+    auto = 0
+    user = 0
+    for p in positions or []:
+        if p.get('is_orphan'):
+            continue
+        mb = (p.get('managed_by') or 'bot').lower()
+        if mb == 'user':
+            user += 1
+        else:
+            auto += 1
+    return {
+        'auto': auto,
+        'user': user,
+        'capacity': AUTO_USER_POSITION_CAP,
+        'can_promote': auto < AUTO_USER_POSITION_CAP,
+    }
+
+
+@app.route('/api/positions/<pos_id>/managed-by', methods=['POST'])
+@login_required
+def api_set_managed_by(pos_id: str):
+    """Flip a position's AUTO/USER tag. Body: {managed_by: 'bot'|'user'}.
+
+    Rejects promotion to 'bot' when the auto cap is already full — UI
+    should disable the toggle in that case, but enforce server-side too.
+    Sticky USER preference overrides: if sticky=user is set for the
+    ticker, refuse promotion to 'bot' until sticky is cleared first.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        target = (data.get('managed_by') or '').lower().strip()
+        if target not in ('bot', 'user'):
+            return jsonify({'ok': False, 'error': "managed_by must be 'bot' or 'user'"}), 400
+
+        db = _customer_db()
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT id, ticker, managed_by FROM positions WHERE id=? AND status='OPEN'",
+                (pos_id,),
+            ).fetchone()
+        if not row:
+            return jsonify({'ok': False, 'error': 'position not found or already closed'}), 404
+
+        current = (row['managed_by'] or 'bot').lower()
+        if current == target:
+            return jsonify({'ok': True, 'noop': True, 'managed_by': current})
+
+        # Guard: promoting USER → AUTO hits server-side cap + sticky rules
+        if target == 'bot':
+            sticky = db.get_ticker_sticky(row['ticker'])
+            if sticky == 'user':
+                return jsonify({
+                    'ok': False,
+                    'error': f"ticker {row['ticker']} is marked sticky USER — clear the sticky lock before promoting",
+                }), 409
+            # Count auto (excluding this position, since we're about to flip it)
+            all_pos = db.get_open_positions()
+            auto_count = sum(1 for p in all_pos
+                             if p['id'] != pos_id and (p.get('managed_by') or 'bot') == 'bot')
+            if auto_count >= AUTO_USER_POSITION_CAP:
+                return jsonify({
+                    'ok': False,
+                    'error': f'AUTO cap reached ({auto_count}/{AUTO_USER_POSITION_CAP}) — close an auto position before promoting',
+                }), 409
+
+        db.set_position_managed_by(pos_id, target)
+        db.log_event('POSITION_MANAGED_BY_CHANGED', agent='Portal',
+                     details=f"{row['ticker']} {current}->{target} (pos_id={pos_id})")
+        return jsonify({'ok': True, 'managed_by': target, 'ticker': row['ticker']})
+    except Exception as e:
+        log.error(f"/api/positions/{pos_id}/managed-by failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auto-slots')
+@login_required
+def api_auto_slots():
+    """Slot usage summary for the Open Positions card header + promotion UX."""
+    try:
+        db = _customer_db()
+        positions = db.get_open_positions()
+        return jsonify(_count_auto_user_slots(positions))
+    except Exception as e:
+        return jsonify({'auto': 0, 'user': 0, 'capacity': AUTO_USER_POSITION_CAP,
+                        'can_promote': False, 'error': str(e)}), 500
+
+
+# ── HALT AGENT (kill switch v2) ──────────────────────────────────────────────
+
+@app.route('/api/halt-status')
+@login_required
+def api_halt_status():
+    """Return halt state for the current customer + the admin halt (if any).
+
+    Shape: {
+      customer_halt: {active, reason, set_by, set_at, expected_return} | null,
+      admin_halt:    {active, reason, set_by, set_at, expected_return} | null,
+      active_source: 'admin' | 'customer' | null,
+    }
+
+    'active_source' is a convenience for the banner — the UI can render based
+    on whichever is active, with admin taking precedence if both are set.
+    """
+    try:
+        cust = _customer_db().get_halt()
+    except Exception:
+        cust = {'active': False, 'reason': None, 'set_by': None,
+                'set_at': None, 'expected_return': None}
+    try:
+        admin = _shared_db().get_halt()
+    except Exception:
+        admin = {'active': False, 'reason': None, 'set_by': None,
+                 'set_at': None, 'expected_return': None}
+
+    active_source = 'admin' if admin.get('active') else ('customer' if cust.get('active') else None)
+
+    return jsonify({
+        'customer_halt': cust,
+        'admin_halt':    admin,
+        'active_source': active_source,
+    })
+
+
+@app.route('/api/admin/halt-agent', methods=['POST'])
+def api_admin_halt_agent():
+    """Activate or deactivate the ADMIN halt (applies to every customer).
+
+    Token-authenticated (SECRET_TOKEN / MONITOR_TOKEN) — called from the
+    command portal's monitor page on pi4b, not browser-UI on pi5.
+
+    Body: {active: bool, reason?: str, expected_return?: str}
+
+    Writes the system_halt singleton row in the MASTER customer's
+    signals.db — the shared DB that every trader subprocess reads via
+    _shared_db(). Takes effect on the NEXT trader invocation per
+    customer; no existing subprocesses are interrupted.
+    """
+    # Token auth — accept either X-Token header or Authorization: Bearer
+    auth_ok = False
+    token = request.headers.get('X-Token', '')
+    if not token:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    expected = os.environ.get('MONITOR_TOKEN', '') or os.environ.get('SECRET_TOKEN', '')
+    if expected and token and token == expected:
+        auth_ok = True
+    if not auth_ok:
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+
+    try:
+        data = request.get_json(silent=True) or {}
+        active = bool(data.get('active'))
+        reason = (data.get('reason') or '').strip()[:300] or None
+        expected_return = (data.get('expected_return') or '').strip()[:80] or None
+        set_by = f"admin:{data.get('admin_id') or 'monitor'}"
+
+        master = _shared_db()
+        master.set_halt(active=active, reason=reason, set_by=set_by,
+                        expected_return=expected_return)
+        master.log_event(
+            'HALT_ACTIVATED' if active else 'HALT_DEACTIVATED',
+            agent='Admin Portal',
+            details=f"src=admin set_by={set_by} reason={reason or '(none given)'} "
+                    f"expected_return={expected_return or '(none)'}",
+        )
+        return jsonify({'ok': True, 'active': active, 'reason': reason,
+                        'expected_return': expected_return})
+    except Exception as e:
+        log.error(f"/api/admin/halt-agent failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/halt-agent', methods=['POST'])
+@login_required
+def api_halt_agent():
+    """Activate or deactivate the CUSTOMER halt for the logged-in customer.
+
+    Body: {active: bool, reason?: str}
+
+    Customer cannot clear admin halt — only the admin portal can. If admin
+    halt is active, the endpoint still accepts customer halt changes (so
+    preferences are recorded), but the banner will keep showing admin
+    precedence until admin clears their halt.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        active = bool(data.get('active'))
+        reason = (data.get('reason') or '').strip()[:300] or None
+
+        customer_id = session.get('customer_id') or 'unknown'
+        set_by = f'customer:{customer_id[:12]}'
+
+        db = _customer_db()
+        db.set_halt(active=active, reason=reason, set_by=set_by)
+        db.log_event(
+            'HALT_ACTIVATED' if active else 'HALT_DEACTIVATED',
+            agent='Portal',
+            details=f"src=customer set_by={set_by} reason={reason or '(none given)'}",
+        )
+        return jsonify({'ok': True, 'active': active, 'reason': reason})
+    except Exception as e:
+        log.error(f"/api/halt-agent failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/ticker-preferences/<ticker>', methods=['POST'])
+@login_required
+def api_set_ticker_preference(ticker: str):
+    """Set or clear the sticky preference for a ticker.
+
+    Body: {sticky: 'user' | null}
+
+    'user' → bot never takes this ticker, even if a signal fires.
+             Any currently-OPEN bot position on the ticker is NOT
+             auto-flipped; user decides whether to close/hand it off
+             via the per-position AUTO/USER toggle.
+    null   → clear the sticky; ticker becomes eligible for the bot
+             again (subject to per-position tagging of any open row).
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        sticky = data.get('sticky')  # None or 'user' (explicit 'bot' reserved for future)
+        if sticky not in (None, 'user'):
+            return jsonify({'ok': False, 'error': "sticky must be 'user' or null"}), 400
+        ticker = (ticker or '').strip().upper()
+        if not ticker or len(ticker) > 10:
+            return jsonify({'ok': False, 'error': 'invalid ticker'}), 400
+
+        db = _customer_db()
+        db.set_ticker_sticky(ticker, sticky, set_by='user')
+        db.log_event('TICKER_PREFERENCE_SET', agent='Portal',
+                     details=f"{ticker} sticky={sticky}")
+        return jsonify({'ok': True, 'ticker': ticker, 'sticky': sticky})
+    except Exception as e:
+        log.error(f"/api/ticker-preferences/{ticker} failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @app.route('/api/agent-pulse')
