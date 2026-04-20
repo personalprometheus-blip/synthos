@@ -2786,11 +2786,8 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
     return rotations
 
 
-def run(session="open"):
-    # ── HALT CHECK — absolute first thing ────────────────────────────
-    # If admin or customer halt is active, exit immediately. This runs
-    # before ANY other work: no DB connection beyond the halt read, no
-    # Alpaca client creation, no state mutation. See HALT_AGENT_REWRITE.md.
+def _run_halt_check():
+    """Absolute first check. If admin or customer halt is active, log and exit."""
     _halt = _check_halt_state()
     if _halt is not None:
         _src, _reason = _halt
@@ -2802,10 +2799,9 @@ def run(session="open"):
             pass
         sys.exit(0)
 
-    # ── RUNTIME WATCHDOG ──────────────────────────────────────────────
-    # Start the background watchdog BEFORE any blocking work so even a
-    # hang on the very first Alpaca call gets a "still alive in phase X"
-    # log line every 15s. See _runtime_watchdog + _set_phase above.
+
+def _start_watchdog():
+    """Start background runtime watchdog. Returns the thread."""
     _set_phase('startup')
     _t0 = time.monotonic()
     _wd = _threading.Thread(
@@ -2814,15 +2810,14 @@ def run(session="open"):
         daemon=True,
     )
     _wd.start()
+    return _wd
 
+
+def _init_clients(session):
+    """Create DB/Alpaca clients, log AGENT_START, run Gate 1. Returns (db, alpaca, now, session_log)."""
     db     = _db()
     alpaca = AlpacaClient()
     now    = datetime.now(ET)
-
-    # Counter of real trade events (buys, sells, rotations) executed this run.
-    # Used to gate the "Session Complete" notification — if no trades fired
-    # we stay silent instead of spamming the Notification Center every run.
-    trade_events = 0
 
     log.info(f"ExecutionAgent starting — session={session} mode={TRADING_MODE} "
              f"operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
@@ -2837,16 +2832,18 @@ def run(session="open"):
         session_log.commit(db)
         sys.exit(0)
 
-    # ── GATE 0: Account Health Check
-    # Runs every cycle. Syncs with Alpaca (source of truth), self-heals
-    # discrepancies, handles customer-initiated trades, skips unfunded accounts.
+    return db, alpaca, now, session_log
+
+
+def _run_gate0_account_health(db, alpaca, session_log):
+    """Gate 0: account health, reconciliation. Returns (account, equity, cash, positions) or (None, None, None, None)."""
     account = alpaca.get_account()
     if not account:
         log.warning("[GATE 0] Cannot reach Alpaca account API — skipping this run")
         session_log.gate("0_HEALTH", "SKIP", {}, "Alpaca account unreachable")
         session_log.commit(db)
         db.log_heartbeat("trade_logic_agent", "OK")
-        return
+        return None, None, None, None
 
     alpaca_equity = float(account.get('equity', 0))
     alpaca_cash = float(account.get('cash', 0))
@@ -2859,7 +2856,7 @@ def run(session="open"):
         db.log_event("ACCOUNT_SKIP", agent="Trade Logic",
                      details=f"Equity ${alpaca_equity:.2f} below $10 minimum")
         db.log_heartbeat("trade_logic_agent", "OK")
-        return
+        return None, None, None, None
 
     # Sync cash — Alpaca is always truth
     db.update_portfolio(cash=alpaca_cash)
@@ -3002,7 +2999,7 @@ def run(session="open"):
             meta={'type': 'first_run', 'equity': alpaca_equity},
             dedup_key='account_ready_bootstrap')
         db.log_heartbeat("trade_logic_agent", "OK")
-        return
+        return None, None, None, None
 
     # Audit Round 5 — BIL concentration alert. Informational sub-gate:
     # if the customer is parking > BIL_CONCENTRATION_THRESHOLD (default
@@ -3057,13 +3054,18 @@ def run(session="open"):
         "orphans_adopted": len(orphans), "ghosts_closed": len(ghosts), "healed": healed,
     }, f"health check OK — {len(positions_after)} positions, ${alpaca_equity:.0f} equity")
 
+    return account, alpaca_equity, alpaca_cash, positions_after
+
+
+def _run_market_gates(db, alpaca, positions, session_log):
+    """Prefetch bars, run Gates 2+3+13+14, BIL sync, expire stale approvals. Returns regime."""
     # ── PREFETCH: Batch-load bars for all tickers we'll need this run
     # One multi-symbol API call replaces dozens of individual get_bars() calls
     _prefetch_tickers = set()
     _prefetch_tickers.add(C.BENCHMARK_SYMBOL)  # SPY — used in Gates 2,3,5,10,13
     _prefetch_tickers.add('TLT')               # Gate 3 bond proxy
     _prefetch_tickers.add('BIL')               # BIL reserve
-    for p in positions_after:
+    for p in positions:
         _prefetch_tickers.add(p['ticker'])      # All held positions
     # Collect signal tickers from shared DB
     try:
@@ -3107,6 +3109,13 @@ def run(session="open"):
         db.expire_stale_approvals(max_age_hours=48)
     except Exception as e:
         log.warning(f"expire_stale_approvals error: {e}")
+
+    return regime
+
+
+def _run_position_management(db, alpaca, regime, session_log, now, session):
+    """Gate 10: active trade management over all open positions. Returns trade_events count."""
+    trade_events = 0
 
     portfolio = db.get_portfolio()
     positions = db.get_open_positions()
@@ -3306,6 +3315,13 @@ def run(session="open"):
                 trade_events += 1
             pos_log.commit(db)
 
+    return trade_events
+
+
+def _run_managed_mode_approvals(db, alpaca, session_log):
+    """Execute user-approved trades in managed/supervised mode. Returns trade_events count."""
+    trade_events = 0
+
     # ── MANAGED MODE: execute user-approved trades
     if _is_supervised():
         approved = get_approved_trades()
@@ -3344,6 +3360,13 @@ def run(session="open"):
                     log.error(f"[MANAGED] Order failed: {ticker}")
             except Exception as e:
                 log.error(f"[MANAGED] Execution error: {e}")
+
+    return trade_events
+
+
+def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
+    """Gates 4–9+11: new signal evaluation including rotation check. Returns trade_events count."""
+    trade_events = 0
 
     # ── NEW SIGNAL EVALUATION (Gates 4–9 + 11)
     # Gate 0 already verified at top of run() — proceed to new signal eval.
@@ -3613,7 +3636,11 @@ def run(session="open"):
 
             sig_log.commit(db)
 
-    # ── Monthly tax sweep — runs once on last trading day, after 3pm
+    return trade_events
+
+
+def _run_monthly_tax_sweep(db, now):
+    """Monthly tax sweep — runs once on last trading day after 3pm."""
     if is_last_trading_day_of_month() and now.hour >= 15:
         today_str = now.strftime('%Y-%m-%d')
         if not db.has_event_today('TAX_SWEEP', today_str):
@@ -3628,7 +3655,9 @@ def run(session="open"):
                 db.log_event("TAX_SWEEP", agent="Trade Logic",
                              details=f"monthly sweep ${tax:.2f}")
 
-    # ── Session complete
+
+def _send_session_summary(db, trade_events, session_log, now, session):
+    """Log session complete, write heartbeat, add notification. Returns (total_value, positions)."""
     portfolio   = db.get_portfolio()
     positions   = db.get_open_positions()
     _cash       = float(portfolio.get('cash') or 0)
@@ -3655,7 +3684,11 @@ def run(session="open"):
     except Exception as e:
         log.warning(f"Heartbeat post failed: {e}")
 
-    # Daily report — runs once per day after 4pm
+    return total_value, positions
+
+
+def _send_daily_report(db, session, now, total_value, positions):
+    """POST daily report to monitor — runs once per day after 4pm."""
     _mtr_report = get_market_time_regime(now)
     today_str_rpt = now.strftime('%Y-%m-%d')
     if _mtr_report['hour'] >= 16 and not db.has_event_today('DAILY_REPORT', today_str_rpt):
@@ -3683,6 +3716,23 @@ def run(session="open"):
                 db.log_event("DAILY_REPORT", agent="Trade Logic", details=f"sent to {monitor_url}")
         except Exception as e:
             log.warning(f"Daily report POST failed: {e}")
+
+
+def run(session='open'):
+    _run_halt_check()
+    _wd = _start_watchdog()
+    db, alpaca, now, session_log = _init_clients(session)
+    account, equity, cash, positions = _run_gate0_account_health(db, alpaca, session_log)
+    if account is None:
+        return
+    regime = _run_market_gates(db, alpaca, positions, session_log)
+    trade_events  = _run_position_management(db, alpaca, regime, session_log, now, session)
+    trade_events += _run_managed_mode_approvals(db, alpaca, session_log)
+    trade_events += _run_signal_evaluation(db, alpaca, regime, session_log, now, session)
+    _run_monthly_tax_sweep(db, now)
+    total_value, positions = _send_session_summary(db, trade_events, session_log, now, session)
+    _send_daily_report(db, session, now, total_value, positions)
+    _wd.join(timeout=0)
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
