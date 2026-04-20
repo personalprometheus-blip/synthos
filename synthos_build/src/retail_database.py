@@ -977,6 +977,22 @@ class DB:
                 created_at  TEXT NOT NULL
             )""",
             "CREATE INDEX IF NOT EXISTS idx_cooling_off_until ON cooling_off(cool_until)",
+
+            # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
+            # daily by retail_tradable_cache.refresh() from Alpaca's
+            # /v2/assets endpoint. Candidate Generator reads via
+            # is_tradable() to skip un-tradable tickers. Created here so
+            # is_tradable never fails on 'no such table' before the first
+            # refresh has run.
+            """CREATE TABLE IF NOT EXISTS tradable_assets (
+                ticker       TEXT PRIMARY KEY,
+                exchange     TEXT,
+                asset_class  TEXT,
+                tradable     INTEGER NOT NULL DEFAULT 1,
+                fetched_at   TEXT NOT NULL,
+                expires_at   TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_tradable_expires ON tradable_assets(expires_at)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
