@@ -9,7 +9,7 @@ check-marks as work lands.
 - `[~]` deferred (with explicit trigger for when to revisit)
 - `[-]` in progress
 
-_Last updated: 2026-04-20 (end of Phase B re-run)_
+_Last updated: 2026-04-20 (Round 9 shipped)_
 
 ---
 
@@ -132,22 +132,22 @@ Spawned when we paused trading after observing the AAPL runaway.
 - [x] Validator `gate3_market_state`: missing `_MARKET_STATE_UPDATED` = STALE
 - [x] `docs/audit/AUDIT_2026-04-20-deferred.md` (6 items, each with trigger)
 
-### B.9 — Round 9 (pending): Phase B re-run follow-ups
+### B.9 — Round 9: Phase B re-run follow-ups
 
 All are sibling sites I missed when fixing earlier rounds, or small
 parallel fixes. Same patterns as Rounds 6-7. One patch branch, low risk.
 
-- [ ] R9-1 `reduce_position()` → single-transaction (mirror R7.2)
-- [ ] R9-2 `update_portfolio()` → read+write inside one transaction
-- [ ] R9-3 `get_api_call_history()` → replace `date(timestamp) = ?` with range (mirror R6.2)
-- [ ] R9-4 `cooling_off` composite index `(ticker, cool_until)`
-- [ ] R9-5 `price_poller`: wrap upsert loop in `BEGIN/COMMIT`; move `DELETE stale` before inserts
-- [ ] R9-6 `tradable_cache.refresh()`: pagination check on `/v2/assets` + transaction wrap
-- [ ] R9-7 `event_calendar` earnings upsert: transaction wrap
-- [ ] R9-8 `retail_market_daemon`: check `r.ok` / `.status_code` in `run_exit_backfill` + `_send_sms` / `_send_email`
-- [ ] R9-9 `get_atr` / `get_volume_avg`: log reason on None/0 return (observability)
-- [ ] R9-10 Unsafe dict subscripts in trader (`signal['ticker']`, `portfolio['cash']`) → `.get()` with defaults
-- [ ] R9-11 Residual `except Exception: pass` in housekeeping helpers (`cleanup_api_calls`, `get_halt`, etc.)
+- [x] R9-1 `reduce_position()` → single-transaction (mirror R7.2)
+- [x] R9-2 `update_portfolio()` → read+write inside one transaction
+- [x] R9-3 `get_api_call_history()` → replace `date(timestamp) = ?` with range (mirror R6.2)
+- [x] R9-4 `cooling_off` composite index `(ticker, cool_until)`
+- [x] R9-5 `price_poller`: wrap upsert loop in `BEGIN/COMMIT`; move `DELETE stale` before inserts
+- [x] R9-6 `tradable_cache.refresh()`: pagination check on `/v2/assets` + transaction wrap
+- [x] R9-7 `event_calendar` earnings upsert: transaction wrap (confirmed atomic via db.conn())
+- [x] R9-8 `retail_market_daemon`: check `r.ok` in `_send_sms` / `_send_email`; log status on failure
+- [x] R9-9 `get_atr` / `get_volume_avg`: log reason on None/0 return (observability)
+- [x] R9-10 Unsafe dict subscripts in trader (`signal['ticker']`, `portfolio['cash']`) → `.get()` with defaults
+- [x] R9-11 `cleanup_api_calls` / `get_halt` bare-except → `log.debug` with context
 
 After Round 9 ships and smoke-verifies:
 - [ ] Re-enable `synthos-trade-daemon.timer` on pi5
