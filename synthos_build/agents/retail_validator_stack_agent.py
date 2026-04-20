@@ -451,15 +451,24 @@ def gate3_market_state(report: ValidationReport, master_db):
         ))
         return
 
-    # Check staleness via _MARKET_STATE_UPDATED if available
+    # Check staleness via _MARKET_STATE_UPDATED. Audit Round 8 — a
+    # missing _MARKET_STATE_UPDATED setting was previously treated as
+    # "age unknown, assume fresh" (age=None let the CAUTION branch be
+    # skipped). Correct policy: missing timestamp = STALE (we have no
+    # evidence the data is fresh).
     state_ts = master_db.get_setting('_MARKET_STATE_UPDATED')
     age = _age_minutes(state_ts)
-    if age is not None and age > MARKET_STATE_STALE_MINUTES:
-        log.warning(f"  Market state stale ({int(age)}m) — CAUTION")
+    stale = (age is None) or (age > MARKET_STATE_STALE_MINUTES)
+    if stale:
+        reason = (
+            f"{int(age)}m old" if age is not None
+            else "_MARKET_STATE_UPDATED setting missing"
+        )
+        log.warning(f"  Market state stale ({reason}) — CAUTION")
         report.add(GateResult(
             gate="GATE3_MARKET_STATE",
             status=GateStatus.CAUTION,
-            message=f"Market state stale ({int(age)}m old) — proceeding with caution",
+            message=f"Market state stale ({reason}) — proceeding with caution",
             restrictions=["DEGRADED_STALE_MARKET_STATE"]
         ))
         return
