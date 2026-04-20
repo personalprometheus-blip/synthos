@@ -9,7 +9,7 @@ check-marks as work lands.
 - `[~]` deferred (with explicit trigger for when to revisit)
 - `[-]` in progress
 
-_Last updated: 2026-04-20 (Phase C Patch 1 shipped — D4 + D6 complete)_
+_Last updated: 2026-04-20 (Phase C Patch 2 shipped — D5 complete)_
 
 ---
 
@@ -168,8 +168,8 @@ Documented fully in `docs/audit/AUDIT_2026-04-20-deferred.md`. Marked
   _Trigger: going live with real capital._
 - [x] **D4** — Blanket `datetime.utcnow()` → `datetime.now(timezone.utc)` (~27 sites)
   _Shipped: Phase C Patch 1 (2026-04-20) — 26 sites across 10 files; format-sensitive .isoformat() sites use .replace(tzinfo=None)._
-- [~] **D5** — Portal template var / unused-ID hand audit (32 warnings)
-  _Trigger: next portal UI sprint._
+- [x] **D5** — Portal template var / unused-ID hand audit (32 warnings)
+  _Shipped: Phase C Patch 2 (2026-04-20) — 14 genuinely unused id= attributes removed; snb-*/tab-* kept (dynamic showTab() concatenation). Jinja2 script-tag lint warnings are false positives, no action needed._
 - [x] **D6** — Duplicate helper consolidation (`now_et`, `is_market_hours`, `kill_switch_active`, etc.)
   _Shipped: Phase C Patch 1 (2026-04-20) — retail_shared.py created; kill_switch_active, get_active_customers, is_market_hours consolidated. now_et and fetch_with_retry left local (diverged return types / stateful circuit breaker)._
 
