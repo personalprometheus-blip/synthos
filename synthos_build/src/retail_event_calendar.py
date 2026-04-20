@@ -214,7 +214,13 @@ def get_upcoming_macro_events(db, within_biz_days: int = 2) -> list[dict]:
 
 
 def _business_day_offset(d: date, n: int) -> date:
-    """Add n business days to d (Mon-Fri only)."""
+    """Add n business days to d (Mon-Fri only).
+
+    R10-14 triage: pairs with `check_event_risk`'s `today <= next_earnings
+    <= cutoff` inclusive range — so "earnings today" is correctly blocked
+    (today <= today <= cutoff is True). The offset advances strictly
+    forward; day 0 (today) belongs to the range-check, not to the offset.
+    """
     added = 0
     cur = d
     while added < n:

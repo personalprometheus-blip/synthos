@@ -487,6 +487,13 @@ class SessionLock:
     """
     File-based lock to prevent two instances of the same session from running
     simultaneously. Uses fcntl for atomic locking — safe across processes.
+
+    Stale-lock note (R10-11 triage): `fcntl.flock` is a POSIX advisory lock
+    tied to the file descriptor. The Linux kernel releases it automatically
+    when the holding process dies — even on SIGKILL, crash, or power loss
+    — because the fd is torn down. The lock FILE may linger on disk, but
+    the next acquire() opens a fresh fd and flock() succeeds immediately
+    because no process holds the lock. No stale-lock cleanup needed here.
     """
     def __init__(self, session: str):
         _LOCK_DIR.mkdir(exist_ok=True)
