@@ -1489,12 +1489,46 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
     else:
         decision_log.gate("4_SPREAD", "SKIP_CHECK", {"reason": "no quote data"}, "spread check skipped — no quote")
 
-    # Event risk
-    # TODO: DATA_DEPENDENCY — automated FOMC/CPI/earnings calendar not yet integrated
-    # Currently: manual exclusion only — flagged for future implementation
-    decision_log.gate("4_EVENT_RISK", "NOT_CHECKED", {
-        "TODO": "EVENT_CALENDAR not yet integrated",
-    }, "event risk check skipped — TODO: DATA_DEPENDENCY")
+    # Event risk — Phase 3a (TRADER_RESTRUCTURE_PLAN) partial implementation.
+    # Reads news_flags from the master DB for this ticker. Any *fresh*
+    # flag in an event-risk category blocks entry, because entering
+    # right before/after an earnings, a regulatory probe, or a legal
+    # action puts the position at the whim of unknown news-driven
+    # volatility we shouldn't absorb.
+    #
+    # Phase 2 currently writes ONLY 'catalyst' category flags (positive
+    # score), so in practice this check is a no-op today. It activates
+    # when the news agent starts classifying into specific categories
+    # in a future patch — the integration is here so that refinement
+    # lands in one place.
+    #
+    # FOMC/CPI scheduled-events calendar is still a DATA_DEPENDENCY
+    # TODO; this check covers the news-flagged portion only.
+    event_risk_categories = {
+        'earnings_miss', 'earnings_raise',   # recent earnings = volatility
+        'regulatory_probe', 'litigation',
+        'management_change', 'guidance_cut', 'guidance_raise',
+    }
+    try:
+        _flags = _shared_db().get_fresh_news_flags_for_ticker(ticker)
+        _risk_hits = [f for f in _flags if f.get('category') in event_risk_categories]
+    except Exception as _e:
+        log.debug(f"news_flags read failed for {ticker} at G4: {_e}")
+        _flags = []
+        _risk_hits = []
+
+    event_risk_ok = len(_risk_hits) == 0
+    decision_log.gate("4_EVENT_RISK", event_risk_ok, {
+        "ticker":              ticker,
+        "fresh_flags":         len(_flags),
+        "event_risk_hits":     len(_risk_hits),
+        "blocking_categories": ",".join(sorted({f['category'] for f in _risk_hits})) or "none",
+        "scheduled_events":    "TODO: FOMC/CPI/earnings calendar still unintegrated",
+    }, ("event risk OK — no fresh event-category flags" if event_risk_ok
+        else f"SKIP — {len(_risk_hits)} fresh event-risk flag(s): "
+             + ",".join(sorted({f['category'] for f in _risk_hits}))))
+    if not event_risk_ok:
+        return False
 
     # Correlated exposure: corr(new_trade, portfolio) > corr_limit
     # Simplified: check if sector already highly concentrated
@@ -1625,6 +1659,34 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         # silently drop Gate 5 output on the migration boundary.
         final_score = round(min(final_score + 0.02, 1.0), 4)
 
+    # News flags modifier — Phase 3a of TRADER_RESTRUCTURE_PLAN.
+    # Aggregates news_flags.score across all fresh flags for this ticker
+    # that are NOT in event-risk categories (those are handled by Gate 4).
+    # Result is clamped to ±0.2 and added to the composite as a mild
+    # adjustment. Positive news = small boost, negative = small penalty.
+    # Severe negative (score < -0.7) blocks later at Gate 5.5 VETO.
+    #
+    # Phase 2 only populates 'catalyst' category (positive scored), so in
+    # practice this currently only adds upside. Negative-category writes
+    # land in a future patch.
+    _excluded_for_modifier = {
+        'earnings_miss', 'earnings_raise', 'regulatory_probe',
+        'litigation', 'management_change', 'guidance_cut', 'guidance_raise',
+    }
+    news_modifier = 0.0
+    news_modifier_info = "no flags"
+    try:
+        _flags = _shared_db().get_fresh_news_flags_for_ticker(ticker)
+        _mod_flags = [f for f in _flags if f.get('category') not in _excluded_for_modifier]
+        if _mod_flags:
+            raw = sum(float(f.get('score') or 0.0) for f in _mod_flags)
+            news_modifier = max(-0.2, min(0.2, round(raw, 4)))
+            news_modifier_info = (f"{len(_mod_flags)} flag(s), "
+                                  f"raw {raw:+.3f}, clamped {news_modifier:+.3f}")
+    except Exception as _e:
+        log.debug(f"news_flags read failed for {ticker} at G5: {_e}")
+    final_score = round(max(0.0, min(final_score + news_modifier, 1.0)), 4)
+
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
     decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
@@ -1635,6 +1697,7 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "interrogation_score":f"{interr_score:.2f} × {W['interrogation']}",
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
         "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
+        "news_flags_mod":     f"{news_modifier:+.3f} ({news_modifier_info})",
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
@@ -1642,6 +1705,48 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     }, f"score {final_score:.4f} {'≥' if passes else '<'} threshold {C.MIN_CONFIDENCE_SCORE}")
 
     return final_score if passes else 0.0
+
+
+# ── GATE 5.5 — NEWS VETO ─────────────────────────────────────────────────────
+
+# Phase 3a of TRADER_RESTRUCTURE_PLAN. Gate 5.5 is the safety net — any
+# ticker with a severe negative news_flag (score < SEVERITY_VETO_THRESHOLD,
+# default -0.7) gets blocked regardless of composite score. Protects against
+# entering positions where negative news materially outweighs the bullish
+# signal that drove composite past threshold.
+#
+# Currently latent: Phase 2's news_agent writes positive-scored 'catalyst'
+# flags only, so this gate doesn't fire today. It activates when future
+# news-classification writes negative-scored flags (litigation=-0.9,
+# regulatory_probe=-0.8, etc.). Integration lands now so that refinement
+# lands in one place later.
+
+NEWS_VETO_THRESHOLD = -0.7
+
+
+def gate5_5_news_veto(signal: dict, decision_log: TradeDecisionLog) -> bool:
+    """Return True if the signal passes (no severe negative news_flag).
+    False means veto — reject the signal regardless of composite score."""
+    ticker = signal['ticker']
+    try:
+        flags = _shared_db().get_fresh_news_flags_for_ticker(ticker)
+    except Exception as e:
+        log.debug(f"news_flags read failed for {ticker} at G5.5: {e}")
+        flags = []
+    severe = [f for f in flags if float(f.get('score') or 0.0) < NEWS_VETO_THRESHOLD]
+    veto_ok = len(severe) == 0
+    decision_log.gate("5.5_NEWS_VETO", veto_ok, {
+        "ticker":       ticker,
+        "fresh_flags":  len(flags),
+        "severe_count": len(severe),
+        "threshold":    f"< {NEWS_VETO_THRESHOLD}",
+        "worst_score":  f"{min([float(f.get('score') or 0.0) for f in flags], default=0.0):.3f}"
+                        if flags else "n/a",
+        "blocking_categories": ",".join(sorted({f['category'] for f in severe})) or "none",
+    }, ("veto clear — no severe negative flags" if veto_ok
+        else f"VETO — {len(severe)} flag(s) below {NEWS_VETO_THRESHOLD}: "
+             + ",".join(sorted({f['category'] for f in severe}))))
+    return veto_ok
 
 
 # ── GATE 6 — ENTRY DECISION ──────────────────────────────────────────────────
@@ -2398,6 +2503,10 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
 
             score = gate5_signal_score(signal, positions, alpaca, sig_log)
             if score == 0.0:
+                continue
+
+            # Gate 5.5 — severe-negative news veto (Phase 3a)
+            if not gate5_5_news_veto(signal, sig_log):
                 continue
 
             candidate = gate6_entry(signal, score, regime, alpaca, sig_log)
@@ -3161,6 +3270,13 @@ def run(session="open"):
                     sig_log.decide("SKIP", f"score below threshold {C.MIN_CONFIDENCE_SCORE}")
                     sig_log.commit(db)
                     _mark_signal_evaluated(signal['id'], 'SKIP_SCORE')
+                    continue
+
+                # Gate 5.5: Severe-negative news veto (Phase 3a)
+                if not gate5_5_news_veto(signal, sig_log):
+                    sig_log.decide("SKIP", "severe-negative news veto")
+                    sig_log.commit(db)
+                    _mark_signal_evaluated(signal['id'], 'SKIP_NEWS_VETO')
                     continue
 
                 # Gate 6: Entry decision
