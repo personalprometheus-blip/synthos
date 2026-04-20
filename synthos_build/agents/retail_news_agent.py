@@ -3084,6 +3084,25 @@ def run(session="market"):
         except Exception as e:
             log.warning(f"interrogation_status write failed (non-fatal): {e}")
 
+        # ── news_flags write (Phase 2 of TRADER_RESTRUCTURE_PLAN) ──
+        # Write a durable annotation alongside the signal row so the
+        # trader (Phase 3) can consult news_flags at Gate 4 EVENT_RISK
+        # and Gate 5 composite. Phase 2 scope is limited: always use
+        # the generic 'catalyst' category and the signal's adjusted
+        # numeric score as the flag score (positive magnitude only —
+        # direction inference is Phase 3 work via sentiment/regime).
+        # Non-fatal: failure here does not block signal ingestion.
+        try:
+            db.write_news_flag(
+                ticker           = ticker,
+                category         = 'catalyst',
+                score            = float(adj_numeric),
+                notes            = (headline or '')[:200],
+                source_signal_id = sig_id,
+            )
+        except Exception as e:
+            log.warning(f"news_flags write failed (non-fatal) for {ticker}: {e}")
+
         # ── Post to company Pi ────────────────────────────────────────────
         post_to_company_pi(
             ticker               = ticker,

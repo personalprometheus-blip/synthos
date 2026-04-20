@@ -284,6 +284,42 @@ CREATE TABLE IF NOT EXISTS signals (
     updated_at      TEXT    NOT NULL
 );
 
+-- ── NEWS FLAGS (Phase 2 of TRADER_RESTRUCTURE_PLAN) ────────────────────
+-- Durable annotations per ticker written by the news agent. Replaces
+-- the "news is the trigger" model: news now contributes as (a) modifier
+-- to Gate 5 composite score, (b) veto at Gate 5.5 for severe negatives,
+-- and (c) event-risk gating at Gate 4 EVENT_RISK. Trader reads from
+-- news_flags when evaluating candidates; news itself no longer
+-- originates the trigger (that's the sector-driven candidate
+-- generator in Phase 3).
+--
+-- Phase 2 scope: create table + news agent writes to it. Trader
+-- does NOT read yet — that lands in Phase 3.
+--
+-- Score semantics: -1.0 to +1.0. Positive = bullish / supports entry,
+-- Negative = bearish / blocks or exits. |score| represents magnitude
+-- (mild 0.3, strong 0.7, severe >0.8).
+--
+-- fresh_until: ISO timestamp. Category-specific TTLs encoded in
+-- write_news_flag() at the caller. Queries filter by fresh_until > now.
+CREATE TABLE IF NOT EXISTS news_flags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker          TEXT    NOT NULL,
+    category        TEXT    NOT NULL,   -- earnings_raise, analyst_upgrade,
+                                        -- guidance_raise, breakout, catalyst,
+                                        -- earnings_miss, guidance_cut,
+                                        -- regulatory_probe, management_change,
+                                        -- litigation, other
+    score           REAL    NOT NULL,   -- -1.0 to +1.0
+    fresh_until     TEXT    NOT NULL,   -- ISO timestamp
+    notes           TEXT,
+    source_signal_id INTEGER,           -- FK to signals.id if derived from a
+                                        -- specific signal; NULL for standalone
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until);
+CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at);
+
 -- ── LEDGER ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ledger (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -832,6 +868,23 @@ class DB:
             # + retail_portal). New positions inserted post-migration should set
             # managed_by explicitly per the who-initiated-the-buy rule.
             "ALTER TABLE positions ADD COLUMN managed_by TEXT NOT NULL DEFAULT 'bot'",
+
+            # Phase 2 of TRADER_RESTRUCTURE_PLAN (2026-04-20) — news_flags
+            # durable-annotation table. See the SCHEMA section for the full
+            # rationale. Migration is additive only — never drops existing
+            # columns or data. Idempotent via IF NOT EXISTS.
+            """CREATE TABLE IF NOT EXISTS news_flags (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker          TEXT    NOT NULL,
+                category        TEXT    NOT NULL,
+                score           REAL    NOT NULL,
+                fresh_until     TEXT    NOT NULL,
+                notes           TEXT,
+                source_signal_id INTEGER,
+                created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until)",
+            "CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1080,6 +1133,93 @@ class DB:
                 "expected_return=excluded.expected_return",
                 (1 if active else 0, reason, set_by, now, expected_return),
             )
+
+    # ── NEWS FLAGS (Phase 2 of TRADER_RESTRUCTURE_PLAN) ───────────────────
+    # Category → default TTL in days. Keep the longest TTL on the most
+    # persistent categories (regulatory probes linger; breakouts go stale
+    # fast). Adjust as real-world signal decay gets measured.
+    NEWS_FLAG_TTL_DAYS = {
+        # Positive
+        'earnings_raise':   5,
+        'analyst_upgrade':  3,
+        'guidance_raise':   7,
+        'breakout':         2,
+        'catalyst':         3,
+        # Negative
+        'earnings_miss':    10,
+        'guidance_cut':     14,
+        'regulatory_probe': 30,
+        'management_change':14,
+        'litigation':       30,
+        # Fallback
+        'other':            2,
+    }
+
+    def write_news_flag(self, ticker, category, score,
+                        notes=None, source_signal_id=None, ttl_days=None):
+        """
+        Write a news_flags row. Phase 2 primitive — news agent calls this
+        after classifying an event.
+
+        Args:
+            ticker: upper-case symbol
+            category: one of NEWS_FLAG_TTL_DAYS keys (or 'other' as fallback)
+            score: -1.0 to +1.0 (sign = direction, magnitude = strength)
+            notes: optional human-readable explanation
+            source_signal_id: FK to signals.id if derived from a specific signal
+            ttl_days: override the default TTL for this category
+
+        Returns: the new row's id.
+        """
+        if ttl_days is None:
+            ttl_days = self.NEWS_FLAG_TTL_DAYS.get(category, self.NEWS_FLAG_TTL_DAYS['other'])
+        # fresh_until = now + ttl_days
+        fresh_until = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+        with self.conn() as c:
+            cur = c.execute(
+                "INSERT INTO news_flags "
+                "(ticker, category, score, fresh_until, notes, source_signal_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (ticker.upper(), category, float(score), fresh_until, notes, source_signal_id),
+            )
+            return cur.lastrowid
+
+    def get_fresh_news_flags_for_ticker(self, ticker):
+        """
+        Return all non-expired news_flags for a given ticker, newest first.
+        Trader (Phase 3) will call this at Gate 4 EVENT_RISK, Gate 5
+        composite, and Gate 5.5 VETO.
+
+        Filters fresh_until > now. Silently skips expired rows — caller
+        doesn't need to think about TTL.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT id, ticker, category, score, fresh_until, notes, "
+                "source_signal_id, created_at "
+                "FROM news_flags WHERE ticker = ? AND fresh_until > ? "
+                "ORDER BY created_at DESC",
+                (ticker.upper(), now),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def expire_stale_news_flags(self):
+        """
+        Housekeeping — prune news_flags rows whose fresh_until has passed.
+        Intended for the enrichment daemon's periodic tick. Returns the
+        count of rows deleted.
+
+        We DELETE rather than mark-as-expired because the archivist
+        already captures any audit trail we'd need via its row-archival
+        pass over outcomes + system_log.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            cur = c.execute(
+                "DELETE FROM news_flags WHERE fresh_until <= ?", (now,)
+            )
+            return cur.rowcount
 
     def close_position(self, pos_id, exit_price, exit_reason, active_controls=None):
         """
