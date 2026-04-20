@@ -30,6 +30,7 @@ Logic audit log: logs/logic_audits/YYYY-MM-DD_sector_screener.log
 
 import os
 import sys
+import time
 import logging
 import requests
 from datetime import datetime, timedelta
