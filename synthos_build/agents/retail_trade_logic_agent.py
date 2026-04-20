@@ -3649,7 +3649,9 @@ def _run_monthly_tax_sweep(db, now):
             portfolio = db.get_portfolio()
             positions = db.get_open_positions()
             unrealized  = sum(p.get('pnl', 0) for p in positions)
-            total_gains = portfolio['realized_gains'] + unrealized
+            # R10-3 — defensive .get() to match the Round 9 pattern applied
+            # elsewhere; a corrupt/partial portfolio row would KeyError here.
+            total_gains = float(portfolio.get('realized_gains') or 0) + unrealized
             if total_gains > 0:
                 tax = round(total_gains * C.GAIN_TAX_PCT, 2)
                 log.info(f"Month-end tax sweep: ${tax:.2f}")

@@ -3149,22 +3149,24 @@ def _enrich_single_db_position(p, alpaca_pos_map):
     _sig_headline = _sig_source = _sig_confidence = _sig_image_url = _sig_source_url = None
     _sig_id = p.get('signal_id')
     if _sig_id:
+        # R10-5 — was leaking the sqlite3 connection on any exception
+        # between connect() and the trailing close(). Context manager
+        # commits / closes cleanly even if .execute() raises.
         try:
             import sqlite3 as _sql
             _shared_path = _shared_db().path
-            _sc = _sql.connect(_shared_path, timeout=5)
-            _sc.row_factory = _sql.Row
-            _sig = _sc.execute(
-                "SELECT headline, source, confidence, image_url, source_url FROM signals WHERE id=?",
-                (_sig_id,)
-            ).fetchone()
-            if _sig:
-                _sig_headline   = _sig['headline']
-                _sig_source     = _sig['source']
-                _sig_confidence = _sig['confidence']
-                _sig_image_url  = _sig['image_url'] if 'image_url' in _sig.keys() else None
-                _sig_source_url = _sig['source_url'] if 'source_url' in _sig.keys() else None
-            _sc.close()
+            with _sql.connect(_shared_path, timeout=5) as _sc:
+                _sc.row_factory = _sql.Row
+                _sig = _sc.execute(
+                    "SELECT headline, source, confidence, image_url, source_url FROM signals WHERE id=?",
+                    (_sig_id,)
+                ).fetchone()
+                if _sig:
+                    _sig_headline   = _sig['headline']
+                    _sig_source     = _sig['source']
+                    _sig_confidence = _sig['confidence']
+                    _sig_image_url  = _sig['image_url'] if 'image_url' in _sig.keys() else None
+                    _sig_source_url = _sig['source_url'] if 'source_url' in _sig.keys() else None
         except Exception as _e:
             log.warning(f"Signal lookup failed for id={_sig_id}: {_e}")
 
@@ -3436,6 +3438,10 @@ def _status_locked_mode(db, agent_running_info):
         "pi_id":              PI_ID,
         "agent_running":      agent_running_info['agent'],
         "agent_running_secs": agent_running_info.get('age_secs', 0),
+        # R10-4 — normal path (get_system_status) returns user_warnings;
+        # omitting it here breaks any JS reading data.user_warnings.length
+        # when the agent happens to be running at fetch time.
+        "user_warnings":      [],
         "admin_overrides": {
             "trading_gate":   os.environ.get('ADMIN_TRADING_GATE', 'ALL'),
             "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
@@ -3564,7 +3570,9 @@ def get_system_status():
                 "orphan_count":     0,
                 "positions":        [],
                 "urgent_flags":     0,
+                "critical_flags":   0,
                 "flags_detail":     [],
+                "user_warnings":    [],
                 "last_heartbeat":   "Unavailable",
                 "kill_switch":      kill_switch_active(),
                 "operating_mode":   OPERATING_MODE,
@@ -13922,49 +13930,54 @@ def _aggregate_customer_market_activity(n_bins, session_start, session_end,
         db_path = os.path.join(customers_dir, cid, 'signals.db')
         if not os.path.exists(db_path):
             continue
+        # R10-5 — wrap in contextlib.closing so conn.close() runs on every
+        # path including mid-loop exceptions (SQL errors, locked DB, etc.).
+        # The original `conn.close()` was inside the try block, so any
+        # exception from .execute() left the connection open until GC.
         try:
             import sqlite3
-            conn = sqlite3.connect(db_path, timeout=5)
-            conn.row_factory = sqlite3.Row
+            from contextlib import closing
             cust_buys  = [0.0] * n_bins
             cust_sells = [0.0] * n_bins
             has_activity = False
 
-            for r in conn.execute(
-                "SELECT opened_at, entry_price * shares AS amt FROM positions "
-                "WHERE opened_at IS NOT NULL AND opened_at >= ? AND opened_at < ?",
-                (session_start_cutoff, session_end_cutoff)
-            ).fetchall():
-                idx = _session_bin_index(
-                    _parse_db_dt_to_et(r['opened_at']),
-                    session_start, session_end, n_bins, BIN_MINUTES,
-                )
-                if idx is None:
-                    continue
-                amt = float(r['amt'] or 0)
-                cust_buys[idx]        += amt
-                total_buys_bins[idx]  += amt
-                total_buy_count       += 1
-                has_activity = True
+            with closing(sqlite3.connect(db_path, timeout=5)) as conn:
+                conn.row_factory = sqlite3.Row
 
-            for r in conn.execute(
-                "SELECT closed_at, entry_price * shares AS amt FROM positions "
-                "WHERE closed_at IS NOT NULL AND closed_at >= ? AND closed_at < ?",
-                (session_start_cutoff, session_end_cutoff)
-            ).fetchall():
-                idx = _session_bin_index(
-                    _parse_db_dt_to_et(r['closed_at']),
-                    session_start, session_end, n_bins, BIN_MINUTES,
-                )
-                if idx is None:
-                    continue
-                amt = float(r['amt'] or 0)
-                cust_sells[idx]        += amt
-                total_sells_bins[idx]  += amt
-                total_sell_count       += 1
-                has_activity = True
+                for r in conn.execute(
+                    "SELECT opened_at, entry_price * shares AS amt FROM positions "
+                    "WHERE opened_at IS NOT NULL AND opened_at >= ? AND opened_at < ?",
+                    (session_start_cutoff, session_end_cutoff)
+                ).fetchall():
+                    idx = _session_bin_index(
+                        _parse_db_dt_to_et(r['opened_at']),
+                        session_start, session_end, n_bins, BIN_MINUTES,
+                    )
+                    if idx is None:
+                        continue
+                    amt = float(r['amt'] or 0)
+                    cust_buys[idx]        += amt
+                    total_buys_bins[idx]  += amt
+                    total_buy_count       += 1
+                    has_activity = True
 
-            conn.close()
+                for r in conn.execute(
+                    "SELECT closed_at, entry_price * shares AS amt FROM positions "
+                    "WHERE closed_at IS NOT NULL AND closed_at >= ? AND closed_at < ?",
+                    (session_start_cutoff, session_end_cutoff)
+                ).fetchall():
+                    idx = _session_bin_index(
+                        _parse_db_dt_to_et(r['closed_at']),
+                        session_start, session_end, n_bins, BIN_MINUTES,
+                    )
+                    if idx is None:
+                        continue
+                    amt = float(r['amt'] or 0)
+                    cust_sells[idx]        += amt
+                    total_sells_bins[idx]  += amt
+                    total_sell_count       += 1
+                    has_activity = True
+
             if has_activity:
                 customers_data[cid] = {
                     'name':  customer_names.get(cid, cid[:8]),
