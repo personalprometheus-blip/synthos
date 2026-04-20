@@ -501,6 +501,29 @@ def run_trade_all_customers(session='open'):
     return ok, fail
 
 
+def run_earnings_refresh():
+    """Refresh the earnings_cache from Nasdaq's calendar API. Phase 5.a
+    of TRADER_RESTRUCTURE_PLAN. Cheap (one HTTP call per business day in
+    horizon, ~10 calls) and keeps Gate 4 EVENT_RISK reads hot-path-free.
+    Safe to call every enrichment tick; cache TTL (7d) makes per-call
+    churn minimal."""
+    log.info("[EARNINGS REFRESH] Starting")
+    try:
+        from retail_event_calendar import refresh_earnings_calendar  # noqa: E402
+        from retail_database import get_customer_db  # noqa: E402
+        owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+        summary = refresh_earnings_calendar(get_customer_db(owner))
+        log.info(
+            f"[EARNINGS REFRESH] Complete — "
+            f"days={summary['days_scanned']} tickers={summary['tickers_seen']} "
+            f"rows={summary['cache_rows']}"
+        )
+        return True
+    except Exception as e:
+        log.error(f"[EARNINGS REFRESH] Error: {e}")
+        return False
+
+
 def run_candidate_generator():
     """Run retail_candidate_generator.py once. Phase 3b of
     TRADER_RESTRUCTURE_PLAN. Emits sector-driven candidate signals with
@@ -941,6 +964,13 @@ def run_premarket_prep():
     # Emits sector-driven candidate signals (source='candidate',
     # status='WATCHING'). Trader doesn't consume until Phase 3c cutover.
     run_candidate_generator()
+    if _shutdown_requested:
+        return
+
+    # Phase 5.a: Earnings calendar refresh. Populates earnings_cache from
+    # Nasdaq's public API so Gate 4 EVENT_RISK's calendar check stays
+    # hot-path-free (pure cache read inside the gate).
+    run_earnings_refresh()
     if _shutdown_requested:
         return
 
