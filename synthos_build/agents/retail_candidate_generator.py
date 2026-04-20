@@ -119,6 +119,21 @@ def run() -> dict:
     candidates = _fetch_candidates(db, run_id)
     log.info(f"Latest screener run {run_id[:8]} returned {len(candidates)} qualifying rows")
 
+    # Audit Round 5 — filter out un-tradable tickers before emission.
+    # Uses Alpaca's /v2/assets cache (refreshed daily by market_daemon).
+    # Unknown tickers (no cache row) pass through — block-on-None would
+    # be too aggressive until the first cache refresh has happened.
+    try:
+        from retail_tradable_cache import is_tradable  # noqa: E402
+        _before = len(candidates)
+        candidates = [c for c in candidates
+                      if is_tradable(db, c['ticker']) is not False]
+        _dropped = _before - len(candidates)
+        if _dropped:
+            log.info(f"Tradable-cache filtered {_dropped} un-tradable ticker(s)")
+    except Exception as _e:
+        log.debug(f"tradable filter skipped: {_e}")
+
     emitted = 0
     updated = 0
     for c in candidates:

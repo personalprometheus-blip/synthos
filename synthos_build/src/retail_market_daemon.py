@@ -501,6 +501,28 @@ def run_trade_all_customers(session='open'):
     return ok, fail
 
 
+def run_tradable_refresh():
+    """Refresh the tradable_assets cache from Alpaca's /v2/assets endpoint.
+    Audit Round 5. Candidate Generator uses the cache to filter un-tradable
+    tickers (crypto, delisted, OTC) before emission. Cheap (one HTTP call,
+    ~11k rows). Called once per market-open pre-flight — cache TTL is 1
+    day so a single refresh per trading day is enough."""
+    log.info("[TRADABLE REFRESH] Starting")
+    try:
+        from retail_tradable_cache import refresh as _tradable_refresh  # noqa: E402
+        from retail_database import get_customer_db  # noqa: E402
+        owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+        summary = _tradable_refresh(get_customer_db(owner))
+        log.info(
+            f"[TRADABLE REFRESH] Complete — fetched={summary.get('fetched', 0)} "
+            f"tradable={summary.get('tradable', 0)}"
+        )
+        return True
+    except Exception as e:
+        log.error(f"[TRADABLE REFRESH] Error: {e}")
+        return False
+
+
 def run_earnings_refresh():
     """Refresh the earnings_cache from Nasdaq's calendar API. Phase 5.a
     of TRADER_RESTRUCTURE_PLAN. Cheap (one HTTP call per business day in
@@ -917,6 +939,13 @@ def run_premarket_prep():
     # Runs first so APPROVED rows are visible to the managed-mode
     # executor in the trader dispatch that comes at the end of prep.
     run_pre_open_reeval()
+    if _shutdown_requested:
+        return
+
+    # Audit Round 5: refresh the tradable-asset cache once per trading
+    # day. Candidate Generator reads from this cache to filter out
+    # un-tradable tickers (crypto, delisted, OTC) before emitting.
+    run_tradable_refresh()
     if _shutdown_requested:
         return
 
