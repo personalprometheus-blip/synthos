@@ -1,6 +1,6 @@
 """Customer DB health checker — called by auditor via SSH."""
 import sqlite3, os, json, sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 customers_dir = '/home/pi516gb/synthos/synthos_build/data/customers'
 results = []
@@ -49,7 +49,7 @@ for cid in os.listdir(customers_dir):
             results.append({'cid': cid[:12], 'severity': 'high', 'issue': 'NO_SETTINGS_TABLE', 'detail': 'customer_settings table missing'})
 
         # Check for stale agent activity (no events in 24h during weekdays)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         if now.weekday() < 5:
             cutoff = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
             recent = db.execute("SELECT COUNT(*) FROM system_log WHERE timestamp > ?", (cutoff,)).fetchone()[0]

@@ -16,7 +16,7 @@ import sys
 import sqlite3
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 _SRC_DIR = Path(__file__).resolve().parent
 _ROOT_DIR = _SRC_DIR.parent
@@ -64,13 +64,13 @@ def rebuild():
     with db.conn() as c:
         for k, v in defaults.items():
             c.execute("INSERT OR REPLACE INTO customer_settings (key, value, updated_at) VALUES (?, ?, ?)",
-                      (k, v, datetime.utcnow().isoformat()))
+                      (k, v, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
 
     # Seed portfolio
     conn = sqlite3.connect(str(DEFAULT_DB))
     try:
         conn.execute("INSERT INTO portfolio (cash, realized_gains, tax_withdrawn, month_start, updated_at) VALUES (1000, 0, 0, 1000, ?)",
-                     (datetime.utcnow().isoformat(),))
+                     (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),))
         conn.commit()
     except sqlite3.IntegrityError:
         pass  # already has a row

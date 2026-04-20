@@ -53,6 +53,11 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from retail_database import get_db, acquire_agent_lock, release_agent_lock
+# Phase C / D6 — shared helpers (2026-04-20)
+from retail_shared import (
+    kill_switch_active,
+    is_market_hours as _is_market_hours_shared,
+)
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
@@ -564,9 +569,7 @@ class RegimeState:
 # The trader's run() entry-point skip check reads both and exits clean if
 # either is active, BEFORE opening an Alpaca client or doing any real work.
 
-def kill_switch_active():
-    """Legacy file-based admin kill check. Kept as emergency fallback."""
-    return os.path.exists(KILL_SWITCH_FILE)
+# kill_switch_active: imported from retail_shared above
 
 def clear_kill_switch():
     try:
@@ -744,25 +747,10 @@ _MARKET_CLOSE_MIN  = 0
 def is_market_hours_utc_now() -> bool:
     """True during US regular session hours (9:30-16:00 ET, weekdays).
 
-    Naming kept `_utc_now` for backward-compat with early references; the
-    implementation is ET-based. ET handles DST automatically via
-    ZoneInfo, so the UTC window shifts correctly (13:30-20:00 UTC in
-    EDT, 14:30-21:00 UTC in EST) without needing hard-coded hours.
-    Matches the retail_market_daemon is_market_hours() implementation.
-
-    Does NOT check exchange holiday calendar — signals queued on a
-    market holiday would get `CANCELLED_PROTECTIVE` at the re-eval
-    max-age threshold, so the failure mode is benign (visible cancel
-    with a named reason). Holiday awareness is a TODO.
+    Naming kept `_utc_now` for backward-compat with internal call sites;
+    delegates to retail_shared canonical. Phase C / D6 (2026-04-20).
     """
-    now_et = datetime.now(ET)
-    if now_et.weekday() >= 5:
-        return False
-    open_time  = now_et.replace(hour=_MARKET_OPEN_HOUR,  minute=_MARKET_OPEN_MIN,
-                                second=0, microsecond=0)
-    close_time = now_et.replace(hour=_MARKET_CLOSE_HOUR, minute=_MARKET_CLOSE_MIN,
-                                second=0, microsecond=0)
-    return open_time <= now_et < close_time
+    return _is_market_hours_shared()
 
 
 def _queue_overnight_order(ticker: str, qty, side: str,
@@ -925,7 +913,7 @@ class AlpacaClient:
         unique = sorted(set(t.upper() for t in tickers))
         # Alpaca reads the 'Z' suffix as UTC. ET labeled as Z was a 4-5 hour
         # silent offset — use UTC for API timestamps.
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
         start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {
@@ -1072,7 +1060,7 @@ class AlpacaClient:
             self._bar_cache[(t_upper, 0)] = []
             return []
         # Cache miss — fetch individually. UTC for Alpaca.
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         end   = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
         start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
         headers = {

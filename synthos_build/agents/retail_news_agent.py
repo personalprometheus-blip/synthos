@@ -34,7 +34,7 @@ import socket
 import logging
 import argparse
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -476,18 +476,18 @@ def _get_incremental_start(db, cursor_name: str,
     if cursor and cursor.get('cursor_value'):
         try:
             cursor_dt = datetime.fromisoformat(cursor['cursor_value'].replace('Z', ''))
-            age_hours = (datetime.utcnow() - cursor_dt).total_seconds() / 3600
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - cursor_dt).total_seconds() / 3600
             if age_hours > stale_clamp_hours:
                 log.info(f"Cursor {cursor_name} is {age_hours:.1f}h old — "
                          f"clamping to {stale_clamp_hours}h back")
-                return (datetime.utcnow() - timedelta(hours=stale_clamp_hours)
+                return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_clamp_hours)
                         ).strftime('%Y-%m-%dT%H:%M:%SZ')
             return cursor['cursor_value']
         except Exception as exc:
             log.warning(f"Cursor {cursor_name} unparseable ({exc}) — using default")
 
     # First-run fallback
-    return (datetime.utcnow() - timedelta(hours=default_hours)
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=default_hours)
             ).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
@@ -659,7 +659,7 @@ def _alpaca_bars(ticker, days):
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return []
     # UTC for Alpaca — 'Z' suffix means UTC, not local ET.
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     end   = now_utc.strftime('%Y-%m-%dT00:00:00Z')
     start = (now_utc - timedelta(days=days)).strftime('%Y-%m-%dT00:00:00Z')
     url   = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars"
@@ -849,9 +849,9 @@ def fetch_alpaca_news_historical(
     # either miss articles or produce start > end errors on hosts where
     # the system clock is set to local time (e.g. pi5 on ET).
     if not start:
-        start = (datetime.utcnow() - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        start = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
     if not end:
-        end = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        end = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     params: dict = {
         "start":               start,
@@ -913,7 +913,7 @@ def fetch_alpaca_news_for_ticker(ticker: str, limit: int = 10) -> list[dict]:
     Returns a list of normalised item dicts.
     """
     # UTC — see note in fetch_alpaca_news_historical about local/UTC mixing.
-    start = (datetime.utcnow() - timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    start = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)).strftime('%Y-%m-%dT%H:%M:%SZ')
     return fetch_alpaca_news_historical(
         symbols=[ticker], start=start, limit=limit, sort="desc"
     )
@@ -1193,7 +1193,7 @@ def gate1_system(item, ctrl, ndl, seen_headlines, state):
         try:
             # disc_date comes from Alpaca's UTC created_at — compare in UTC.
             disc_dt   = datetime.strptime(disc_date_str, '%Y-%m-%d')
-            age_hours = (datetime.utcnow() - disc_dt).total_seconds() / 3600
+            age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - disc_dt).total_seconds() / 3600
             if age_hours > ctrl.MAX_NEWS_AGE_HOURS:
                 state.system_status = "timestamp_rejected"
                 ndl.gate(1, "SYSTEM",
@@ -2867,7 +2867,7 @@ def run(session="market"):
                              for w in ["spouse", "joint", "dependent"]))
         staleness, discount = get_staleness(
             item.get("tx_date", ""),
-            item.get("disc_date", datetime.utcnow().strftime('%Y-%m-%d')),
+            item.get("disc_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')),
         )
         item["staleness"] = staleness
         item["is_amended"] = is_amended

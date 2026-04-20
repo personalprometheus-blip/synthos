@@ -20,7 +20,7 @@ Constraints:
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 log = logging.getLogger('optimizer')
 
@@ -85,7 +85,7 @@ def run_optimization(db, min_sample=20, max_adj=0.20):
         log.info(f"Optimizer: {key} {a['old_value']:.4f} → {a['new_value']:.4f} ({a['reason']})")
 
     # Log to optimizer_log (UTC — matches DB convention)
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S')
     try:
         with db.conn() as c:
             c.execute("""

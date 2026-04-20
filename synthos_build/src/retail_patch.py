@@ -57,7 +57,7 @@ import logging
 import subprocess
 import tempfile
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -603,7 +603,7 @@ def _check_retail_node() -> list[str]:
 
     # ── Agent heartbeats ──────────────────────────────────────────────────
     lines.append("  Agent heartbeats (from signals.db):")
-    now_ts = datetime.utcnow()
+    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
     if os.path.exists(DB_PATH):
         try:
             conn = sqlite3.connect(DB_PATH, timeout=5)

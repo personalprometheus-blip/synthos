@@ -41,6 +41,9 @@ sys.path.insert(0, str(_SRC))
 from dotenv import load_dotenv
 load_dotenv(_ROOT / 'user' / '.env')
 
+# Phase C / D6 — shared helpers (2026-04-20)
+from retail_shared import get_active_customers  # noqa: E402
+
 ET = ZoneInfo("America/New_York")
 OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
 
@@ -110,15 +113,7 @@ SESSIONS = {
 }
 
 
-def get_active_customers():
-    """Return list of active customer IDs."""
-    try:
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active')]
-    except Exception as e:
-        print(f"  {RED}Could not list customers: {e}{RESET}")
-        return []
+# get_active_customers: imported from retail_shared above
 
 
 def get_customer_name(cid):
