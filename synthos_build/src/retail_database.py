@@ -1356,6 +1356,24 @@ class DB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_fresh_macro_windows(self, customer_id):
+        """
+        Used by trader (Phase 3c.b) as the entry filter. Returns all
+        non-expired macro rows for the given customer. Caller joins to
+        signals (master) + live_prices to find tickers currently within
+        their entry band, then runs the 14-gate evaluation.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT signal_id, entry_low, entry_high, stop, tp, "
+                "computed_at, expires_at "
+                "FROM trade_windows "
+                "WHERE customer_id = ? AND tier = 'macro' AND expires_at > ?",
+                (customer_id, now),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def expire_stale_trade_windows(self):
         """Housekeeping — prune expired window rows. Returns count deleted."""
         now = datetime.now(timezone.utc).isoformat()

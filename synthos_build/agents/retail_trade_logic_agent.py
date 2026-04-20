@@ -2485,7 +2485,31 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
     MAX_ROTATIONS = 1
 
     try:
-        signals = shared_db.get_validated_signals()
+        # Phase 3c.b — window-driven candidate pool for rotation too.
+        # Rotation ranks signals by score, so we want the same universe
+        # the main loop evaluates: in-band macro-window signals. Keeps
+        # the trader internally consistent (can't rotate into something
+        # the main loop would refuse to enter).
+        _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
+        _price_map = {}
+        try:
+            with shared_db.conn() as _c:
+                _pr = _c.execute(
+                    "SELECT ticker, price FROM live_prices WHERE price IS NOT NULL"
+                ).fetchall()
+                _price_map = {r['ticker']: float(r['price']) for r in _pr if r['price']}
+        except Exception:
+            pass
+        signals = []
+        for _w in _windows:
+            _sig = shared_db.get_signal_by_id(_w['signal_id'])
+            if not _sig:
+                continue
+            _price = _price_map.get(_sig.get('ticker'))
+            if _price is None:
+                continue
+            if _w['entry_low'] <= _price <= _w['entry_high']:
+                signals.append(_sig)
         if not signals:
             return
 
@@ -3221,20 +3245,63 @@ def run(session="open"):
                     ).rowcount
                     _v_expired = _c.execute(
                         "UPDATE signals SET status='EXPIRED', updated_at=datetime('now') "
-                        "WHERE status='VALIDATED' "
+                        "WHERE status IN ('VALIDATED', 'WATCHING') "
                         "AND created_at < datetime('now', '-12 hours')"
                     ).rowcount
                     if _q_expired or _v_expired:
                         log.info(
                             f"[SIGNALS] Expired {_q_expired} QUEUED (>72h) + "
-                            f"{_v_expired} VALIDATED (>12h) stale signal(s)"
+                            f"{_v_expired} VALIDATED/WATCHING (>12h) stale signal(s)"
                         )
             except Exception:
                 pass
 
-            signals = _shared_db().get_validated_signals()
-            _set_phase('signal_evaluation', f"{len(signals)} signals")
-            log.info(f"Evaluating {len(signals)} validated signal(s)")
+            # Phase 3c.b — window-driven entry selection. Replaces the v1
+            # "evaluate every VALIDATED signal" loop. Flow:
+            #   1. Pull fresh macro windows for this customer
+            #   2. Look up live price for each window's ticker (via signal_id)
+            #   3. Keep only windows where live_price ∈ [entry_low, entry_high]
+            #   4. Feed the resulting signal list into the gate chain
+            # Macro TTL is 8h so the enrichment-tick cadence (30min) is
+            # sufficient to keep windows fresh. Refresh mode wiring is
+            # deferred to Phase 4 (ATR-anchored recompute).
+            _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
+            _price_map = {}
+            try:
+                with _shared_db().conn() as _c:
+                    _pr = _c.execute(
+                        "SELECT ticker, price FROM live_prices WHERE price IS NOT NULL"
+                    ).fetchall()
+                    _price_map = {r['ticker']: float(r['price']) for r in _pr if r['price']}
+            except Exception as _e:
+                log.warning(f"live_prices read failed: {_e}")
+
+            signals = []
+            _out_of_band = 0
+            _no_price    = 0
+            _no_signal   = 0
+            for _w in _windows:
+                _sig = _shared_db().get_signal_by_id(_w['signal_id'])
+                if not _sig:
+                    _no_signal += 1
+                    continue
+                _tkr = _sig.get('ticker')
+                _price = _price_map.get(_tkr)
+                if _price is None:
+                    _no_price += 1
+                    continue
+                if not (_w['entry_low'] <= _price <= _w['entry_high']):
+                    _out_of_band += 1
+                    continue
+                signals.append(_sig)
+
+            _set_phase('signal_evaluation', f"{len(signals)} in-band")
+            log.info(
+                f"[WINDOW] {len(_windows)} macro window(s) → "
+                f"{len(signals)} in-band | skipped: "
+                f"{_out_of_band} out-of-band, {_no_price} no-price, "
+                f"{_no_signal} no-signal"
+            )
 
             for signal in signals:
                 if budget_exceeded():
