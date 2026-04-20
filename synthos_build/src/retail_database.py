@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS trade_windows (
     tp            REAL,                -- nullable (optional take-profit)
     computed_at   TEXT    NOT NULL,
     expires_at    TEXT    NOT NULL,
+    atr           REAL,                -- ATR_14 at compute time (Phase 4.a)
     PRIMARY KEY (signal_id, customer_id, tier)
 );
 CREATE INDEX IF NOT EXISTS idx_trade_windows_customer_tier
@@ -935,6 +936,12 @@ class DB:
                 PRIMARY KEY (signal_id, customer_id, tier)
             )""",
             "CREATE INDEX IF NOT EXISTS idx_trade_windows_customer_tier ON trade_windows(customer_id, tier, expires_at)",
+
+            # Phase 4.a of TRADER_RESTRUCTURE_PLAN (2026-04-20) — attach
+            # ATR_14 to each window row. Nullable so rows written before
+            # window_calculator starts populating it stay valid; fresh
+            # computes after this migration always fill it.
+            "ALTER TABLE trade_windows ADD COLUMN atr REAL",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1282,7 +1289,7 @@ class DB:
 
     def write_trade_window(self, signal_id, customer_id, tier,
                            entry_low, entry_high, stop, tp=None,
-                           ttl_seconds=None):
+                           ttl_seconds=None, atr=None):
         """
         Upsert a window row. Primary key is (signal_id, customer_id, tier)
         so successive recomputes overwrite in place rather than
@@ -1297,6 +1304,8 @@ class DB:
             stop: stop-loss level if position gets filled
             tp: optional take-profit level (ok for macro, null for minor)
             ttl_seconds: override default TTL for this tier
+            atr: ATR_14 at compute time (Phase 4.a). Optional — rows
+                 written before ATR-fetch lands will store NULL.
         """
         if tier not in ('macro', 'minor'):
             raise ValueError(f"tier must be 'macro' or 'minor', got {tier!r}")
@@ -1309,16 +1318,18 @@ class DB:
             c.execute(
                 "INSERT INTO trade_windows "
                 "(signal_id, customer_id, tier, entry_low, entry_high, "
-                "stop, tp, computed_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "stop, tp, computed_at, expires_at, atr) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(signal_id, customer_id, tier) DO UPDATE SET "
                 "entry_low=excluded.entry_low, entry_high=excluded.entry_high, "
                 "stop=excluded.stop, tp=excluded.tp, "
-                "computed_at=excluded.computed_at, expires_at=excluded.expires_at",
+                "computed_at=excluded.computed_at, expires_at=excluded.expires_at, "
+                "atr=excluded.atr",
                 (int(signal_id), customer_id, tier,
                  float(entry_low), float(entry_high), float(stop),
                  None if tp is None else float(tp),
-                 computed_at, expires_at),
+                 computed_at, expires_at,
+                 None if atr is None else float(atr)),
             )
 
     def get_windows_for_signal(self, signal_id, customer_id):
@@ -1329,7 +1340,7 @@ class DB:
         with self.conn() as c:
             rows = c.execute(
                 "SELECT tier, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at "
+                "computed_at, expires_at, atr "
                 "FROM trade_windows "
                 "WHERE signal_id = ? AND customer_id = ? AND expires_at > ?",
                 (int(signal_id), customer_id, now),
@@ -1349,7 +1360,7 @@ class DB:
         with self.conn() as c:
             rows = c.execute(
                 "SELECT signal_id, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at "
+                "computed_at, expires_at, atr "
                 "FROM trade_windows "
                 "WHERE customer_id = ? AND tier = 'minor' AND expires_at > ?",
                 (customer_id, now),
@@ -1367,7 +1378,7 @@ class DB:
         with self.conn() as c:
             rows = c.execute(
                 "SELECT signal_id, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at "
+                "computed_at, expires_at, atr "
                 "FROM trade_windows "
                 "WHERE customer_id = ? AND tier = 'macro' AND expires_at > ?",
                 (customer_id, now),
