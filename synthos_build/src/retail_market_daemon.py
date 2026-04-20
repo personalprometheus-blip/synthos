@@ -1271,6 +1271,15 @@ def run_close_session():
     run_exit_backfill()
     run_trail_optimizer()
 
+    # Phase 5.c — write the day's audit rollup. Idempotent; overwrites
+    # if called again later the same day.
+    try:
+        from retail_daily_master import generate as _daily_master_generate  # noqa: E402
+        _path = _daily_master_generate()
+        log.info(f"[DAILY MASTER] wrote {_path}")
+    except Exception as _e:
+        log.warning(f"[DAILY MASTER] generation failed: {_e}")
+
 
 def run_exit_backfill():
     """Backfill post-exit prices for the trailing stop optimizer."""
