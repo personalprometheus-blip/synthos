@@ -83,20 +83,37 @@ log = logging.getLogger('market_sentiment_agent')
 # Yahoo RSS removed — only VIX + treasury chart calls retained
 
 def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
-    """Fetch URL with exponential backoff. Returns response or None."""
+    """Fetch URL with exponential backoff. Returns response or None.
+
+    Audit Round 7.3 — tuple timeout (5s connect, REQUEST_TIMEOUT read) so
+    a slow DNS / SYN failure doesn't eat the full budget on every retry.
+    Logs the HTTP status code explicitly when available so 429 rate
+    limits and 5xx upstream issues are traceable (previously the generic
+    'Fetch failed' didn't surface it). Retry-on-any-exception behavior
+    retained — raise_for_status() raises HTTPError for 4xx/5xx which
+    triggers the backoff.
+    """
     last_error = None
     for attempt in range(max_retries):
         try:
-            r = requests.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
+            r = requests.get(url, params=params, headers=headers,
+                             timeout=(5, REQUEST_TIMEOUT))
             r.raise_for_status()
             return r
         except Exception as e:
             last_error = e
+            status = getattr(getattr(e, 'response', None), 'status_code', None)
             if attempt < max_retries - 1:
                 wait = 2 ** attempt
-                log.warning(f"Fetch failed attempt {attempt+1}/{max_retries} — retry in {wait}s")
+                log.warning(
+                    f"Fetch failed ({url[:60]}) attempt {attempt+1}/{max_retries}"
+                    f" status={status} — retry in {wait}s: {e}"
+                )
                 time.sleep(wait)
-    log.error(f"Fetch permanently failed: {url[:80]} — {last_error}")
+    log.error(
+        f"Fetch permanently failed after {max_retries} attempts "
+        f"({url[:80]}): {last_error}"
+    )
     return None
 
 

@@ -26,10 +26,26 @@ import argparse
 import logging
 import os
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger('daily_master')
+_ET = ZoneInfo("America/New_York")
+
+
+def _et_day_bounds_utc(day_iso: str) -> tuple[str, str]:
+    """Return the UTC start + end timestamps (exclusive) for an ET
+    calendar day. Audit Round 7.6 — previously the queries compared
+    `opened_at >= 'YYYY-MM-DD'` treating the column as naive-UTC,
+    which misbinned ET-evening activity into the next UTC day.
+
+    Example: ET 2026-04-20 runs from 2026-04-20 04:00 UTC (EDT) to
+    2026-04-21 04:00 UTC."""
+    day_et_midnight = datetime.fromisoformat(f"{day_iso}T00:00:00").replace(tzinfo=_ET)
+    start = day_et_midnight.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    end   = (day_et_midnight + timedelta(days=1)).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    return start, end
 
 _ROOT_DIR = Path(__file__).resolve().parent.parent
 _LOGS_DIR = _ROOT_DIR / 'logs' / 'daily_master'
@@ -49,43 +65,45 @@ def _get_active_customers():
 
 
 def _opens_today(db, day_iso: str) -> list[dict]:
-    """Positions opened on `day_iso` (YYYY-MM-DD) for this customer."""
+    """Positions opened on ET-day `day_iso` (YYYY-MM-DD) for this customer."""
+    start_utc, end_utc = _et_day_bounds_utc(day_iso)
     with db.conn() as c:
         rows = c.execute(
             "SELECT ticker, sector, entry_price, shares, opened_at, "
             "entry_signal_score, entry_sentiment_score, interrogation_status "
             "FROM positions "
-            "WHERE opened_at >= ? AND opened_at < datetime(?, '+1 day') "
+            "WHERE opened_at >= ? AND opened_at < ? "
             "ORDER BY opened_at",
-            (day_iso, day_iso),
+            (start_utc, end_utc),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def _closes_today(db, day_iso: str) -> list[dict]:
-    """Positions closed on `day_iso` for this customer."""
+    """Positions closed on ET-day `day_iso` for this customer."""
+    start_utc, end_utc = _et_day_bounds_utc(day_iso)
     with db.conn() as c:
         rows = c.execute(
             "SELECT ticker, entry_price, current_price as exit_price, "
             "shares, pnl, closed_at, exit_reason "
             "FROM positions "
-            "WHERE closed_at >= ? AND closed_at < datetime(?, '+1 day') "
+            "WHERE closed_at >= ? AND closed_at < ? "
             "ORDER BY closed_at",
-            (day_iso, day_iso),
+            (start_utc, end_utc),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def _candidates_today(shared_db, day_iso: str) -> list[dict]:
-    """Candidate signals emitted today (master/shared DB only)."""
+    """Candidate signals emitted on ET-day (master/shared DB only)."""
+    start_utc, end_utc = _et_day_bounds_utc(day_iso)
     with shared_db.conn() as c:
         rows = c.execute(
             "SELECT ticker, sector, entry_signal_score, created_at "
             "FROM signals "
-            "WHERE source='candidate' AND created_at >= ? "
-            "AND created_at < datetime(?, '+1 day') "
+            "WHERE source='candidate' AND created_at >= ? AND created_at < ? "
             "ORDER BY created_at",
-            (day_iso, day_iso),
+            (start_utc, end_utc),
         ).fetchall()
     return [dict(r) for r in rows]
 

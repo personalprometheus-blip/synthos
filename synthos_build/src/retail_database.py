@@ -1002,6 +1002,15 @@ class DB:
             # filter. Composite index lets the whole predicate resolve
             # against the index directly.
             "CREATE INDEX IF NOT EXISTS idx_signals_ticker_txdate_status ON signals(ticker, tx_date, status)",
+
+            # Audit Round 7.1 (2026-04-20) — entry_signal_score was
+            # declared TEXT and written as f"{x:.4f}". Writers now pass
+            # floats directly (SQLite dynamic typing accepts either).
+            # One-shot: cast all pre-existing string values to REAL so
+            # ORDER BY / comparisons use numeric semantics. Idempotent
+            # because CAST on an already-REAL value is a no-op.
+            "UPDATE signals   SET entry_signal_score = CAST(entry_signal_score AS REAL) WHERE entry_signal_score IS NOT NULL AND typeof(entry_signal_score) = 'text'",
+            "UPDATE positions SET entry_signal_score = CAST(entry_signal_score AS REAL) WHERE entry_signal_score IS NOT NULL AND typeof(entry_signal_score) = 'text'",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1495,6 +1504,11 @@ class DB:
         than inserting a duplicate.
         """
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        # Round 7.1: store as REAL (SQLite's dynamic typing accepts a
+        # float in a TEXT-affinity column; comparisons then use numeric
+        # semantics). Previously used f"{x:.4f}" which forced lexicographic
+        # sort on SELECT ... ORDER BY entry_signal_score.
+        score_num = round(float(combined_score), 4)
         with self.conn() as c:
             existing = c.execute(
                 "SELECT id FROM signals "
@@ -1506,7 +1520,7 @@ class DB:
                 c.execute(
                     "UPDATE signals SET entry_signal_score = ?, updated_at = ? "
                     "WHERE id = ?",
-                    (f"{combined_score:.4f}", self.now(), existing['id']),
+                    (score_num, self.now(), existing['id']),
                 )
                 return None
             expires_at = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).strftime(
@@ -1531,7 +1545,7 @@ class DB:
                 (ticker, None, sector, headline,
                  today, expires_at, discard_del,
                  self.now(), self.now(),
-                 f"{combined_score:.4f}"),
+                 score_num),
             )
             return cur.lastrowid
 
@@ -1622,6 +1636,15 @@ class DB:
         """
         Closes a position. Adds proceeds to cash, records outcome,
         writes ledger entry.
+
+        Audit Round 7.2 — runs as a single transaction so concurrent
+        closes against the same customer DB can't race-read the
+        portfolio before either write lands. Previously the portfolio
+        read + positions update + outcomes insert + portfolio update
+        + ledger insert were split across multiple `with self.conn()`
+        blocks, each auto-committing in order. Two parallel closes
+        could both read `cash=X` and each write `cash=X+their_proceeds`,
+        losing one close.
         """
         with self.conn() as c:
             pos = c.execute(
@@ -1631,22 +1654,28 @@ class DB:
                 raise ValueError(f"Position {pos_id} not found")
             pos = dict(pos)
 
-        proceeds   = round(exit_price * float(pos['shares']), 2)
-        cost       = round(float(pos['entry_price']) * float(pos['shares']), 2)
-        pnl_dollar = round(proceeds - cost, 2)
-        pnl_pct    = round((pnl_dollar / cost) * 100, 2)
-        # Stored timestamps are naive-UTC strings. Parse, attach UTC tz so
-        # the subtraction against datetime.now(timezone.utc) works.
-        _opened = datetime.fromisoformat(pos['opened_at'].replace('Z', '+00:00'))
-        if _opened.tzinfo is None:
-            _opened = _opened.replace(tzinfo=timezone.utc)
-        hold_days  = (datetime.now(timezone.utc) - _opened).days
-        verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
-        portfolio  = self.get_portfolio()
-        new_cash   = round(portfolio['cash'] + proceeds, 2)
-        new_gains  = round(portfolio['realized_gains'] + pnl_dollar, 2)
+            proceeds   = round(exit_price * float(pos['shares']), 2)
+            cost       = round(float(pos['entry_price']) * float(pos['shares']), 2)
+            pnl_dollar = round(proceeds - cost, 2)
+            pnl_pct    = round((pnl_dollar / cost) * 100, 2)
+            # Stored timestamps are naive-UTC strings. Parse, attach UTC tz so
+            # the subtraction against datetime.now(timezone.utc) works.
+            _opened = datetime.fromisoformat(pos['opened_at'].replace('Z', '+00:00'))
+            if _opened.tzinfo is None:
+                _opened = _opened.replace(tzinfo=timezone.utc)
+            hold_days  = (datetime.now(timezone.utc) - _opened).days
+            verdict    = "WIN" if pnl_dollar >= 0 else "LOSS"
 
-        with self.conn() as c:
+            # Read portfolio INSIDE the transaction so the subsequent
+            # update sees the fresh value, not a pre-read snapshot.
+            pf_row = c.execute(
+                "SELECT cash, realized_gains FROM portfolio WHERE id=1"
+            ).fetchone()
+            if not pf_row:
+                raise RuntimeError("portfolio row missing — DB not initialized")
+            new_cash  = round(float(pf_row['cash']) + proceeds, 2)
+            new_gains = round(float(pf_row['realized_gains']) + pnl_dollar, 2)
+
             c.execute("""
                 UPDATE positions SET
                     current_price=?, pnl=?, status='CLOSED',
@@ -1665,14 +1694,20 @@ class DB:
                   None, None, pos['vol_bucket'],
                   exit_reason, verdict, self.now()))
 
-        self.update_portfolio(cash=new_cash, realized_gains=new_gains)
-        self.add_ledger_entry(
-            entry_type="EXIT",
-            description=f"{pos['ticker']} · {exit_reason} · {'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
-            amount=proceeds,
-            balance=new_cash,
-            position_id=pos_id,
-        )
+            # Inline the portfolio + ledger writes so the whole sequence
+            # (positions → outcomes → portfolio → ledger) commits atomically.
+            c.execute(
+                "UPDATE portfolio SET cash=?, realized_gains=?, updated_at=? WHERE id=1",
+                (new_cash, new_gains, self.now())
+            )
+            c.execute("""
+                INSERT INTO ledger
+                    (date, type, description, amount, balance, position_id, created_at)
+                VALUES (?,?,?,?,?,?,?)
+            """, (datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+                  'EXIT',
+                  f"{pos['ticker']} · {exit_reason} · {'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
+                  proceeds, new_cash, pos_id, self.now()))
         log.info(f"Closed position: {pos['ticker']} {verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f})")
 
         # Record exit performance for trailing stop optimizer
