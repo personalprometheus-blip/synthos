@@ -528,7 +528,10 @@ CREATE TABLE IF NOT EXISTS sector_screening (
     sentiment_signal    TEXT,                  -- "bullish" / "bearish" / "neutral" / "pending"
     sentiment_score     REAL,                  -- numeric score from Pulse (0-1)
     congressional_flag  TEXT,                  -- "recent_buy" / "recent_sell" / "none"
-    combined_score      REAL,                  -- weighted composite
+    combined_score      REAL,                  -- weighted composite (news+sentiment+weight)
+    momentum_score      REAL,                  -- per-ticker momentum 0-1 from sector_screener's
+                                               -- calc_momentum_score (ret_3m+SMA+volume trend)
+                                               -- Primary filter for candidate_generator (2026-04-21+)
     status              TEXT    NOT NULL DEFAULT 'considering',
     notes               TEXT,
     created_at          TEXT    NOT NULL
@@ -989,6 +992,13 @@ class DB:
             # covers both, eliminating the sort. Portal hits this on every
             # dashboard render.
             "CREATE INDEX IF NOT EXISTS idx_approvals_status_queued ON pending_approvals(status, queued_at)",
+
+            # 2026-04-21 — momentum_score is now the primary filter column
+            # for candidate_generator (was combined_score which mixed news,
+            # sentiment, and ETF weight but omitted the per-ticker momentum
+            # from sector_screener's own calc_momentum_score). Null for
+            # historical rows; filled in on all new screener runs.
+            "ALTER TABLE sector_screening ADD COLUMN momentum_score REAL",
 
             # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
             # daily by retail_tradable_cache.refresh() from Alpaca's
@@ -3268,13 +3278,17 @@ class DB:
                     INSERT INTO sector_screening
                         (run_id, sector, etf, etf_5yr_return, ticker, company,
                          etf_weight_pct, news_signal, sentiment_signal,
-                         congressional_flag, status, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                         congressional_flag, momentum_score, status, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     run_id, sector, etf, etf_5yr_return,
                     cd['ticker'], cd.get('company', ''),
                     cd.get('etf_weight_pct', 0.0),
                     'pending', 'pending', 'none',
+                    # momentum_score persisted 2026-04-21 — it's the
+                    # per-ticker 0-1 score from calc_momentum_score.
+                    # Primary filter column for candidate_generator.
+                    cd.get('momentum_score'),
                     'considering', now,
                 ))
             # Issue screening requests for Scout and Pulse
