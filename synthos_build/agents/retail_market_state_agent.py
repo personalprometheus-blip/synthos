@@ -512,6 +512,11 @@ def persist_state(db, state, sentiment, news, macro):
     # Top-level settings for fast reads by downstream agents
     db.set_setting('_MARKET_STATE', state.label)
     db.set_setting('_MARKET_STATE_SCORE', str(state.composite))
+    # Explicit freshness timestamp — validator_stack_agent.py reads this
+    # at ~line 459 to decide if market state is stale. Without it, every
+    # validator run flagged DEGRADED_STALE_MARKET_STATE. Pairs with
+    # `_MARKET_STATE` and `_MARKET_STATE_SCORE` above. Added 2026-04-21.
+    db.set_setting('_MARKET_STATE_UPDATED', now_str)
 
     # Stamp all QUEUED signals with the current aggregate market state.
     # Required stamp for QUEUED → VALIDATED promotion.
