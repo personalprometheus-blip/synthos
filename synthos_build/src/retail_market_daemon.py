@@ -1035,14 +1035,21 @@ def run_market_loop():
     log.info("=" * 60)
 
     cycle = 0
-    last_enrichment = time.monotonic()
-    last_recon = time.monotonic()
-    # 2026-04-21: price poller moved to its own 24/7 systemd timer
+    enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
+    recon_interval = RECON_INTERVAL_MIN * 60
+    # 2026-04-21: on entry, pretend the last enrichment was a full
+    # interval ago so the first loop iteration fires immediately. This
+    # matters for mid-day restarts: on a fresh startup at 11 AM we
+    # shouldn't wait 30 min for the first news+sentiment+window pass.
+    # If premarket_prep already ran (09:15-09:30 path), the cycle just
+    # burns ~2 minutes of redundant pipeline work then settles into the
+    # 30-min cadence — small cost, big benefit for restart scenarios.
+    last_enrichment = time.monotonic() - enrichment_interval
+    last_recon = time.monotonic() - recon_interval
+    # Price poller moved to its own 24/7 systemd timer
     # (synthos-price-poller.timer, every 60s). Removed from this loop so
     # live_prices keeps refreshing even when market_daemon isn't up
     # (pre-pre-market, post-close, weekend).
-    enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
-    recon_interval = RECON_INTERVAL_MIN * 60
 
     # NOTE: trader dispatch moved to retail_trade_daemon.py (Phase 1 of
     # TRADER_RESTRUCTURE_PLAN). This daemon no longer triggers the
