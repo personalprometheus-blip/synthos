@@ -1033,6 +1033,43 @@ class DB:
             # because CAST on an already-REAL value is a no-op.
             "UPDATE signals   SET entry_signal_score = CAST(entry_signal_score AS REAL) WHERE entry_signal_score IS NOT NULL AND typeof(entry_signal_score) = 'text'",
             "UPDATE positions SET entry_signal_score = CAST(entry_signal_score AS REAL) WHERE entry_signal_score IS NOT NULL AND typeof(entry_signal_score) = 'text'",
+
+            # 2026-04-21 — news-attribution patch.
+            # `name` column on tradable_assets: captures the company name
+            # from Alpaca's /v2/assets endpoint so the news agent can
+            # validate that ticker tags in Benzinga articles actually
+            # match the headline. Populated by retail_tradable_cache.py.
+            "ALTER TABLE tradable_assets ADD COLUMN name TEXT",
+
+            # `signal_attribution_flags` table — audit log of suspicious
+            # ticker assignments from Alpaca's news feed. Written by the
+            # news agent during _alpaca_article_to_item(). Reasons:
+            #   'untradable'    — all tagged symbols non-tradable / crypto (Fix A, enforced)
+            #   'remap_differs' — re-ranker would pick a different ticker (Fix C, shadow)
+            #   'conflict'      — 2+ tagged symbols tie on headline score
+            #   'no_match'      — zero tagged symbols match the headline
+            # 90-day retention (cleanup migration below).
+            """CREATE TABLE IF NOT EXISTS signal_attribution_flags (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at      TEXT NOT NULL,
+                headline        TEXT NOT NULL,
+                article_url     TEXT,
+                alpaca_symbols  TEXT NOT NULL,
+                chosen_ticker   TEXT,
+                would_choose    TEXT,
+                reason          TEXT NOT NULL,
+                tie_candidates  TEXT,
+                best_score      INTEGER,
+                resolved        INTEGER NOT NULL DEFAULT 0,
+                resolution_note TEXT
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_attrib_flags_created ON signal_attribution_flags(created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_attrib_flags_reason  ON signal_attribution_flags(reason, resolved)",
+
+            # Retention sweep — keep the flag table bounded. Runs every
+            # time a DB is opened. At the expected ~30-40 flags/day the
+            # table stays under ~4k rows at steady state.
+            "DELETE FROM signal_attribution_flags WHERE created_at < datetime('now','-90 days')",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -3503,6 +3540,79 @@ class DB:
             sql += " WHERE resolved = 0"
         with self.conn() as c:
             return c.execute(sql).fetchone()[0]
+
+    # ── ATTRIBUTION FLAGS (news-agent quality audit, 2026-04-21) ──────────
+    # News agent writes one row each time ticker attribution for an Alpaca
+    # article looks suspicious. Reasons:
+    #   'untradable'    — all tagged symbols non-tradable / crypto (Fix A — ENFORCED, signal dropped)
+    #   'remap_differs' — re-ranker would pick a different ticker than symbols[0] (Fix C — SHADOW)
+    #   'conflict'      — 2+ tagged symbols tie on headline score
+    #   'no_match'      — zero tagged symbols match the headline
+    # 90-day retention via migration. Close-session digest summarises each
+    # day's counts into the `notifications` table for portal review.
+
+    def add_attribution_flag(self, headline, alpaca_symbols, reason,
+                             chosen_ticker=None, would_choose=None,
+                             tie_candidates=None, best_score=None,
+                             article_url=None):
+        """Insert an attribution-flag row. Returns the new row id.
+
+        alpaca_symbols: list of ticker symbols as Alpaca tagged the article.
+        tie_candidates: list of (symbol, score) tuples for 'conflict' rows.
+        Both are JSON-encoded at write time; callers pass Python lists.
+        """
+        import json as _json
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO signal_attribution_flags
+                    (created_at, headline, article_url, alpaca_symbols,
+                     chosen_ticker, would_choose, reason, tie_candidates,
+                     best_score)
+                VALUES (?,?,?,?,?,?,?,?,?)
+            """, (self.now(), headline[:500] if headline else '',
+                  article_url, _json.dumps(list(alpaca_symbols or [])),
+                  chosen_ticker, would_choose, reason,
+                  _json.dumps(tie_candidates) if tie_candidates else None,
+                  best_score))
+            return c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def get_attribution_flag_counts(self, since_hours=24):
+        """Return dict of {reason: count} for flags created in the last
+        `since_hours`. Used by close-session digest and portal."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT reason, COUNT(*) AS cnt FROM signal_attribution_flags "
+                "WHERE created_at >= datetime('now', ?) "
+                "GROUP BY reason",
+                (f'-{int(since_hours)} hours',)
+            ).fetchall()
+        return {r['reason']: r['cnt'] for r in rows}
+
+    def get_attribution_flags(self, reason=None, limit=50, unresolved_only=True):
+        """Fetch recent attribution flags for review. Newest first."""
+        import json as _json
+        sql = "SELECT * FROM signal_attribution_flags WHERE 1=1"
+        params = []
+        if unresolved_only:
+            sql += " AND resolved = 0"
+        if reason:
+            sql += " AND reason = ?"
+            params.append(reason)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self.conn() as c:
+            rows = c.execute(sql, params).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            for k in ('alpaca_symbols', 'tie_candidates'):
+                if d.get(k):
+                    try:
+                        d[k] = _json.loads(d[k])
+                    except Exception:
+                        pass
+            result.append(d)
+        return result
 
     # ── TICKER → SECTOR CACHE ──────────────────────────────────────────────
 

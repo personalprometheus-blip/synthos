@@ -36,7 +36,14 @@ _OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883
 
 
 def _ensure_table(db):
-    """Create tradable_assets table if absent. Idempotent."""
+    """Create tradable_assets table if absent. Idempotent.
+
+    2026-04-21: `name` column added for the news-attribution patch so
+    retail_news_agent can validate that Alpaca's tagged ticker actually
+    matches the article headline (via company-name token matching).
+    ALTER is a no-op on fresh DBs because `name` is listed in CREATE
+    below; kept in MIGRATIONS for existing Pi installs to pick it up.
+    """
     with db.conn() as c:
         c.execute("""
             CREATE TABLE IF NOT EXISTS tradable_assets (
@@ -44,6 +51,7 @@ def _ensure_table(db):
                 exchange     TEXT,
                 asset_class  TEXT,
                 tradable     INTEGER NOT NULL DEFAULT 1,
+                name         TEXT,
                 fetched_at   TEXT NOT NULL,
                 expires_at   TEXT NOT NULL
             )
@@ -131,17 +139,45 @@ def refresh(db) -> dict:
                 tradable_count += 1
             c.execute(
                 "INSERT INTO tradable_assets "
-                "(ticker, exchange, asset_class, tradable, fetched_at, expires_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
+                "(ticker, exchange, asset_class, tradable, name, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(ticker) DO UPDATE SET "
                 "exchange=excluded.exchange, asset_class=excluded.asset_class, "
-                "tradable=excluded.tradable, fetched_at=excluded.fetched_at, "
-                "expires_at=excluded.expires_at",
+                "tradable=excluded.tradable, name=excluded.name, "
+                "fetched_at=excluded.fetched_at, expires_at=excluded.expires_at",
                 (sym, a.get('exchange'), a.get('class'),
-                 is_tradable, now_iso, expires_at)
+                 is_tradable, a.get('name'), now_iso, expires_at)
             )
     log.info(f"[TRADABLE REFRESH] {len(assets)} assets fetched, {tradable_count} tradable, cache upserted")
     return {'fetched': len(assets), 'tradable': tradable_count, 'source': 'alpaca'}
+
+
+def get_name(db, ticker: str) -> Optional[str]:
+    """Return the cached company name for `ticker` from tradable_assets,
+    or None if the cache has no row for it (or name is unset).
+
+    Called by retail_news_agent during ingestion to populate signals.company
+    and to validate headline↔ticker attribution. Unknown tickers return
+    None — callers fall back to Alpaca alias dict or accept no-name.
+
+    Does NOT check freshness — names are stable enough that a stale row
+    is fine. The tradable flag is the freshness-sensitive field.
+    """
+    if not ticker:
+        return None
+    try:
+        with db.conn() as c:
+            row = c.execute(
+                "SELECT name FROM tradable_assets WHERE ticker = ?",
+                (ticker.strip().upper(),)
+            ).fetchone()
+    except Exception as e:
+        log.debug(f"get_name read failed for {ticker}: {e}")
+        return None
+    if not row:
+        return None
+    name = row['name']
+    return name if name else None
 
 
 def is_tradable(db, ticker: str) -> Optional[bool]:

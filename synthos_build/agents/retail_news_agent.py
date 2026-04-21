@@ -784,16 +784,157 @@ def _alpaca_news_tier(source_name: str) -> int:
     return 3   # default: press-release tier
 
 
-def _alpaca_article_to_item(article: dict) -> dict:
+# ── NEWS ATTRIBUTION QUALITY — 2026-04-21 ─────────────────────────────────
+#
+# Measured against last 14 days of Benzinga signals: 40.9% of tagged
+# tickers don't appear in the headline by ticker symbol OR company name.
+# ~2/day were reaching ACTED_ON with the wrong ticker attached (e.g.
+# AAPL tagged on a Tesla deliveries headline, BAC tagged on Anthropic).
+#
+# This block adds three fixes at the Alpaca ingestion boundary:
+#   Fix A (ENFORCED) — drop articles where all symbols are crypto pairs
+#                      or not in tradable_assets. These can't produce
+#                      tradable signals anyway; surface them early.
+#   Fix C (SHADOW)   — for multi-symbol articles, re-rank the symbols
+#                      by headline match and log what we'd pick; live
+#                      behaviour still uses symbols[0] until enforced.
+#   Company populate — fills signals.company (currently empty) from the
+#                      Alpaca /v2/assets name cache for every signal.
+#
+# Shadow mode is controlled by the ENFORCE flags below. Decision log
+# goes to `signal_attribution_flags` + stdout `[TICKER_*]` lines. The
+# close-session digest summarises daily counts into the notifications
+# table for portal review.
+
+TICKER_REMAP_ENFORCE   = False   # shadow: still pick symbols[0]; flag remap diffs
+TICKER_REJECT_ENFORCE  = False   # shadow: keep no-match signals; flag them
+TICKER_UNTRADABLE_DROP = True    # enforced day 1 — Fix A
+
+# Symbol suffix set for crypto pairs Alpaca tags on market-commentary
+# articles (we can't trade these on our paper equity account).
+_CRYPTO_PAIR_SUFFIXES = ('USD', 'USDT', 'USDC')
+
+
+def _is_crypto_symbol(sym: str) -> bool:
+    """Return True for Alpaca crypto-pair symbols (e.g. BTCUSD, ETHUSDT)."""
+    if not sym or len(sym) < 6:
+        return False
+    s = sym.upper()
+    return any(s.endswith(suf) for suf in _CRYPTO_PAIR_SUFFIXES) and s[0].isalpha()
+
+
+def _score_symbol_against_headline(sym: str, name: str | None,
+                                   aliases: list[str], headline: str) -> int:
+    """Score a single symbol's match strength against a headline.
+
+    Returns:
+      3 — ticker literal appears in headline as a word boundary
+      2 — any token from the Alpaca asset name (distinctive, ≥4 chars,
+          not blacklisted) appears in headline
+      2 — any alias from TICKER_ALIASES appears in headline
+      0 — no match
+
+    Ticker symbol takes precedence; scoring does not stack name+alias
+    (first positive match wins). This keeps scores small and comparable.
+    """
+    import re as _re  # local import to avoid module-level reliance
+    from retail_ticker_aliases import tokens_for_name  # noqa: E402
+
+    if not sym or not headline:
+        return 0
+    tk = sym.upper()
+    h  = headline
+    h_lower = h.lower()
+
+    # +3 — ticker literal as a whole word
+    if _re.search(r'\b' + _re.escape(tk) + r'\b', h):
+        return 3
+    # +2 — company-name token match (via Alpaca /v2/assets name)
+    for t in tokens_for_name(name or ''):
+        if t in h_lower:
+            return 2
+    # +2 — alias match
+    for alias in aliases:
+        if alias in h_lower:
+            return 2
+    return 0
+
+
+def _pick_ticker_from_symbols(symbols: list, headline: str, db) -> tuple:
+    """Re-rank Alpaca's symbols[] array by headline match strength.
+
+    Returns (best_ticker, audit) where:
+      best_ticker — the highest-scoring symbol (ties broken by original
+                    Benzinga order). None only if `symbols` is empty.
+      audit — dict with keys:
+        'scores'    — {sym: score, ...}
+        'best'      — (sym, score) chosen
+        'reason'    — None | 'remap_differs' | 'conflict' | 'no_match'
+        'tie_candidates' — list of (sym, score) when reason='conflict'
+
+    This function is PURE — no DB writes. Caller is responsible for
+    writing flag rows and emitting logs based on the audit dict.
+    """
+    from retail_ticker_aliases import aliases_for  # noqa: E402
+    from retail_tradable_cache import get_name  # noqa: E402
+
+    if not symbols:
+        return None, {'scores': {}, 'best': (None, 0), 'reason': None,
+                      'tie_candidates': []}
+
+    scores = {}
+    for sym in symbols:
+        u = sym.upper()
+        name = get_name(db, u) if db else None
+        aliases = aliases_for(u)
+        scores[u] = _score_symbol_against_headline(u, name, aliases, headline)
+
+    # Pick winner: highest score, tie-break by original order (first in symbols[])
+    best_sym   = symbols[0].upper()
+    best_score = scores.get(best_sym, 0)
+    for sym in symbols[1:]:
+        u = sym.upper()
+        if scores[u] > best_score:
+            best_sym, best_score = u, scores[u]
+
+    # Tie detection: multiple symbols with the same max score (only interesting
+    # if score > 0 — ties at 0 are just "no match" across the board).
+    tied = [s.upper() for s in symbols if scores[s.upper()] == best_score]
+    reason = None
+    tie_candidates = []
+    if best_score == 0:
+        reason = 'no_match'
+    elif len(tied) >= 2:
+        reason = 'conflict'
+        tie_candidates = [(t, scores[t]) for t in tied]
+    elif best_sym != symbols[0].upper():
+        reason = 'remap_differs'
+
+    return best_sym, {
+        'scores': scores, 'best': (best_sym, best_score),
+        'reason': reason, 'tie_candidates': tie_candidates,
+    }
+
+
+def _alpaca_article_to_item(article: dict, db=None) -> dict | None:
     """
     Normalise an Alpaca news article dict to the pipeline's standard item format.
 
     Alpaca article fields:
       id, headline, summary, author, created_at, updated_at,
       content, url, symbols (list), source (e.g. 'Benzinga')
+
+    Returns None when Fix A untradable-prefilter rejects the article
+    (all tagged symbols are crypto or not in tradable_assets).
+    Callers MUST handle None in their iteration loops.
+
+    2026-04-21 attribution patch:
+      - Fix A: prefilter crypto/untradable (enforced, signal dropped)
+      - Fix C: multi-symbol re-rank (shadow mode; still picks symbols[0])
+      - company populate: signals.company from tradable_assets.name
     """
     symbols   = article.get("symbols") or []
-    ticker    = symbols[0].upper() if symbols else None
+    headline  = (article.get("headline") or "").strip()
     pub_date  = (article.get("created_at") or "")[:10]   # "YYYY-MM-DD"
     source    = article.get("source", "Alpaca News")
     tier      = _alpaca_news_tier(source)
@@ -802,16 +943,122 @@ def _alpaca_article_to_item(article: dict) -> dict:
         (img["url"] for img in images if img.get("size") == "small"),
         images[0].get("url", "") if images else ""
     )
+    article_url = article.get("url", _ALPACA_NEWS_URL)
+
+    # ── Fix A — untradable prefilter (ENFORCED) ────────────────────────
+    # Drop articles where EVERY tagged symbol is crypto or un-tradable.
+    # Articles with at least one tradable symbol pass through; the
+    # re-ranker below will pick the most relevant one.
+    if TICKER_UNTRADABLE_DROP and symbols and db is not None:
+        from retail_tradable_cache import is_tradable  # noqa: E402
+        tradable_syms = []
+        for sym in symbols:
+            u = sym.upper()
+            if _is_crypto_symbol(u):
+                continue
+            t = is_tradable(db, u)
+            # Pass through unknowns (None) to avoid over-aggressive filtering
+            # before the first tradable_cache refresh. Explicit False = drop.
+            if t is not False:
+                tradable_syms.append(u)
+        if not tradable_syms:
+            try:
+                db.add_attribution_flag(
+                    headline=headline, alpaca_symbols=symbols,
+                    reason='untradable', chosen_ticker=None,
+                    article_url=article_url,
+                )
+            except Exception as _e:
+                log.debug(f"attribution flag write failed: {_e}")
+            log.info(f"[UNTRADABLE_SKIP] symbols={symbols} headline={headline[:80]!r}")
+            return None
+
+    # ── Fix C — multi-symbol re-ranking (SHADOW) ───────────────────────
+    # Compute the would-pick ticker; log + flag when it differs from
+    # symbols[0] or when the article has a conflict/no-match. In shadow
+    # mode (default) we still ship symbols[0]. Flip TICKER_REMAP_ENFORCE
+    # after a ~5-day log review.
+    live_ticker = symbols[0].upper() if symbols else None
+    picked_ticker = live_ticker
+    audit = None
+    if symbols and db is not None:
+        try:
+            picked_ticker, audit = _pick_ticker_from_symbols(symbols, headline, db)
+        except Exception as _e:
+            log.debug(f"pick_ticker_from_symbols failed: {_e}")
+            picked_ticker, audit = live_ticker, None
+
+    if audit is not None and audit['reason']:
+        reason = audit['reason']
+        try:
+            if reason == 'remap_differs':
+                log.info(
+                    f"[TICKER_REMAP] live={live_ticker} would={picked_ticker} "
+                    f"scores={audit['scores']} headline={headline[:80]!r}"
+                )
+                db.add_attribution_flag(
+                    headline=headline, alpaca_symbols=symbols,
+                    reason='remap_differs', chosen_ticker=live_ticker,
+                    would_choose=picked_ticker,
+                    best_score=audit['best'][1], article_url=article_url,
+                )
+            elif reason == 'conflict':
+                log.info(
+                    f"[TICKER_FLAG:CONFLICT] chosen={live_ticker} "
+                    f"ties={audit['tie_candidates']} headline={headline[:80]!r}"
+                )
+                db.add_attribution_flag(
+                    headline=headline, alpaca_symbols=symbols,
+                    reason='conflict', chosen_ticker=live_ticker,
+                    would_choose=picked_ticker,
+                    tie_candidates=audit['tie_candidates'],
+                    best_score=audit['best'][1], article_url=article_url,
+                )
+            elif reason == 'no_match':
+                log.info(
+                    f"[TICKER_FLAG:NOMATCH] chosen={live_ticker} "
+                    f"symbols={symbols} headline={headline[:80]!r}"
+                )
+                db.add_attribution_flag(
+                    headline=headline, alpaca_symbols=symbols,
+                    reason='no_match', chosen_ticker=live_ticker,
+                    would_choose=None, best_score=0,
+                    article_url=article_url,
+                )
+        except Exception as _e:
+            log.debug(f"attribution flag write failed ({reason}): {_e}")
+
+    # Live ticker choice: enforce mode uses re-ranker; shadow uses symbols[0]
+    if TICKER_REMAP_ENFORCE and picked_ticker is not None:
+        ticker = picked_ticker
+    elif audit and audit['reason'] == 'no_match' and TICKER_REJECT_ENFORCE:
+        ticker = None
+    else:
+        ticker = live_ticker
+
+    # ── Company populate ───────────────────────────────────────────────
+    # Fill signals.company from Alpaca /v2/assets cache. Previously left
+    # empty at ingestion; downstream tooling (audits, portal) couldn't
+    # validate tickers against company names.
+    company = None
+    if ticker and db is not None:
+        try:
+            from retail_tradable_cache import get_name  # noqa: E402
+            company = get_name(db, ticker)
+        except Exception as _e:
+            log.debug(f"get_name failed for {ticker}: {_e}")
+
     return {
-        "headline":    (article.get("headline") or "").strip(),
+        "headline":    headline,
         "subhead":     (article.get("summary")  or "")[:120].strip(),
         "source":      f"Alpaca News ({source})",
         "source_tier": tier,
-        "source_url":  article.get("url", _ALPACA_NEWS_URL),
+        "source_url":  article_url,
         "politician":  "",
         "disc_date":   pub_date,
         "tx_date":     pub_date,
         "ticker":      ticker,
+        "company":     company,
         "all_symbols": symbols,
         "image_url":   image_url,
         # Full ISO-8601 created_at kept so the incremental-fetch cursor
@@ -898,7 +1145,13 @@ def fetch_alpaca_news_historical(
         pages_fetched += 1
 
         for article in articles:
-            item = _alpaca_article_to_item(article)
+            # Pass the shared-intel DB so the attribution patch can
+            # look up ticker names and write flags. None return means
+            # Fix A dropped the article (all symbols un-tradable/crypto);
+            # skip without appending.
+            item = _alpaca_article_to_item(article, db=_db())
+            if item is None:
+                continue
             if item["headline"]:
                 results.append(item)
 

@@ -1357,6 +1357,74 @@ def run_close_session():
     except Exception as _e:
         log.warning(f"[DAILY MASTER] generation failed: {_e}")
 
+    # 2026-04-21 — news-attribution shadow digest.
+    # Posts today's [TICKER_*] flag counts to the portal notifications
+    # table so the user can see the feature doing work without having
+    # to grep logs. Internal-only (category='system'); skipped silently
+    # if the table isn't there (older DB rev).
+    try:
+        _post_attribution_digest()
+    except Exception as _e:
+        log.debug(f"[ATTRIB DIGEST] skipped: {_e}")
+
+
+def _post_attribution_digest():
+    """Write a portal notification summarising today's news-attribution
+    shadow flags. Reads signal_attribution_flags over the last 24h
+    across all customer DBs; writes to each customer's notifications
+    table (single row per day, deduped via dedup_key).
+
+    The daemon only needs the master/owner DB counts — that's where the
+    shared news agent writes. Still writes one notification per customer
+    so per-customer portals show it. Future: surface at a shared route.
+    """
+    try:
+        import auth  # noqa: F401
+        from retail_database import get_customer_db
+    except Exception:
+        return
+    customers = get_active_customers()
+    if not customers:
+        return
+    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+    if not owner_id:
+        return
+    owner_db = get_customer_db(owner_id)
+    counts = owner_db.get_attribution_flag_counts(since_hours=24)
+    if not counts:
+        # Nothing flagged today — write a tiny heartbeat so the user can
+        # see the feature is live and just quiet.
+        title = 'Attribution shadow: 0 flags (24h)'
+        body  = ('No attribution issues detected in Alpaca news ingestion '
+                 'over the last 24h. Shadow mode active (Fix A enforced, '
+                 'Fix C shadow).')
+    else:
+        parts = []
+        if counts.get('untradable'):
+            parts.append(f"{counts['untradable']} untradable (dropped)")
+        if counts.get('remap_differs'):
+            parts.append(f"{counts['remap_differs']} would-remap (shadow)")
+        if counts.get('conflict'):
+            parts.append(f"{counts['conflict']} conflicts")
+        if counts.get('no_match'):
+            parts.append(f"{counts['no_match']} no-match")
+        title = f"Attribution shadow: {sum(counts.values())} flags (24h)"
+        body  = ('News-agent attribution audit — '
+                 + ', '.join(parts) + '. '
+                 'Shadow mode (live ticker = Alpaca symbols[0]). '
+                 'Flip TICKER_REMAP_ENFORCE=True in retail_news_agent.py '
+                 'after 5 business days if the log reads clean.')
+    dedup_key = f"attribution_digest:{datetime.now(ET).strftime('%Y-%m-%d')}"
+    meta = {'counts': counts, 'date': datetime.now(ET).strftime('%Y-%m-%d')}
+    for cid in customers:
+        try:
+            db = get_customer_db(cid)
+            db.add_notification(category='system', title=title,
+                                body=body, meta=meta, dedup_key=dedup_key)
+        except Exception as _e:
+            log.debug(f"[ATTRIB DIGEST] notify failed for {cid}: {_e}")
+    log.info(f"[ATTRIB DIGEST] posted: {title}")
+
 
 def run_exit_backfill():
     """Backfill post-exit prices for the trailing stop optimizer."""
