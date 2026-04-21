@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-20T20:00:00-04:00",
-    "version": "3.6"
+    "last_updated": "2026-04-20T22:15:00-04:00",
+    "version": "3.7"
   },
   "nodes": [
     {
@@ -13,8 +13,8 @@
       "network": "eth0 static",
       "status": "live",
       "agents": [
-        {"name": "synthos_monitor.py", "desc": "Admin portal + dashboard", "how": "systemd", "status": "live"},
-        {"name": "company_server.py", "desc": "Event queue API, /receive_backup", "how": "systemd", "status": "live"},
+        {"name": "synthos_monitor.py", "desc": "Admin portal + dashboard + /receive_backup endpoint (absorbed from company_server 2026-04-20)", "how": "systemd (synthos-login-server.service, port 5050)", "status": "live"},
+        {"name": "company_server.py", "desc": "Legacy event queue API — file retained, service removed 2026-04-20. Role absorbed into synthos_monitor.py. Candidate for deletion once no callers remain.", "how": "not running (dead unit file removed from /etc/systemd/system/)", "status": "archived"},
         {"name": "company_auditor.py", "desc": "Cross-node log scanner (SSH to pi5, pi2w)", "how": "daemon", "status": "live"},
         {"name": "company_archivist.py", "desc": "DB row archival to compressed JSON", "how": "daemon", "status": "live"},
         {"name": "company_scoop.py", "desc": "Email queue drain, Resend dispatch", "how": "daemon", "status": "live"},
@@ -23,7 +23,7 @@
         {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
         {"name": "company_librarian.py", "desc": "Package audit, CVE scan, all nodes", "how": "cron Sun", "status": "cron"},
         {"name": "company_strongbox.py", "desc": "Encrypt + R2 cloud upload (nightly 2am)", "how": "cron 2am", "status": "cron"},
-        {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 5m", "status": "cron"}
+        {"name": "node_heartbeat.py", "desc": "System metrics (CPU / mem / disk / temp) to monitor DB", "how": "cron * * * * * (every minute, runs in venv)", "status": "cron"}
       ],
       "databases": ["company.db", "auditor.db", "login.db", "support.db"],
       "services": ["Cloudflare tunnel", "command.synth-cloud.com"],
@@ -41,8 +41,8 @@
         {"name": "retail_portal.py", "desc": "Customer dashboard + API (gunicorn, port 5001). Phase C D2 refactor extracted 12 helpers from 4 hotspot endpoints (stripe_webhook, _enrich_positions, get_system_status, api_admin_market_activity) dropping line counts 46-87%.", "how": "systemd (synthos-portal.service)", "status": "live"},
         {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "systemd (synthos-watchdog.service)", "status": "live"},
         {"name": "retail_market_daemon.py", "desc": "Enrichment pipeline 9:10-16:00 ET (news/sentiment/macro/validator/screener/price_poller). No longer runs trader — see retail_trade_daemon.", "how": "systemd (synthos-market-daemon.timer, Mon-Fri 09:10 ET)", "status": "live"},
-        {"name": "retail_trade_daemon.py", "desc": "Continuous trader 9:30-16:00 ET, 30s cycle. Same 14-gate logic, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN. Phase C D1 refactor: run() 897→15 lines via 11 named helpers (_run_halt_check, _start_watchdog, _init_clients, _run_gate0_account_health, _run_market_gates, _run_position_management, _run_managed_mode_approvals, _run_signal_evaluation, _run_monthly_tax_sweep, _send_session_summary, _send_daily_report).", "how": "systemd (synthos-trade-daemon.timer, Mon-Fri 09:25 ET — currently disabled, re-enable pending post-Phase-C monitoring)", "status": "paused"},
-        {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator (overnight news)", "how": "cron", "status": "cron"},
+        {"name": "retail_trade_daemon.py", "desc": "Continuous trader 9:30-16:00 ET, 30s cycle, MAX_TRADE_PARALLEL=3 subprocess pool. Same 14-gate logic, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN. Phase C D1 refactor: run() 897→15 lines via 11 named helpers (_run_halt_check, _start_watchdog, _init_clients, _run_gate0_account_health, _run_market_gates, _run_position_management, _run_managed_mode_approvals, _run_signal_evaluation, _run_monthly_tax_sweep, _send_session_summary, _send_daily_report).", "how": "systemd (synthos-trade-daemon.timer, Mon..Fri 09:25 ET — re-enabled 2026-04-20T21:20 EDT after Phase C verification)", "status": "live"},
+        {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator. Dispatches per-customer subprocesses for enrichment when market_daemon isn't covering the slot.", "how": "cron — overnight :05 hourly weekdays (off-hours only), weekend :05 hourly Sat+Sun, Sunday 20:00 prep session. Uses SessionLock (fcntl flock) to prevent overlap. is_market_hours() now delegates to retail_shared (D6/R10-7).", "status": "cron"},
         {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
         {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution + screener integration", "how": "daemon", "status": "live"},
         {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "daemon", "status": "live"},
@@ -62,9 +62,9 @@
         {"name": "retail_sector_backfill_agent.py", "desc": "One-off/periodic backfill for missing sector_screening rows.", "how": "manual / on-demand", "status": "tool"},
         {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "daemon", "status": "live"},
         {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
-        {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b", "how": "per agent", "status": "cron"},
+        {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b monitor (called directly by long-running services, plus hourly cron as a standalone ping)", "how": "cron 21 * * * 1-5 (hourly :21 weekdays) + inline calls from daemons", "status": "cron"},
         {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 1m", "status": "cron"},
-        {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check", "how": "@reboot", "status": "boot"},
+        {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check — trade-daemon / market-daemon services After= this one so they wait for a healthy boot before firing", "how": "systemd (synthos-boot-sequence.service, Type=oneshot)", "status": "boot"},
         {"name": "retail_health_check.py", "desc": "Post-reboot DB + Alpaca verify", "how": "boot only", "status": "boot"},
         {"name": "retail_patch.py", "desc": "Safe file updater, rollback", "how": "manual", "status": "tool"},
         {"name": "retail_backup.py", "desc": "Nightly archive to pi4b staging", "how": "cron 1:30am", "status": "cron"},
