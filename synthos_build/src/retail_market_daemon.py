@@ -635,8 +635,20 @@ def run_fault_detection():
 
 def run_screener():
     """Run sector screener once — sweeps all 11 S&P sectors.
-    Only called from pre-market prep (once per day). Sector momentum is a
-    multi-week signal; no value refreshing intraday."""
+
+    Called twice per trading day (2026-04-21+):
+      1. Pre-market prep (~09:15 ET) — uses yesterday's close bars.
+         Produces candidates for today's trading.
+      2. Close session (~16:00 ET) — captures today's close bar.
+         Feeds tomorrow's pre-market with fresher data + any
+         off-hours overnight_cycle that fires tonight.
+
+    Sector momentum is a multi-week signal — the scoring formula
+    (3m-return + SMA + volume) shifts slowly, so two passes per day is
+    plenty. No value refreshing intraday.
+
+    Fault detection threshold: 30 hours stale — even a skipped close
+    run + skipped next pre-market doesn't trip the alert."""
     log.info("[SCREENER] Starting — sweeping all 11 sectors")
     write_agent_running('retail_sector_screener.py')
     try:
@@ -1315,6 +1327,26 @@ def run_close_session():
     # Post-close: backfill exit performance data, then run optimizer
     run_exit_backfill()
     run_trail_optimizer()
+
+    # 2026-04-21 — Second daily sector screener pass.
+    #
+    # Rationale: calc_momentum_score inputs (3-month return, 20d/50d SMA,
+    # 10d/30d volume ratio) are all slow-moving — a refresh 6 hours after
+    # pre-market would produce near-identical scores. BUT running at market
+    # close captures today's actual close bar, so tomorrow's pre-market
+    # prep (and any off-hours overnight_cycle that fires tonight) starts
+    # from <17h-old data instead of ~24h-old.
+    #
+    # This is a *freshness bonus*, not a dependency: if this run fails
+    # (network, crash, machine down), pre-market's own screener pass at
+    # 09:15 the next morning brings everything back to current. Fault
+    # detection's sector_screener heartbeat threshold is 30 hours, so
+    # missing a single day doesn't even trip an alert.
+    #
+    # Ordered after exit_backfill+trail_optimizer (those use DB state only,
+    # quick) and before daily_master so the rollup markdown captures
+    # today's fresh sector picture.
+    run_screener()
 
     # Phase 5.c — write the day's audit rollup. Idempotent; overwrites
     # if called again later the same day.
