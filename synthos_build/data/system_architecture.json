@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-20T22:15:00-04:00",
-    "version": "3.7"
+    "last_updated": "2026-04-21T12:00:00-04:00",
+    "version": "3.8"
   },
   "nodes": [
     {
@@ -40,27 +40,27 @@
       "agents": [
         {"name": "retail_portal.py", "desc": "Customer dashboard + API (gunicorn, port 5001). Phase C D2 refactor extracted 12 helpers from 4 hotspot endpoints (stripe_webhook, _enrich_positions, get_system_status, api_admin_market_activity) dropping line counts 46-87%.", "how": "systemd (synthos-portal.service)", "status": "live"},
         {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "systemd (synthos-watchdog.service)", "status": "live"},
-        {"name": "retail_market_daemon.py", "desc": "Enrichment pipeline 9:10-16:00 ET (news/sentiment/macro/validator/screener/price_poller). No longer runs trader — see retail_trade_daemon.", "how": "systemd (synthos-market-daemon.timer, Mon-Fri 09:10 ET)", "status": "live"},
+        {"name": "retail_market_daemon.py", "desc": "Enrichment pipeline 9:15-16:00 ET. Pre-market prep at 09:15 (full once-daily pipeline: tradable_refresh, screener, news, sentiment, macro, state, bias, fault, validator, promoter, candidate_gen, earnings_refresh, window_calc) + selfcheck. Intraday every 30m (skips once-daily agents). Close session at 16:00 runs trader close + exit_backfill + trail_optimizer + sector_screener_pass2 + daily_master. 2026-04-21 fixes: timer 09:10→09:15 (dispatcher alignment), full overnight_cycle, mid-day restart fires enrichment immediately, run_premarket_selfcheck advisory gate. No longer runs trader or price_poller inline — both are standalone systemd units.", "how": "systemd (synthos-market-daemon.timer, Mon-Fri 09:15 ET)", "status": "live"},
         {"name": "retail_trade_daemon.py", "desc": "Continuous trader 9:30-16:00 ET, 30s cycle, MAX_TRADE_PARALLEL=3 subprocess pool. Same 14-gate logic, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN. Phase C D1 refactor: run() 897→15 lines via 11 named helpers (_run_halt_check, _start_watchdog, _init_clients, _run_gate0_account_health, _run_market_gates, _run_position_management, _run_managed_mode_approvals, _run_signal_evaluation, _run_monthly_tax_sweep, _send_session_summary, _send_daily_report).", "how": "systemd (synthos-trade-daemon.timer, Mon..Fri 09:25 ET — re-enabled 2026-04-20T21:20 EDT after Phase C verification)", "status": "live"},
         {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator. Dispatches per-customer subprocesses for enrichment when market_daemon isn't covering the slot.", "how": "cron — overnight :05 hourly weekdays (off-hours only), weekend :05 hourly Sat+Sun, Sunday 20:00 prep session. Uses SessionLock (fcntl flock) to prevent overlap. is_market_hours() now delegates to retail_shared (D6/R10-7).", "status": "cron"},
         {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
         {"name": "retail_trade_logic_agent.py", "desc": "14-gate trade execution + screener integration", "how": "daemon", "status": "live"},
         {"name": "retail_news_agent.py", "desc": "22-gate news classification", "how": "daemon", "status": "live"},
         {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection", "how": "daemon", "status": "live"},
-        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring", "how": "daemon", "status": "live"},
-        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads top-N per sector from sector_screening. Trader consumes via windows (Phase 3c).", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring — 11 S&P SPDR sector ETFs × top-10 holdings each, per-ticker calc_momentum_score (3m return 50% + 20d/50d SMA 30% + 10d/30d volume 20%). Runs 2x/day (pre-market 09:15 + close 16:00) — momentum is a multi-week signal so twice daily captures yesterday's close + today's close, plenty for the slow-moving inputs. Output populates sector_screening table including momentum_score column (2026-04-21+). 30-hour fault-detection stale threshold tolerates a missed day.", "how": "subprocess (called by market_daemon 2x/day)", "status": "live"},
+        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads sector_screening rows where momentum_score >= MIN_MOMENTUM_SCORE (0.45 as of 2026-04-21, was combined_score >= 0.55 but that formula omitted sector momentum entirely — the 'sector-driven' filter was actually filtering on news+sentiment quality). Top-N per sector (3), global cap 30. combined_score remains informational for portal display. Trader consumes via trade_windows.", "how": "subprocess (called by market_daemon enrichment ticks)", "status": "live"},
         {"name": "retail_window_calculator.py", "desc": "Phase 3b/4 — precomputes macro+minor entry/exit windows per signal × customer into trade_windows. Phase 4.a adds ATR column; 4.b scales bands by ATR. Anchor still dynamic — pin revisit deferred post-Phase-5.", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_event_calendar.py", "desc": "Phase 5.a — Gate 4 EVENT_RISK calendar. Nasdaq bulk earnings fetch + macro_events table. Called from market_daemon's enrichment tick.", "how": "module (called by market_daemon)", "status": "live"},
         {"name": "retail_tradable_cache.py", "desc": "Audit Round 5 — Alpaca /v2/assets cache (~11k us_equity symbols). Candidate Generator uses is_tradable() to filter out crypto/delisted/OTC before emission. Refreshed once per trading day in premarket.", "how": "module (refreshed by market_daemon)", "status": "live"},
         {"name": "retail_daily_master.py", "desc": "Phase 5.c — end-of-day audit rollup. Renders logs/daily_master/YYYY-MM-DD.md with opens/closes/candidates/cooling-off/earnings tables. Fires at market close from run_close_session.", "how": "module (called at 4PM ET by market_daemon)", "status": "live"},
         {"name": "retail_macro_regime_agent.py", "desc": "Macro regime classifier (BEAR/BULL/NORMAL trend × volatility). Runs in enrichment pipeline.", "how": "daemon subprocess", "status": "live"},
-        {"name": "retail_market_state_agent.py", "desc": "Market state detector (open/close/holiday) for session gating.", "how": "daemon subprocess", "status": "live"},
+        {"name": "retail_market_state_agent.py", "desc": "Market state detector (open/close/holiday) for session gating. Writes _MARKET_STATE, _MARKET_STATE_SCORE, and _MARKET_STATE_UPDATED (the last one added 2026-04-21 — the validator's staleness check read the key but market_state_agent never wrote it, so every validator run flagged DEGRADED_STALE_MARKET_STATE).", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_bias_detection_agent.py", "desc": "Behavioral-bias detector (sector concentration, loss aversion, disposition effect).", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_fault_detection_agent.py", "desc": "Data freshness + system resources + account health checks.", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_validator_stack_agent.py", "desc": "Final enrichment stamp — promotes QUEUED → VALIDATED when all prior stamps present.", "how": "daemon subprocess", "status": "live"},
         {"name": "retail_shared.py", "desc": "Phase C D6 — canonical kill_switch_active() / get_active_customers() / is_market_hours() shared by market_daemon, scheduler, portal, trader, dry_run, window_calculator. Replaces 5 near-duplicate local copies. now_et() and fetch_with_retry() intentionally left local (diverged return types / stateful circuit-breaker globals).", "how": "module (import)", "status": "live"},
         {"name": "retail_sector_backfill_agent.py", "desc": "One-off/periodic backfill for missing sector_screening rows.", "how": "manual / on-demand", "status": "tool"},
-        {"name": "retail_price_poller.py", "desc": "Shared live_prices for all customers", "how": "daemon", "status": "live"},
+        {"name": "retail_price_poller.py", "desc": "Live-price refresher for the live_prices table — feeds portal + trader's in-band window check. 2026-04-21: moved from inline market_daemon loop call to standalone systemd timer firing every 60s, 24/7. Decoupling ensures prices stay fresh even when market_daemon isn't running (pre-pre-market, post-close, weekends).", "how": "systemd (synthos-price-poller.timer, OnUnitActiveSec=60s, 24/7)", "status": "live"},
         {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
         {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b monitor (called directly by long-running services, plus hourly cron as a standalone ping)", "how": "cron 21 * * * 1-5 (hourly :21 weekdays) + inline calls from daemons", "status": "cron"},
         {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 1m", "status": "cron"},
@@ -111,10 +111,102 @@
     }
   ],
   "data_flow": {
-    "trading_pipeline": "Market Daemon (9:10-16:00) → Screener → News → Sentiment → Trade Logic (per customer) → 14 gates + screener boost → BUY / SKIP / WATCH → Alpaca API",
-    "shared_data": "Price Poller → live_prices table (every cycle). News/Sentiment → shared signals → all customers read same intel. Screener scores feed into Gate 5.",
-    "monitoring": "Auditor → SSH scans pi4b, pi5, pi2w → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts.",
-    "backup_chain": "pi5 retail_backup.py (1:30am) → tar.gz → POST to pi4b → Strongbox (2am) → AES-256 encrypt → Cloudflare R2 (30-day retention)"
+    "trading_pipeline": "Market Daemon (9:15-16:00) orchestrates enrichment → candidate_generator emits sector-driven candidates by momentum_score → window_calculator writes trade_windows → trade_daemon (continuous 9:30-16:00, 30s cycles) reads windows + live_prices → 14-gate eval per signal → BUY / SKIP / WATCH / EXIT → Alpaca API",
+    "shared_data": "price_poller (standalone 24/7 timer, every 60s) → live_prices. News/Sentiment → shared signals pool → all customers see same intel. Sector screener → momentum_score on sector_screening table → candidate_generator filter.",
+    "monitoring": "Auditor → SSH scans pi4b + pi5 → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts. pi2w nodes currently disabled (power-source relocation pending).",
+    "backup_chain": "pi5 retail_backup.py (1:30am) → tar.gz → POST to pi4b /receive_backup → Strongbox (2am) → AES-256 encrypt → Cloudflare R2 (30-day retention)",
+    "pipeline_variants": {
+      "premarket_prep_09_15": {
+        "fires": "weekday at 09:15 ET via synthos-market-daemon.timer",
+        "notes": "Full-pipeline once-daily — INCLUDES tradable_refresh, screener, earnings_refresh. After completion, daemon enters continuous intraday loop until close.",
+        "steps": [
+          "run_pre_open_reeval (re-evaluate overnight-queued orders)",
+          "run_tradable_refresh (Alpaca /v2/assets universe, ~11k symbols — once-daily)",
+          "run_news (session='market')",
+          "run_screener (sector momentum — once-daily pass #1)",
+          "run_sentiment",
+          "run_macro_regime",
+          "run_market_state",
+          "run_bias_detection",
+          "run_fault_detection",
+          "run_validator_stack",
+          "promote_validated_signals (QUEUED → VALIDATED where all stamps present)",
+          "run_candidate_generator (sector-driven candidates, WATCHING status)",
+          "run_earnings_refresh (Nasdaq earnings calendar — once-daily)",
+          "run_window_calculator (trade_windows per signal × customer)",
+          "run_price_poller (initial priming; standalone timer also fires every 60s)",
+          "run_premarket_selfcheck (advisory — validates pipeline artifacts; logs + flags + continues)"
+        ]
+      },
+      "intraday_enrichment_30min": {
+        "fires": "every 30 min during market_loop, 09:30-16:00 ET",
+        "notes": "Skips once-daily agents (tradable_refresh, screener, earnings_refresh). First cycle fires immediately on daemon startup (mid-day restart scenario).",
+        "steps": [
+          "run_news (session='market')",
+          "run_sentiment",
+          "run_macro_regime",
+          "run_market_state",
+          "run_bias_detection",
+          "run_fault_detection",
+          "run_validator_stack",
+          "promote_validated_signals",
+          "run_candidate_generator",
+          "run_window_calculator"
+        ]
+      },
+      "close_session_16_00": {
+        "fires": "once at 16:00 ET, inside run_market_loop exit",
+        "notes": "Post-market wrap-up. 2026-04-21: added 2nd daily sector screener pass so tomorrow's pre-market starts from fresher close-based data.",
+        "steps": [
+          "run_trade_all_customers (session='close', final dispatch)",
+          "run_exit_backfill (post-exit prices for optimizer)",
+          "run_trail_optimizer (adaptive exit parameter tuning)",
+          "run_screener (sector momentum — once-daily pass #2, ADDED 2026-04-21)",
+          "daily_master generate (end-of-day audit markdown)"
+        ]
+      },
+      "overnight_cycle_offhours": {
+        "fires": "weekend / post-close weekday when market_daemon is invoked outside trading hours (cron-scheduled hourly for safety; main() picks this path based on clock)",
+        "notes": "One-shot — does not loop. Mirrors full pipeline so weekend runs keep signals warm for Monday's pre-market.",
+        "steps": [
+          "run_tradable_refresh",
+          "run_news (session='overnight')",
+          "run_screener",
+          "run_sentiment",
+          "run_macro_regime",
+          "run_market_state",
+          "run_bias_detection",
+          "run_fault_detection",
+          "run_validator_stack",
+          "promote_validated_signals",
+          "run_candidate_generator",
+          "run_earnings_refresh",
+          "run_window_calculator (mode='overnight')"
+        ]
+      }
+    },
+    "daily_timeline_weekday_et": [
+      {"time": "00:00", "node": "pi4b", "event": "logrotate.timer (approximate — runs daily)"},
+      {"time": "00:05-08:05 (:05 past each hour)", "node": "pi5", "event": "retail_scheduler.py --session=overnight (cron-driven news-agent only refresh)"},
+      {"time": "01:30", "node": "pi5", "event": "retail_backup.py — create archive, POST to pi4b /receive_backup"},
+      {"time": "02:00", "node": "pi4b", "event": "company_strongbox.py — encrypt staged backups, upload to R2"},
+      {"time": "03:00", "node": "pi5", "event": "rebuild_default_template.py — nightly fresh default customer DB schema"},
+      {"time": "06:00 (approximate)", "node": "pi4b", "event": "morning_report generation (company_auditor rollup)"},
+      {"time": "08:00", "node": "pi4b", "event": "company_fidget.py — daily keep-alive + anomaly detection"},
+      {"time": "09:15", "node": "pi5", "event": "synthos-market-daemon.timer → pre-market prep (full once-daily pipeline)"},
+      {"time": "09:25", "node": "pi5", "event": "synthos-trade-daemon.timer fires; daemon starts and waits for 09:30 open"},
+      {"time": "09:30-16:00", "node": "pi5", "event": "trade_daemon continuous 30s cycles + market_daemon enrichment every 30 min (14 cycles)"},
+      {"time": "16:00", "node": "pi5", "event": "market close — trade_daemon exits cleanly, market_daemon runs close_session (trader-close + exit_backfill + trail_optimizer + sector_screener pass #2 + daily_master)"},
+      {"time": "16:05-23:05 (:05 past each hour)", "node": "pi5", "event": "retail_scheduler.py --session=overnight (cron, off-hours news refresh)"},
+      {"time": "continuous 24/7 (every 60s)", "node": "pi5", "event": "synthos-price-poller.timer → refresh live_prices for portal + trader"},
+      {"time": "continuous (every 1 min)", "node": "pi5, pi4b", "event": "node_heartbeat.py — system metrics to monitor"},
+      {"time": "weekdays :21 hourly", "node": "pi5", "event": "retail_heartbeat.py — agent-status standalone ping"},
+      {"time": "Saturday 03:55", "node": "pi5", "event": "retail_shutdown.py — graceful pre-maintenance shutdown"},
+      {"time": "Saturday 04:00", "node": "pi5, pi4b", "event": "sudo reboot (weekly maintenance)"},
+      {"time": "Sunday 09:00", "node": "pi4b", "event": "company_librarian.py — weekly package audit, CVE scan"},
+      {"time": "Sunday 20:00", "node": "pi5", "event": "retail_scheduler.py --session=prep (Monday pre-market context build)"},
+      {"time": "Sunday 00:00", "node": "pi5", "event": "rotate_logs.py — weekly log rotation + archive"}
+    ]
   },
   "ssh_map": {
     "from_pi4b": [
@@ -181,6 +273,14 @@
     "Round 10 Patch D (2026-04-20): retail_shared docstring explains why fetch_with_retry stays local; politician-weight bare-excepts downgraded to log.debug; SessionLock + _business_day_offset gain defensive docs (2 false-positive audit findings)",
     "BIL_OVER_ALLOCATED health-check exempts sub-$500 accounts (was firing on $61 test account with $39 in BIL); kept catching real-account defensive-posture ($39,997/$59,995)",
     "Auditor gains 'disabled' flag for nodes — pi2w_monitor skipped until hardware returns (was 58 NODE_UNREACHABLE hits/day)",
-    "pi4b synthos-company repo cleaned — untracked data/backup_status.json + fidget_latest.json (runtime drift); gitignore broadened for logs/* / *.bak / *.pre_*_bak / data/archives/; 3 stale *.pre_dbleak_bak files deleted (Apr 14); git status now empty"
+    "pi4b synthos-company repo cleaned — untracked data/backup_status.json + fidget_latest.json (runtime drift); gitignore broadened for logs/* / *.bak / *.pre_*_bak / data/archives/; 3 stale *.pre_dbleak_bak files deleted (Apr 14); git status now empty",
+    "Enrichment pipeline reconstruction (2026-04-21): discovered market_daemon had been running ONE 54-second overnight cycle each morning then exiting, never entering the intraday loop. Root cause: systemd timer fired at 09:10 but main() dispatcher treated hour==9 AND minute<PREMARKET_START_MIN(15) as 'before pre-market → overnight cycle → exit'. Fix: timer 09:10→09:15 alignment. Symptom: window_calculator never ran intraday, no trade_windows populated, trader had nothing in-band to evaluate. User-caught via 'why aren't 53 VALIDATED signals trading?' question.",
+    "Overnight cycle completion (2026-04-21): run_overnight_cycle() was missing bias_detection, candidate_generator, window_calculator, tradable_refresh, run_screener, earnings_refresh — only ran the validation chain. Monday pre-market had to catch up all once-daily work from scratch. Now mirrors run_premarket_prep.",
+    "Standalone 24/7 price_poller (2026-04-21): moved from inline market_daemon loop call to its own synthos-price-poller.{service,timer} unit pair. Fires OnUnitActiveSec=60s regardless of market_daemon state, so live_prices stays fresh pre-pre-market / post-close / weekends.",
+    "run_premarket_selfcheck (2026-04-21): advisory readiness gate between pre-market prep and market_loop. Validates 7 categories (tradable_cache fresh, earnings_cache populated, VALIDATED signals exist, trade_windows computed today, live_prices non-empty, portal listening, disk space OK). On failure: log + PREMARKET_SELFCHECK_FAIL event + deduped notification + continue (advisory per user spec).",
+    "Mid-day market_daemon restart fires enrichment immediately (2026-04-21): last_enrichment / last_recon initialized to now-interval so the first loop iteration triggers the 30-min cycle instead of waiting 30 min. Matters for restart scenarios (crash recovery, manual restart, operator intervention).",
+    "_MARKET_STATE_UPDATED key-name fix (2026-04-21): validator_stack_agent.py:459 read _MARKET_STATE_UPDATED to check staleness but market_state_agent never wrote that key (only _MARKET_STATE + _MARKET_STATE_SCORE). Every validator run flagged DEGRADED_STALE_MARKET_STATE. One-line addition to persist_state() fixes it.",
+    "Candidate filter: combined_score → momentum_score (2026-04-21): sector-driven candidate emission was actually filtering on news+sentiment (combined_score = news*0.4 + sentiment*0.4 + weight*0.2, zero weight on sector momentum). Caught when 11 top sector leaders including TGT 0.94, CAT 0.90, DLR 0.90, AVGO 0.90 weren't being emitted despite strong momentum. Added momentum_score column to sector_screening (persisted by sector_screener's already-computed calc_momentum_score), switched candidate_generator to filter + rank by momentum_score with threshold 0.45. combined_score kept as informational for portal display. Emission at 0.45: ~30 candidates after MAX_PER_SECTOR=3 + MAX_TOTAL=30 caps, all 11 sectors represented, quality distribution (10 at 0.90+, 13 at 0.75-0.89, 6 at 0.60-0.74).",
+    "Sector screener cadence doubled 1×/day → 2×/day (2026-04-21): added run_screener() to run_close_session() so it fires at 16:00 ET in addition to pre-market 09:15. Gives tomorrow's pre-market fresher data (<17h old vs ~24h old) and feeds any overnight_cycle runs tonight. Momentum scoring inputs are slow-moving (3m return, 20d/50d SMAs, volume ratios) so 2×/day is the correct cadence — intraday refreshing produces ~identical scores. Graceful degradation: if close-run fails, pre-market's own 09:15 run brings everything back to current; fault_detection's 30h stale threshold tolerates a missed day."
   ]
 }
