@@ -1,11 +1,20 @@
 [Unit]
-Description=Daily trigger for Synthos Market Daemon (09:10 ET weekdays)
+Description=Daily trigger for Synthos Market Daemon (09:15 ET weekdays)
 Requires=synthos-market-daemon.service
 
 [Timer]
-# Pi5 system clock is America/New_York — 09:10 here = 09:10 ET directly.
-OnCalendar=Mon..Fri *-*-* 09:10:00
-# If the machine was down at 09:10 (e.g. reboot), fire immediately on boot
+# Pi5 system clock is America/New_York — 09:15 here = 09:15 ET directly.
+#
+# Why 09:15 specifically (2026-04-21 fix): the daemon's main() dispatcher
+# treats `hour==9 AND minute<PREMARKET_START_MIN(15)` as "before pre-market"
+# and sends the process to the one-shot overnight cycle. When the timer
+# fired at 09:10, main() saw "before premkt" and exited after overnight,
+# never entering the intraday pipeline. The 5-minute bug ate 6.5h of
+# trading per day. Aligning the timer with PREMARKET_START_HOUR /
+# PREMARKET_START_MIN removes the ambiguity — dispatcher now correctly
+# picks the intraday path.
+OnCalendar=Mon..Fri *-*-* 09:15:00
+# If the machine was down at 09:15 (e.g. reboot), fire immediately on boot
 # catching up the missed trigger. Desired: if pi reboots at 11 AM weekday,
 # we want the daemon to start (11 AM is still market hours).
 Persistent=true

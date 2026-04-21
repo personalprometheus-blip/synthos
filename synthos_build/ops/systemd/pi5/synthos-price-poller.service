@@ -1,0 +1,45 @@
+# /etc/systemd/system/synthos-price-poller.service
+#
+# Fired by synthos-price-poller.timer every 60s, 24/7. Runs a single
+# pass of retail_price_poller.py which refreshes the live_prices table
+# for all tickers referenced by open positions + validated signals.
+#
+# Why 24/7 (2026-04-21): previously the price poller was called inline
+# from retail_market_daemon's market_loop — so live_prices only stayed
+# fresh during the daemon's own runtime (9:30-16:00 ET). When
+# market_daemon's dispatcher bug sent it to the one-shot overnight
+# path, live_prices stopped refreshing. The standalone timer keeps
+# prices current regardless of whether any daemon is running.
+#
+# Canonical source: synthos_build/ops/systemd/pi5/synthos-price-poller.service
+# Deployed to:      /etc/systemd/system/synthos-price-poller.service
+#
+# Install:
+#   sudo cp synthos_build/ops/systemd/pi5/synthos-price-poller.service \
+#           synthos_build/ops/systemd/pi5/synthos-price-poller.timer \
+#       /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now synthos-price-poller.timer
+
+[Unit]
+Description=Synthos Price Poller (live_prices refresh, 60s cadence)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build
+ExecStart=/usr/bin/python3 agents/retail_price_poller.py
+# Individual run should finish in a few seconds. 30s hard-kill so a
+# hung HTTP request can't stack up when the timer re-fires.
+TimeoutStartSec=30
+# Redirect stdout/stderr to the existing log file (append) so output
+# stays alongside the rest of retail_*.log.
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/price_poller.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/price_poller.log
+
+[Install]
+# Enable the .timer, not this unit directly.
+WantedBy=multi-user.target
