@@ -1,0 +1,20 @@
+# /etc/systemd/system/synthos-price-poller.timer
+#
+# Fires the price poller every 60 seconds, 24 hours a day.
+# Unit file lives in git at:
+#   synthos_build/ops/systemd/pi5/synthos-price-poller.timer
+
+[Unit]
+Description=Runs the Synthos Price Poller every 60s, 24/7
+Requires=synthos-price-poller.service
+
+[Timer]
+# Fire 30s after boot to let the network come up, then every 60s.
+# AccuracySec=1s so timer fires close to the second boundary.
+OnBootSec=30
+OnUnitActiveSec=60
+AccuracySec=1s
+Unit=synthos-price-poller.service
+
+[Install]
+WantedBy=timers.target

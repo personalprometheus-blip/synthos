@@ -1037,7 +1037,10 @@ def run_market_loop():
     cycle = 0
     last_enrichment = time.monotonic()
     last_recon = time.monotonic()
-    last_price_poll = time.monotonic()
+    # 2026-04-21: price poller moved to its own 24/7 systemd timer
+    # (synthos-price-poller.timer, every 60s). Removed from this loop so
+    # live_prices keeps refreshing even when market_daemon isn't up
+    # (pre-pre-market, post-close, weekend).
     enrichment_interval = ENRICHMENT_INTERVAL_MIN * 60
     recon_interval = RECON_INTERVAL_MIN * 60
 
@@ -1055,7 +1058,6 @@ def run_market_loop():
 
         since_enrichment = now_mono - last_enrichment
         since_recon = now_mono - last_recon
-        since_price = now_mono - last_price_poll
 
         # ── ENRICHMENT CYCLE (every 30 min) ──
         # Full pipeline: data → analysis → checks → validation → trade
@@ -1112,10 +1114,11 @@ def run_market_loop():
         elif since_recon >= recon_interval:
             last_recon = time.monotonic()
 
-        # ── PRICE POLL (every 60 sec) ──
-        if since_price >= PRICE_POLL_INTERVAL_SEC:
-            run_price_poller()
-            last_price_poll = time.monotonic()
+        # ── PRICE POLL — REMOVED ──
+        # Price poller now runs on its own 24/7 systemd timer
+        # (synthos-price-poller.timer, every 60s) so live_prices stays
+        # fresh even outside of this market_loop's runtime. Removed
+        # from here 2026-04-21.
 
         write_heartbeat(status="OK" if not kill_switch_active() else "KILL_SWITCH",
                         cycle=cycle, customers=0)
@@ -1126,7 +1129,11 @@ def run_market_loop():
         # Next enrichment / recon countdown
         next_enrichment = max(0, enrichment_interval - (time.monotonic() - last_enrichment))
         next_recon = max(0, recon_interval - (time.monotonic() - last_recon))
-        next_event = min(next_enrichment, next_recon, PRICE_POLL_INTERVAL_SEC)
+        # Cap at 30s so shutdown signals stay responsive even when the
+        # next enrichment is far away. PRICE_POLL_INTERVAL_SEC used to be
+        # part of this min() — removed 2026-04-21 alongside the inline
+        # price_poller call.
+        next_event = min(next_enrichment, next_recon, 30)
 
         log.info(f"[IDLE {cycle}] {t_cycle} — next enrichment {next_enrichment/60:.0f}m, "
                  f"next recon {next_recon/60:.0f}m — sleeping {min(next_event, 30):.0f}s")
@@ -1426,12 +1433,27 @@ def run_trail_optimizer():
 def run_overnight_cycle():
     """One-shot enrichment pass for off-hours / weekend runs.
 
-    Fetches news incrementally via the cursor-based path, runs the full
-    validation chain (sentiment → macro → market_state → fault →
-    validator → promoter), and exits. Does NOT dispatch traders — the
+    Fetches news incrementally via the cursor-based path and runs the
+    FULL enrichment pipeline so the trader wakes up Monday (or on the
+    next market open) with fresh data. Does NOT dispatch traders — the
     overnight-queue gate inside AlpacaClient would queue any submits
-    anyway, so traders would produce no useful execution and just
-    consume the dispatch budget.
+    anyway, so traders would produce no useful execution.
+
+    2026-04-21 update: previously ran only the validation chain
+    (news→sentiment→macro→state→fault→validator→promoter). That left
+    bias_detection, candidate_generator, window_calculator,
+    tradable_refresh, sector_screener, and earnings_refresh unrun
+    during weekend / off-hours cycles — which meant Monday pre-market
+    had to catch up all the once-daily work from scratch. Now mirrors
+    run_premarket_prep() so the pipeline stays warm across weekends
+    and post-close hours. Price poller runs on its own 24/7 systemd
+    timer — no inline call needed here.
+
+    TODO: once the overnight vs. premarket paths diverge further
+    (different data sources? different customer filters?), split into
+    a dedicated run_overnight_prep() alongside run_premarket_prep().
+    For now they're nearly identical with only `session='overnight'`
+    on the news call to distinguish them.
 
     Intended to be cron-invoked hourly 24/7 (see docs/overnight_queue_plan.md
     Phase 4.1) — during market hours main() picks the intraday path
@@ -1439,27 +1461,203 @@ def run_overnight_cycle():
     """
     cycle_id = _begin_cycle(label='overnight')
     log.info("=" * 60)
-    log.info("OVERNIGHT CYCLE — news → sentiment → macro → state → fault → validator → promoter (no trader)")
+    log.info("OVERNIGHT CYCLE — full pipeline (tradable→news→screener→sentiment→"
+             "macro→state→bias→fault→validator→promoter→candidate→earnings→windows)")
     log.info("=" * 60)
     try:
+        # Once-daily prep — parity with premarket
+        run_tradable_refresh()
+        if _shutdown_requested: return
+
+        # Data collection
         run_news(session='overnight')
+        if _shutdown_requested: return
+        run_screener()
         if _shutdown_requested: return
         run_sentiment()
         if _shutdown_requested: return
+
+        # Analysis & classification
         run_macro_regime()
         if _shutdown_requested: return
         run_market_state()
         if _shutdown_requested: return
+
+        # Per-customer checks
+        run_bias_detection()
+        if _shutdown_requested: return
+
+        # System health & validation
         run_fault_detection()
         if _shutdown_requested: return
         run_validator_stack()
         if _shutdown_requested: return
+
+        # Promoter
         promote_validated_signals()
+        if _shutdown_requested: return
+
+        # Candidate + event calendar + windows (was missing — caused
+        # Monday pre-market to build from an empty slate)
+        run_candidate_generator()
+        if _shutdown_requested: return
+        run_earnings_refresh()
+        if _shutdown_requested: return
+        run_window_calculator(mode='overnight')
     except Exception as e:
         log.error(f"[OVERNIGHT] Cycle error: {e}", exc_info=True)
     finally:
         clear_agent_running()
         _end_cycle(cycle_id)
+
+
+def run_premarket_selfcheck():
+    """Advisory pre-market readiness check. Runs after premarket_prep
+    completes and before market_loop begins. Verifies the enrichment
+    pipeline produced usable state; logs + flags any failures but does
+    NOT block the market_loop (log, flag, continue — per user spec).
+
+    Check categories:
+      1. tradable_cache has fresh rows (today's date)
+      2. earnings_cache populated
+      3. ≥1 VALIDATED signal in shared DB
+      4. ≥1 trade_window for owner customer computed today
+      5. live_prices non-empty
+      6. Portal reachable on localhost:5001
+      7. Disk space > 1GB free on logs / data partition
+
+    Alpaca reachability is verified by the trader's Gate 0 on its first
+    cycle — intentionally not duplicated here to avoid dragging the
+    AlpacaClient class (which lives inside retail_trade_logic_agent.py)
+    into this module.
+
+    Returns: (ok: bool, failures: list[str]) — caller can decide on
+    action. Current callers always continue regardless.
+    """
+    import socket
+    from datetime import datetime, timezone
+
+    failures = []
+    today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
+
+    log.info("[SELFCHECK] Running pre-market readiness check")
+
+    # 1. tradable_cache has today's rows
+    try:
+        from retail_database import get_customer_db  # noqa: E402
+        _db = get_customer_db(owner)
+        with _db.conn() as c:
+            n = c.execute(
+                "SELECT COUNT(*) FROM tradable_assets WHERE fetched_at >= ?",
+                (today_utc,)
+            ).fetchone()[0]
+            if n == 0:
+                failures.append(f"tradable_cache: no rows refreshed today ({today_utc})")
+            else:
+                log.info(f"[SELFCHECK] tradable_cache: {n} rows fresh today")
+    except Exception as e:
+        failures.append(f"tradable_cache: query failed ({str(e)[:80]})")
+
+    # 2. earnings_cache populated (upcoming earnings, at least some in-window)
+    try:
+        with _db.conn() as c:
+            n = c.execute(
+                "SELECT COUNT(*) FROM earnings_cache WHERE next_earnings >= date('now')"
+            ).fetchone()[0]
+            if n == 0:
+                failures.append("earnings_cache: no upcoming earnings rows")
+            else:
+                log.info(f"[SELFCHECK] earnings_cache: {n} upcoming rows")
+    except Exception as e:
+        failures.append(f"earnings_cache: query failed ({str(e)[:80]})")
+
+    # 4 + 5: Signals + windows in the OWNER's per-customer DB (shared signal
+    # pool + trade_windows both live there; candidate-gen writes into it).
+    try:
+        with _db.conn() as c:
+            n_sig = c.execute(
+                "SELECT COUNT(*) FROM signals WHERE status='VALIDATED'"
+            ).fetchone()[0]
+            if n_sig == 0:
+                failures.append("signals: zero VALIDATED signals in pool")
+            else:
+                log.info(f"[SELFCHECK] signals: {n_sig} VALIDATED in pool")
+
+            n_win = c.execute(
+                "SELECT COUNT(*) FROM trade_windows WHERE computed_at >= ?",
+                (today_utc,)
+            ).fetchone()[0]
+            if n_win == 0:
+                failures.append(f"trade_windows: zero windows computed today ({today_utc})")
+            else:
+                log.info(f"[SELFCHECK] trade_windows: {n_win} computed today")
+    except Exception as e:
+        failures.append(f"signals/windows: query failed ({str(e)[:80]})")
+
+    # 6. live_prices
+    try:
+        with _db.conn() as c:
+            n = c.execute(
+                "SELECT COUNT(*) FROM live_prices WHERE price IS NOT NULL"
+            ).fetchone()[0]
+            if n == 0:
+                failures.append("live_prices: zero tickers with price data")
+            elif n < 5:
+                failures.append(f"live_prices: only {n} tickers (expected >5)")
+            else:
+                log.info(f"[SELFCHECK] live_prices: {n} tickers")
+    except Exception as e:
+        failures.append(f"live_prices: query failed ({str(e)[:80]})")
+
+    # 7. Portal reachable
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect(('127.0.0.1', 5001))
+        s.close()
+        log.info("[SELFCHECK] portal: reachable on :5001")
+    except Exception as e:
+        failures.append(f"portal: not listening on 5001 ({str(e)[:80]})")
+
+    # 8. Disk space
+    try:
+        import shutil as _sh
+        free_gb = _sh.disk_usage(str(_ROOT_DIR)).free / (1024 ** 3)
+        if free_gb < 1.0:
+            failures.append(f"disk: only {free_gb:.2f}GB free on {_ROOT_DIR} (< 1GB)")
+        else:
+            log.info(f"[SELFCHECK] disk: {free_gb:.1f}GB free")
+    except Exception as e:
+        failures.append(f"disk: check failed ({str(e)[:80]})")
+
+    ok = len(failures) == 0
+    if ok:
+        log.info("[SELFCHECK] PASS — pre-market pipeline ready")
+    else:
+        log.warning(f"[SELFCHECK] FAIL ({len(failures)} issues) — continuing anyway (advisory)")
+        for f in failures:
+            log.warning(f"[SELFCHECK]   ✗ {f}")
+        # Flag to customer DB for portal visibility + notification
+        try:
+            _db.log_event(
+                "PREMARKET_SELFCHECK_FAIL",
+                agent="market_daemon",
+                details=f"{len(failures)} issue(s): " + "; ".join(f[:60] for f in failures[:5]),
+            )
+            _db.add_notification(
+                'system',
+                f'Pre-market self-check: {len(failures)} issue(s)',
+                "Enrichment pipeline ran but some checks failed. Market loop "
+                "continuing in advisory mode. See logs for detail: "
+                + "; ".join(failures[:3]),
+                meta={'failures': failures, 'ok': False},
+                dedup_key=f'premarket_selfcheck_{today_utc}',
+            )
+        except Exception as _e:
+            log.debug(f"Failed to record selfcheck failure: {_e}")
+
+    return (ok, failures)
 
 
 def _run_intraday_pipeline():
@@ -1487,12 +1685,22 @@ def _run_intraday_pipeline():
         return
 
     # Phase 1: Pre-market prep (includes pre-open re-evaluation as Phase 0)
+    ran_prep = False
     if is_premarket() or (now_et().hour == PREMARKET_START_HOUR and
                           now_et().minute >= PREMARKET_START_MIN):
         run_premarket_prep()
+        ran_prep = True
 
     if _shutdown_requested:
         return
+
+    # Phase 1b: Advisory self-check. Only runs if we just did premarket_prep
+    # (mid-day restart skips — prep didn't run, so asserting its artifacts
+    # would give misleading failures). Log+flag+continue per spec.
+    if ran_prep:
+        run_premarket_selfcheck()
+        if _shutdown_requested:
+            return
 
     # Wait for market open if we finished prep early
     while not _shutdown_requested and not is_market_hours() and not past_market_close():
