@@ -32,7 +32,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify, render_template_string, redirect, session, flash
+from flask import Flask, request, jsonify, render_template, render_template_string, redirect, session, flash
 from dotenv import load_dotenv
 import auth
 
@@ -1998,93 +1998,15 @@ def logout():
 
 
 # ── TERMS OF SERVICE ──────────────────────────────────────────────────────
-
-_TERMS_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos — Terms of Service</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<style>
-@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
-@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
-</style>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#f5f0e8;color:#1a1612;font-family:'Inter',sans-serif;
-     min-height:100vh;display:flex;flex-direction:column;align-items:center;
-     justify-content:flex-start;padding:40px 20px}
-.wordmark{font-family:'JetBrains Mono',monospace;font-size:0.9rem;font-weight:600;
-          letter-spacing:0.12em;color:#1a1612;margin-bottom:32px;opacity:0.5}
-.card{background:#ede8df;border:1px solid #c8bfaa;border-radius:4px;
-      padding:2rem;width:100%;max-width:620px}
-h1{font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:600;
-   letter-spacing:0.06em;margin-bottom:6px}
-.version{font-size:0.72rem;color:#7a7060;margin-bottom:24px;
-         font-family:'JetBrains Mono',monospace;letter-spacing:0.04em}
-.tos-body{background:#f5f0e8;border:1px solid #c8bfaa;border-radius:2px;
-          padding:1.25rem 1.5rem;max-height:340px;overflow-y:auto;
-          font-size:0.82rem;line-height:1.8;color:#2a2420;margin-bottom:24px}
-.tos-body p{margin-bottom:1rem}
-.tos-body p:last-child{margin-bottom:0}
-.tos-body strong{font-weight:600;color:#1a1612}
-.accept-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:20px}
-.accept-row input[type=checkbox]{margin-top:3px;accent-color:#1a1612;
-                                  width:15px;height:15px;flex-shrink:0;cursor:pointer}
-.accept-row label{font-size:0.82rem;color:#2a2420;line-height:1.5;cursor:pointer}
-button[type=submit]{width:100%;background:#1a1612;color:#f5f0e8;border:none;
-                    border-radius:2px;padding:11px 20px;
-                    font-family:'JetBrains Mono',monospace;font-size:0.82rem;
-                    font-weight:600;letter-spacing:0.1em;cursor:pointer;
-                    text-transform:uppercase;transition:opacity 0.15s}
-button[type=submit]:hover{opacity:0.85}
-button[type=submit]:disabled{opacity:0.35;cursor:not-allowed}
-.meta{font-size:0.7rem;color:#7a7060;margin-top:16px;text-align:center;
-      font-family:'JetBrains Mono',monospace;letter-spacing:0.04em}
-</style>
-</head>
-<body>
-<div class="wordmark">SYNTHOS</div>
-<div class="card">
-  <h1>Terms of Service</h1>
-  <div class="version">Version {{ version }} &nbsp;·&nbsp; Review before continuing</div>
-
-  <div class="tos-body">
-    <p><strong>PLACEHOLDER — Terms of Service content will be added here.</strong></p>
-    <p>This document will contain the full Synthos Terms of Service, including
-    provisions covering acceptable use, risk disclosure, limitations of liability,
-    and operator responsibilities.</p>
-    <p>By accepting, you confirm you have read and agree to the terms as they will
-    appear in the final document. This placeholder acceptance is recorded with a
-    timestamp and version number.</p>
-    <p>The document content is intentionally left blank during this development phase.
-    Do not distribute to end customers until final terms are drafted and reviewed.</p>
-  </div>
-
-  {% if error %}
-  <div style="color:#8b2200;font-size:0.78rem;margin-bottom:14px;padding:8px 12px;
-              background:#fdf0ed;border:1px solid #c8bfaa;border-radius:2px">
-    {{ error }}
-  </div>
-  {% endif %}
-
-  <form method="POST" action="/terms">
-    <div class="accept-row">
-      <input type="checkbox" id="accepted" name="accepted" value="yes" required>
-      <label for="accepted">
-        I have read and agree to the Synthos Terms of Service (v{{ version }}).
-        I understand that trading involves risk of financial loss and that Synthos
-        is not a licensed financial advisor.
-      </label>
-    </div>
-    <button type="submit">Accept &amp; Continue →</button>
-  </form>
-
-  <div class="meta">Acceptance is recorded with timestamp and version number.</div>
-</div>
-</body>
-</html>"""
+#
+# Template: src/templates/terms.html
+# Extracted from inline _TERMS_HTML on 2026-04-22
+# (patch/2026-04-22-portal-template-extraction). First page in the portal
+# template-extraction initiative — pattern for subsequent pages:
+#   1. Move HTML string → src/templates/<page>.html
+#   2. Replace render_template_string(_X_HTML, …) → render_template('<page>.html', …)
+#   3. Delete the inline constant
+# Jinja2 syntax already used by render_template_string — no conversion.
 
 
 def _write_tos_acceptance_file(customer_id: str, version: str, ip: str, ua: str) -> None:
@@ -2122,18 +2044,16 @@ def terms_get():
     # If already accepted current version, skip straight through
     if session.get('tos_version') == TOS_CURRENT_VERSION:
         return redirect('/')
-    from flask import render_template_string
-    return render_template_string(_TERMS_HTML, version=TOS_CURRENT_VERSION, error=None)
+    return render_template('terms.html', version=TOS_CURRENT_VERSION, error=None)
 
 
 @app.route('/terms', methods=['POST'])
 @authenticated_only
 def terms_post():
     """Record ToS acceptance, write agreement file, update session."""
-    from flask import render_template_string
     if request.form.get('accepted') != 'yes':
-        return render_template_string(
-            _TERMS_HTML, version=TOS_CURRENT_VERSION,
+        return render_template(
+            'terms.html', version=TOS_CURRENT_VERSION,
             error="You must check the box to continue."
         )
 
