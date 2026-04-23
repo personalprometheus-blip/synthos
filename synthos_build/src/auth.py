@@ -176,9 +176,26 @@ def init_auth_db():
             );
         """)
     _migrate_auth_db()
+    _migrate_pending_signups()
     # Restrict permissions — auth.db contains encrypted PII and password hashes
     os.chmod(AUTH_DB_PATH, 0o600)
     log.info("Auth DB initialized")
+
+
+def _migrate_pending_signups():
+    """Add ToS-acceptance columns to pending_signups. Idempotent."""
+    new_columns = [
+        ("tos_accepted_at", "TEXT"),
+        ("tos_version",     "TEXT"),
+        ("tos_ip",          "TEXT"),
+        ("tos_user_agent",  "TEXT"),
+    ]
+    with _auth_conn() as c:
+        for col_name, col_def in new_columns:
+            try:
+                c.execute(f"ALTER TABLE pending_signups ADD COLUMN {col_name} {col_def}")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
 
 def _migrate_auth_db():
@@ -497,11 +514,23 @@ def list_customers() -> list:
 
 # ── SIGNUP MANAGEMENT ─────────────────────────────────────────────────────
 
-def create_pending_signup(name: str, email: str, phone: str, password: str, state: str = '', zip_code: str = '') -> int:
+def create_pending_signup(name: str, email: str, phone: str, password: str,
+                          state: str = '', zip_code: str = '',
+                          tos_accepted: bool = False, tos_version: str = '',
+                          tos_ip: str = '', tos_user_agent: str = '') -> int:
     """
     Create a pending signup. Stores password hash (not plaintext).
-    Returns the signup row ID. Raises ValueError if email already registered or pending.
+    Returns the signup row ID. Raises ValueError if email already registered, pending,
+    or if ToS was not accepted.
+
+    ToS acceptance (tos_accepted=True) is required — user must check the checkbox on
+    the signup form. tos_version/tos_ip/tos_user_agent are recorded for audit trail.
+    On approve_signup(), these values are copied to the customer row (so the "I agreed"
+    timestamp reflects when the user checked the box, not when admin clicked approve).
     """
+    if not tos_accepted:
+        raise ValueError("You must accept the Terms of Service to sign up.")
+
     email = email.lower().strip()
     now   = datetime.now(timezone.utc).isoformat()
 
@@ -526,21 +555,26 @@ def create_pending_signup(name: str, email: str, phone: str, password: str, stat
             # If REJECTED, allow re-signup by updating the row
             c.execute(
                 "UPDATE pending_signups SET name=?, phone=?, password_hash=?, state=?, zip_code=?, "
-                "status='PENDING', created_at=?, reviewed_at=NULL, reviewed_by=NULL "
+                "status='PENDING', created_at=?, reviewed_at=NULL, reviewed_by=NULL, "
+                "tos_accepted_at=?, tos_version=?, tos_ip=?, tos_user_agent=? "
                 "WHERE id=?",
-                (name, phone, hash_password(password), state, zip_code, now, existing_signup['id'])
+                (name, phone, hash_password(password), state, zip_code, now,
+                 now, tos_version, tos_ip, tos_user_agent, existing_signup['id'])
             )
-            log.info(f"Re-submitted rejected signup: {email}")
+            log.info(f"Re-submitted rejected signup: {email} (ToS v{tos_version})")
             return existing_signup['id']
 
         c.execute(
-            "INSERT INTO pending_signups (name, email, phone, password_hash, state, zip_code, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name, email, phone, hash_password(password), state, zip_code, now)
+            "INSERT INTO pending_signups "
+            "(name, email, phone, password_hash, state, zip_code, created_at, "
+            " tos_accepted_at, tos_version, tos_ip, tos_user_agent) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (name, email, phone, hash_password(password), state, zip_code, now,
+             now, tos_version, tos_ip, tos_user_agent)
         )
         signup_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    log.info(f"New pending signup #{signup_id}: {email}")
+    log.info(f"New pending signup #{signup_id}: {email} (ToS v{tos_version} accepted)")
     return signup_id
 
 
@@ -612,8 +646,12 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
                 now,                    # created_at
                 row.get('state', ''),   # from signup form
                 row.get('zip_code', ''),# from signup form
-                now,                    # tos_accepted_at (auto-accept on approval)
-                '1.0',                  # tos_version
+                # ToS values carried over from pending_signups row (captured when
+                # the user checked the box on the signup form). Falls back to the
+                # approval timestamp only for legacy rows created before ToS was
+                # required at signup — those should not exist post-2026-04-23.
+                row.get('tos_accepted_at') or now,
+                row.get('tos_version')     or '1.0',
             )
         )
 
@@ -778,13 +816,19 @@ def verify_signup_email(token: str) -> dict:
             "email_verify_token=NULL WHERE id=?",
             (now_iso, signup_id)
         )
-        # Auto-approve — invite code was pre-validated at signup, email verify is the final gate
-        try:
-            approval = approve_signup(signup_id, reviewed_by="invite_auto")
-            return {"signup_id": signup_id, "name": name, "email": email, **approval}
-        except Exception as _ae:
-            log.warning(f"Auto-approve after email verify failed: {_ae}")
-            return {"signup_id": signup_id, "name": name, "email": email}
+    # ── End of write transaction — the `with` block exited and committed above. ──
+    # Auto-approve MUST live outside the `with` block: approve_signup() opens its
+    # own _auth_conn() to write the new customer row, and SQLite only allows one
+    # writer at a time. Calling it while the outer context still held the write
+    # lock raised "database is locked" → the pending_signup stayed PENDING with no
+    # customer row, even though email verification had already succeeded on disk.
+    # Invite code was pre-validated at signup; email verify is the final gate.
+    try:
+        approval = approve_signup(signup_id, reviewed_by="invite_auto")
+        return {"signup_id": signup_id, "name": name, "email": email, **approval}
+    except Exception as _ae:
+        log.warning(f"Auto-approve after email verify failed: {_ae}")
+        return {"signup_id": signup_id, "name": name, "email": email}
 
 
 

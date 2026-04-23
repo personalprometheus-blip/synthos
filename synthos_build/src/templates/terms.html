@@ -62,18 +62,29 @@
   </div>
   {% endif %}
 
-  <form method="POST" action="/terms">
-    <div class="accept-row">
-      <input type="checkbox" id="accepted" name="accepted" value="yes" required>
-      <label for="accepted">
-        I have read and agree to the Synthos Terms of Service (v{{ version }}).
-        I understand that trading involves risk of financial loss and that Synthos
-        is not a licensed financial advisor.
-      </label>
+  {% if read_only %}
+    {# Public read-only view (linked from /signup). No Accept form — the
+       acceptance happens via the checkbox on the signup form itself. #}
+    <div class="meta" style="margin-top:8px">
+      <a href="/signup" style="color:#1a1612;text-decoration:none;border-bottom:1px dotted #1a1612">
+        &larr; Back to signup
+      </a>
     </div>
-    <button type="submit">Accept &amp; Continue →</button>
-  </form>
-
-  <div class="meta">Acceptance is recorded with timestamp and version number.</div>
+  {% else %}
+    {# Authenticated legacy flow — used for customers whose accounts pre-date
+       the signup-time checkbox, or whose ToS acceptance was lost. #}
+    <form method="POST" action="/terms">
+      <div class="accept-row">
+        <input type="checkbox" id="accepted" name="accepted" value="yes" required>
+        <label for="accepted">
+          I have read and agree to the Synthos Terms of Service (v{{ version }}).
+          I understand that trading involves risk of financial loss and that Synthos
+          is not a licensed financial advisor.
+        </label>
+      </div>
+      <button type="submit">Accept &amp; Continue →</button>
+    </form>
+    <div class="meta">Acceptance is recorded with timestamp and version number.</div>
+  {% endif %}
 </div>
 {% endblock %}

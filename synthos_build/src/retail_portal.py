@@ -682,6 +682,7 @@ def check_auth():
         return
     # Routes that are always public — no session required
     public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email', '/reset-password',
+                     '/terms/view',
                      '/admin/construction-verify'}
     if request.path in public_routes:
         return
@@ -779,19 +780,28 @@ def signup_page():
     success = False
 
     if request.method == 'POST':
-        code     = request.form.get('access_code', '').strip()
-        name     = request.form.get('name', '').strip()
-        email    = request.form.get('email', '').strip()
-        phone    = request.form.get('phone', '').strip()
-        state    = request.form.get('state', '').strip().upper()
-        zip_code = request.form.get('zip_code', '').strip()
-        password = request.form.get('password', '')
-        confirm  = request.form.get('confirm_password', '')
+        code         = request.form.get('access_code', '').strip()
+        name         = request.form.get('name', '').strip()
+        email        = request.form.get('email', '').strip()
+        phone        = request.form.get('phone', '').strip()
+        state        = request.form.get('state', '').strip().upper()
+        zip_code     = request.form.get('zip_code', '').strip()
+        password     = request.form.get('password', '')
+        confirm      = request.form.get('confirm_password', '')
+        tos_accepted = request.form.get('tos_accepted') == 'yes'
+
+        # Basic email format check — not RFC-perfect but rejects obvious garbage
+        # (no @, no domain, whitespace). Final validation is the user actually
+        # receiving the verification email.
+        import re as _re
+        EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
         if not auth.verify_signup_access_code(code):
             error = "Invalid access code. Contact the operator for an invite code."
         elif not name or not email:
             error = "Name and email are required."
+        elif not EMAIL_RE.match(email):
+            error = "Please enter a valid email address."
         elif state != 'GA':
             error = "Synthos is currently available to Georgia residents only. More states coming soon."
         elif not zip_code or len(zip_code) != 5 or not zip_code.isdigit():
@@ -800,9 +810,24 @@ def signup_page():
             error = "Password must be at least 8 characters."
         elif password != confirm:
             error = "Passwords do not match."
+        elif not tos_accepted:
+            error = "You must accept the Terms of Service to continue."
         else:
             try:
-                _sid = auth.create_pending_signup(name, email, phone, password, state=state, zip_code=zip_code)
+                # Capture audit trail for the ToS acceptance event. These are
+                # stored on the pending_signups row and carried into the customer
+                # row on approval, so the "I agreed" timestamp always reflects
+                # when the user checked the box (not when an admin approved).
+                tos_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+                tos_ua = request.headers.get('User-Agent', '')[:500]
+                _sid = auth.create_pending_signup(
+                    name, email, phone, password,
+                    state=state, zip_code=zip_code,
+                    tos_accepted=True,
+                    tos_version=TOS_CURRENT_VERSION,
+                    tos_ip=tos_ip,
+                    tos_user_agent=tos_ua,
+                )
                 # Send email verification link
                 try:
                     _vtoken = auth.generate_signup_verify_token(_sid)
@@ -810,7 +835,7 @@ def signup_page():
                 except Exception as _ve:
                     log.warning(f"Verification email failed: {_ve}")
                 success = True
-                log.info(f"Signup submitted: {email} (verification email sent)")
+                log.info(f"Signup submitted: {email} (ToS v{TOS_CURRENT_VERSION} accepted, verification email sent)")
             except ValueError as e:
                 error = str(e)
             except Exception as e:
@@ -1120,6 +1145,15 @@ def _write_tos_acceptance_file(customer_id: str, version: str, ip: str, ua: str)
         log.info("ToS acceptance filed: %s", filepath)
     except OSError as exc:
         log.error("Failed to write ToS acceptance file: %s", exc)
+
+
+@app.route('/terms/view', methods=['GET'])
+def terms_view_public():
+    """Public read-only ToS page — linked from the signup form so prospective
+    users can read the terms before agreeing. No Accept button rendered;
+    template hides the form when `read_only=True`."""
+    return render_template('terms.html', version=TOS_CURRENT_VERSION,
+                           error=None, read_only=True)
 
 
 @app.route('/terms', methods=['GET'])

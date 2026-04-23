@@ -64,6 +64,24 @@
   }
   .back-link:hover { color: var(--text); }
   .code-note { font-size: 0.68rem; color: var(--dim); margin-top: 4px; }
+  /* ToS checkbox row — single horizontal line: [box] label + link */
+  .tos-field {
+    display: flex; align-items: flex-start; gap: 0.55rem;
+    margin: 0.6rem 0 0.3rem 0;
+  }
+  .tos-field input[type="checkbox"] {
+    margin-top: 0.18rem; accent-color: var(--teal);
+    width: 14px; height: 14px; flex-shrink: 0; cursor: pointer;
+  }
+  .tos-field label {
+    font-size: 0.72rem; color: var(--muted);
+    line-height: 1.5; cursor: pointer;
+    text-transform: none; letter-spacing: 0; font-weight: 400; margin: 0;
+  }
+  .tos-field a {
+    color: var(--teal); text-decoration: none; border-bottom: 1px dotted var(--teal);
+  }
+  .tos-field a:hover { border-bottom-style: solid; }
 {% endblock %}
 
 {% block content %}
@@ -76,8 +94,9 @@
     {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
     {% if success %}
       <div class="success-msg">
-        Your signup request has been submitted.<br>
-        You will receive access once an administrator approves your account.
+        <strong>Check your email.</strong><br>
+        We've sent a verification link to your inbox.
+        Click it to activate your account and log in.
       </div>
     {% else %}
     <form method="POST" action="/signup" autocomplete="off">
@@ -126,6 +145,14 @@
           <label>Confirm</label>
           <input type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
         </div>
+      </div>
+      <div class="tos-field">
+        <input type="checkbox" name="tos_accepted" id="tos_accepted" value="yes" required
+               {{ 'checked' if request.form.get('tos_accepted') == 'yes' else '' }}>
+        <label for="tos_accepted">
+          I have read and agree to the
+          <a href="/terms/view" target="_blank" rel="noopener">Terms of Service</a>.
+        </label>
       </div>
       <button class="submit-btn" type="submit">Request Access &rarr;</button>
     </form>
