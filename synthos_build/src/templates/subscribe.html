@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% set title = "Subscribe" %}
+
+{% block inline_css %}
+  body { font-family: 'Courier New', monospace;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+          padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
+  .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+              color: #fff; margin-bottom: 12px; }
+  .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
+  .notice { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
+            padding: 24px; margin-bottom: 24px; }
+  .notice p { color: #ccc; font-size: 14px; line-height: 1.7; }
+  .reason { background: #2a1a00; border: 1px solid #7a4a00; border-radius: 8px;
+            padding: 14px 18px; font-size: 13px; color: #f59e0b; margin-bottom: 24px; }
+  a { color: #6b8cff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .sub { color: #555; font-size: 12px; margin-top: 24px; }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  {% if reason == 'past_due' %}
+  <div class="reason">⚠ Payment required — your grace period has ended</div>
+  {% elif reason == 'cancelled' %}
+  <div class="reason">Your subscription has been cancelled</div>
+  {% else %}
+  <div class="reason">A subscription is required to access the platform</div>
+  {% endif %}
+  <div class="notice">
+    <p>Subscription management is coming soon.<br>
+       Contact <a href="mailto:synthos.signal@gmail.com">synthos.signal@gmail.com</a>
+       to reactivate your account or for billing questions.</p>
+  </div>
+  <p class="sub"><a href="/login">← Back to login</a></p>
+</div>
+{% endblock %}

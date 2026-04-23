@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% set title = "News Feed" %}
+
+{% block head_extra %}
+  <meta http-equiv="refresh" content="60">
+{% endblock %}
+
+{% block inline_css %}
+  /* News feed is LIGHT-themed (like /terms). Overrides core.css dark defaults. */
+  :root {
+    --bg:     #faf8f4;
+    --card:   #fff;
+    --border: #e8e0d0;
+    --text:   #1a1612;
+    --muted:  #7a7060;
+    --mono:   'JetBrains Mono', monospace;
+    --sans:   'Inter', sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans);
+         font-size: 0.9rem; min-height: 100vh; }
+  header { display: flex; justify-content: space-between; align-items: center;
+           padding: 14px 28px; border-bottom: 1px solid var(--border);
+           background: var(--card); }
+  .wordmark { font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.15em;
+              text-transform: uppercase; font-weight: 600; }
+  .nav a { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.08em;
+           text-decoration: none; color: var(--muted); margin-left: 20px; }
+  .nav a:hover { color: var(--text); }
+  .page-title { padding: 20px 28px 8px; font-family: var(--mono);
+                font-size: 0.85rem; letter-spacing: 0.1em;
+                text-transform: uppercase; color: var(--muted); }
+  .subtitle { padding: 0 28px 16px; font-size: 0.78rem; color: var(--muted); }
+  .table-wrap { overflow-x: auto; padding: 0 28px 40px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  th { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em;
+       text-transform: uppercase; color: var(--muted); padding: 8px 12px;
+       text-align: left; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td      { background: #f5f2ec; }
+  .score-HIGH      { color: #1a6b3c; font-weight: 600; }
+  .score-MEDIUM    { color: #7a5c00; font-weight: 600; }
+  .score-LOW       { color: #7a3020; font-weight: 600; }
+  .score-NOISE     { color: var(--muted); }
+  .ticker          { font-family: var(--mono); font-weight: 600; }
+  .ts              { font-family: var(--mono); font-size: 0.75rem;
+                     color: var(--muted); white-space: nowrap; }
+  .empty           { text-align: center; padding: 60px 0; color: var(--muted);
+                     font-family: var(--mono); font-size: 0.8rem; letter-spacing: 0.1em; }
+  .refresh-note    { font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+                     text-align: right; padding: 0 28px 8px; }
+{% endblock %}
+
+{% block content %}
+<header>
+  <div class="wordmark">SYNTHOS NEWS FEED</div>
+  <div class="nav">
+    <a href="/">&#8592; Portal</a>
+    <a href="/news">&#8635; Refresh</a>
+    <a href="/logout">Sign out</a>
+  </div>
+</header>
+<div class="page-title">Signal Activity Feed</div>
+<div class="subtitle">All signals evaluated by the News agent — including WATCH and DISCARD decisions. Auto-refreshes every 60s.</div>
+<div class="refresh-note">Showing last {{ count }} entries &middot; last updated {{ updated }}</div>
+<div class="table-wrap">
+{{ table_content | safe }}
+</div>
+{% endblock %}

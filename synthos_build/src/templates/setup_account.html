@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% set title = "Set Your Password" %}
+
+{% block inline_css %}
+  body { font-family: 'Courier New', monospace;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+          padding: 56px 48px; max-width: 420px; width: 100%; }
+  .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+              color: #fff; margin-bottom: 8px; text-align: center; }
+  .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
+             text-align: center; margin-bottom: 40px; }
+  h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+  p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
+  label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
+          text-transform: uppercase; margin-bottom: 6px; }
+  input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
+          padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 14px;
+          margin-bottom: 20px; outline: none; }
+  input:focus { border-color: #6b8cff; }
+  button { width: 100%; background: #4f46e5; color: #fff; border: none;
+           border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
+           font-weight: 600; cursor: pointer; letter-spacing: 1px; }
+  button:hover { background: #6b8cff; }
+  .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
+           padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
+  .rule { font-size: 11px; color: #555; margin-top: -12px; margin-bottom: 20px; }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <h2>Set your password</h2>
+  <p>Choose a strong password to complete your account setup.
+     You'll use this to log in at synth-cloud.com</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <label>Password</label>
+    <input type="password" name="password" autofocus autocomplete="new-password"
+           placeholder="At least 12 characters" minlength="12">
+    <div class="rule">Minimum 12 characters</div>
+    <label>Confirm Password</label>
+    <input type="password" name="confirm" autocomplete="new-password"
+           placeholder="Re-enter your password">
+    <button type="submit">ACTIVATE ACCOUNT →</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {# Password-toggle eye icon — was inline, now shared. The .pw-wrap/.pw-eye
+     styles live in core.css. #}
+  <script src="{{ url_for('static', filename='js/pw-toggle.js') }}" defer></script>
+{% endblock %}

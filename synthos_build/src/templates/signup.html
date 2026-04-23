@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% set title = "Create Account" %}
+
+{% block inline_css %}
+  /* Page-specific layout. Design tokens + reset + fonts come from core.css. */
+  .signup-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 40px 20px;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0, 245, 212, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(123, 97, 255, 0.04) 0%, transparent 60%);
+  }
+  .signup-card {
+    width: 100%; max-width: 420px;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 16px;
+    padding: 2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .signup-logo {
+    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+    letter-spacing: 0.18em; color: var(--teal); text-align: center;
+    margin-bottom: 0.5rem; text-shadow: 0 0 18px rgba(0, 245, 212, 0.20);
+  }
+  .signup-title { font-size: 1.1rem; font-weight: 600; text-align: center; margin-bottom: 0.3rem; }
+  .signup-sub   { font-size: 0.78rem; color: var(--muted); text-align: center; margin-bottom: 1.5rem; }
+  .field        { margin-bottom: 1rem; }
+  .field label {
+    display: block; font-size: 0.62rem; font-weight: 500; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem;
+  }
+  .field input {
+    font-family: var(--mono); font-size: 0.82rem; width: 100%;
+    padding: 0.5rem 0.7rem; background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); transition: border-color 0.15s;
+  }
+  .field input:focus       { outline: none; border-color: rgba(0, 245, 212, 0.25);
+                             box-shadow: 0 0 0 3px rgba(0, 245, 212, 0.06); }
+  .field input::placeholder { color: var(--dim); }
+  .field-row { display: flex; gap: 12px; }
+  .field-row .field { flex: 1; }
+  .submit-btn {
+    font-family: var(--mono); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.05em;
+    width: 100%; padding: 0.65rem; margin-top: 0.5rem;
+    background: rgba(0, 245, 212, 0.12); color: var(--teal);
+    border: 1px solid rgba(0, 245, 212, 0.18); border-radius: 8px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .submit-btn:hover    { background: rgba(0, 245, 212, 0.18);
+                         box-shadow: 0 0 14px rgba(0, 245, 212, 0.09); }
+  .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .error-msg {
+    background: rgba(255, 75, 110, 0.08); border: 1px solid rgba(255, 75, 110, 0.18);
+    border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 1rem;
+    font-size: 0.78rem; color: var(--pink);
+  }
+  .success-msg {
+    background: rgba(0, 245, 212, 0.06); border: 1px solid rgba(0, 245, 212, 0.14);
+    border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem;
+    font-size: 0.82rem; color: var(--teal); text-align: center; line-height: 1.6;
+  }
+  .back-link {
+    display: block; text-align: center; margin-top: 1.2rem;
+    font-size: 0.72rem; color: var(--muted); text-decoration: none;
+  }
+  .back-link:hover { color: var(--text); }
+  .code-note { font-size: 0.68rem; color: var(--dim); margin-top: 4px; }
+  /* ToS checkbox row — single horizontal line: [box] label + link */
+  .tos-field {
+    display: flex; align-items: flex-start; gap: 0.55rem;
+    margin: 0.6rem 0 0.3rem 0;
+  }
+  .tos-field input[type="checkbox"] {
+    margin-top: 0.18rem; accent-color: var(--teal);
+    width: 14px; height: 14px; flex-shrink: 0; cursor: pointer;
+  }
+  .tos-field label {
+    font-size: 0.72rem; color: var(--muted);
+    line-height: 1.5; cursor: pointer;
+    text-transform: none; letter-spacing: 0; font-weight: 400; margin: 0;
+  }
+  .tos-field a {
+    color: var(--teal); text-decoration: none; border-bottom: 1px dotted var(--teal);
+  }
+  .tos-field a:hover { border-bottom-style: solid; }
+{% endblock %}
+
+{% block content %}
+<div class="signup-wrap">
+  <div class="signup-card">
+    <div class="signup-logo">SYNTHOS</div>
+    <div class="signup-title">Create Account</div>
+    <div class="signup-sub">Enter your details to request access</div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+    {% if success %}
+      <div class="success-msg">
+        <strong>Check your email.</strong><br>
+        We've sent a verification link to your inbox.
+        Click it to activate your account and log in.
+      </div>
+    {% else %}
+    <form method="POST" action="/signup" autocomplete="off">
+      <div class="field">
+        <label>Access Code</label>
+        <input type="text" name="access_code" placeholder="Enter your invite code" required
+               value="{{ request.form.get('access_code', '') }}">
+        <div class="code-note">Contact the operator for an invite code</div>
+      </div>
+      <div class="field">
+        <label>Full Name</label>
+        <input type="text" name="name" placeholder="Jane Smith" required
+               value="{{ request.form.get('name', '') }}">
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" placeholder="you@example.com" required
+               value="{{ request.form.get('email', '') }}">
+      </div>
+      <div class="field">
+        <label>Phone <span style="font-size:9px;color:rgba(255,255,255,0.3)">(optional)</span></label>
+        <input type="tel" name="phone" placeholder="+1 (555) 000-0000"
+               value="{{ request.form.get('phone', '') }}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>State</label>
+          <select name="state" required
+                  style="width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:7px;color:rgba(255,255,255,0.88);font-family:inherit;font-size:0.82rem">
+            <option value="">Select state...</option>
+            <option value="GA" {{ 'selected' if request.form.get('state') == 'GA' else '' }}>Georgia</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Zip Code</label>
+          <input type="text" name="zip_code" placeholder="30301" required pattern="[0-9]{5}"
+                 maxlength="5" value="{{ request.form.get('zip_code', '') }}">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Password</label>
+          <input type="password" name="password" placeholder="Min 8 characters" required minlength="8">
+        </div>
+        <div class="field">
+          <label>Confirm</label>
+          <input type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
+        </div>
+      </div>
+      <div class="tos-field">
+        <input type="checkbox" name="tos_accepted" id="tos_accepted" value="yes" required
+               {{ 'checked' if request.form.get('tos_accepted') == 'yes' else '' }}>
+        <label for="tos_accepted">
+          I have read and agree to the
+          <a href="/terms/view" target="_blank" rel="noopener">Terms of Service</a>.
+        </label>
+      </div>
+      <button class="submit-btn" type="submit">Request Access &rarr;</button>
+    </form>
+    {% endif %}
+    <a href="/" class="back-link">&larr; Back to Synthos</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/pw-toggle.js') }}" defer></script>
+{% endblock %}

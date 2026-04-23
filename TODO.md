@@ -38,7 +38,10 @@
 
 ### Small portal issues to fix (add specifics as found)
 
-- [ ] *(add as you find them)*
+- [ ] **`check_email.html` theming** — page renders but looks off: emoji needs changing (current 📬 feels out of place against the dark theme) and the page theme needs to match the newer SYNTHOS visual language rather than the generic dark-card look.
+- [ ] **Password-toggle eye icons bug** — the `.pw-eye` visibility-toggle SVG icons render massive across multiple pages because the `.pw-wrap` / `.pw-eye` CSS only lives in one template (password-reset form), while the password-toggle JS is copy-pasted across 4+ pages including setup_account and signup. Fixed in `setup_account.html` on 2026-04-23 by inlining the CSS. Broader fix: extract to `static/css/pw-toggle.css` and reference from every template using password inputs.
+- [ ] **`_SIGNUP_PAGE_HTML` will hit same eye-icon bug** — has the password-toggle JS but no `.pw-eye` CSS. Apply same CSS when extracting that template.
+- [ ] **Portal shared-CSS consolidation** — multiple pages copy-paste the same `@font-face` rules (Inter, JetBrains Mono), the `.pw-eye` block, and likely other chrome. Extract to shared `static/css/*.css` files during later DRY pass (not part of initial extraction).
 
 ### Mobile wave experience (spec from 2026-04-21 evening)
 

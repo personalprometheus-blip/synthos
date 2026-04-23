@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% set title = "Email Verified" %}
+
+{% block inline_css %}
+  body { min-height: 100vh; display: flex; align-items: center;
+         justify-content: center; padding: 2rem; }
+  .card { max-width: 400px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 14px; padding: 2.5rem; text-align: center; }
+  .icon { font-size: 48px; margin-bottom: 1rem; color: var(--cyan); }
+  .t { font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--cyan); }
+  .s { font-size: 0.85rem; color: var(--muted); line-height: 1.6; margin-bottom: 1.75rem; }
+  .btn-login {
+    display: inline-block; padding: 0.7rem 2rem;
+    background: var(--cyan); color: #000; text-decoration: none;
+    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+    letter-spacing: 0.06em; border-radius: 8px;
+    transition: opacity 0.15s, box-shadow 0.15s;
+  }
+  .btn-login:hover { opacity: 0.9; box-shadow: 0 0 20px rgba(0, 245, 212, 0.25); }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="icon">&#10003;</div>
+  <div class="t">Email Verified</div>
+  <div class="s">
+    Your email has been confirmed and your account is active.<br>
+    Please log in to continue.
+  </div>
+  <a href="/login" class="btn-login">Log In &rarr;</a>
+</div>
+{% endblock %}

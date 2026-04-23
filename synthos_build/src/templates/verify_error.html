@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set title = "Verification Failed" %}
+
+{% block inline_css %}
+  body { min-height: 100vh; display: flex; align-items: center;
+         justify-content: center; padding: 2rem; }
+  .card { max-width: 400px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 14px; padding: 2.5rem; text-align: center; }
+  .icon { font-size: 48px; margin-bottom: 1rem; color: var(--red); }
+  .t { font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--red); }
+  .s { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="icon">&#10007;</div>
+  <div class="t">Verification Failed</div>
+  <div class="s">{{ error_msg }}</div>
+</div>
+{% endblock %}

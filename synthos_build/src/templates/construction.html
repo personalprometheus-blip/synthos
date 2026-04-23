@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% set title = "Coming Soon" %}
+
+{% block inline_css %}
+  body { font-family: 'Courier New', monospace;
+         display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; }
+  .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+          padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
+  .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+              color: #fff; margin-bottom: 12px; }
+  .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
+  .status { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
+            padding: 24px; margin-bottom: 32px; }
+  .dot { width: 10px; height: 10px; background: #f59e0b; border-radius: 50%;
+         display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .status-text { font-size: 15px; color: #ccc; }
+  .sub { color: #666; font-size: 12px; margin-top: 24px; line-height: 1.6; }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <div class="status">
+    <span class="dot"></span>
+    <span class="status-text">Platform launching soon</span>
+  </div>
+  <p class="sub">
+    We're putting the finishing touches on things.<br>
+    Check back shortly — or email us at synthos.signal@gmail.com<br>
+    to be notified when we go live.
+  </p>
+</div>
+{% endblock %}

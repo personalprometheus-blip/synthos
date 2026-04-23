@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% set title = "Terms of Service" %}
+
+{% block inline_css %}
+  /* Terms page uses a LIGHT theme (intentionally different from the dark
+     onboarding cards) — legal document feel. Overrides core.css defaults. */
+  body { background: #f5f0e8; color: #1a1612; font-family: 'Inter', sans-serif;
+         min-height: 100vh; display: flex; flex-direction: column;
+         align-items: center; justify-content: flex-start; padding: 40px 20px; }
+  .wordmark { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem;
+              font-weight: 600; letter-spacing: 0.12em; color: #1a1612;
+              margin-bottom: 32px; opacity: 0.5; }
+  .card { background: #ede8df; border: 1px solid #c8bfaa; border-radius: 4px;
+          padding: 2rem; width: 100%; max-width: 620px; }
+  h1 { font-family: 'JetBrains Mono', monospace; font-size: 1rem; font-weight: 600;
+       letter-spacing: 0.06em; margin-bottom: 6px; }
+  .version { font-size: 0.72rem; color: #7a7060; margin-bottom: 24px;
+             font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; }
+  .tos-body { background: #f5f0e8; border: 1px solid #c8bfaa; border-radius: 2px;
+              padding: 1.25rem 1.5rem; max-height: 340px; overflow-y: auto;
+              font-size: 0.82rem; line-height: 1.8; color: #2a2420; margin-bottom: 24px; }
+  .tos-body p { margin-bottom: 1rem; }
+  .tos-body p:last-child { margin-bottom: 0; }
+  .tos-body strong { font-weight: 600; color: #1a1612; }
+  .accept-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; }
+  .accept-row input[type=checkbox] { margin-top: 3px; accent-color: #1a1612;
+                                      width: 15px; height: 15px; flex-shrink: 0; cursor: pointer; }
+  .accept-row label { font-size: 0.82rem; color: #2a2420; line-height: 1.5; cursor: pointer; }
+  button[type=submit] { width: 100%; background: #1a1612; color: #f5f0e8; border: none;
+                         border-radius: 2px; padding: 11px 20px;
+                         font-family: 'JetBrains Mono', monospace; font-size: 0.82rem;
+                         font-weight: 600; letter-spacing: 0.1em; cursor: pointer;
+                         text-transform: uppercase; transition: opacity 0.15s; }
+  button[type=submit]:hover { opacity: 0.85; }
+  button[type=submit]:disabled { opacity: 0.35; cursor: not-allowed; }
+  .meta { font-size: 0.7rem; color: #7a7060; margin-top: 16px; text-align: center;
+          font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; }
+{% endblock %}
+
+{% block content %}
+<div class="wordmark">SYNTHOS</div>
+<div class="card">
+  <h1>Terms of Service</h1>
+  <div class="version">Version {{ version }} &nbsp;·&nbsp; Review before continuing</div>
+
+  <div class="tos-body">
+    <p><strong>PLACEHOLDER — Terms of Service content will be added here.</strong></p>
+    <p>This document will contain the full Synthos Terms of Service, including
+    provisions covering acceptable use, risk disclosure, limitations of liability,
+    and operator responsibilities.</p>
+    <p>By accepting, you confirm you have read and agree to the terms as they will
+    appear in the final document. This placeholder acceptance is recorded with a
+    timestamp and version number.</p>
+    <p>The document content is intentionally left blank during this development phase.
+    Do not distribute to end customers until final terms are drafted and reviewed.</p>
+  </div>
+
+  {% if error %}
+  <div style="color:#8b2200;font-size:0.78rem;margin-bottom:14px;padding:8px 12px;
+              background:#fdf0ed;border:1px solid #c8bfaa;border-radius:2px">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if read_only %}
+    {# Public read-only view (linked from /signup). No Accept form — the
+       acceptance happens via the checkbox on the signup form itself. #}
+    <div class="meta" style="margin-top:8px">
+      <a href="/signup" style="color:#1a1612;text-decoration:none;border-bottom:1px dotted #1a1612">
+        &larr; Back to signup
+      </a>
+    </div>
+  {% else %}
+    {# Authenticated legacy flow — used for customers whose accounts pre-date
+       the signup-time checkbox, or whose ToS acceptance was lost. #}
+    <form method="POST" action="/terms">
+      <div class="accept-row">
+        <input type="checkbox" id="accepted" name="accepted" value="yes" required>
+        <label for="accepted">
+          I have read and agree to the Synthos Terms of Service (v{{ version }}).
+          I understand that trading involves risk of financial loss and that Synthos
+          is not a licensed financial advisor.
+        </label>
+      </div>
+      <button type="submit">Accept &amp; Continue →</button>
+    </form>
+    <div class="meta">Acceptance is recorded with timestamp and version number.</div>
+  {% endif %}
+</div>
+{% endblock %}
