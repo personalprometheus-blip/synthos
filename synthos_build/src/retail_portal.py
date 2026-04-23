@@ -1266,157 +1266,8 @@ def check_auth():
 
 # ── SIGNUP ────────────────────────────────────────────────────────────────────
 
-_SIGNUP_PAGE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos — Create Account</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<style>
-  /* Self-hosted fonts (CSP-safe) — variable files cover all weights */
-  @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
-  @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
-  :root{
-    --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
-    --border:#1e2535;--border2:rgba(255,255,255,0.08);
-    --text:#e0ddd8;--muted:#556;--dim:rgba(255,255,255,0.18);
-    --teal:#00f5d4;--pink:#ff4b6e;--amber:#f5a623;
-    --sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
-  .signup-wrap{
-    display:flex;align-items:center;justify-content:center;
-    min-height:100vh;padding:40px 20px;
-    background:
-      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0,245,212,0.05) 0%, transparent 60%),
-      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(123,97,255,0.04) 0%, transparent 60%);
-  }
-  .signup-card{
-    width:100%;max-width:420px;
-    background:var(--surface);border:1px solid var(--border2);border-radius:16px;
-    padding:2rem;box-shadow:0 20px 60px rgba(0,0,0,0.5);
-  }
-  .signup-logo{
-    font-family:var(--mono);font-size:0.85rem;font-weight:600;
-    letter-spacing:0.18em;color:var(--teal);text-align:center;margin-bottom:0.5rem;
-    text-shadow:0 0 18px rgba(0,245,212,0.20);
-  }
-  .signup-title{font-size:1.1rem;font-weight:600;text-align:center;margin-bottom:0.3rem}
-  .signup-sub{font-size:0.78rem;color:var(--muted);text-align:center;margin-bottom:1.5rem}
-  .field{margin-bottom:1rem}
-  .field label{
-    display:block;font-size:0.62rem;font-weight:500;letter-spacing:0.09em;
-    text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem;
-  }
-  .field input{
-    font-family:var(--mono);font-size:0.82rem;width:100%;
-    padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);
-    border:1px solid var(--border);border-radius:8px;
-    color:var(--text);transition:border-color .15s;
-  }
-  .field input:focus{outline:none;border-color:rgba(0,245,212,0.25);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
-  .field input::placeholder{color:var(--dim)}
-  .field-row{display:flex;gap:12px}
-  .field-row .field{flex:1}
-  .submit-btn{
-    font-family:var(--mono);font-size:0.78rem;font-weight:600;letter-spacing:0.05em;
-    width:100%;padding:0.65rem;margin-top:0.5rem;
-    background:rgba(0,245,212,0.12);color:var(--teal);
-    border:1px solid rgba(0,245,212,0.18);border-radius:8px;
-    cursor:pointer;transition:all .15s;
-  }
-  .submit-btn:hover{background:rgba(0,245,212,0.18);box-shadow:0 0 14px rgba(0,245,212,0.09)}
-  .submit-btn:disabled{opacity:0.4;cursor:not-allowed}
-  .error-msg{
-    background:rgba(255,75,110,0.08);border:1px solid rgba(255,75,110,0.18);
-    border-radius:8px;padding:0.5rem 0.75rem;margin-bottom:1rem;
-    font-size:0.78rem;color:var(--pink);
-  }
-  .success-msg{
-    background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.14);
-    border-radius:8px;padding:0.75rem;margin-bottom:1rem;
-    font-size:0.82rem;color:var(--teal);text-align:center;line-height:1.6;
-  }
-  .back-link{
-    display:block;text-align:center;margin-top:1.2rem;
-    font-size:0.72rem;color:var(--muted);text-decoration:none;
-  }
-  .back-link:hover{color:var(--text)}
-  .code-note{font-size:0.68rem;color:var(--dim);margin-top:4px}
-</style>
-</head>
-<body>
-<div class="signup-wrap">
-  <div class="signup-card">
-    <div class="signup-logo">SYNTHOS</div>
-    <div class="signup-title">Create Account</div>
-    <div class="signup-sub">Enter your details to request access</div>
-
-    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
-    {% if success %}
-      <div class="success-msg">
-        Your signup request has been submitted.<br>
-        You will receive access once an administrator approves your account.
-      </div>
-    {% else %}
-    <form method="POST" action="/signup" autocomplete="off">
-      <div class="field">
-        <label>Access Code</label>
-        <input type="text" name="access_code" placeholder="Enter your invite code" required
-               value="{{ request.form.get('access_code', '') }}">
-        <div class="code-note">Contact the operator for an invite code</div>
-      </div>
-      <div class="field">
-        <label>Full Name</label>
-        <input type="text" name="name" placeholder="Jane Smith" required
-               value="{{ request.form.get('name', '') }}">
-      </div>
-      <div class="field">
-        <label>Email</label>
-        <input type="email" name="email" placeholder="you@example.com" required
-               value="{{ request.form.get('email', '') }}">
-      </div>
-      <div class="field">
-        <label>Phone <span style="font-size:9px;color:rgba(255,255,255,0.3)">(optional)</span></label>
-        <input type="tel" name="phone" placeholder="+1 (555) 000-0000"
-               value="{{ request.form.get('phone', '') }}">
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>State</label>
-          <select name="state" required style="width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:7px;color:rgba(255,255,255,0.88);font-family:inherit;font-size:0.82rem">
-            <option value="">Select state...</option>
-            <option value="GA" {{ 'selected' if request.form.get('state') == 'GA' else '' }}>Georgia</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Zip Code</label>
-          <input type="text" name="zip_code" placeholder="30301" required pattern="[0-9]{5}"
-                 maxlength="5" value="{{ request.form.get('zip_code', '') }}">
-        </div>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label>Password</label>
-          <input type="password" name="password" placeholder="Min 8 characters" required minlength="8">
-        </div>
-        <div class="field">
-          <label>Confirm</label>
-          <input type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
-        </div>
-      </div>
-      <button class="submit-btn" type="submit">Request Access &rarr;</button>
-    </form>
-    {% endif %}
-    <a href="/" class="back-link">&larr; Back to Synthos</a>
-  </div>
-</div>
-<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
-</body>
-</html>
-"""
+# _SIGNUP_PAGE_HTML extracted 2026-04-23 → src/templates/signup.html
+# Tier 2 migration on feat/portal-v2 (extends base.html, uses static/js/pw-toggle.js).
 
 
 
@@ -1452,72 +1303,7 @@ def forgot_password_page():
                 log.error(f"Password reset error: {e}")
             submitted = True  # Always show success (don't reveal if email exists)
 
-    return render_template_string("""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Synthos — Reset Password</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-<style>
-  /* Self-hosted fonts (CSP-safe) — variable files cover all weights */
-  @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
-  @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
-  :root{
-    --bg:#0a0c14;--surface:#111520;--surface2:rgba(255,255,255,0.04);
-    --border:#1e2535;--border2:rgba(255,255,255,0.08);
-    --text:#e0ddd8;--muted:#556;--dim:rgba(255,255,255,0.18);
-    --teal:#00f5d4;--pink:#ff4b6e;
-    --sans:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px}
-  .wrap{
-    display:flex;align-items:center;justify-content:center;
-    min-height:100vh;padding:40px 20px;
-    background:radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0,245,212,0.05) 0%, transparent 60%);
-  }
-  .card{
-    width:100%;max-width:380px;
-    background:var(--surface);border:1px solid var(--border2);border-radius:16px;
-    padding:2rem;box-shadow:0 20px 60px rgba(0,0,0,0.5);
-  }
-  .logo{font-family:var(--mono);font-size:0.85rem;font-weight:600;letter-spacing:0.18em;color:var(--teal);text-align:center;margin-bottom:0.5rem;text-shadow:0 0 18px rgba(0,245,212,0.20)}
-  .title{font-size:1rem;font-weight:600;text-align:center;margin-bottom:0.3rem}
-  .sub{font-size:0.78rem;color:var(--muted);text-align:center;margin-bottom:1.5rem;line-height:1.6}
-  label{display:block;font-size:0.62rem;font-weight:500;letter-spacing:0.09em;text-transform:uppercase;color:var(--muted);margin-bottom:0.3rem}
-  input{font-family:var(--mono);font-size:0.82rem;width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;color:var(--text);margin-bottom:1rem}
-  input:focus{outline:none;border-color:rgba(0,245,212,0.25);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
-  input::placeholder{color:var(--dim)}
-  .btn{font-family:var(--mono);font-size:0.78rem;font-weight:600;width:100%;padding:0.65rem;background:rgba(0,245,212,0.12);color:var(--teal);border:1px solid rgba(0,245,212,0.18);border-radius:8px;cursor:pointer;transition:all .15s}
-  .btn:hover{background:rgba(0,245,212,0.18)}
-  .success{background:rgba(0,245,212,0.06);border:1px solid rgba(0,245,212,0.14);border-radius:8px;padding:0.75rem;font-size:0.82rem;color:var(--teal);text-align:center;line-height:1.6}
-  .back{display:block;text-align:center;margin-top:1.2rem;font-size:0.72rem;color:var(--muted);text-decoration:none}
-  .back:hover{color:var(--text)}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="card">
-    <div class="logo">SYNTHOS</div>
-    <div class="title">Reset Password</div>
-    <div class="sub">Enter your email address and we'll send you instructions to reset your password.</div>
-    {% if submitted %}
-      <div class="success">
-        If an account exists for that email, you'll receive reset instructions shortly.
-      </div>
-    {% else %}
-    <form method="POST" action="/forgot-password">
-      <label>Email</label>
-      <input type="email" name="email" placeholder="you@example.com" required>
-      <button class="btn" type="submit">Send Reset Instructions &rarr;</button>
-    </form>
-    {% endif %}
-    <a href="/" class="back">&larr; Back to Synthos</a>
-  </div>
-</div>
-</body>
-</html>""", submitted=submitted)
+    return render_template('forgot_password.html', submitted=submitted)
 
 
 @app.route('/signup', methods=['GET', 'POST'])
@@ -1565,7 +1351,7 @@ def signup_page():
                 log.error(f"Signup error: {e}")
                 error = "An unexpected error occurred. Please try again."
 
-    return render_template_string(_SIGNUP_PAGE_HTML, error=error, success=success)
+    return render_template('signup.html', error=error, success=success)
 
 
 # ── SIGNUP MANAGEMENT API (admin only) ────────────────────────────────────────
@@ -1765,179 +1551,12 @@ def notifications_page():
     """Full-page notification archive. Shows all categories (including the
     routine 'daily' / 'system' pings filtered out of the dashboard widget and
     bell dropdown). Supports category filter, unread-only toggle, pagination."""
-    return render_template_string(NOTIFICATIONS_PAGE_HTML)
+    return render_template('notifications.html')
 
 
-NOTIFICATIONS_PAGE_HTML = r"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8"><title>Notifications · Synthos</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{
-  --bg:#0a0b0f; --panel:rgba(20,22,30,0.7); --text:#e8ebf2; --muted:#9ba0ad;
-  --dim:#5a5f6b; --border:rgba(255,255,255,0.08); --teal:#00f5d4; --signal:#f5a623;
-  --violet:#7b61ff; --pink:#ff4b6e; --mono:'SF Mono','Menlo',monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;min-height:100vh;padding:32px 16px}
-.wrap{max-width:880px;margin:0 auto}
-header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
-h1{font-size:22px;font-weight:700;letter-spacing:-0.01em}
-.back{color:var(--teal);text-decoration:none;font-size:12px;font-weight:600}
-.back:hover{color:var(--signal)}
-.glass{background:var(--panel);border:1px solid var(--border);border-radius:12px;backdrop-filter:blur(12px)}
-.filters{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
-.filter-btn{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;font-weight:600;letter-spacing:0.04em;padding:6px 12px;border-radius:99px;cursor:pointer;transition:all 0.15s}
-.filter-btn:hover{color:var(--text);border-color:rgba(255,255,255,0.16)}
-.filter-btn.active{background:rgba(0,245,212,0.08);border-color:var(--teal);color:var(--teal)}
-.mark-read{margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:10px;padding:6px 10px;border-radius:99px;cursor:pointer}
-.mark-read:hover{color:var(--signal);border-color:var(--signal)}
-.list{padding:4px 0}
-.item{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;cursor:pointer;transition:background 0.1s}
-.item:hover{background:rgba(255,255,255,0.02)}
-.item:last-child{border-bottom:none}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--signal);flex-shrink:0;margin-top:7px;box-shadow:0 0 6px rgba(245,166,35,0.3)}
-.dot.read{background:transparent}
-.body{flex:1;min-width:0}
-.title{font-size:13px;font-weight:600;color:var(--text)}
-.preview{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}
-.meta{display:flex;gap:8px;align-items:center;margin-top:6px}
-.pill{font-size:8px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;padding:2px 7px;border-radius:99px}
-.pill.system{background:rgba(123,97,255,0.1);color:var(--violet)}
-.pill.daily{background:rgba(0,245,212,0.08);color:var(--teal)}
-.pill.account{background:rgba(245,166,35,0.08);color:var(--signal)}
-.pill.trade{background:rgba(0,245,212,0.08);color:var(--teal)}
-.pill.alert{background:rgba(255,75,110,0.08);color:var(--pink)}
-.pill.approval{background:rgba(245,166,35,0.12);color:var(--signal)}
-.time{font-size:9px;color:var(--dim);font-family:var(--mono)}
-.empty{text-align:center;padding:48px 16px;color:var(--dim);font-size:12px}
-.pager{padding:16px;display:flex;gap:10px;align-items:center;justify-content:center;border-top:1px solid var(--border)}
-.pager button{background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:6px 14px;border-radius:99px;cursor:pointer}
-.pager button:disabled{opacity:0.3;cursor:not-allowed}
-.pager button:not(:disabled):hover{color:var(--teal);border-color:var(--teal)}
-.pager-status{font-size:11px;color:var(--dim);font-family:var(--mono)}
-</style></head>
-<body><div class="wrap">
-<header>
-  <a class="back" href="/">← Dashboard</a>
-  <h1>Notifications</h1>
-</header>
-<div class="glass">
-  <div class="filters">
-    <button class="filter-btn active" data-cat="" onclick="setFilter(this,'')">All</button>
-    <button class="filter-btn" data-cat="trade" onclick="setFilter(this,'trade')">Trades</button>
-    <button class="filter-btn" data-cat="alert" onclick="setFilter(this,'alert')">Alerts</button>
-    <button class="filter-btn" data-cat="account" onclick="setFilter(this,'account')">Account</button>
-    <button class="filter-btn" data-cat="daily" onclick="setFilter(this,'daily')">Sessions</button>
-    <button class="filter-btn" data-cat="system" onclick="setFilter(this,'system')">System</button>
-    <button class="filter-btn" onclick="toggleUnread(this)">Unread only</button>
-    <button class="mark-read" onclick="markAllRead()">Mark all read</button>
-  </div>
-  <div class="list" id="list"><div class="empty">Loading…</div></div>
-  <div class="pager" id="pager" style="display:none">
-    <button id="prev" onclick="prevPage()">← Prev</button>
-    <span class="pager-status" id="pager-status">—</span>
-    <button id="next" onclick="nextPage()">Next →</button>
-  </div>
-</div>
-</div>
-<script>
-var _cat = '';
-var _unread = false;
-var _offset = 0;
-var _limit = 25;
-
-function _esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function _relTime(iso){
-  if(!iso)return'';
-  // DB timestamps are UTC-naive ("YYYY-MM-DD HH:MM:SS" with no TZ marker).
-  // Append 'Z' so JS treats them as UTC, not local.
-  var s=String(iso);
-  if(!s.includes('Z')&&!s.includes('+')&&!s.includes('-',10)) s=s.replace(' ','T')+'Z';
-  var d=new Date(s);
-  var secs=Math.floor((Date.now()-d.getTime())/1000);
-  if(secs<0)secs=0;
-  if(secs<60)return'just now';
-  if(secs<3600)return Math.floor(secs/60)+'m ago';
-  if(secs<86400)return Math.floor(secs/3600)+'h ago';
-  if(secs<604800)return Math.floor(secs/86400)+'d ago';
-  return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-}
-function setFilter(btn, cat){
-  document.querySelectorAll('.filter-btn[data-cat]').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  _cat = cat; _offset = 0; load();
-}
-function toggleUnread(btn){
-  _unread = !_unread; _offset = 0;
-  btn.classList.toggle('active', _unread);
-  load();
-}
-function prevPage(){_offset=Math.max(0,_offset-_limit);load();}
-function nextPage(){_offset+=_limit;load();}
-async function markAllRead(){
-  var body = {all: true};
-  if (_cat) body.category = _cat;
-  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  load();
-}
-async function markOne(id){
-  await fetch('/api/notifications/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
-  load();
-}
-async function load(){
-  var list = document.getElementById('list');
-  list.innerHTML = '<div class="empty">Loading…</div>';
-  try{
-    var qs = '?limit='+_limit+'&offset='+_offset;
-    if (_cat) qs += '&category='+_cat;
-    if (_unread) qs += '&unread_only=1';
-    var r = await fetch('/api/notifications'+qs);
-    var d = await r.json();
-    var items = d.notifications || [];
-    var total = d.total || 0;
-    if (!items.length){
-      list.innerHTML = '<div class="empty">'+(_unread?'No unread notifications':'No notifications')+'</div>';
-    } else {
-      list.innerHTML = items.map(function(n){
-        var pillCls = 'pill ' + (n.category||'system');
-        var dotCls = 'dot' + (n.is_read ? ' read' : '');
-        return '<div class="item" onclick="markOne('+n.id+')">'
-          + '<div class="'+dotCls+'"></div>'
-          + '<div class="body">'
-          + '<div class="title">'+_esc(n.title)+'</div>'
-          + (n.body ? '<div class="preview">'+_esc(n.body)+'</div>' : '')
-          + '<div class="meta">'
-          + '<span class="'+pillCls+'">'+(n.category||'system')+'</span>'
-          + '<span class="time">'+_relTime(n.created_at)+'</span>'
-          + '</div></div></div>';
-      }).join('');
-    }
-    // Pager
-    var pager = document.getElementById('pager');
-    var status = document.getElementById('pager-status');
-    var prev = document.getElementById('prev');
-    var next = document.getElementById('next');
-    if (total > _limit) {
-      pager.style.display = 'flex';
-      var shown_start = total ? _offset + 1 : 0;
-      var shown_end = Math.min(_offset + _limit, total);
-      status.textContent = shown_start + '–' + shown_end + ' of ' + total;
-      prev.disabled = _offset === 0;
-      next.disabled = (_offset + _limit) >= total;
-    } else {
-      pager.style.display = 'none';
-    }
-  }catch(e){
-    console.warn(e);
-    list.innerHTML = '<div class="empty">Failed to load notifications</div>';
-  }
-}
-load();
-setInterval(load, 30000);
-</script>
-</body></html>
-"""
+# NOTIFICATIONS_PAGE_HTML extracted 2026-04-23 → src/templates/notifications.html
+# Tier 2 migration on feat/portal-v2. Full page + JS kept inline in the template;
+# candidate for JS extraction later.
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -12360,58 +11979,8 @@ def get_news_feed_data(limit=100):
         return []
 
 
-NEWS_FEED_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="60">
-<title>Synthos — News Feed</title>
-<style>
-@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
-@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
-</style>
-<style>
-  :root{--bg:#faf8f4;--card:#fff;--border:#e8e0d0;--text:#1a1612;--muted:#7a7060;--mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:0.9rem;min-height:100vh}
-  header{display:flex;justify-content:space-between;align-items:center;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--card)}
-  .wordmark{font-family:var(--mono);font-size:0.8rem;letter-spacing:0.15em;text-transform:uppercase;font-weight:600}
-  .nav a{font-family:var(--mono);font-size:0.72rem;letter-spacing:0.08em;text-decoration:none;color:var(--muted);margin-left:20px}
-  .nav a:hover{color:var(--text)}
-  .page-title{padding:20px 28px 8px;font-family:var(--mono);font-size:0.85rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted)}
-  .subtitle{padding:0 28px 16px;font-size:0.78rem;color:var(--muted)}
-  .table-wrap{overflow-x:auto;padding:0 28px 40px}
-  table{width:100%;border-collapse:collapse;font-size:0.83rem}
-  th{font-family:var(--mono);font-size:0.68rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);padding:8px 12px;text-align:left;border-bottom:2px solid var(--border);white-space:nowrap}
-  td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
-  tr:hover td{background:#f5f2ec}
-  .score-HIGH{color:#1a6b3c;font-weight:600}
-  .score-MEDIUM{color:#7a5c00;font-weight:600}
-  .score-LOW{color:#7a3020;font-weight:600}
-  .score-NOISE{color:var(--muted)}
-  .ticker{font-family:var(--mono);font-weight:600}
-  .ts{font-family:var(--mono);font-size:0.75rem;color:var(--muted);white-space:nowrap}
-  .empty{text-align:center;padding:60px 0;color:var(--muted);font-family:var(--mono);font-size:0.8rem;letter-spacing:0.1em}
-  .refresh-note{font-family:var(--mono);font-size:0.7rem;color:var(--muted);text-align:right;padding:0 28px 8px}
-</style>
-</head>
-<body>
-<header>
-  <div class="wordmark">SYNTHOS NEWS FEED</div>
-  <div class="nav">
-    <a href="/">&#8592; Portal</a>
-    <a href="/news">&#8635; Refresh</a>
-    <a href="/logout">Sign out</a>
-  </div>
-</header>
-<div class="page-title">Signal Activity Feed</div>
-<div class="subtitle">All signals evaluated by the News agent — including WATCH and DISCARD decisions. Auto-refreshes every 60s.</div>
-<div class="refresh-note">Showing last {count} entries &middot; last updated {updated}</div>
-<div class="table-wrap">
-{table_content}
-</div>
-</body></html>"""
+# NEWS_FEED_HTML extracted 2026-04-23 → src/templates/news_feed.html
+# Tier 2 migration on feat/portal-v2. Light-themed; variables live in template.
 
 
 @app.route('/news')
@@ -12456,10 +12025,8 @@ def news_feed_page():
             )
         table_content = header + ''.join(body_rows) + '</tbody></table>'
 
-    html = NEWS_FEED_HTML.replace('{count}', str(len(rows)))
-    html = html.replace('{updated}', now_str)
-    html = html.replace('{table_content}', table_content)
-    return html
+    return render_template('news_feed.html', count=len(rows),
+                           updated=now_str, table_content=table_content)
 
 
 _article_meta_cache: dict = {}
