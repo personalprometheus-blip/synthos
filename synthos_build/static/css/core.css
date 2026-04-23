@@ -1,0 +1,175 @@
+/* ============================================================
+   core.css — Synthos design tokens + reset + shared primitives
+   ============================================================
+   Extracted 2026-04-23 from _SHARED_CSS in retail_portal.py
+   (feat/portal-v2 scaffolding). Loaded by every page via
+   base.html. Page-specific styles go in each template's
+   {% block inline_css %} or dedicated stylesheet.
+
+   Contents:
+     1. @font-face (Inter, JetBrains Mono — self-hosted, CSP-safe)
+     2. CSS reset (*, *::before, *::after)
+     3. :root design tokens (colors, typography, motion, shadows)
+     4. <body> defaults + link defaults
+     5. Password-toggle primitives (.pw-wrap, .pw-eye)
+   ============================================================ */
+
+/* ── Self-hosted fonts (CSP-safe) — variable files cover all weights ── */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('/static/fonts/Inter.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('/static/fonts/JetBrainsMono.woff2') format('woff2');
+}
+
+/* ── CSS reset ── */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 90%;
+    color-scheme: dark;
+}
+
+:root {
+    /* ── Surfaces ── */
+    --bg:       #0a0c14;
+    --surface:  #111520;
+    --surface2: #161b28;
+    --surface3: #1c2235;
+
+    /* ── Borders ── */
+    --border:  rgba(255, 255, 255, 0.07);
+    --border2: rgba(255, 255, 255, 0.13);
+    --border3: rgba(255, 255, 255, 0.20);
+
+    /* ── Text ── */
+    --text:  rgba(255, 255, 255, 0.88);
+    --muted: rgba(255, 255, 255, 0.40);
+    --dim:   rgba(255, 255, 255, 0.18);
+
+    /* ── Existing color names (preserved for compatibility) ── */
+    --teal:    #00f5d4;
+    --teal2:   rgba(0, 245, 212, 0.08);
+    --pink:    #ff4b6e;
+    --pink2:   rgba(255, 75, 110, 0.08);
+    --purple:  #7b61ff;
+    --purple2: rgba(123, 97, 255, 0.08);
+    --amber:   #f5a623;
+    --amber2:  rgba(245, 166, 35, 0.08);
+    --green:   #22c55e;
+
+    /* ── Semantic aliases (new — use for all new code) ── */
+    --cyan:        #00f5d4;
+    --cyan-dim:    rgba(0, 245, 212, 0.08);
+    --cyan-mid:    rgba(0, 245, 212, 0.09);
+    --cyan-glow:   rgba(0, 245, 212, 0.22);
+    --violet:      #7b61ff;
+    --violet-dim:  rgba(123, 97, 255, 0.08);
+    --violet-mid:  rgba(123, 97, 255, 0.09);
+    --violet-glow: rgba(123, 97, 255, 0.18);
+    --signal:      #f5a623;
+    --signal-dim:  rgba(245, 166, 35, 0.08);
+    --signal-mid:  rgba(245, 166, 35, 0.15);
+    --signal-glow: rgba(245, 166, 35, 0.18);
+    --red:         #ff4b6e;
+    --red-dim:     rgba(255, 75, 110, 0.08);
+    --red-mid:     rgba(255, 75, 110, 0.09);
+
+    /* ── Glow scale (use these, not ad-hoc box-shadows) ── */
+    --glow-hero:   0 0 20px rgba(0, 245, 212, 0.22);
+    --glow-active: 0 0 8px  rgba(0, 245, 212, 0.12);
+    --glow-dot:    0 0 5px  currentColor;
+
+    /* ── Shadow scale ── */
+    --shadow-card:  0 4px 16px  rgba(0, 0, 0, 0.3);
+    --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.6);
+
+    /* ── Typography scale ── */
+    --text-hero: 28px;
+    --text-xl:   20px;
+    --text-lg:   15px;
+    --text-base: 13px;
+    --text-sm:   11px;
+    --text-xs:   10px;
+    --text-xxs:  9px;
+
+    /* ── Fonts ── */
+    --sans: 'Inter', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+
+    /* ── Motion ── */
+    --pulse-live:  2s;
+    --pulse-alert: 3s;
+    --transition:  0.15s;
+}
+
+/* ── Body defaults ── */
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+/* ── Password-toggle primitives ──
+   The .pw-wrap/.pw-eye classes are applied by static/js/pw-toggle.js
+   to any <input type="password"> on the page. Ensures the SVG icon
+   stays tiny (18px) instead of rendering at container-default size. */
+.pw-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.pw-wrap input {
+    flex: 1;
+    padding-right: 36px !important;
+}
+.pw-eye {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    line-height: 1;
+    opacity: 0.4;
+    transition: opacity 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pw-eye:hover {
+    opacity: 0.8;
+}
+.pw-eye svg {
+    width: 18px;
+    height: 18px;
+    stroke: currentColor;
+    color: var(--muted);
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}

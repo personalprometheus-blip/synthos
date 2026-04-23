@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set title = "Email Verified" %}
+
+{% block inline_css %}
+  body { min-height: 100vh; display: flex; align-items: center;
+         justify-content: center; padding: 2rem; }
+  .card { max-width: 400px; background: var(--surface); border: 1px solid var(--border);
+          border-radius: 14px; padding: 2.5rem; text-align: center; }
+  .icon { font-size: 48px; margin-bottom: 1rem; color: var(--cyan); }
+  .t { font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--cyan); }
+  .s { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="icon">&#10003;</div>
+  <div class="t">Email Verified</div>
+  <div class="s">Your email has been confirmed. Your signup is pending admin review.</div>
+</div>
+{% endblock %}
