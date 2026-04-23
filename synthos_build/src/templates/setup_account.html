@@ -30,6 +30,23 @@
     .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
              padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
     .rule { font-size: 11px; color: #555; margin-top: -12px; margin-bottom: 20px; }
+    /* Bug-fix 2026-04-23: password-toggle icon styling was missing from
+       the original inline template (_SETUP_ACCOUNT_HTML). The JS creates
+       .pw-wrap/.pw-eye elements and the SVG had no width/height attrs,
+       so icons rendered at 100% container width. CSS copied from the
+       password-reset template's <style> block to fix the display bug.
+       TODO: extract to static/css/pw-toggle.css when DRYing portal CSS. */
+    .pw-wrap { position: relative; display: flex; align-items: center; }
+    .pw-wrap input { flex: 1; padding-right: 36px !important; }
+    .pw-eye { position: absolute; right: 10px; top: 50%;
+              transform: translateY(-50%); background: none; border: none;
+              cursor: pointer; padding: 2px; line-height: 1;
+              opacity: 0.4; transition: opacity .15s;
+              display: flex; align-items: center; justify-content: center; }
+    .pw-eye:hover { opacity: 0.8; }
+    .pw-eye svg { width: 18px; height: 18px; stroke: currentColor;
+                  color: #666; fill: none; stroke-width: 1.8;
+                  stroke-linecap: round; stroke-linejoin: round; }
   </style>
 </head>
 <body>
