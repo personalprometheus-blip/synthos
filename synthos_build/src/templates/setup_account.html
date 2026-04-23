@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synthos — Set Your Password</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
+            padding: 56px 48px; max-width: 420px; width: 100%; }
+    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
+                color: #fff; margin-bottom: 8px; text-align: center; }
+    .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
+               text-align: center; margin-bottom: 40px; }
+    h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+    p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
+    label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
+            text-transform: uppercase; margin-bottom: 6px; }
+    input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
+            padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 14px;
+            margin-bottom: 20px; outline: none; }
+    input:focus { border-color: #6b8cff; }
+    button { width: 100%; background: #4f46e5; color: #fff; border: none;
+             border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
+             font-weight: 600; cursor: pointer; letter-spacing: 1px; }
+    button:hover { background: #6b8cff; }
+    .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
+             padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
+    .rule { font-size: 11px; color: #555; margin-top: -12px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="tagline">Algorithmic Trading Platform</div>
+  <h2>Set your password</h2>
+  <p>Choose a strong password to complete your account setup.
+     You'll use this to log in at synth-cloud.com</p>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <label>Password</label>
+    <input type="password" name="password" autofocus autocomplete="new-password"
+           placeholder="At least 12 characters" minlength="12">
+    <div class="rule">Minimum 12 characters</div>
+    <label>Confirm Password</label>
+    <input type="password" name="confirm" autocomplete="new-password"
+           placeholder="Re-enter your password">
+    <button type="submit">ACTIVATE ACCOUNT →</button>
+  </form>
+</div>
+<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verification Failed</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{min-height:100vh;background:#0a0c14;color:rgba(255,255,255,0.88);
+       font-family:Inter,sans-serif;display:flex;align-items:center;
+       justify-content:center;padding:2rem}
+  .card{max-width:400px;background:#111520;border:1px solid rgba(255,255,255,0.07);
+        border-radius:14px;padding:2.5rem;text-align:center}
+  .icon{font-size:48px;margin-bottom:1rem;color:#ff4b6e}
+  .t{font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:#ff4b6e}
+  .s{font-size:.85rem;color:rgba(255,255,255,0.5);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#10007;</div>
+  <div class="t">Verification Failed</div>
+  <div class="s">{{ error_msg }}</div>
+</div>
+</body>
+</html>

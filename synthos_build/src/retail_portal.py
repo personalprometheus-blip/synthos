@@ -425,7 +425,7 @@ def construction_required(f):
         if not CONSTRUCTION_MODE:
             return f(*args, **kwargs)
         if not is_admin():
-            return render_template_string(_CONSTRUCTION_PAGE_HTML), 200
+            return render_template('construction.html'), 200
         if not session.get('construction_unlocked'):
             session['construction_redirect'] = request.path
             return redirect('/admin/construction-verify')
@@ -2086,266 +2086,32 @@ def terms_post():
 # when session['access_reason'] == 'grace_period'.
 
 
-_CONSTRUCTION_PAGE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Synthos — Coming Soon</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
-           display: flex; align-items: center; justify-content: center;
-           min-height: 100vh; }
-    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
-    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-                color: #fff; margin-bottom: 12px; }
-    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
-    .status { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
-              padding: 24px; margin-bottom: 32px; }
-    .dot { width: 10px; height: 10px; background: #f59e0b; border-radius: 50%;
-           display: inline-block; margin-right: 8px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
-    .status-text { font-size: 15px; color: #ccc; }
-    .sub { color: #666; font-size: 12px; margin-top: 24px; line-height: 1.6; }
-  </style>
-</head>
-<body>
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Algorithmic Trading Platform</div>
-  <div class="status">
-    <span class="dot"></span>
-    <span class="status-text">Platform launching soon</span>
-  </div>
-  <p class="sub">
-    We're putting the finishing touches on things.<br>
-    Check back shortly — or email us at synthos.signal@gmail.com<br>
-    to be notified when we go live.
-  </p>
-</div>
-</body>
-</html>"""
+# _CONSTRUCTION_PAGE_HTML extracted 2026-04-23 → src/templates/construction.html
+# (patch/2026-04-22-portal-template-extraction). No Jinja variables used;
+# static coming-soon page gating the customer acquisition pipeline.
 
 
-_CHECK_EMAIL_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Synthos — Check Your Email</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
-    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-                color: #fff; margin-bottom: 12px; }
-    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
-    .icon { font-size: 48px; margin-bottom: 24px; }
-    h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #e0e0e0; }
-    p { color: #999; font-size: 13px; line-height: 1.7; margin-bottom: 12px; }
-    .note { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
-            padding: 16px; margin-top: 24px; font-size: 12px; color: #666; }
-    a { color: #6b8cff; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-  </style>
-</head>
-<body>
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Algorithmic Trading Platform</div>
-  <div class="icon">📬</div>
-  <h2>Check your inbox</h2>
-  <p>We've sent a setup link to your email address.<br>
-     Click the link to activate your account.</p>
-  <p>The link expires in 48 hours.</p>
-  <div class="note">
-    Didn't receive it? Check your spam folder, or
-    <a href="mailto:synthos.signal@gmail.com">contact support</a>.
-  </div>
-</div>
-</body>
-</html>"""
+# _CHECK_EMAIL_HTML extracted 2026-04-23 → src/templates/check_email.html
+# Post-signup holding page shown after account creation. No Jinja vars.
 
 
-_SETUP_ACCOUNT_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Synthos — Set Your Password</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 56px 48px; max-width: 420px; width: 100%; }
-    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-                color: #fff; margin-bottom: 8px; text-align: center; }
-    .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
-               text-align: center; margin-bottom: 40px; }
-    h2 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
-    p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
-    label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
-            text-transform: uppercase; margin-bottom: 6px; }
-    input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
-            padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 14px;
-            margin-bottom: 20px; outline: none; }
-    input:focus { border-color: #6b8cff; }
-    button { width: 100%; background: #4f46e5; color: #fff; border: none;
-             border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
-             font-weight: 600; cursor: pointer; letter-spacing: 1px; }
-    button:hover { background: #6b8cff; }
-    .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
-             padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
-    .rule { font-size: 11px; color: #555; margin-top: -12px; margin-bottom: 20px; }
-  </style>
-</head>
-<body>
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Algorithmic Trading Platform</div>
-  <h2>Set your password</h2>
-  <p>Choose a strong password to complete your account setup.
-     You'll use this to log in at synth-cloud.com</p>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  <form method="POST">
-    <label>Password</label>
-    <input type="password" name="password" autofocus autocomplete="new-password"
-           placeholder="At least 12 characters" minlength="12">
-    <div class="rule">Minimum 12 characters</div>
-    <label>Confirm Password</label>
-    <input type="password" name="confirm" autocomplete="new-password"
-           placeholder="Re-enter your password">
-    <button type="submit">ACTIVATE ACCOUNT →</button>
-  </form>
-</div>
-<script>document.querySelectorAll('input[type="password"]').forEach(function(inp){if(inp.parentElement.classList.contains('pw-wrap'))return;var wrap=document.createElement('div');wrap.className='pw-wrap';inp.parentNode.insertBefore(wrap,inp);wrap.appendChild(inp);var btn=document.createElement('button');btn.type='button';btn.className='pw-eye';btn.tabIndex=-1;btn.innerHTML='<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.onclick=function(){var t=inp.type==='password'?'text':'password';inp.type=t;btn.innerHTML=t==='text'?'<svg viewBox=\"0 0 24 24\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"/></svg>':'<svg viewBox=\"0 0 24 24\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>';btn.style.opacity=t==='text'?'0.7':'0.4';};wrap.appendChild(btn);});</script>
-</body>
-</html>"""
+# _SETUP_ACCOUNT_HTML extracted 2026-04-23 → src/templates/setup_account.html
+# Password-setup form used by /setup-account/<token>. Renders with error kwarg.
 
 
-_SUBSCRIBE_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Synthos — Subscribe</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
-    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-                color: #fff; margin-bottom: 12px; }
-    .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
-    .notice { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
-              padding: 24px; margin-bottom: 24px; }
-    .notice p { color: #ccc; font-size: 14px; line-height: 1.7; }
-    .reason { background: #2a1a00; border: 1px solid #7a4a00; border-radius: 8px;
-              padding: 14px 18px; font-size: 13px; color: #f59e0b; margin-bottom: 24px; }
-    a { color: #6b8cff; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .sub { color: #555; font-size: 12px; margin-top: 24px; }
-  </style>
-</head>
-<body>
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Algorithmic Trading Platform</div>
-  {% if reason == 'past_due' %}
-  <div class="reason">⚠ Payment required — your grace period has ended</div>
-  {% elif reason == 'cancelled' %}
-  <div class="reason">Your subscription has been cancelled</div>
-  {% else %}
-  <div class="reason">A subscription is required to access the platform</div>
-  {% endif %}
-  <div class="notice">
-    <p>Subscription management is coming soon.<br>
-       Contact <a href="mailto:synthos.signal@gmail.com">synthos.signal@gmail.com</a>
-       to reactivate your account or for billing questions.</p>
-  </div>
-  <p class="sub"><a href="/login">← Back to login</a></p>
-</div>
-</body>
-</html>"""
+# _SUBSCRIBE_HTML extracted 2026-04-23 → src/templates/subscribe.html
+# Subscription-gate page for /subscribe. Renders with reason kwarg
+# (past_due | cancelled | default).
 
 
-_CONSTRUCTION_VERIFY_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Synthos — Construction Access</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace;
-           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-            padding: 56px 48px; max-width: 420px; width: 100%; }
-    .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-                color: #fff; margin-bottom: 8px; text-align: center; }
-    .tagline { color: #888; font-size: 13px; letter-spacing: 2px;
-               text-align: center; margin-bottom: 40px; }
-    h2 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
-    p { color: #888; font-size: 12px; margin-bottom: 28px; line-height: 1.6; }
-    label { display: block; font-size: 11px; letter-spacing: 1px; color: #666;
-            text-transform: uppercase; margin-bottom: 6px; }
-    input { width: 100%; background: #1e1e2e; border: 1px solid #333; border-radius: 6px;
-            padding: 12px 14px; color: #e0e0e0; font-family: inherit; font-size: 20px;
-            letter-spacing: 8px; text-align: center; margin-bottom: 20px; outline: none; }
-    input:focus { border-color: #f59e0b; }
-    .send-btn { background: none; border: 1px solid #444; border-radius: 6px;
-                padding: 10px 16px; color: #888; font-family: inherit; font-size: 12px;
-                cursor: pointer; margin-bottom: 20px; width: 100%; }
-    .send-btn:hover { border-color: #666; color: #ccc; }
-    button[type=submit] { width: 100%; background: #92400e; color: #fff; border: none;
-             border-radius: 6px; padding: 13px; font-family: inherit; font-size: 14px;
-             font-weight: 600; cursor: pointer; letter-spacing: 1px; }
-    button[type=submit]:hover { background: #b45309; }
-    .error { background: #2a1515; border: 1px solid #7f2020; border-radius: 6px;
-             padding: 12px; color: #f87171; font-size: 13px; margin-bottom: 20px; }
-    .info { background: #1a1a2e; border: 1px solid #333; border-radius: 6px;
-            padding: 12px; color: #6b8cff; font-size: 13px; margin-bottom: 20px; }
-  </style>
-</head>
-<body>
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Construction Access</div>
-  <h2>Admin verification required</h2>
-  <p>This route is under construction. An access code has been sent to the admin
-     email address. Enter the 6-digit code below to proceed.</p>
-  {% if error %}<div class="error">{{ error }}</div>{% endif %}
-  {% if sent %}<div class="info">✓ Code sent to admin email — valid for 10 minutes</div>{% endif %}
-  <form method="POST">
-    <label>Access Code</label>
-    <input type="text" name="otp" autofocus maxlength="6" placeholder="000000"
-           inputmode="numeric" autocomplete="one-time-code">
-    <button type="submit">VERIFY →</button>
-  </form>
-  <br>
-  <form method="POST" action="/admin/construction-send-otp">
-    <button type="submit" class="send-btn">Resend code to admin email</button>
-  </form>
-</div>
-</body>
-</html>"""
+# _CONSTRUCTION_VERIFY_HTML extracted 2026-04-23 → src/templates/construction_verify.html
+# Admin OTP gate for construction-mode routes. Renders with error + sent kwargs.
 
 
 @app.route('/check-email')
 def check_email_page():
     """Holding page shown after account creation — instructs customer to check inbox."""
-    return render_template_string(_CHECK_EMAIL_HTML), 200
+    return render_template('check_email.html'), 200
 
 
 @app.route('/setup-account/<token>', methods=['GET', 'POST'])
@@ -2357,7 +2123,7 @@ def setup_account(token):
     """
     customer = auth.consume_verify_token(token)
     if not customer:
-        return render_template_string(_SETUP_ACCOUNT_HTML,
+        return render_template('setup_account.html',
                                       error="This setup link is invalid or has expired. "
                                             "Contact support for a new link."), 400
 
@@ -2366,10 +2132,10 @@ def setup_account(token):
         confirm  = request.form.get('confirm', '')
 
         if len(password) < 12:
-            return render_template_string(_SETUP_ACCOUNT_HTML,
+            return render_template('setup_account.html',
                                           error="Password must be at least 12 characters.")
         if password != confirm:
-            return render_template_string(_SETUP_ACCOUNT_HTML,
+            return render_template('setup_account.html',
                                           error="Passwords do not match.")
 
         try:
@@ -2378,52 +2144,17 @@ def setup_account(token):
             return redirect('/login?activated=1')
         except Exception as e:
             log.error(f"Account activation failed: {e}")
-            return render_template_string(_SETUP_ACCOUNT_HTML,
+            return render_template('setup_account.html',
                                           error="Activation failed — please try again or contact support.")
 
-    return render_template_string(_SETUP_ACCOUNT_HTML, error=None)
+    return render_template('setup_account.html', error=None)
 
 
 # Email verification result pages
-_VERIFY_SUCCESS_HTML = (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
-    '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    '<title>Email Verified</title>'
-    '<style>*{box-sizing:border-box;margin:0;padding:0}'
-    'body{min-height:100vh;background:#0a0c14;color:rgba(255,255,255,0.88);'
-    'font-family:Inter,sans-serif;display:flex;align-items:center;'
-    'justify-content:center;padding:2rem}'
-    '.card{max-width:400px;background:#111520;border:1px solid rgba(255,255,255,0.07);'
-    'border-radius:14px;padding:2.5rem;text-align:center}'
-    '.icon{font-size:48px;margin-bottom:1rem;color:#00f5d4}'
-    '.t{font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:#00f5d4}'
-    '.s{font-size:.85rem;color:rgba(255,255,255,0.5);line-height:1.6}'
-    '</style></head><body><div class="card">'
-    '<div class="icon">&#10003;</div>'
-    '<div class="t">Email Verified</div>'
-    '<div class="s">Your email has been confirmed. Your signup is pending admin review.</div>'
-    '</div></body></html>'
-)
-
-_VERIFY_ERROR_HTML = (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
-    '<meta name="viewport" content="width=device-width,initial-scale=1">'
-    '<title>Verification Failed</title>'
-    '<style>*{box-sizing:border-box;margin:0;padding:0}'
-    'body{min-height:100vh;background:#0a0c14;color:rgba(255,255,255,0.88);'
-    'font-family:Inter,sans-serif;display:flex;align-items:center;'
-    'justify-content:center;padding:2rem}'
-    '.card{max-width:400px;background:#111520;border:1px solid rgba(255,255,255,0.07);'
-    'border-radius:14px;padding:2.5rem;text-align:center}'
-    '.icon{font-size:48px;margin-bottom:1rem;color:#ff4b6e}'
-    '.t{font-size:1.2rem;font-weight:700;margin-bottom:.5rem;color:#ff4b6e}'
-    '.s{font-size:.85rem;color:rgba(255,255,255,0.5);line-height:1.6}'
-    '</style></head><body><div class="card">'
-    '<div class="icon">&#10007;</div>'
-    '<div class="t">Verification Failed</div>'
-    '<div class="s">ERROR_MSG</div>'
-    '</div></body></html>'
-)
+# _VERIFY_SUCCESS_HTML + _VERIFY_ERROR_HTML extracted 2026-04-23 →
+# src/templates/verify_success.html + src/templates/verify_error.html
+# Error template upgraded from .replace('ERROR_MSG', ...) hack to proper
+# Jinja {{ error_msg }} variable; callsites updated to pass error_msg kwarg.
 
 
 @app.route('/verify-email/<token>')
@@ -2441,12 +2172,13 @@ def verify_email(token):
                 _notify_admin_new_customer(result.get("name", ""), result.get("email", ""))
             except Exception as _ne:
                 log.warning(f"Admin notification after verify failed: {_ne}")
-        return _VERIFY_SUCCESS_HTML
+        return render_template('verify_success.html')
     except ValueError as e:
         # Not a signup verification token — try setup-account redirect (legacy)
         return redirect(f'/setup-account/{token}')
     except Exception as e:
-        return _VERIFY_ERROR_HTML.replace("ERROR_MSG", "An unexpected error occurred."), 500
+        return render_template('verify_error.html',
+                               error_msg="An unexpected error occurred."), 500
 
 
 @app.route('/subscribe')
@@ -2459,8 +2191,8 @@ def subscribe_page():
     """
     reason = request.args.get('reason', 'inactive')
     if CONSTRUCTION_MODE and not (is_authenticated() and is_admin()):
-        return render_template_string(_CONSTRUCTION_PAGE_HTML), 200
-    return render_template_string(_SUBSCRIBE_HTML, reason=reason)
+        return render_template('construction.html'), 200
+    return render_template('subscribe.html', reason=reason)
 
 
 def _verify_stripe_signature(payload, sig_header):
@@ -2696,7 +2428,7 @@ def construction_verify():
             else:
                 error = "Incorrect or expired code. Request a new one below."
 
-    return render_template_string(_CONSTRUCTION_VERIFY_HTML, error=error, sent=sent)
+    return render_template('construction_verify.html', error=error, sent=sent)
 
 
 @app.route('/admin/construction-send-otp', methods=['POST'])
