@@ -42,4 +42,7 @@ echo "  Browse:  http://localhost:$PORT/"
 echo "─────────────────────────────────────────────────"
 
 cd "$REPO_ROOT/synthos_build/src"
-exec env PORTAL_PORT=$PORT "$VENV/bin/python" retail_portal.py
+# HTTPS_ONLY=false — dev server runs on http://localhost so session cookies
+# must NOT be Secure-flagged (browser would drop them and login wouldn't persist).
+# Production pi5 runs behind Cloudflare HTTPS where Secure is correct.
+exec env PORTAL_PORT=$PORT HTTPS_ONLY=false "$VENV/bin/python" retail_portal.py

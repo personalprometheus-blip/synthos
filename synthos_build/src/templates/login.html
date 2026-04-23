@@ -56,6 +56,19 @@
     padding: 1.25rem 2.5rem; border-top: 1px solid var(--border);
     text-align: center; font-size: 0.72rem; color: var(--dim);
   }
+  .forgot-row {
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.78rem;
+    font-family: var(--mono);
+  }
+  .forgot-row a {
+    color: var(--muted);
+    text-decoration: none;
+    letter-spacing: 0.04em;
+    transition: color 0.15s;
+  }
+  .forgot-row a:hover { color: var(--accent); }
 {% endblock %}
 
 {% block content %}
@@ -80,6 +93,9 @@
       <input type="password" name="password" autocomplete="current-password" placeholder="••••••••">
       <button class="btn-submit" type="submit">Sign In →</button>
     </form>
+    <div class="forgot-row">
+      <a href="/forgot-password">Forgot password?</a>
+    </div>
   </div>
 </div>
 <footer>Algorithmic trading involves risk. Past performance does not guarantee future results.</footer>

@@ -17,3 +17,11 @@ synthos_build/logs/daily_master/
 synthos_build/logs/tier_readout/
 .obsidian/
 .venv-*
+
+# Customer data — NEVER commit. Pulled locally for dev iteration only.
+# Each Pi maintains its own data dir; committing would leak encrypted PII.
+synthos_build/data/customers/
+synthos_build/data/auth.db
+synthos_build/data/auth.db-journal
+synthos_build/data/auth.db-wal
+synthos_build/data/auth.db-shm

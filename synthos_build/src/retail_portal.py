@@ -308,6 +308,14 @@ app.config['SESSION_COOKIE_SAMESITE']   = 'Strict'      # blocks cross-site requ
 app.config['SESSION_COOKIE_NAME']        = 'synthos_s'  # non-default name
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 
+# ── JINJA2 TEMPLATE AUTO-RELOAD ────────────────────────────────────────────
+# Flask defaults TEMPLATES_AUTO_RELOAD=False unless debug mode is on. On local
+# dev (HTTPS_ONLY=false — set by scripts/dev_portal.sh), enable reload so
+# template edits land without a portal restart. Prod pi5 leaves this False —
+# gunicorn workers get restarted explicitly on deploy anyway.
+if os.environ.get('HTTPS_ONLY', 'true').lower() == 'false':
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+
 # ── SESSION ACTIVITY TRACKING ──────────────────────────────────────────────
 import threading as _threading
 from collections import deque as _deque
