@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% set title = "File Manager" %}
+
+{% block inline_css %}
+@font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
+{% endblock %}
+
+{% block content %}
+<header class="header">
+  <div class="wordmark">SYNTHOS</div>
+  <div class="nav">
+    <a href="/">&#8592; Portal</a>
+  </div>
+</header>
+
+<div class="page">
+  <div class="title">File <span>Manager</span></div>
+  <div class="subtitle">{{ pi_id }} &middot; {{ project_dir }} &middot; Drop files here to update the Pi directly &mdash; no git required</div>
+
+  <!-- DROP ZONE -->
+  <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+    <div class="drop-icon">&#8659;</div>
+    <div class="drop-title">Drop files here to upload to Pi</div>
+    <div class="drop-sub">
+      Supports .py .sh .md .html .txt .json files<br>
+      Multiple files OK &mdash; portal.py will restart the portal automatically
+    </div>
+    <button class="drop-btn" onclick="event.stopPropagation();document.getElementById('file-input').click()">
+      Choose Files
+    </button>
+    <input type="file" id="file-input" multiple accept=".py,.sh,.md,.html,.txt,.json">
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="sec-label">Uploading</div>
+    <div id="progress-list"></div>
+  </div>
+
+  <!-- RESULT -->
+  <div class="result-banner" id="result-banner"></div>
+  <div class="result-banner" id="git-note" style="display:none;margin-top:6px"></div>
+
+  <!-- RESTART NOTE -->
+  <div class="restart-note" id="restart-note" style="display:none">
+    &#9881; portal.py was updated &mdash; portal is restarting. Page will reload in 8 seconds.
+  </div>
+
+  <!-- FILE LIST -->
+  <div class="sec-label" style="margin-top:8px">Current files on Pi</div>
+  <div class="file-grid">
+    <div class="fh">File</div>
+    <div class="fh">Size</div>
+    <div class="fh">Modified</div>
+    {% for f in files %}
+    <div class="fr">
+      <div class="fc">
+        <div class="ftype ft-{{ f.type }}"></div>
+        <span class="fname">{{ f.name }}</span>
+        {% if f.managed %}<span class="fmanaged">managed</span>{% endif %}
+      </div>
+      <div class="fsize">{{ (f.size / 1024) | round(1) }}k</div>
+      <div class="fmtime" title="{{ f.mtime }}">
+        {{ f.mtime | int | timestamp_to_date }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+// Drag and drop handlers
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  uploadFiles(Array.from(e.dataTransfer.files));
+});
+fileInput.addEventListener('change', () => uploadFiles(Array.from(fileInput.files)));
+
+async function uploadFiles(files) {
+  if (!files.length) return;
+
+  const wrap  = document.getElementById('progress-wrap');
+  const list  = document.getElementById('progress-list');
+  const banner = document.getElementById('result-banner');
+  const note  = document.getElementById('restart-note');
+
+  wrap.style.display = 'block';
+  banner.style.display = 'none';
+  note.style.display = 'none';
+  list.innerHTML = '';
+
+  // Show progress items
+  files.forEach(f => {
+    list.innerHTML += '<div class="progress-item" id="prog-' + CSS.escape(f.name) + '">'
+      + '<div class="ftype ft-' + (f.name.endsWith('.py')?'py':f.name.endsWith('.sh')?'sh':'other') + '"></div>'
+      + '<div class="prog-name">' + f.name + '</div>'
+      + '<div class="prog-bar"><div class="prog-fill" id="fill-' + CSS.escape(f.name) + '" style="width:0%"></div></div>'
+      + '<div class="prog-status ps-wait" id="stat-' + CSS.escape(f.name) + '">waiting</div>'
+    + '</div>';
+  });
+
+  // Animate to 70% while uploading
+  files.forEach(f => {
+    const fill = document.getElementById('fill-' + CSS.escape(f.name));
+    const stat = document.getElementById('stat-' + CSS.escape(f.name));
+    if (fill) fill.style.width = '70%';
+    if (stat) { stat.textContent = 'uploading'; stat.className = 'prog-status ps-wait'; }
+  });
+
+  const form = new FormData();
+  files.forEach(f => form.append('files', f));
+
+  try {
+    const r = await fetch('/api/files/upload', { method: 'POST', body: form });
+    const d = await r.json();
+
+    // Update progress items
+    files.forEach(f => {
+      const fill = document.getElementById('fill-' + CSS.escape(f.name));
+      const stat = document.getElementById('stat-' + CSS.escape(f.name));
+      const ok   = d.uploaded.includes(f.name);
+      if (fill) fill.style.width = '100%';
+      if (fill) fill.style.background = ok ? 'linear-gradient(90deg,#7b61ff,#00f5d4)' : '#ff4b6e';
+      if (stat) { stat.textContent = ok ? 'done' : 'error'; stat.className = 'prog-status ' + (ok ? 'ps-ok' : 'ps-err'); }
+    });
+
+    // Result banner
+    banner.style.display = 'block';
+    if (d.ok) {
+      banner.className = 'result-banner rb-ok';
+      banner.textContent = '\\u2713 ' + d.uploaded.length + ' file' + (d.uploaded.length===1?'':'s') + ' uploaded to Pi: ' + d.uploaded.join(', ');
+    } else {
+      banner.className = 'result-banner rb-err';
+      banner.textContent = d.uploaded.length + ' uploaded, ' + d.errors.length + ' failed: ' + d.errors.join('; ');
+    }
+
+    // GitHub sync result
+    const gitNote = document.getElementById('git-note');
+    if (gitNote && d.git) {
+      gitNote.style.display = 'block';
+      gitNote.className = d.git.ok ? 'result-banner rb-ok' : 'result-banner rb-err';
+      gitNote.textContent = (d.git.ok ? '\\u2197 GitHub: ' : '\\u26a0 GitHub: ') + d.git.message;
+    }
+
+    // Portal restart
+    if (d.restart) {
+      note.style.display = 'block';
+      setTimeout(() => location.href = '/', 8000);
+    }
+
+    // Reset input
+    fileInput.value = '';
+
+  } catch(e) {
+    banner.style.display = 'block';
+    banner.className = 'result-banner rb-err';
+    banner.textContent = 'Upload failed: ' + e.message;
+    if (e.message.includes('Failed to fetch')) {
+      note.style.display = 'block';
+      setTimeout(() => location.href = '/', 6000);
+    }
+  }
+}
+</script>
+{% endblock %}
