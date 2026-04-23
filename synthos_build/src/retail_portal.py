@@ -322,7 +322,13 @@ from collections import deque as _deque
 
 _session_activity = {}           # {customer_id: {last_activity: datetime, ip: str}}
 _session_activity_lock = _threading.Lock()
-_CUSTOMER_TIMEOUT = timedelta(minutes=15)
+# Non-admin inactivity auto-logout window. Set via CUSTOMER_SESSION_TIMEOUT_MINUTES
+# env var (default 15). Set to 0 to disable the inactivity check entirely —
+# sessions then last until the 8-hour cookie expiry regardless of idle time.
+# Used during travel / extended remote work where tab-switching triggers
+# false logouts.
+_TIMEOUT_MINUTES = int(os.environ.get('CUSTOMER_SESSION_TIMEOUT_MINUTES', '15'))
+_CUSTOMER_TIMEOUT = timedelta(minutes=_TIMEOUT_MINUTES)
 _session_hourly = _deque(maxlen=1440)   # (iso_minute, active_count, [customer_names]) per-minute for 24h
 
 
@@ -710,8 +716,10 @@ def check_auth():
 
         with _session_activity_lock:
             _prev = _session_activity.get(_cid)
-            # Non-admin: auto-logout after 15 min of no ACTIVE requests
-            if _prev and session.get('role') != 'admin':
+            # Non-admin: auto-logout after the configured idle window.
+            # Skip entirely when _TIMEOUT_MINUTES == 0 (explicitly disabled).
+            if (_TIMEOUT_MINUTES > 0
+                    and _prev and session.get('role') != 'admin'):
                 _elapsed = (_now - _prev['last_activity']).total_seconds()
                 if _elapsed > _CUSTOMER_TIMEOUT.total_seconds():
                     _session_activity.pop(_cid, None)
