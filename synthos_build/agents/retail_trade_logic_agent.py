@@ -214,6 +214,18 @@ class TradingControls:
     MEAN_REV_ZSCORE           = float(os.environ.get('MEAN_REV_ZSCORE', '-1.5'))
     BREAKOUT_LOOKBACK         = int(os.environ.get('BREAKOUT_LOOKBACK', '20'))
     PULLBACK_RETRACE_PCT      = float(os.environ.get('PULLBACK_RETRACE_PCT', '0.05'))
+    # Anchor-proximity chase caps (2026-04-23). Each entry type uses a
+    # historical anchor already computed inside gate6_entry (MA20, rolling
+    # breakout high, rolling mean, recent 10-day high). These caps reject
+    # entries where current price has already run too far above the anchor —
+    # i.e. block "chasing peaks" after a move has already happened.
+    # 7-day audit of owner account found no explicit anchor-proximity gate
+    # on MOMENTUM or BREAKOUT paths — this closes that.
+    # Set a value to 999 (basically unbounded) to disable a given cap while
+    # keeping the anchor logging for post-hoc analysis.
+    MAX_MOMENTUM_CHASE_PCT    = float(os.environ.get('MAX_MOMENTUM_CHASE_PCT', '0.02'))   # 2% above MA20
+    MAX_BREAKOUT_CHASE_PCT    = float(os.environ.get('MAX_BREAKOUT_CHASE_PCT', '0.015'))  # 1.5% above breakout level
+    MAX_MEANREV_CHASE_PCT     = float(os.environ.get('MAX_MEANREV_CHASE_PCT', '0.01'))    # 1% above rolling mean (belt-and-suspenders; z-score also gates)
 
     # Sizing (Gate 7)
     BASE_RISK_PER_TRADE       = float(os.environ.get('BASE_RISK_PER_TRADE', '0.01'))
@@ -1877,50 +1889,98 @@ def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
     roc     = (current - closes[-6]) / closes[-6] if len(closes) >= 6 else 0
 
     candidates = []
+    # Collect chase-rejections so we can log aggregate context on WATCH exit —
+    # helps the post-hoc audit see which caps are firing and how often.
+    rejected_chase = []
 
     # Momentum: price > MA AND ROC > threshold
     # Disabled in BEAR regime
+    # Anchor: MA20. Chase cap rejects entries > MAX_MOMENTUM_CHASE_PCT above anchor.
     if regime.trend != "BEAR":
         momentum_ok = current > ma20 and roc >= C.MOMENTUM_ROC_THRESHOLD
         if momentum_ok:
-            candidates.append({"type": "MOMENTUM", "score": score * 1.0,
-                                "detail": f"price ${current:.2f} > MA20 ${ma20:.2f}, ROC {roc*100:.2f}%"})
+            chase_pct = (current - ma20) / ma20 if ma20 > 0 else 0
+            if chase_pct <= C.MAX_MOMENTUM_CHASE_PCT:
+                candidates.append({
+                    "type": "MOMENTUM", "score": score * 1.0,
+                    "anchor_type": "MA20", "anchor_price": ma20, "chase_pct": chase_pct,
+                    "detail": f"price ${current:.2f} > MA20 ${ma20:.2f} (chase {chase_pct*100:.2f}%), ROC {roc*100:.2f}%",
+                })
+            else:
+                rejected_chase.append(f"MOMENTUM: price ${current:.2f} is {chase_pct*100:.2f}% above MA20 ${ma20:.2f} "
+                                      f"(cap {C.MAX_MOMENTUM_CHASE_PCT*100:.1f}%)")
 
     # Mean-reversion: z-score(price, mean) < -threshold
     # Only in SIDEWAYS regime
+    # Anchor: 20-day rolling mean. z-score already anti-chase; cap is belt-and-suspenders.
     if regime.trend == "SIDEWAYS" and len(closes) >= 20:
         mean = sum(closes[-20:]) / 20
         std  = (sum((c - mean)**2 for c in closes[-20:]) / 20) ** 0.5
         z    = (current - mean) / std if std > 0 else 0
         if z <= C.MEAN_REV_ZSCORE:
-            candidates.append({"type": "MEAN_REVERSION", "score": score * 0.9,
-                                "detail": f"z-score {z:.2f} ≤ threshold {C.MEAN_REV_ZSCORE}"})
+            chase_pct = (current - mean) / mean if mean > 0 else 0
+            # Mean-rev usually enters BELOW anchor (z < 0 → price < mean → chase_pct < 0).
+            # Only reject if somehow above mean by >cap (unusual but possible if z
+            # threshold is relaxed). Normal path: chase_pct is negative, cap trivially passes.
+            if chase_pct <= C.MAX_MEANREV_CHASE_PCT:
+                candidates.append({
+                    "type": "MEAN_REVERSION", "score": score * 0.9,
+                    "anchor_type": "MEAN20", "anchor_price": mean, "chase_pct": chase_pct,
+                    "detail": f"z-score {z:.2f} ≤ threshold {C.MEAN_REV_ZSCORE}, anchor mean ${mean:.2f}",
+                })
+            else:
+                rejected_chase.append(f"MEAN_REVERSION: price ${current:.2f} is {chase_pct*100:.2f}% above mean ${mean:.2f} "
+                                      f"(cap {C.MAX_MEANREV_CHASE_PCT*100:.1f}%)")
 
     # Breakout: price > rolling N-period high
     # Disabled in SIDEWAYS regime
+    # Anchor: N-day rolling high (the breakout level). Chase cap rejects breakouts
+    # that have already run > MAX_BREAKOUT_CHASE_PCT above the level — biggest
+    # historical chase risk on this path.
     if regime.trend != "SIDEWAYS" and len(bars) >= C.BREAKOUT_LOOKBACK:
         rolling_high = max(b["h"] for b in bars[-(C.BREAKOUT_LOOKBACK + 1):-1])
         if current > rolling_high:
-            candidates.append({"type": "BREAKOUT", "score": score * 0.95,
-                                "detail": f"price ${current:.2f} > {C.BREAKOUT_LOOKBACK}d high ${rolling_high:.2f}"})
+            chase_pct = (current - rolling_high) / rolling_high if rolling_high > 0 else 0
+            if chase_pct <= C.MAX_BREAKOUT_CHASE_PCT:
+                candidates.append({
+                    "type": "BREAKOUT", "score": score * 0.95,
+                    "anchor_type": f"HIGH_{C.BREAKOUT_LOOKBACK}D", "anchor_price": rolling_high, "chase_pct": chase_pct,
+                    "detail": f"price ${current:.2f} > {C.BREAKOUT_LOOKBACK}d high ${rolling_high:.2f} (chase {chase_pct*100:.2f}%)",
+                })
+            else:
+                rejected_chase.append(f"BREAKOUT: price ${current:.2f} is {chase_pct*100:.2f}% above {C.BREAKOUT_LOOKBACK}d high ${rolling_high:.2f} "
+                                      f"(cap {C.MAX_BREAKOUT_CHASE_PCT*100:.1f}%)")
 
     # Pullback: retraced X% within uptrend
+    # Anchor: recent 10-day high. Entry BELOW anchor by design (retrace_pct > 0).
+    # No separate chase cap — the retrace gate already enforces anti-chase.
     if regime.trend == "BULL" and len(closes) >= 10:
         recent_high = max(closes[-10:])
         retrace     = (recent_high - current) / recent_high if recent_high > 0 else 0
         if 0 < retrace <= C.PULLBACK_RETRACE_PCT and current > ma20:
-            candidates.append({"type": "PULLBACK", "score": score * 0.92,
-                                "detail": f"retraced {retrace*100:.2f}% from ${recent_high:.2f} in uptrend"})
+            # chase_pct negative by construction (we're below recent_high)
+            chase_pct = (current - recent_high) / recent_high if recent_high > 0 else 0
+            candidates.append({
+                "type": "PULLBACK", "score": score * 0.92,
+                "anchor_type": "HIGH_10D", "anchor_price": recent_high, "chase_pct": chase_pct,
+                "detail": f"retraced {retrace*100:.2f}% from ${recent_high:.2f} in uptrend",
+            })
 
     if not candidates:
+        # Distinguish "no entry condition met" from "blocked by chase cap" —
+        # the latter means the signal was classifiable but price already ran.
+        watch_reason = "no entry condition met"
+        if rejected_chase:
+            watch_reason = "blocked by chase cap (price extended from anchor)"
         decision_log.gate("6_ENTRY", "WATCH", {
-            "ticker":    ticker,
-            "price":     f"${current:.2f}",
-            "ma20":      f"${ma20:.2f}",
-            "roc_5d":    f"{roc*100:.2f}%",
-            "regime":    f"{regime.trend}/{regime.volatility}",
-            "reason":    "no entry condition met",
-        }, "WATCH — no entry condition triggered")
+            "ticker":         ticker,
+            "price":          f"${current:.2f}",
+            "ma20":           f"${ma20:.2f}",
+            "roc_5d":         f"{roc*100:.2f}%",
+            "regime":         f"{regime.trend}/{regime.volatility}",
+            "reason":         watch_reason,
+            "chase_rejected": "; ".join(rejected_chase) if rejected_chase else "—",
+        }, f"WATCH — {watch_reason}")
         return None
 
     best = max(candidates, key=lambda x: x["score"])
@@ -1930,11 +1990,22 @@ def gate6_entry(signal: dict, score: float, regime: RegimeState, alpaca,
         "entry_score":      f"{best['score']:.4f}",
         "regime":           f"{regime.trend}/{regime.volatility}",
         "candidates_found": len(candidates),
+        "anchor_type":      best["anchor_type"],
+        "anchor_price":     f"${best['anchor_price']:.2f}",
+        "chase_pct":        f"{best['chase_pct']*100:+.2f}%",
         "detail":           best["detail"],
-    }, f"entry={best['type']} score={best['score']:.4f}")
+    }, f"entry={best['type']} score={best['score']:.4f} chase={best['chase_pct']*100:+.2f}% vs {best['anchor_type']}")
 
-    return {"ticker": ticker, "type": best["type"],
-            "score": best["score"], "price": current}
+    # Return anchor metadata so downstream persist can stamp it on the position row.
+    return {
+        "ticker":       ticker,
+        "type":         best["type"],
+        "score":        best["score"],
+        "price":        current,
+        "anchor_type":  best["anchor_type"],
+        "anchor_price": best["anchor_price"],
+        "chase_pct":    best["chase_pct"],
+    }
 
 
 # ── GATE 7 — POSITION SIZING ─────────────────────────────────────────────────
@@ -2734,7 +2805,11 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                     "max_trade": round(size * candidate['price'], 2),
                     "trail_amt": trail_amt, "trail_pct": trail_pct,
                     "vol_label": vol_label,
-                    "reasoning": f"ROTATION: replaces {weakest['ticker']} | Score gap: {score_gap:.3f}",
+                    "reasoning": (
+                        f"ROTATION: replaces {weakest['ticker']} | Score gap: {score_gap:.3f} | "
+                        f"{candidate['type']} anchor={candidate.get('anchor_type','?')} "
+                        f"${candidate.get('anchor_price',0):.2f} chase={candidate.get('chase_pct',0)*100:+.2f}%"
+                    ),
                     "session": session,
                 }
                 queue_for_approval(signal, decision_data)
@@ -3626,8 +3701,12 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 "trail_amt": trail_amt,
                 "trail_pct": trail_pct,
                 "vol_label": vol_label,
-                "reasoning": f"Entry type: {candidate['type']} | Score: {score:.4f} | "
-                             f"Mode: {regime.mode} | Regime: {regime.trend}/{regime.volatility}",
+                "reasoning": (
+                    f"Entry type: {candidate['type']} | Score: {score:.4f} | "
+                    f"Anchor: {candidate.get('anchor_type','?')} ${candidate.get('anchor_price',0):.2f} "
+                    f"(chase {candidate.get('chase_pct',0)*100:+.2f}%) | "
+                    f"Mode: {regime.mode} | Regime: {regime.trend}/{regime.volatility}"
+                ),
                 "session":   session,
             }
 
