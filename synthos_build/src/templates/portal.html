@@ -5492,8 +5492,9 @@ async function loadTraderActivity() {
       return;
     }
 
-    // Outcome classifier. "Protective" wins over win/loss — it's how the trade
-    // was closed, not the dollar result. A stop-loss can still be a small win.
+    // Outcome classifier. "Protective" wins over win/loss for the LABEL —
+    // it's how the trade was closed, not the dollar result. A stop-loss can
+    // still be a small win. Icon + badge word use this color.
     const classify = (t) => {
       const reason = (t.exit_reason || '').toLowerCase();
       if (/(stop|protect|trail|safety)/.test(reason)) {
@@ -5502,6 +5503,16 @@ async function loadTraderActivity() {
       if (t.pnl > 0)  return { outcome: 'WIN',  color: 'var(--teal)', rgb: '0,245,212' };
       if (t.pnl < 0)  return { outcome: 'LOSS', color: 'var(--pink)', rgb: '255,75,110' };
       return { outcome: 'EVEN', color: 'var(--muted)', rgb: '255,255,255' };
+    };
+
+    // P&L color is ALWAYS sign-based — green for gain, red for loss, neutral
+    // for flat. Decoupled from classify() so a PROTECTIVE stop-out that
+    // closed at a profit renders the amount in green even though the badge
+    // is amber (trade was protective; result was a gain).
+    const pnlColor = (pnl) => {
+      if (pnl > 0) return { color: 'var(--teal)', rgb: '0,245,212' };
+      if (pnl < 0) return { color: 'var(--pink)', rgb: '255,75,110' };
+      return { color: 'var(--muted)', rgb: '255,255,255' };
     };
 
     const reasonLabel = (reason) => {
@@ -5520,6 +5531,7 @@ async function loadTraderActivity() {
 
     el.innerHTML = trades.map(t => {
       const c       = classify(t);
+      const pc      = pnlColor(t.pnl || 0);
       const ticker  = t.ticker || '--';
       const label   = reasonLabel(t.exit_reason);
       const pnl     = t.pnl || 0;
@@ -5545,7 +5557,7 @@ async function loadTraderActivity() {
           <div class="agent-row-sub">${summary}</div>
         </div>
         <div class="agent-row-right">
-          <div style="font-size:11px;font-weight:700;color:${c.color};font-family:var(--mono)">${pnlStr}</div>
+          <div style="font-size:11px;font-weight:700;color:${pc.color};font-family:var(--mono)">${pnlStr}</div>
           <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:2px">${retStr}</div>
         </div>
       </div>`;
