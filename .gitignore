@@ -16,3 +16,4 @@ synthos_build/.trade_daemon_heartbeat
 synthos_build/logs/daily_master/
 synthos_build/logs/tier_readout/
 .obsidian/
+.venv-*
