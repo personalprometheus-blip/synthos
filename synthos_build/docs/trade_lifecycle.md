@@ -102,14 +102,38 @@ runs inside the trader before entry evaluation.
 - Benchmark: SPY regime (trend, volatility, drawdown)
 - Regime: benchmark-relative risk posture
 - Position review: per-open-position exit triggers (stop loss,
-  trailing ratchet, late-day tighten, protective exit)
-- Signal evaluation: liquidity, spread, score, entry pattern, sizing,
-  risk setup, portfolio-level exposure, stress, evaluation-loop
-  kill conditions
+  trailing ratchet, late-day tighten, open-hour grace window,
+  protective exit)
+- Signal evaluation: liquidity, spread, score, entry pattern,
+  anchor-proximity chase caps, sizing, risk setup, portfolio-level
+  exposure, stress, evaluation-loop kill conditions
 
 Each gate writes to `TradeDecisionLog` which commits a structured
 `TRADE_DECISION` row to `system_log` per signal and a `scan_log` row
 per ticker.
+
+**Gate 6 — entry pattern classification + anchor-proximity caps**
+*(added 2026-04-23)*. Each candidate signal is classified into one of
+four entry types, each tied to a historical anchor computed from the
+Alpaca daily bars already loaded for that ticker:
+
+| Entry type | Anchor | Default max chase above anchor |
+|------------|--------|-------------------------------|
+| MOMENTUM | 20-day close MA (`MA20`) | `MAX_MOMENTUM_CHASE_PCT` (2%) |
+| BREAKOUT | N-day rolling high (`HIGH_20D` default) | `MAX_BREAKOUT_CHASE_PCT` (1.5%) |
+| MEAN_REVERSION | 20-day rolling mean (`MEAN20`) | `MAX_MEANREV_CHASE_PCT` (1%) — belt-and-suspenders; z-score already gates |
+| PULLBACK | Recent 10-day high (`HIGH_10D`) | no cap — retrace gate already enforces anti-chase |
+
+A signal that classifies as an entry type but whose current price
+exceeds `anchor × (1 + cap)` is rejected to WATCH with reason
+`"blocked by chase cap (price extended from anchor)"` — distinct from
+`"no entry condition met"`. The anchor type, anchor price, and chase
+percent are stamped into the Gate 6 log inputs and into the approval
+email `reasoning` field. Each cap can be widened or disabled (set to
+999) via env var without a code change. Motivation: pre-change audit
+found every entry was priced at `current_price` regardless of how far
+above its anchor, producing systematic peak-buying on momentum and
+breakout paths.
 
 **Order types handled.**
 - Market / notional BUY — overnight-queued if off-hours (see §5)
@@ -178,7 +202,19 @@ the user sees what would have traded and why it didn't.
 
 **Position management** runs on every trader dispatch (Gate 10):
 - Trailing stop ratchet (move stop up as price rises)
-- Late-day stop tightening (reduce gap risk into close)
+- Late-day stop tightening (reduce gap risk into close) — disabled in
+  prod via `LATE_DAY_TIGHTEN_PCT=0` after 2026-04-22 audit showed
+  late-day tightening caused disproportionate closing-hour loss exits
+- **Open-hour stop-loss grace** *(added 2026-04-23)* — stop-loss
+  triggering is suppressed for the first `STOP_LOSS_OPEN_GRACE_MINUTES`
+  (default 15) after 09:30 ET. Would-be triggers are recorded as
+  `pos_log.note` entries for audit (`"Stop-loss suppressed (15-min
+  open grace)..."`) but do not fire a SELL. Pulse exits (CASCADE
+  signals, severe news veto) are unaffected and still fire
+  immediately. Motivation: audit found every opening-hour stop-loss
+  over 7 days fired at 09:32 ET due to overnight-ratcheted stops
+  sitting inside the market-open gap band. Set
+  `STOP_LOSS_OPEN_GRACE_MINUTES=0` to restore prior behavior.
 - Protective exit (Pulse urgent flag, benchmark-relative stop
   adjustment)
 - Stop-loss fire (submits market SELL — overnight-gated if off-hours)
@@ -192,6 +228,21 @@ ghosts. Differences are logged.
 written with the full PnL, hold period, entry/exit reasons, and a
 backref to the originating signal. Member-weight updates flow from
 here if the signal came from a congress member.
+
+**Portal history rendering** *(2026-04-23)*. The dashboard History
+panel decouples the outcome-classification badge from the dollar-P&L
+color:
+- Badge word (`PROTECTIVE` / `WIN` / `LOSS` / `EVEN`) + row icon
+  color reflect the *exit reason* — a stop-loss / trailing / safety
+  exit always shows amber "PROTECTIVE" regardless of whether the
+  trade closed at a profit.
+- Dollar amount color is strictly sign-based (teal = gain, pink =
+  loss, grey = flat).
+
+So a protective stop-out that closed at +$5.20 shows an amber
+"PROTECTIVE" badge next to a teal "+$5.20" — preserving both how
+the trade closed and whether it made money. No backend change;
+rendering split in `portal.html` `classify()` vs. `pnlColor()`.
 
 ---
 
