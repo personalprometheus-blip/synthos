@@ -80,6 +80,17 @@
 - [ ] News-triggered sentiment re-run (Q1 from earlier design — speculative)
 - [ ] **Congressional signal → combined_score** — design decision still open. Currently `congressional_flag` (recent_buy / recent_sell / none) is displayed in sector_screening but not mathematically weighted into `combined_score`. Should it add a modifier? Surfaced from deleted INFORMATION_FLOW_WORKING_DOC.md (2026-04-22).
 
+### SYSTEM_MANIFEST.md rewrite-or-retire decision
+
+- [ ] **Decide fate of `synthos-company/documentation/specs/SYSTEM_MANIFEST.md`** — stamped OUTDATED on 2026-04-23 (v5.0 describes cancelled process_node, unused Redis, retired agent filenames). Two paths:
+	1. **Rewrite as v6.0** reflecting actual architecture (Pi 5 retail + Pi 4B company, 14 retail agents, SQLite+HTTP comms) — 2-3h focused work
+	2. **Retire** and redistribute unique content into smaller focused docs:
+		- ENV_SCHEMA → new `docs/env_schema.md` or merge into CLAUDE.md
+		- UPGRADE_RULES → new `docs/upgrade_rules.md`
+		- DEPENDENCY_GRAPH → could be auto-generated from imports
+		- SYSTEM_PATHS section is mostly stable, could keep or fold into architecture.json
+- 136 cross-references to this file exist across repos; whichever path we take, need to update or redirect those refs
+
 ### Operational stale cleanup (from 2026-04-23 arch.json drift audit)
 
 These surfaced during the ground-truth audit — **not urgent**, can roll into the pi4b SSD-swap day or next pi5-touch moment:
