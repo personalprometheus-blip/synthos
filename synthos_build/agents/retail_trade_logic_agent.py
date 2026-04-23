@@ -256,6 +256,13 @@ class TradingControls:
     # Session timing
     CONSERVATIVE_AFTER_HOUR   = int(os.environ.get('CONSERVATIVE_AFTER_HOUR', '15'))
     LATE_DAY_TIGHTEN_PCT      = float(os.environ.get('LATE_DAY_TIGHTEN_PCT', '0.25'))
+    # Open-hour stop-loss grace: skip stop-loss enforcement for the first N
+    # minutes after 09:30 ET. Overnight ratcheted stops often sit inside the
+    # market-open gap band — a gap-down that reverses within minutes would
+    # otherwise trigger them immediately. Set to 0 to disable (= prior behavior).
+    # 7-day audit 2026-04-23 found all 7 opening-hour stops fired at 09:32 ET
+    # with standard trail mechanics (not SPY-corr tightening).
+    STOP_LOSS_OPEN_GRACE_MINUTES = int(os.environ.get('STOP_LOSS_OPEN_GRACE_MINUTES', '15'))
 
     # Benchmark correlation
     BENCHMARK_CORR_WIDEN      = float(os.environ.get('BENCHMARK_CORR_WIDEN', '1.50'))
@@ -3216,15 +3223,34 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                         effective_stop = current_price - distance * C.BENCHMARK_CORR_TIGHTEN
                         pos_log.note(f"SPY corr={corr:.2f}, SPY flat — stop tightened to ${effective_stop:.2f}")
 
+            # Open-hour grace: suppress stop-loss triggering during the first
+            # N minutes after 09:30 ET to ride out opening-gap noise that
+            # otherwise false-triggers ratcheted trailing stops (see 2026-04-23
+            # audit: 7/7 opening-hour stops fired at 09:32 ET).
+            _now_et = datetime.now(ET)
+            _grace_min = C.STOP_LOSS_OPEN_GRACE_MINUTES
+            _in_open_grace = (
+                _grace_min > 0
+                and _now_et.hour == 9
+                and 30 <= _now_et.minute < 30 + _grace_min
+            )
+
             if current_price <= effective_stop:
-                exit_reason = "STOP_LOSS"
-                pos_log.gate("10_STOP_LOSS", True, {
-                    "current":    f"${current_price:.2f}",
-                    "stop_level": f"${effective_stop:.2f}",
-                    "trail_stop": f"${pos.get('trail_stop_amt', 0):.2f}",
-                    "entry":      f"${pos['entry_price']:.2f}",
-                    "spy_corr":   f"{corr:.2f}" if corr is not None else "N/A",
-                }, "stop loss triggered")
+                if _in_open_grace:
+                    pos_log.note(
+                        f"Stop-loss suppressed ({_grace_min}-min open grace): "
+                        f"price=${current_price:.2f} stop=${effective_stop:.2f} "
+                        f"entry=${pos['entry_price']:.2f}"
+                    )
+                else:
+                    exit_reason = "STOP_LOSS"
+                    pos_log.gate("10_STOP_LOSS", True, {
+                        "current":    f"${current_price:.2f}",
+                        "stop_level": f"${effective_stop:.2f}",
+                        "trail_stop": f"${pos.get('trail_stop_amt', 0):.2f}",
+                        "entry":      f"${pos['entry_price']:.2f}",
+                        "spy_corr":   f"{corr:.2f}" if corr is not None else "N/A",
+                    }, "stop loss triggered")
 
         # Max holding time
         elif holding_days > C.MAX_HOLDING_DAYS:
