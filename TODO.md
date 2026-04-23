@@ -67,10 +67,28 @@
 - [ ] **Re-evaluate in 2-4 weeks** — once `exit_performance` has 20+ exits for the optimizer. Decide whether to keep `LATE_DAY_TIGHTEN_PCT=0.0` or move to Option 3 (conditional: only tighten if `gain_pct > 0.01`)
 - [ ] Add `LATE_DAY_TIGHTEN_PCT=0.0` resolved-items entry to `synthos_build/data/system_architecture.json` (bundle with next arch update)
 
+### AUTO/USER per-position management
+
+- [ ] **Feature merge target 2026-05-03** — spec: `synthos-company/documentation/specs/AUTO_USER_TAGGING.md`
+	- Branch: `patch/2026-05-03-auto-user-tagging` (active)
+	- Adds `managed_by` tag to positions (bot vs user), sticky-USER ticker preferences, 4 API endpoints, portal UI toggles
+	- **Pre-merge update needed**: spec's feature matrix row for "late-day stop tightening" is obsolete — we disabled `LATE_DAY_TIGHTEN_PCT=0.0` globally on 2026-04-21. Strike that row or mark "currently disabled globally" before merge.
+
 ### Other trading-logic items
 
 - [ ] Separate premarket from overnight cycle (future refactor — noted as TODO in code)
 - [ ] News-triggered sentiment re-run (Q1 from earlier design — speculative)
+- [ ] **Congressional signal → combined_score** — design decision still open. Currently `congressional_flag` (recent_buy / recent_sell / none) is displayed in sector_screening but not mathematically weighted into `combined_score`. Should it add a modifier? Surfaced from deleted INFORMATION_FLOW_WORKING_DOC.md (2026-04-22).
+
+### Operational stale cleanup (from 2026-04-23 arch.json drift audit)
+
+These surfaced during the ground-truth audit — **not urgent**, can roll into the pi4b SSD-swap day or next pi5-touch moment:
+
+- [ ] **pi4b: decide on `company_scoop.py`** — currently flagged `status: broken` in arch.json. Either revive as a systemd service (the cron replacement daemon never started) or formally retire. `scoop.log` empty since 2026-04-18.
+- [ ] **pi4b: remove `synthos-login.service`** (disabled/inactive unit file, points at dead `login_server/app.py`). Companion to deleting the `login_server/` directory itself (already on deferred list).
+- [ ] **pi4b: remove `/home/pi/synthos_build/`** — empty skeleton directory (only has empty `data/` subfolder from 2026-04-08). Leftover from an old hardware role.
+- [ ] **pi4b: remove `/home/pi/synthos-process/`** — dead repo from cancelled process_node (Phase 4 merge into retail_node). 3+ weeks stale.
+- [ ] **pi5: remove `/etc/systemd/system/synthos-portal.service.bak.20260418_081448`** — 4-day-old stale backup file.
 
 ## 🏗️ Infrastructure
 
