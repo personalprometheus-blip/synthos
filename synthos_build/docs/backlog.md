@@ -568,6 +568,93 @@ ssh -J pi4b pi516gb@10.0.0.11 \
 
 ---
 
+## NEWS-WAVE-TRACKING — use source count + regional spread as signal confidence modifier
+
+**Why deferred.** Today's signal scoring is single-event based: one Benzinga
+article produces one signal with one confidence tier. But the same underlying
+event often surfaces across 4-10+ sources within a few hours ("wave"), and
+the degree of adoption is information: a single-source story on a ticker is
+noise-level; the same story on 6 sources globally is real sentiment shift.
+We don't capture this signal.
+
+Originally specified in the (now-deleted) AGENT_ENHANCEMENT_PLAN.md as
+`duplicate_counter` + `duplicate_regions` fields on signals. Rescued into
+this backlog on 2026-04-22 during docs cleanup because the idea is still
+valuable even though the parent doc was superseded.
+
+**Entry conditions (all must be true):**
+
+1. **Attribution patch shadow period complete** — `TICKER_REMAP_ENFORCE` /
+   `TICKER_REJECT_ENFORCE` enforcement decision made on 2026-04-28 and
+   stable for ≥5 trading days afterward. Adding another scoring layer
+   on top of moving attribution logic is asking for confused debugging.
+2. **Duplicate flag-write bug fixed** — articles currently process twice
+   (signal + display paths), inflating counts. Need a clean `seen_articles`
+   table or equivalent before we can reason about counters.
+3. **Benzinga headline-only limitation understood** — we only get
+   headlines, not bodies, so "same story" detection relies on Jaccard
+   against headline + source-name. Might be noisy; needs a measurement
+   pass before we build scoring logic.
+
+**Scope.** Add `duplicate_counter` (INTEGER) + `duplicate_regions` (TEXT
+JSON array) columns to signals. Populate via a post-classification pass
+that scans last-4h signals for the same ticker with >=50% headline Jaccard
+similarity. Modify signal confidence scoring to add a small bump (+0.05
+to +0.15) when counter >=4 or regions.length >=3. No behavior change if
+counter is 1.
+
+**Risk.** Low. Additive scoring nudge with a clamped effect size. Easy
+to disable via feature flag. Worst case: trader sees slightly higher
+confidence on widely-reported stories, which is generally correct.
+
+**Related context.**
+- Original spec (deleted): `synthos-company/documentation/specs/AGENT_ENHANCEMENT_PLAN.md`
+- Attribution patch: `patch/2026-04-21-news-attribution`
+- Duplicate flag-write bug: see `synthos/TODO.md` active-this-week section
+
+---
+
+## OVERVALUATION-ALERT — warn (don't block) when entry price exceeds historical P/E band
+
+**Why deferred.** The trader's 14-gate risk chain checks ATR, liquidity,
+correlation, and portfolio concentration. It does NOT check whether the
+entry price is meaningfully above the ticker's own historical valuation
+range or the sector's mean P/E. Strong-company-bad-timing is a known
+pattern where a signal is "correct" on sentiment but wrong on entry
+price.
+
+Originally specified in the (now-deleted) AGENT_ENHANCEMENT_PLAN.md.
+Worth rescuing because it addresses a real gap in gate 6/8 risk logic,
+and it's meant to be an alert (display-layer), not a block — low risk
+to the dispatch pipeline.
+
+**Entry conditions (all must be true):**
+
+1. **SEC EDGAR financial-disclosure pipeline built or vendored** — we
+   need trailing earnings + revenue numbers per ticker to compute P/E
+   and growth-adjusted fair value. Shallow `earnings_cache` isn't enough.
+2. **Sector P/E benchmark source identified** — needs a per-sector-
+   per-month mean P/E feed. Could be Alpaca bars-derived or a third-
+   party feed; TBD.
+3. **No open validator CAUTION verdicts across fleet** — don't stack
+   new data-quality dependencies on an already-noisy pipeline.
+
+**Scope.** New helper `compute_pe_overvaluation(ticker, entry_price)` →
+returns `{status: 'normal' | 'elevated' | 'extreme', pe_ratio,
+sector_mean, band_z}`. Gate 8 consumes the result: if `status='extreme'`,
+add `overvaluation_flag=True` to the trade record (not a block). Portal
+UI surfaces the flag as a small warning badge on the position card.
+
+**Risk.** Low. Pure advisory — no gating behavior changes. Worst case:
+false positives annoy the user with warnings on legitimate growth stocks
+(TSLA, NVDA always look expensive by traditional P/E).
+
+**Related context.**
+- Original spec (deleted): `synthos-company/documentation/specs/AGENT_ENHANCEMENT_PLAN.md`
+- 14-gate chain: `synthos_build/agents/retail_trade_logic_agent.py`, gate4-gate11
+
+---
+
 ## Historical / completed (struck through)
 
 <!-- Move completed items here with commit SHAs when done, keep for
