@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+{% set title = "Algorithmic Trading Platform" %}
+
+{% block inline_css %}
+/* ── NAV ── */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0.45rem 2rem;
+  background:rgba(10,12,20,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+}
+.nav-left{display:flex;align-items:center;gap:0.7rem}
+.hamburger{
+  display:flex;flex-direction:column;gap:4px;
+  background:none;border:none;cursor:pointer;padding:5px;opacity:0.4;transition:opacity .15s;
+}
+.hamburger:hover{opacity:0.9}
+.hamburger span{display:block;width:16px;height:1.5px;background:var(--text);border-radius:2px}
+.nav-logo{
+  font-family:var(--mono);font-size:0.85rem;font-weight:500;letter-spacing:0.18em;
+  color:var(--teal);text-shadow:0 0 18px rgba(0,245,212,0.20);
+}
+/* portrait dropdown */
+.profile-btn{
+  position:relative;width:33px;height:33px;border-radius:50%;
+  background:rgba(245,166,35,0.10);border:1px solid rgba(245,166,35,0.25);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:border-color .15s,box-shadow .15s;flex-shrink:0;
+}
+.profile-btn:hover{border-color:rgba(245,166,35,0.5);box-shadow:0 0 12px rgba(245,166,35,0.15)}
+.profile-btn svg{color:rgba(245,166,35,0.85);width:16.5px;height:16.5px}
+.auth-drop{
+  display:none;position:absolute;top:calc(100% + 8px);right:0;
+  width:252px;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:12px;padding:1.1rem;
+  box-shadow:0 20px 50px rgba(0,0,0,0.6),0 0 0 1px rgba(0,245,212,0.05);
+  z-index:200;
+}
+.auth-drop.open{display:block}
+.auth-drop-title{font-size:0.78rem;font-weight:600;margin-bottom:0.15rem;color:var(--text)}
+.auth-drop-sub{font-size:0.68rem;color:var(--muted);margin-bottom:0.9rem}
+.auth-drop label{
+  display:block;font-size:0.62rem;font-weight:500;letter-spacing:0.09em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:0.28rem;
+}
+.auth-drop input{
+  font-family:var(--mono);font-size:0.78rem;width:100%;
+  padding:0.45rem 0.65rem;background:rgba(255,255,255,0.03);
+  border:1px solid var(--border);border-radius:6px;
+  color:var(--text);margin-bottom:0.65rem;transition:border-color .15s;
+}
+.auth-drop input:focus{outline:none;border-color:rgba(0,245,212,0.22);box-shadow:0 0 0 3px rgba(0,245,212,0.06)}
+.auth-drop input::placeholder{color:rgba(255,255,255,0.18)}
+.auth-drop-btn{
+  font-family:var(--mono);font-size:0.72rem;font-weight:500;letter-spacing:0.07em;
+  width:100%;padding:0.5rem;
+  background:rgba(0,245,212,0.12);color:var(--teal);
+  border:1px solid rgba(0,245,212,0.14);border-radius:6px;
+  cursor:pointer;transition:all .15s;
+}
+.auth-drop-btn:hover{background:rgba(0,245,212,0.12);box-shadow:0 0 14px rgba(0,245,212,0.09)}
+
+/* ── HERO ── */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:7rem 2rem 4rem;text-align:center;position:relative;overflow:hidden;
+}
+.hero-bg{
+  position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 0%, rgba(0,245,212,0.07) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 30% at 15% 60%, rgba(123,97,255,0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 85% 50%, rgba(255,75,110,0.04) 0%, transparent 60%);
+}
+.hero-grid{
+  position:absolute;inset:0;pointer-events:none;opacity:0.03;
+  background-image:linear-gradient(var(--teal) 1px,transparent 1px),linear-gradient(90deg,var(--teal) 1px,transparent 1px);
+  background-size:60px 60px;
+}
+.hero-eyebrow{
+  font-family:var(--mono);font-size:0.65rem;letter-spacing:0.22em;
+  color:var(--teal);text-transform:uppercase;margin-bottom:1.3rem;opacity:0.8;
+}
+.hero-title{
+  font-size:clamp(2.16rem,5.4vw,3.78rem);font-weight:600;line-height:1.1;
+  letter-spacing:-0.025em;margin-bottom:1.2rem;color:var(--text);
+}
+.hero-title span{
+  background:linear-gradient(135deg,var(--teal) 0%,#00c4a8 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.hero-sub{
+  font-size:0.95rem;color:var(--muted);max-width:440px;margin:0 auto;
+  font-weight:400;line-height:1.75;
+}
+
+/* ── STATS ── */
+.stats{display:flex;flex-wrap:wrap;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.stat{
+  flex:1;min-width:150px;padding:1.4rem 1.5rem;text-align:center;
+  border-right:1px solid var(--border);position:relative;overflow:hidden;
+}
+.stat:last-child{border-right:none}
+.stat::after{
+  content:'';position:absolute;bottom:0;left:15%;right:15%;height:1px;
+}
+.stat.teal::after{background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.stat.pink::after{background:linear-gradient(90deg,transparent,var(--pink),transparent)}
+.stat.purple::after{background:linear-gradient(90deg,transparent,var(--purple),transparent)}
+.stat.amber::after{background:linear-gradient(90deg,transparent,var(--amber),transparent)}
+.stat-value{
+  font-family:var(--mono);font-size:1.45rem;font-weight:500;margin-bottom:0.2rem;
+}
+.stat.teal .stat-value{color:var(--teal);text-shadow:0 0 18px rgba(0,245,212,0.18)}
+.stat.pink .stat-value{color:var(--pink);text-shadow:0 0 18px rgba(255,75,110,0.18)}
+.stat.purple .stat-value{color:var(--purple);text-shadow:0 0 18px rgba(123,97,255,0.18)}
+.stat.amber .stat-value{color:var(--amber);text-shadow:0 0 18px rgba(245,166,35,0.3)}
+.stat-label{font-size:0.68rem;color:var(--muted);letter-spacing:0.06em;text-transform:uppercase}
+
+/* ── FEATURES ── */
+.features{padding:5rem 2rem;max-width:1040px;margin:0 auto}
+.section-eyebrow{
+  font-family:var(--mono);font-size:0.65rem;letter-spacing:0.2em;
+  color:var(--teal);text-transform:uppercase;margin-bottom:0.75rem;text-align:center;opacity:0.8;
+}
+.section-title{
+  font-size:1.65rem;font-weight:600;text-align:center;
+  margin-bottom:0.6rem;letter-spacing:-0.02em;color:var(--text);
+}
+.section-sub{color:var(--muted);text-align:center;max-width:400px;margin:0 auto 2.75rem;font-size:0.85rem;line-height:1.7}
+.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:1px;background:var(--border)}
+.feature-card{
+  background:var(--surface);padding:1.5rem;position:relative;overflow:hidden;
+  transition:background .2s;
+}
+.feature-card:hover{background:var(--surface2)}
+.feature-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  opacity:0;transition:opacity .2s;
+}
+.feature-card:hover::before{opacity:1}
+.fc-teal::before{background:linear-gradient(90deg,transparent,var(--teal),transparent)}
+.fc-pink::before{background:linear-gradient(90deg,transparent,var(--pink),transparent)}
+.fc-purple::before{background:linear-gradient(90deg,transparent,var(--purple),transparent)}
+.fc-amber::before{background:linear-gradient(90deg,transparent,var(--amber),transparent)}
+.feature-tag{
+  font-family:var(--mono);font-size:0.6rem;letter-spacing:0.12em;text-transform:uppercase;
+  margin-bottom:0.75rem;opacity:0.7;
+}
+.fc-teal .feature-tag{color:var(--teal)}
+.fc-pink .feature-tag{color:var(--pink)}
+.fc-purple .feature-tag{color:var(--purple)}
+.fc-amber .feature-tag{color:var(--amber)}
+.feature-name{font-weight:600;font-size:0.88rem;margin-bottom:0.45rem;color:var(--text)}
+.feature-desc{font-size:0.78rem;color:var(--muted);line-height:1.65}
+
+/* ── HOW IT WORKS ── */
+.how{padding:4.5rem 2rem;border-top:1px solid var(--border)}
+.how-inner{max-width:820px;margin:0 auto}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0;margin-top:2.5rem;position:relative}
+.steps::before{
+  content:'';position:absolute;top:1.1rem;left:10%;right:10%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--border2),var(--border2),transparent);
+}
+.step{text-align:center;padding:0 1rem}
+.step-dot{
+  width:10px;height:10px;border-radius:50%;border:1px solid var(--teal);
+  background:rgba(0,245,212,0.09);margin:0 auto 0.9rem;
+  box-shadow:0 0 8px rgba(0,245,212,0.12);
+}
+.step-num{font-family:var(--mono);font-size:0.6rem;letter-spacing:0.15em;color:var(--teal);margin-bottom:0.5rem;opacity:0.7}
+.step-title{font-weight:600;font-size:0.85rem;margin-bottom:0.4rem;color:var(--text)}
+.step-desc{font-size:0.75rem;color:var(--muted);line-height:1.6}
+
+/* ── FOOTER ── */
+footer{
+  border-top:1px solid var(--border);padding:1.4rem 2rem;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;
+}
+.footer-logo{font-family:var(--mono);font-size:0.75rem;letter-spacing:0.18em;color:rgba(0,245,212,0.18)}
+.footer-note{font-size:0.68rem;color:var(--dim)}
+{% endblock %}
+
+{% block content %}
+<!-- NAV -->
+<nav>
+  <div class="nav-left">
+    <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-logo">SYNTHOS</div>
+  </div>
+  <div class="profile-btn" id="profile-btn" onclick="toggleAuthDrop(event)" aria-label="Sign in">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+    </svg>
+    <div class="auth-drop" id="auth-drop" onclick="event.stopPropagation()">
+      <div class="auth-drop-title">Welcome back</div>
+      <div class="auth-drop-sub">Sign in to your Synthos account</div>
+      <form method="POST" action="/login">
+        <label>Email</label>
+        <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+        <button class="auth-drop-btn" type="submit">Sign In →</button>
+      </form>
+      <div style="text-align:right;margin-top:0.4rem">
+        <a href="/forgot-password" style="font-size:0.62rem;color:var(--muted);text-decoration:none;letter-spacing:0.03em">Forgot password?</a>
+      </div>
+      <div style="border-top:1px solid var(--border);margin-top:0.8rem;padding-top:0.75rem;text-align:center">
+        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:0.4rem">Don't have an account?</div>
+        <a href="/signup" style="font-family:var(--mono);font-size:0.72rem;color:var(--teal);text-decoration:none;letter-spacing:0.04em">Create Account →</a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-eyebrow">Algorithmic Trading Platform</div>
+  <h1 class="hero-title">Your portfolio.<br><span>Systematically managed.</span></h1>
+  <p class="hero-sub">Synthos runs a disciplined, rules-based trading strategy on your behalf — continuously, consistently, and without emotion.</p>
+</section>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat teal">
+    <div class="stat-value">14</div>
+    <div class="stat-label">Risk Gates Per Trade</div>
+  </div>
+  <div class="stat pink">
+    <div class="stat-value">3×</div>
+    <div class="stat-label">Daily Market Sessions</div>
+  </div>
+  <div class="stat purple">
+    <div class="stat-value">24/7</div>
+    <div class="stat-label">System Monitoring</div>
+  </div>
+  <div class="stat amber">
+    <div class="stat-value">0</div>
+    <div class="stat-label">Emotional Decisions</div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="features">
+  <div class="section-eyebrow">Platform</div>
+  <h2 class="section-title">Built for discipline, not instinct</h2>
+  <p class="section-sub">Every trade passes through a structured gate system before execution. No gut calls.</p>
+  <div class="feature-grid">
+    <div class="feature-card fc-teal">
+      <div class="feature-tag">Execution</div>
+      <div class="feature-name">Rule-Based Trading</div>
+      <div class="feature-desc">A 14-gate decision spine covers momentum, sentiment, risk exposure, and market regime before any order is placed.</div>
+    </div>
+    <div class="feature-card fc-purple">
+      <div class="feature-tag">Intelligence</div>
+      <div class="feature-name">Multi-Source Signals</div>
+      <div class="feature-desc">News sentiment, sector momentum, and congressional trade data feed into every session before the open.</div>
+    </div>
+    <div class="feature-card fc-amber">
+      <div class="feature-tag">Control</div>
+      <div class="feature-name">Supervised or Autonomous</div>
+      <div class="feature-desc">Approve every trade manually, or let the system execute fully within your defined risk parameters.</div>
+    </div>
+    <div class="feature-card fc-pink">
+      <div class="feature-tag">Safety</div>
+      <div class="feature-name">Instant Kill Switch</div>
+      <div class="feature-desc">Halt all trading from your dashboard immediately. Your override is always respected, no exceptions.</div>
+    </div>
+    <div class="feature-card fc-teal">
+      <div class="feature-tag">Visibility</div>
+      <div class="feature-name">Live Portfolio View</div>
+      <div class="feature-desc">Real-time positions, P&L, and pending approvals visible from your account dashboard at any time.</div>
+    </div>
+    <div class="feature-card fc-purple">
+      <div class="feature-tag">Reliability</div>
+      <div class="feature-name">Crash-Proof Infrastructure</div>
+      <div class="feature-desc">Auto-restart on failure, encrypted backups, and 24/7 health monitoring keep the system running.</div>
+    </div>
+  </div>
+</section>
+
+<!-- WHO IT'S FOR -->
+<section class="features" style="padding-top:4rem;padding-bottom:1.5rem">
+  <div class="section-eyebrow">For You</div>
+  <h2 class="section-title">Built for people who work for a living</h2>
+  <p class="section-sub">You earned it. Let a systematic approach put it to work while you focus on what matters.</p>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;max-width:900px;margin:2rem auto 0">
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🔧</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Trades &amp; Contractors</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">On the job site by 6am. No time for charts. Your money should work as hard as you do.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🏥</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Nurses &amp; Healthcare</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">12-hour shifts don't leave room for portfolio management. Synthos runs while you're saving lives.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">🌙</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Night Shift Workers</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">You sleep when the market is open. Your trading system doesn't have to.</div>
+    </div>
+    <div style="padding:20px;border-radius:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+      <div style="font-size:20px;margin-bottom:8px">💼</div>
+      <div style="font-size:0.88rem;font-weight:600;color:var(--text);margin-bottom:4px">Small Business Owners</div>
+      <div style="font-size:0.75rem;color:var(--muted);line-height:1.5">You're wearing every hat already. Institutional-grade tools without the institutional price tag.</div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<div class="how">
+  <div class="how-inner">
+    <div class="section-eyebrow" style="text-align:center">Process</div>
+    <h2 class="section-title" style="text-align:center">How each session works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-num">01 — PRE-MARKET</div>
+        <div class="step-title">Market Intelligence</div>
+        <div class="step-desc">News, sentiment, and sector data gathered and scored before the session opens.</div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-num">02 — GATE CHECK</div>
+        <div class="step-title">Risk Screening</div>
+        <div class="step-desc">Each trade filtered through 14 sequential gates. One failure halts the trade.</div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-num">03 — EXECUTION</div>
+        <div class="step-title">Order Placement</div>
+        <div class="step-desc">Approved trades routed to market. You're notified of any action taken.</div>
+      </div>
+      <div class="step">
+        <div class="step-dot"></div>
+        <div class="step-num">04 — REPORTING</div>
+        <div class="step-title">Session Summary</div>
+        <div class="step-desc">Results, positions, and performance metrics updated in your dashboard in real time.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">SYNTHOS</div>
+  <div class="footer-note">Algorithmic trading involves risk. Past performance does not guarantee future results.</div>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Landing-page-specific handlers
+  function toggleAuthDrop(e){
+    e.stopPropagation();
+    document.getElementById('auth-drop').classList.toggle('open');
+  }
+  function toggleSidebar(){ /* wired in dashboard script */ }
+  document.addEventListener('click', function(){
+    document.getElementById('auth-drop').classList.remove('open');
+  });
+</script>
+<script src="{{ url_for('static', filename='js/pw-toggle.js') }}" defer></script>
+{% endblock %}

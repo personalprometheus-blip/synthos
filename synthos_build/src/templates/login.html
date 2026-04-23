@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% set title = "Sign In" %}
+
+{% block inline_css %}
+  /* Login page — design tokens + reset + fonts come from core.css.
+     Pre-existing bug fix: --accent was referenced but never defined
+     anywhere in the portal (_SHARED_CSS didn't have it). Button would
+     render with browser fallback. Defining it here as an alias for
+     --teal preserves intended branding. */
+  :root { --accent: var(--teal); }
+
+  body { display: flex; flex-direction: column; min-height: 100vh; }
+  .login-nav {
+    padding: 1.1rem 2.5rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .login-nav-logo  { font-family: var(--mono); font-size: 0.95rem;
+                     font-weight: 500; letter-spacing: 0.18em; }
+  .login-nav-back  { font-size: 0.78rem; color: var(--muted); font-family: var(--mono); }
+  .login-nav-back:hover { color: var(--text); }
+  .login-wrap      { flex: 1; display: flex; align-items: center;
+                     justify-content: center; padding: 3rem 1.5rem; }
+  .card {
+    width: 100%; max-width: 360px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 2.25rem;
+  }
+  .card-title  { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;
+                 letter-spacing: -0.01em; }
+  .card-sub    { font-size: 0.82rem; color: var(--muted); margin-bottom: 2rem; }
+  label {
+    display: block; font-size: 0.72rem; font-weight: 500; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem;
+  }
+  input {
+    font-family: var(--mono); font-size: 0.88rem;
+    width: 100%; padding: 0.6rem 0.85rem;
+    background: #0d0d18; border: 1px solid var(--border); border-radius: 7px;
+    color: var(--text); margin-bottom: 1.1rem; transition: border-color 0.15s;
+  }
+  input:focus        { outline: none; border-color: var(--accent); }
+  input::placeholder { color: var(--dim); }
+  .btn-submit {
+    font-family: var(--mono); font-size: 0.8rem; font-weight: 500; letter-spacing: 0.08em;
+    width: 100%; padding: 0.7rem 1rem;
+    background: var(--accent); color: #fff; border: none; border-radius: 7px;
+    cursor: pointer; transition: opacity 0.15s; margin-top: 0.25rem;
+  }
+  .btn-submit:hover { opacity: 0.88; }
+  .error {
+    font-size: 0.8rem; font-family: var(--mono);
+    background: #2a0f0f; border: 1px solid #5c1f1f; color: var(--red);
+    padding: 0.6rem 0.85rem; border-radius: 7px; margin-bottom: 1.1rem;
+  }
+  footer {
+    padding: 1.25rem 2.5rem; border-top: 1px solid var(--border);
+    text-align: center; font-size: 0.72rem; color: var(--dim);
+  }
+{% endblock %}
+
+{% block content %}
+<nav class="login-nav">
+  <a href="/"><div class="login-nav-logo">SYNTHOS</div></a>
+  <a href="/" class="login-nav-back">← Back</a>
+</nav>
+<div class="login-wrap">
+  <div class="card">
+    {% if maintenance_msg %}
+      <div style="background:rgba(245,166,35,0.08);border:1px solid rgba(245,166,35,0.2);color:#f5a623;padding:0.6rem 0.85rem;border-radius:7px;margin-bottom:1.1rem;font-size:0.8rem;font-family:var(--mono)">
+        {{ maintenance_msg }}
+      </div>
+    {% endif %}
+    <div class="card-title">Welcome back</div>
+    <div class="card-sub">Sign in to your Synthos account</div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="POST" action="/login">
+      <label>Email</label>
+      <input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com">
+      <label>Password</label>
+      <input type="password" name="password" autocomplete="current-password" placeholder="••••••••">
+      <button class="btn-submit" type="submit">Sign In →</button>
+    </form>
+  </div>
+</div>
+<footer>Algorithmic trading involves risk. Past performance does not guarantee future results.</footer>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/pw-toggle.js') }}" defer></script>
+{% endblock %}
