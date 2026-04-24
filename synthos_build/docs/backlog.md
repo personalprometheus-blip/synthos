@@ -24,6 +24,109 @@ Each backlog item:
 
 ---
 
+## EDGAR-SIGNAL-EXPANSION — widen SEC EDGAR ingestion beyond congressional filings
+
+**Why deferred.** Congress (STOCK Act) filings already flow through
+`retail_news_agent.py`'s SEC path. EDGAR carries several higher-signal
+filing types that aren't touched yet. Adding them is real work with
+ingestion + parsing + dedup considerations. Better done post-travel
+with time to observe the new signal volume.
+
+**Two phases, in order.**
+
+### Phase 1 — filings NOT yet wired in (net-new signal sources)
+
+Priority by signal-to-effort:
+
+1. **Form 4 (corporate insider transactions)** — ★★★★★
+   Officers/directors buy/sell their own company's stock. Filed
+   within 2 business days (vs congress at 30-45 days). Best real-time
+   insider signal publicly available. Fits existing schema: person +
+   ticker + tx_type + date + amount — same shape as congress.
+   Route into `news_agent` as a new source path, source_tier=1.
+
+2. **13D (activist ≥5% crossing)** — ★★★★
+   When someone crosses 5% ownership with *intent to influence*
+   (vs passive 13G). Big catalyst. Low volume (~50-100/year). Would
+   need new entity classifier ("is this filer a known activist?").
+
+3. **Form 144 (intent to sell restricted shares)** — ★★
+   Early warning of insider sales before Form 4 confirms them.
+   Nice-to-have supplement.
+
+### Phase 2 — enhance partial coverage in existing agents
+
+4. **8-K filtered by item code** — partly covered today by
+   Alpaca news ingestion. Direct EDGAR pull catches edge items
+   news sources underweight:
+   - Item 2.02 — earnings results (pre-wire sometimes)
+   - Item 5.02 — officer/director changes
+   - Item 1.03 — bankruptcy / receivership
+   - Item 8.01 — "other events" catch-all (pre-announcement signal)
+   Wire into `retail_news_agent.py` as an additional ingestion
+   source alongside Alpaca news, with dedup via headline Jaccard
+   similarity (Gate 8 already does this for news).
+
+5. **13G** — companion to 13D, lower signal. Include when doing 13D.
+
+**Explicitly skipping:** 13F (45-day lag, priced-in by the time
+public), 10-K/10-Q (already covered by earnings calendar + news),
+DEF 14A (low trading signal).
+
+**Why seed existing agents, not build new ones.**
+News agent already has: 22-gate classification spine, tier-weighted
+scoring, member-weight feedback, corroboration tracking, Gate 4 event
+risk, news_flags table for trader consumption. Building a parallel
+"EDGAR agent" would duplicate all of that. Each EDGAR source simply
+becomes a new `source` value and `source_tier` assignment inside
+news_agent's existing ingestion loop.
+
+**Entry conditions (all must be true):**
+
+1. Operator back from travel with attention to observe new signal
+   volume for 1-2 weeks.
+2. News_agent Gate 20 evaluation loop decision made — if it gets
+   implemented, EDGAR signals feed into that loop's accuracy stats
+   automatically. If it stays deferred, that's fine too.
+3. EDGAR rate-limit posture confirmed — EDGAR allows 10 req/sec
+   with proper User-Agent. Verify `fetch_with_retry` in news_agent
+   handles this cleanly.
+
+**Scope.**
+
+Phase 1:
+- `retail_news_agent.py` — new ingestion function `fetch_edgar_form4()`,
+  new source-tier mapping. Likely ~200 lines.
+- Possibly `fetch_edgar_13d()` if activist tracking is wanted. ~150
+  more lines + entity-classifier helper.
+- Schema: `signals` table already has `source`, `source_tier`,
+  `transaction_type` — no migration needed.
+
+Phase 2:
+- `retail_news_agent.py` — new source `edgar_8k`, add item-code
+  filter parser. ~100 lines.
+
+Total: ~300-450 lines across one file, maybe 2.
+
+**Risk.**
+- Signal flood. Form 4 alone generates thousands of filings/month
+  across all US equities. Need tier quotas + ticker-dedup already
+  in place (they are — Gate 4 TICKER_DEDUP + tier cap at 60/25/10/5).
+- Classification quality drop. A Form 4 from a shell-company CEO
+  isn't the same signal as JPM's CEO buying $10M of JPM. Need
+  threshold filter on transaction size + filer title.
+- 8-K volume overlap with Alpaca news. Dedup via Jaccard may let
+  duplicates leak on formatting differences; test before full enable.
+
+**Related context.**
+- Current congressional SEC path: `retail_news_agent.py` SEC EDGAR
+  ingestion section (fetches STOCK Act filings).
+- News agent gate spine: see 2026-04-24 news audit in session history.
+- EDGAR full-text-search API: https://efts.sec.gov/LATEST/search-index
+- EDGAR RSS per filing-type: https://www.sec.gov/cgi-bin/browse-edgar
+
+---
+
 ## DYNAMIC-UNIVERSE-EXPANSION — replace 110 hand-curated sector tickers with full Alpaca tradable universe
 
 **Why deferred.** Current `retail_sector_screener.py` operates on 11
