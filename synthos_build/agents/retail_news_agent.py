@@ -2082,11 +2082,19 @@ def gate11_benchmark_relative(sentiment, scope, regime, ctrl, ndl, state):
         "dominance_state": dominance_state,
     }
 
-# ── GATE 12 — CONFIRMATION ────────────────────────────────────────────────
+# ── GATE 12 — SKIP / CONFIRMATION (future-planning placeholder) ──────────
+# MARKED SKIP 2026-04-24: the gate's stated purpose is cross-source claim
+# validation (multiple INDEPENDENT outlets corroborating the same claim),
+# which requires a multi-source aggregation feed we do not have. The current
+# implementation is a same-ticker-count proxy — it asks "how many Synthos
+# signals exist for this ticker in the last 8h," not "do different outlets
+# confirm this story." Function is retained as scaffold so when a real
+# multi-source feed is wired in, the gate slot and downstream consumers
+# (confirmation_state, confirmation_score) are already in place.
 
-def gate12_confirmation(item, ctrl, ndl, db, state):
+def gate12_skip_confirmation(item, ctrl, ndl, db, state):
     """
-    Credibility and confirmation controls.
+    [SKIP / PLACEHOLDER] Credibility and confirmation controls.
     Sets state.confirmation_state and state.confirmation_score.
     Returns dict: {source_count, has_primary_source, conf_adj, misinformation_risk,
                    confirmed, confirmation_state, confirmation_score}.
@@ -2094,8 +2102,9 @@ def gate12_confirmation(item, ctrl, ndl, db, state):
     States: primary_confirmed(1.0), strong(0.7), weak(0.4),
             high_misinformation_risk(0.0), expired_unconfirmed(0.1), contradictory(0.0).
 
-    TODO: DATA_DEPENDENCY — cross-source claim validation requires multi-source
-    aggregation not yet implemented. Current: DB-based source count for same ticker.
+    TODO: DATA_DEPENDENCY — true cross-source claim validation requires a
+    multi-outlet aggregation feed. Current implementation is a same-ticker
+    count proxy — does NOT actually confirm independent reporting.
     """
     ticker      = (item.get("ticker") or "").upper()
     source_tier = item.get("source_tier", 2)
@@ -2155,7 +2164,7 @@ def gate12_confirmation(item, ctrl, ndl, db, state):
     state.confirmation_state = confirmation_state
     state.confirmation_score = round(confirmation_score, 4)
 
-    ndl.gate(12, "CONFIRMATION",
+    ndl.gate(12, "SKIP_CONFIRMATION",
              {"source_tier": source_tier, "source_count": source_count,
               "has_primary_source": has_primary_source, "confirmed": confirmed,
               "misinfo_risk": misinformation_risk},
@@ -2228,11 +2237,18 @@ def gate13_timing(item, ctrl, ndl, state):
     return {"tradeable": timing_tradeable, "timing_state": timing_state, "stale": stale}
 
 
-# ── GATE 14 — CROWDING / SATURATION ──────────────────────────────────────
+# ── GATE 14 — SKIP / CROWDING / SATURATION (future-planning placeholder) ─
+# MARKED SKIP 2026-04-24: the gate's stated purpose is measuring social
+# attention saturation (X/Reddit/Stocktwits mention counts vs. baseline),
+# which requires a social-firehose API we don't have. The current
+# implementation counts headline-token similarity across Synthos's own
+# recent signals pool — a weak proxy that only sees our own pipeline,
+# never broader retail attention. Retained as scaffold for future API
+# integration so downstream scoring (crowding_discount) stays wired.
 
-def gate14_crowding(item, ctrl, ndl, db, state):
+def gate14_skip_crowding(item, ctrl, ndl, db, state):
     """
-    Crowding and saturation controls.
+    [SKIP / PLACEHOLDER] Crowding and saturation controls.
     Sets state.crowding_state, state.crowding_discount, state.cluster_volume.
     Returns dict: {cluster_volume, crowding_state, crowding_discount}.
 
@@ -2279,7 +2295,7 @@ def gate14_crowding(item, ctrl, ndl, db, state):
     state.crowding_discount = crowding_discount
     state.cluster_volume    = cluster_volume
 
-    ndl.gate(14, "CROWDING",
+    ndl.gate(14, "SKIP_CROWDING",
              {"cluster_volume": cluster_volume,
               "threshold": ctrl.CLUSTER_VOL_THRESHOLD,
               "exhausted_threshold": exhausted_threshold},
@@ -2291,11 +2307,18 @@ def gate14_crowding(item, ctrl, ndl, db, state):
     }
 
 
-# ── GATE 15 — CONTRADICTION / AMBIGUITY ──────────────────────────────────
+# ── GATE 15 — SKIP / CONTRADICTION (future-planning placeholder) ─────────
+# MARKED SKIP 2026-04-24: the gate's stated purpose is analyst view
+# dispersion (do sell-side price targets / ratings diverge?), which
+# requires an aggregated expert-consensus feed we don't have. The current
+# implementation only catches INTERNAL conflict within a single article
+# (headline says "up", subhead says "down") or uncertainty-word density —
+# useful but much narrower than real analyst dispersion. Retained as
+# scaffold so downstream scoring (ambiguity_score) stays wired.
 
-def gate15_contradiction(item, ctrl, ndl, state):
+def gate15_skip_contradiction(item, ctrl, ndl, state):
     """
-    Contradiction and ambiguity controls.
+    [SKIP / PLACEHOLDER] Contradiction and ambiguity controls.
     Sets state.ambiguity_state and state.ambiguity_score.
     Returns dict: {ambiguity_state, ambiguity_score, has_contradiction,
                    uncertainty_density, head_body_mismatch}.
@@ -2354,7 +2377,7 @@ def gate15_contradiction(item, ctrl, ndl, state):
     state.ambiguity_state = ambiguity_state
     state.ambiguity_score = round(ambiguity_score, 4)
 
-    ndl.gate(15, "CONTRADICTION",
+    ndl.gate(15, "SKIP_CONTRADICTION",
              {"uncertainty_density": f"{uncertainty_density:.3f}",
               "head_body_mismatch": head_body_mismatch,
               "internally_conflicted": internally_conflicted},
@@ -3146,10 +3169,10 @@ def run(session="market"):
 
         # ── Gates 12-16: Confirmation, timing, crowding, contradiction,
         #                impact magnitude ────────────────────────────────────
-        confirmation = gate12_confirmation(item, ctrl, ndl, db, state)
+        confirmation = gate12_skip_confirmation(item, ctrl, ndl, db, state)
         timing       = gate13_timing(item, ctrl, ndl, state)
-        crowding     = gate14_crowding(item, ctrl, ndl, db, state)
-        contradiction = gate15_contradiction(item, ctrl, ndl, state)
+        crowding     = gate14_skip_crowding(item, ctrl, ndl, db, state)
+        contradiction = gate15_skip_contradiction(item, ctrl, ndl, state)
         gate16_impact_magnitude(scope, topic, regime, ctrl, ndl, state)
 
         # ── Gate 13: Timing exit ──────────────────────────────────────────
@@ -3431,10 +3454,10 @@ def run(session="market"):
             scope_re         = gate9_scope(topic_re, entity_re, ctrl, ndl_re, state_re)
             gate10_horizon(topic_re, event_re, ctrl, ndl_re, state_re)
             gate11_benchmark_relative(sentiment_re, scope_re, regime, ctrl, ndl_re, state_re)
-            confirmation_re  = gate12_confirmation(reeval_item, ctrl, ndl_re, db, state_re)
+            confirmation_re  = gate12_skip_confirmation(reeval_item, ctrl, ndl_re, db, state_re)
             gate13_timing(reeval_item, ctrl, ndl_re, state_re)
-            gate14_crowding(reeval_item, ctrl, ndl_re, db, state_re)
-            contradiction_re = gate15_contradiction(reeval_item, ctrl, ndl_re, state_re)
+            gate14_skip_crowding(reeval_item, ctrl, ndl_re, db, state_re)
+            contradiction_re = gate15_skip_contradiction(reeval_item, ctrl, ndl_re, state_re)
             gate16_impact_magnitude(scope_re, topic_re, regime, ctrl, ndl_re, state_re)
             action_re        = gate17_action(sentiment_re, novelty_re, confirmation_re,
                                              contradiction_re, regime, event_re, ctrl, ndl_re, state_re)

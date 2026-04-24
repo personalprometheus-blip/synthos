@@ -683,3 +683,74 @@ now in the user's physical possession as a bootable recovery image.
   (`vcgencmd bootloader_config` kept showing `0xf416` post-apply).
   Post-NVMe-boot confirmed the flash DID persist — those tools were
   just reading a boot-time cache. Non-issue.
+
+---
+
+## NEWS-AGENT-GATE-20 — implement real evaluation loop using `outcomes` table
+
+**Why deferred.** Gate 20 (`gate20_evaluation`) claims to be the news
+pipeline's feedback loop — "comparing predicted vs. realized market
+response" per its docstring — but the current implementation only
+checks whether the ticker is still in the active signals table and
+writes the literal string `accuracy_note="accuracy_tracking_pending"`.
+It is scaffolding: a gate slot and a decision-log entry with no
+actual evaluation logic behind them. Flagged in 2026-04-24 news
+agent audit.
+
+This is the closest thing to a "learning" feedback loop the news
+pipeline could have, and the data to power it already exists — every
+closed trade writes an `outcomes` row with P&L, hold time, and a
+backref to the originating signal (see trade_lifecycle.md §7).
+
+**Why NOT just fix it.** Implementing this properly is ~1 day of work.
+Not appropriate to ship 3 days before the operator's 3-week travel
+window where a faulty evaluation loop could drift the scoring in
+ways no one is watching. Safer to design the full feedback loop when
+there's time to observe it for 1-2 weeks post-deploy.
+
+**Entry conditions** (ALL must be met):
+1. Operator back from extended travel, with 2+ weeks of focused
+   attention available to watch classification accuracy daily.
+2. `outcomes` table has ≥ 50 closed trades with `signal_id` backrefs
+   (enough samples per event_class to compute meaningful accuracy).
+3. Decision on how Gate 20 should FEED BACK into upstream scoring:
+   read-only (informational only, no effect on future classifications)
+   OR adaptive (tune composite weights based on historical accuracy).
+   Read-only is safer; adaptive is more valuable. Must pick one before
+   implementation, not during.
+
+**Scope.**
+- `synthos_build/agents/retail_news_agent.py` — `gate20_evaluation`
+  body replaced (~80 lines). Also touches the `NewsDecisionLog.commit`
+  path if we add a dedicated `news_accuracy` persistence row.
+- `synthos_build/src/retail_database.py` — add helper method
+  `get_news_accuracy_by_event_class(event_class, days)` that joins
+  `signals` to `outcomes` by `signal_id` and computes win rate /
+  avg P&L per classification bucket. ~40 lines.
+- Optionally: new `news_accuracy` summary table if we want a rolling
+  view the portal can show. Add idempotent migration. ~60 lines.
+- `trade_lifecycle.md` — update §1 / §3 to describe the real loop.
+
+Total: ~180 lines + 1 schema migration. Manageable; the reason for
+deferral is not size, it's the need for post-deploy observation time.
+
+**Risk.**
+- If adaptive (tuning weights from accuracy): a few bad classifications
+  could skew future scoring for days until more data dilutes them.
+  Mitigation: start as read-only, add weight-tuning in a second patch
+  only after read-only accuracy reports look sane.
+- Schema migration could race with market_daemon / price_poller on
+  DB lock — use idempotent ALTER TABLE with try/except, same pattern
+  as `_migrate_pending_signups`.
+- The `outcomes → signals` join assumes `signal_id` is always
+  populated on position rows. Pre-2026-04-08 rows may be NULL; skip
+  those in the accuracy query.
+
+**Related context.**
+- News-agent audit finding 2026-04-24: Gate 20 is hardcoded
+  `accuracy_tracking_pending` — it produces the gate log entry but
+  does no evaluation.
+- `outcomes` table contract: see `trade_lifecycle.md` §7 "Outcome
+  tracking."
+- Historical source: `gate20_evaluation` at L2679 of
+  `retail_news_agent.py`.
