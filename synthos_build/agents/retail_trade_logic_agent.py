@@ -248,6 +248,15 @@ class TradingControls:
         'interrogation':       float(os.environ.get('W_INTERROGATION', '0.20')),
         'sentiment':           float(os.environ.get('W_SENTIMENT', '0.20')),
     }
+    # Market-state modifier added 2026-04-24. Pulls _MARKET_STATE_SCORE
+    # from market_state_agent (sentiment 40% + news 25% + macro 35%
+    # composite, range -1..+1). Applied as ADDITIVE nudge to Gate 5
+    # composite (after weighted-sum), so a negative market regime
+    # reduces all scores slightly without hard-blocking any signal.
+    # Default weight chosen conservatively — too large would let one
+    # bad sentiment scan veto every entry that day.
+    # Set MARKET_STATE_SCORE_WEIGHT=0 to disable.
+    MARKET_STATE_SCORE_WEIGHT = float(os.environ.get('MARKET_STATE_SCORE_WEIGHT', '0.10'))
 
     # Entry (Gate 6)
     MOMENTUM_ROC_THRESHOLD    = float(os.environ.get('MOMENTUM_ROC_THRESHOLD', '0.02'))
@@ -876,6 +885,60 @@ def _queue_overnight_order(ticker: str, qty, side: str,
     return None
 
 
+def _resolve_fill_price(order, alpaca, fallback_price: float,
+                        max_polls: int = 4, poll_delay: float = 0.5) -> float:
+    """Return the real Alpaca fill price for a just-submitted market order,
+    falling back to `fallback_price` (typically the stale daily-close
+    `candidate['price']`) if we cannot confirm a fill within the poll
+    window. Added 2026-04-24 to close pipeline audit Gap 3 (slippage).
+
+    Polls GET /v2/orders/{id} up to `max_polls` times with `poll_delay`
+    seconds between attempts — market orders usually fill in <1s, so a
+    ~2s ceiling is plenty without hanging the trader loop. Any exception
+    or missing filled_avg_price falls back to `fallback_price` and logs
+    a warning so downstream P&L stays non-fictional most of the time."""
+    import time as _time
+    try:
+        oid = order.get('id') if isinstance(order, dict) else None
+        if not oid:
+            log.warning(f"_resolve_fill_price: order has no id, using fallback ${fallback_price:.4f}")
+            return float(fallback_price)
+        # Order response itself may already carry filled_avg_price if the
+        # first poll at submit time caught a fast fill — check before
+        # waking Alpaca.
+        fap = order.get('filled_avg_price')
+        if fap:
+            try:
+                return float(fap)
+            except (TypeError, ValueError):
+                pass
+        for i in range(max_polls):
+            _time.sleep(poll_delay)
+            o = alpaca.get_order(oid)
+            if not o:
+                continue
+            status = (o.get('status') or '').lower()
+            fap = o.get('filled_avg_price')
+            if fap and status in ('filled', 'partially_filled'):
+                try:
+                    real = float(fap)
+                    slip_bp = ((real - float(fallback_price)) / float(fallback_price)) * 10000 \
+                              if fallback_price else 0.0
+                    log.info(f"_resolve_fill_price: order={oid} fill=${real:.4f} "
+                             f"(candidate=${float(fallback_price):.4f}, slip={slip_bp:+.1f}bp)")
+                    return real
+                except (TypeError, ValueError):
+                    pass
+            if status in ('canceled', 'expired', 'rejected'):
+                log.warning(f"_resolve_fill_price: order={oid} status={status} — fallback")
+                break
+        log.warning(f"_resolve_fill_price: order={oid} did not confirm fill in "
+                    f"{max_polls * poll_delay:.1f}s — fallback ${fallback_price:.4f}")
+    except Exception as e:
+        log.warning(f"_resolve_fill_price error ({e}) — fallback ${fallback_price:.4f}")
+    return float(fallback_price)
+
+
 # ── RUNTIME WATCHDOG ──────────────────────────────────────────────────────────
 # Two jobs:
 #   1. Track the current phase ("reconciliation", "gate_10_position_review",
@@ -1248,6 +1311,11 @@ class AlpacaClient:
     def cancel_order(self, order_id):
         return self._request("delete", f"/v2/orders/{order_id}")
 
+    def get_order(self, order_id):
+        """Fetch a single order by id. Used by _resolve_fill_price to read
+        the actual filled_avg_price after a market order submit."""
+        return self._request("get", f"/v2/orders/{order_id}")
+
     def get_position_safe(self, ticker):
         if not self._circuit_check():
             return None
@@ -1392,6 +1460,41 @@ def gate1_system(db, alpaca, session: str, decision_log: TradeDecisionLog) -> bo
     if not api_ok:
         decision_log.decide("HALT", "Broker API unreachable")
         return False
+
+    # Validator verdict consumption (added 2026-04-24)
+    # retail_validator_stack_agent.py emits _VALIDATOR_VERDICT ∈
+    # {GO, CAUTION, NO_GO} based on 5-gate pre-trade system health
+    # checks (fault detection, bias, market state, macro regime).
+    # Prior to this wiring the trader ignored the verdict entirely —
+    # validator said "system is degraded, don't trust this right now"
+    # and trader kept opening positions. Defeats the 5-gate chain.
+    #
+    # NO_GO  → halt new entries, existing positions keep running
+    # CAUTION → log warning, proceed (graceful degradation case)
+    # GO / missing → proceed normally
+    # Existing positions + Gate 10 management + trailing stops are
+    # all unaffected — this only gates *new entry decisions*.
+    try:
+        verdict = (db.get_setting('_VALIDATOR_VERDICT') or 'GO').upper()
+        restrictions_raw = db.get_setting('_VALIDATOR_RESTRICTIONS') or '[]'
+        try:
+            restrictions = json.loads(restrictions_raw) if isinstance(restrictions_raw, str) else []
+        except Exception:
+            restrictions = []
+        decision_log.gate("1_VALIDATOR", verdict != 'NO_GO', {
+            "verdict":      verdict,
+            "restrictions": restrictions[:5],  # cap log spam
+        }, f"validator verdict={verdict}" + (f" restrictions={len(restrictions)}" if restrictions else ""))
+        if verdict == 'NO_GO':
+            decision_log.decide("HALT", f"Validator NO_GO (restrictions: {restrictions})")
+            return False
+        if verdict == 'CAUTION' and restrictions:
+            log.warning(f"[GATE 1] Validator CAUTION — proceeding despite: {restrictions}")
+    except Exception as e:
+        log.debug(f"Gate 1 validator verdict check error: {e}")
+        # Missing validator output is NOT a halt condition — graceful degrade
+        decision_log.gate("1_VALIDATOR", True, {"verdict": "UNKNOWN"},
+                          "validator output unavailable — proceeding")
 
     decision_log.gate("1_SYSTEM", True, {}, "all system gates passed")
     return True
@@ -1831,6 +1934,28 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     # by Gate 6's chase caps (MOMENTUM/BREAKOUT/MEANREV), which block
     # extended entries outright rather than down-weighting them.
 
+    # Market-state score modifier (added 2026-04-24).
+    # Consumes _MARKET_STATE_SCORE from market_state_agent which
+    # synthesizes sentiment (40%) + news (25%) + macro (35%) into a
+    # -1..+1 composite. Applied here as an additive nudge scaled by
+    # MARKET_STATE_SCORE_WEIGHT (default 0.10) so negative regimes
+    # gently reduce all entries without hard-blocking. Disabled by
+    # setting weight to 0. Missing / unparseable setting silently
+    # defaults to 0 contribution.
+    market_state_mod = 0.0
+    market_state_info = "no data"
+    try:
+        _ms_raw = _shared_db().get_setting('_MARKET_STATE_SCORE')
+        if _ms_raw is not None:
+            _ms_score = float(_ms_raw)
+            # Clamp to valid range so a bad write can't crater scores
+            _ms_score = max(-1.0, min(1.0, _ms_score))
+            market_state_mod = round(_ms_score * C.MARKET_STATE_SCORE_WEIGHT, 4)
+            market_state_info = f"{_ms_score:+.2f} × {C.MARKET_STATE_SCORE_WEIGHT}"
+    except Exception as _e:
+        log.debug(f"_MARKET_STATE_SCORE read failed at G5: {_e}")
+    final_score = round(max(0.0, min(final_score + market_state_mod, 1.0)), 4)
+
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
     decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
@@ -1842,6 +1967,7 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
         "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
         "news_flags_mod":     f"{news_modifier:+.3f} ({news_modifier_info})",
+        "market_state_mod":   f"{market_state_mod:+.3f} ({market_state_info})",
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
@@ -2846,12 +2972,14 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         atr, candidate['price'], signal.get('sector', ''))
                     order = alpaca.submit_order(signal['ticker'], size, "buy")
                     if order:
+                        # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
+                        real_entry = _resolve_fill_price(order, alpaca, candidate['price'])
                         # signal_id=None for non-owner customers (FK references local signals table,
                         # but signals live in shared DB)
                         _sig_id = signal['id'] if _CUSTOMER_ID == _OWNER_CID else None
                         db.open_position(
                             ticker=signal['ticker'], company=signal.get('company'),
-                            sector=signal.get('sector'), entry_price=candidate['price'],
+                            sector=signal.get('sector'), entry_price=real_entry,
                             shares=size, trail_stop_amt=trail_amt,
                             trail_stop_pct=trail_pct, vol_bucket=vol_label,
                             signal_id=_sig_id,
@@ -2863,11 +2991,11 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                                             order_type="trailing_stop", trail_price=trail_amt)
                         _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"[ROTATION] COMPLETE: Sold {weakest['ticker']} → "
-                                 f"BUY {size:.4f} {signal['ticker']} @ ${candidate['price']:.2f}")
-                        _cost = round(candidate['price'] * size, 2)
+                                 f"BUY {size:.4f} {signal['ticker']} @ ${real_entry:.2f}")
+                        _cost = round(real_entry * size, 2)
                         db.add_notification('trade', f'Bought {signal["ticker"]}',
-                            f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested (rotated from {weakest["ticker"]})',
-                            meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2), 'rotation_from': weakest['ticker']})
+                            f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested (rotated from {weakest["ticker"]})',
+                            meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(real_entry, 2), 'rotation_from': weakest['ticker']})
                         rotations += 1
                         sig_log.decide("ROTATE", f"Replaced {weakest['ticker']} (gap {score_gap:.3f})")
                         sig_log.commit(db)
@@ -3463,9 +3591,11 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                 sig_id    = approval['id']
                 order = alpaca.submit_order(ticker=ticker, qty=shares, side="buy")
                 if order:
+                    # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
+                    real_entry = _resolve_fill_price(order, alpaca, price)
                     _appr_sig = db.get_signal_by_id(sig_id) or {}
                     db.open_position(ticker=ticker, company=approval.get('company'),
-                                     sector=approval.get('sector'), entry_price=price,
+                                     sector=approval.get('sector'), entry_price=real_entry,
                                      shares=shares, trail_stop_amt=trail_amt,
                                      trail_stop_pct=trail_pct, vol_bucket=vol_label,
                                      signal_id=sig_id,
@@ -3477,11 +3607,11 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
-                    log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${price:.2f}")
-                    _cost = round(price * shares, 2)
+                    log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${real_entry:.2f}")
+                    _cost = round(real_entry * shares, 2)
                     db.add_notification('trade', f'Bought {ticker}',
-                        f'{shares:.2f} shares @ ${price:.2f} — ${_cost:.2f} invested',
-                        meta={'ticker': ticker, 'side': 'buy', 'shares': round(shares, 4), 'price': round(price, 2)})
+                        f'{shares:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
+                        meta={'ticker': ticker, 'side': 'buy', 'shares': round(shares, 4), 'price': round(real_entry, 2)})
                     trade_events += 1
                 else:
                     log.error(f"[MANAGED] Order failed: {ticker}")
@@ -3723,9 +3853,11 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
                 order = alpaca.submit_order(signal['ticker'], size, "buy")
                 if order:
+                    # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
+                    real_entry = _resolve_fill_price(order, alpaca, candidate['price'])
                     db.open_position(
                         ticker=signal['ticker'], company=signal.get('company'),
-                        sector=signal.get('sector'), entry_price=candidate['price'],
+                        sector=signal.get('sector'), entry_price=real_entry,
                         shares=size, trail_stop_amt=trail_amt,
                         trail_stop_pct=trail_pct, vol_bucket=vol_label,
                         signal_id=(signal['id'] if _CUSTOMER_ID == _OWNER_CID else None),
@@ -3737,11 +3869,11 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(signal['id'])
                     log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
-                             f"@ ${candidate['price']:.2f} | stop ${trail_amt:.2f}")
-                    _cost = round(candidate['price'] * size, 2)
+                             f"@ ${real_entry:.2f} | stop ${trail_amt:.2f}")
+                    _cost = round(real_entry * size, 2)
                     db.add_notification('trade', f'Bought {signal["ticker"]}',
-                        f'{size:.2f} shares @ ${candidate["price"]:.2f} — ${_cost:.2f} invested',
-                        meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(candidate['price'], 2)})
+                        f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
+                        meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(real_entry, 2)})
                     trade_events += 1
                 else:
                     log.error(f"Order failed: {signal['ticker']}")
