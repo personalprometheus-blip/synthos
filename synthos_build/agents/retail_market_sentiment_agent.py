@@ -1929,11 +1929,19 @@ def gate11_sector_rotation(ctrl, state, sdl, sector_returns):
              f"cyc-def={spread:.4f}")
 
 
-def gate12_macro(ctrl, state, sdl, macro_data):
+def gate12_skip_macro(ctrl, state, sdl, macro_data):
     """
-    Gate 12 — Macro Conditions.
-    TODO: DATA_DEPENDENCY — economic surprise indices, Fed funds futures require FRED/Bloomberg.
-    All states set to neutral on free tier.
+    [SKIP / PLACEHOLDER] Gate 12 — Macro Conditions.
+
+    MARKED SKIP 2026-04-24: this gate has no free-tier proxy. Every
+    state is hardcoded to "neutral" with macro_score=0.0; the function
+    is effectively a no-op that exists to preserve the gate slot and
+    the state-field surface for when a real data feed (FRED, CME,
+    Bloomberg) is wired in. Do NOT mistake a neutral macro_state
+    entry in the decision log for a real macro check.
+
+    TODO: DATA_DEPENDENCY — economic surprise indices, Fed funds
+    futures, yield curve shape all require FRED or paid Bloomberg.
     """
     # TODO: DATA_DEPENDENCY — CPI surprise, GDP surprise require FRED or paid Bloomberg
     # TODO: DATA_DEPENDENCY — Fed funds futures require CME data
@@ -1943,10 +1951,10 @@ def gate12_macro(ctrl, state, sdl, macro_data):
     state.macro_sentiment_state = "neutral"
     state.macro_score           = 0.0
 
-    sdl.gate(12, "macro",
+    sdl.gate(12, "SKIP_macro",
              {"macro_data_keys": list(macro_data.keys()) if macro_data else []},
              "neutral",
-             "TODO:DATA_DEPENDENCY — macro data (CPI/GDP surprise, Fed futures) requires FRED/Bloomberg")
+             "SKIP:DATA_DEPENDENCY — macro data (CPI/GDP surprise, Fed futures) requires FRED/Bloomberg")
 
 
 def gate13_news(ctrl, state, sdl, news_data):
@@ -2008,11 +2016,19 @@ def gate13_news(ctrl, state, sdl, news_data):
              f"entries={entry_count} avg={avg_score:.3f}")
 
 
-def gate14_social(ctrl, state, sdl, social_data):
+def gate14_skip_social(ctrl, state, sdl, social_data):
     """
-    Gate 14 — Social Sentiment.
-    TODO: DATA_DEPENDENCY — social sentiment requires paid feed (StockTwits, Twitter/X API).
-    All states set to neutral on free tier.
+    [SKIP / PLACEHOLDER] Gate 14 — Social Sentiment.
+
+    MARKED SKIP 2026-04-24: social sentiment has no free-tier
+    equivalent and our tier does not include StockTwits / X / Reddit
+    access. Every state is hardcoded to neutral/aligned/normal with
+    social_score=0.0; the gate is a no-op retained to keep the
+    state-field surface intact for future paid-feed integration.
+    Do NOT read `social_*` state values as signal; they are placeholders.
+
+    TODO: DATA_DEPENDENCY — social sentiment requires paid feed
+    (StockTwits, Twitter/X API, Reddit WallStreetBets scraper).
     """
     # TODO: DATA_DEPENDENCY — StockTwits requires paid API access
     # TODO: DATA_DEPENDENCY — Twitter/X API requires paid developer access
@@ -2024,10 +2040,10 @@ def gate14_social(ctrl, state, sdl, social_data):
     state.social_quality_state   = "normal"
     state.social_score           = 0.0
 
-    sdl.gate(14, "social",
+    sdl.gate(14, "SKIP_social",
              {"social_data_keys": list(social_data.keys()) if social_data else []},
              "neutral",
-             "TODO:DATA_DEPENDENCY — social data requires paid feed (StockTwits/Twitter/Reddit)")
+             "SKIP:DATA_DEPENDENCY — social data requires paid feed (StockTwits/Twitter/Reddit)")
 
 
 def gate15_breadth_price_divergence(ctrl, state, sdl, spx_bars):
@@ -2798,9 +2814,9 @@ def run():
         gate9_safe_haven(ctrl, state, sdl, etf_rets)
         gate10_credit(ctrl, state, sdl, etf_rets)
         gate11_sector_rotation(ctrl, state, sdl, sector_rets)
-        gate12_macro(ctrl, state, sdl, data["macro_data"])
+        gate12_skip_macro(ctrl, state, sdl, data["macro_data"])
         gate13_news(ctrl, state, sdl, data["news_data"])
-        gate14_social(ctrl, state, sdl, data["social_data"])
+        gate14_skip_social(ctrl, state, sdl, data["social_data"])
         gate15_breadth_price_divergence(ctrl, state, sdl, spx_bars)
         gate16_composite_construction(ctrl, state, sdl)
         gate17_weighting(ctrl, state, sdl)
