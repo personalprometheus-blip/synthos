@@ -2,9 +2,19 @@
 
 A distributed algorithmic trading assistant running on Raspberry Pi hardware. Monitors U.S. Congressional trading disclosures, scores signals using multi-agent analysis (research + sentiment), and executes paper trades via Alpaca. Currently in supervised paper-trading mode only.
 
+> **Current state (2026-04-24).** The sections below are a historical
+> snapshot from the Phase 3 pre-deployment era (April 5, 2026). For
+> the live operational map — node roles, running agents, cron/timer
+> schedules, data flow — see `data/system_architecture.json` (v3.12).
+> For a producer→consumer trace of the trading pipeline, see
+> `docs/pipeline_audit_2026-04-24.md`. The retail node is a Pi 5 16GB
+> (NVMe storage), the company node is a Pi 4B, and Phase 6 (live
+> trading) has not flipped — still `TRADING_MODE=PAPER`.
+
 ## Status
-See [STATUS.md](./STATUS.md) for current progress.
-See [docs/validation/SYSTEM_VALIDATION_REPORT.md](./docs/validation/SYSTEM_VALIDATION_REPORT.md) for known blockers.
+See [STATUS.md](./STATUS.md) for the historical Phase 1-5 record.
+See [docs/validation/SYSTEM_VALIDATION_REPORT.md](./docs/validation/SYSTEM_VALIDATION_REPORT.md) for historical blockers.
+Operational truth lives in `data/system_architecture.json`.
 
 ## Structure
 

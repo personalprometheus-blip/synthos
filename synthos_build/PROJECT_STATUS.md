@@ -1,7 +1,17 @@
 # PROJECT STATUS — Synthos
 
+> **⚠ Historical snapshot (frozen 2026-04-05).** The phase tracker
+> below is preserved for audit trail. Current operational truth
+> lives in `data/system_architecture.json` (v3.12) — retail Pi 5 is
+> deployed on NVMe, Phase C refactor + pipeline-audit Gaps 1-3
+> landed 2026-04-24, and the stack is in supervised Phase 6 paper
+> mode. For live data: `docs/pipeline_audit_2026-04-24.md`,
+> `docs/trade_lifecycle.md`, `docs/backlog.md`.
+
+---
+
 **Last Updated:** 2026-04-05
-**Current Phase:** Phase 5 complete — Pi 5 retail build pending before Phase 6
+**Current Phase (at freeze):** Phase 5 complete — Pi 5 retail build pending before Phase 6
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
 ---

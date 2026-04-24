@@ -101,15 +101,26 @@ runs inside the trader before entry evaluation.
 1-8, 10, 11, 13, 14 plus news-veto sub-check 5.5; gate 9 and gate 12
 were planned slots in an earlier design that were consolidated into
 gates 10 and 14 respectively — the numbering gap is intentional):
-- System: kill switch, API health, drawdown, daily-loss limits
+- System: kill switch, API health, drawdown, daily-loss limits,
+  **validator verdict** (added 2026-04-24): reads `_VALIDATOR_VERDICT`
+  written by `retail_validator_stack_agent`. `NO_GO` halts new entries
+  (existing positions + Gate 10 exits unaffected); `CAUTION` logs a
+  warning and proceeds; `GO` / missing key → proceed normally. Closes
+  pipeline-audit Gap 1 (verdict produced but previously ignored).
 - Benchmark: SPY regime (trend, volatility, drawdown)
 - Regime: benchmark-relative risk posture
 - Position review: per-open-position exit triggers (stop loss,
   trailing ratchet, late-day tighten, open-hour grace window,
   protective exit)
-- Signal evaluation: liquidity, spread, score, entry pattern,
-  anchor-proximity chase caps, sizing, risk setup, portfolio-level
-  exposure, stress, evaluation-loop kill conditions
+- Signal evaluation: liquidity, spread, score (includes
+  **market-state regime nudge** added 2026-04-24: Gate 5 composite
+  adds `_MARKET_STATE_SCORE` × `MARKET_STATE_SCORE_WEIGHT` (default
+  0.10) to the weighted sum, so a negative regime — sentiment 40% +
+  news 25% + macro 35% composite — tilts all scores down without
+  hard-blocking any individual signal; env `MARKET_STATE_SCORE_WEIGHT=0`
+  disables), entry pattern, anchor-proximity chase caps, sizing,
+  risk setup, portfolio-level exposure, stress, evaluation-loop kill
+  conditions
 
 Each gate writes to `TradeDecisionLog` which commits a structured
 `TRADE_DECISION` row to `system_log` per signal and a `scan_log` row
@@ -192,7 +203,16 @@ the user sees what would have traded and why it didn't.
 - For each: calls `alpaca.submit_order(ticker, qty, 'buy')` (now inside
   market hours, so the overnight gate no-ops)
 - On successful submission:
-  - Writes a `positions` row with `status='OPEN'`
+  - **Resolves real fill price** via `_resolve_fill_price(order, alpaca,
+    fallback)` (added 2026-04-24): polls `GET /v2/orders/{id}` up to 4×
+    with 0.5s delay (~2s ceiling) for `filled_avg_price`; falls back to
+    the candidate's stale daily-close price with a warning log only if
+    the fill never confirms in the poll window. Applied at all 3 submit
+    → open_position sites (rotation path, managed-mode executor,
+    automatic mode). Closes pipeline-audit Gap 3 — every downstream P&L
+    now measures against the real entry, not a fiction.
+  - Writes a `positions` row with `status='OPEN'` and
+    `entry_price=real_entry`
   - Submits a trailing-stop SELL as follow-up protection
   - Marks the approval row `EXECUTED`
   - Writes a `trade` notification for the user

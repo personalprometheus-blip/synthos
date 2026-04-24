@@ -24,6 +24,76 @@ Each backlog item:
 
 ---
 
+## PIPELINE-AUDIT — Gap 4 (urgent_flags vs news_flags rationale doc)
+
+**Why deferred.** Cosmetic — no bug, no runtime impact. The 2026-04-24
+pipeline audit clarified that `urgent_flags` (cascade-driven Gate 10
+PULSE_EXIT force-exits) and `news_flags` (per-ticker scoring adjustments
+for Gate 4 EVENT_RISK + Gate 5 composite modifier) serve distinct
+severity tiers with different schemas, TTLs, and consumers. An earlier
+session recommended unifying them. This entry captures the "keep
+separate" rationale so the question doesn't loop back.
+
+**Entry conditions.**
+1. Post-travel, when docs touches are low-risk.
+2. No parallel refactor in-flight on either table.
+
+**Scope.** Add a 15-line comment block at the top of each table's
+creation site in the schema module + a note in `retail_trade_lifecycle.md`.
+
+**Risk.** None — documentation only.
+
+**Related.** `docs/pipeline_audit_2026-04-24.md` Gap 4.
+
+---
+
+## PIPELINE-AUDIT — Gap 5 (sentiment agent 27-gate scope decision)
+
+**Why deferred.** Requires a design decision, not a mechanical fix, and
+touches the sentiment agent's entire output surface. Premature to touch
+before travel; safer to let 3 weeks of live operation inform the call.
+
+**Context.** `retail_market_sentiment_agent.py` has 27 gates. Of those,
+only two outputs flow downstream: the composite `cascade_detected`
+boolean (→ `urgent_flags` → Gate 10 PULSE_EXIT) and the composite market
+score (→ `scan_log` MARKET row → `market_state_agent` with weight 0.40).
+Gates 5 (breadth), 7 (volatility), 8 (options), 9 (safe-haven), 10
+(credit), 11 (sector rotation), 13 (news), 15 (divergence), 21
+(divergence warnings), 23 (risk discounts), 24 (persistence), 25
+(evaluation), 26 (output) each emit rich per-dimension state labels
+that get logged to `scan_log` but are never read by any downstream
+consumer.
+
+**Decision needed.** Option A — strip the agent to the composite +
+cascade path, delete the other gates (smaller surface, lower
+maintenance). Option B — wire the rich per-dimension outputs into
+something that consumes them (bigger, but reveals more of sentiment's
+original design intent). Both require measurement: over 3 weeks of
+live runs, do the unused gate outputs cluster with known regime shifts
+such that wiring them up would clearly improve signal quality?
+
+**Entry conditions.**
+1. ≥3 weeks of live sentiment scan_log data post-2026-04-24 (i.e.
+   after travel).
+2. One explicit decision logged in `docs/` or commit message, not a
+   drive-by refactor.
+3. No parallel Gate 5 composite rework in-flight.
+
+**Scope.** Option A: ~-400 lines in `retail_market_sentiment_agent.py`
++ scan_log schema tidy. Option B: ~+200 lines to add a new consumer
+(likely extending `market_state_agent` to blend per-dimension inputs).
+Either way: full unit-test coverage on the kept gates.
+
+**Risk.** Option A mid-travel would delete gates currently computing
+inputs we forgot we use — verify zero downstream reads first with
+`grep -r` across the whole repo before removing any. Option B can
+quietly inflate Gate 5 composite weight budget past 1.0 if not paired
+with a weight recalibration.
+
+**Related.** `docs/pipeline_audit_2026-04-24.md` Gap 5.
+
+---
+
 ## OPERATIONAL-HARDENING — pi5 direct backup + DEGRADED detector + token rotation
 
 **Why deferred.** Three operational resilience items that don't each
