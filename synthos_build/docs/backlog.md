@@ -24,6 +24,62 @@ Each backlog item:
 
 ---
 
+## ENCRYPTION-KEY-ROTATION — tooling to rotate the auth.db Fernet key without lockout
+
+**Why deferred.** Today the Fernet `ENCRYPTION_KEY` in `.env`
+encrypts every sensitive customer field: email, display name, phone,
+Alpaca API key, Alpaca secret. There is no mechanism to rotate this
+key. If it ever leaks (accidental `.env` commit, backup intercept,
+pi5 compromise), every customer's Alpaca credentials become
+decryptable by whoever has the key — and rotating requires
+re-encrypting every row atomically with a new key, which nothing in
+the current tree does.
+
+This is a real security hole but NOT an immediate fire. The fix is
+tooling, not behavior change.
+
+**Entry conditions (all must be true):**
+
+1. Operator back from travel with attention bandwidth to test
+   rotation on a full customer DB (takes careful dry-run + real-run
+   separation).
+2. Pi5 `.env` verified with 0600 perms + not in any repo.
+3. R2 / offsite backup of auth.db confirmed recoverable (so if
+   rotation corrupts mid-flight, we can roll back).
+
+**Scope.**
+- New tool: `synthos_build/tools/rotate_encryption_key.py` — reads
+  OLD_KEY + NEW_KEY from env or CLI, decrypts every field with OLD,
+  re-encrypts with NEW, writes to a staging table, commits in one
+  transaction, then swaps the .env key.
+- Migration strategy: two-key window. Both keys present in .env for
+  a transition period; decrypt tries NEW first, falls back to OLD,
+  writes always use NEW. After verification, drop OLD key.
+- ~200 lines of new tool code + maybe 20 lines of auth.py changes
+  for dual-key decrypt support.
+
+**Risk.**
+- Catastrophic: a failed mid-flight rotation leaves some rows
+  encrypted with OLD and others with NEW. All subsequent logins
+  break.
+- Mitigation: always run against a COPY of auth.db first. Only
+  promote to the live file after verifying every row round-trips
+  successfully with the new key.
+- Transaction atomicity: SQLite supports BEGIN/COMMIT but the
+  tool must NOT let the process be SIGKILLed mid-migration. Use
+  a file-based progress marker.
+
+**Related context.**
+- Key storage today: `synthos_build/user/.env` on pi5, key name
+  `ENCRYPTION_KEY`.
+- Fernet library: `cryptography.fernet.Fernet`.
+- Fields encrypted: see `retail_database.py` / `auth.py` columns
+  with `_enc` suffix.
+- Broader security review 2026-04-24 (backlog item below references
+  same audit).
+
+---
+
 ## EDGAR-SIGNAL-EXPANSION — widen SEC EDGAR ingestion beyond congressional filings
 
 **Why deferred.** Congress (STOCK Act) filings already flow through

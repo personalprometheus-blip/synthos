@@ -922,16 +922,13 @@ class DB:
             "CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until)",
             "CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at)",
 
-            # trade_windows table — originally populated by
-            # retail_window_calculator.py (Phase 3b of TRADER_RESTRUCTURE_PLAN).
-            # DORMANT since 2026-04-24: window_calculator was removed along
-            # with the trader's window-driven pre-filter — trader now reads
-            # VALIDATED signals directly and relies on Gate 6 chase caps
-            # for anchor-based entry protection. Schema + helper methods
-            # (write_trade_window, get_fresh_macro_windows,
-            # expire_stale_trade_windows, get_windows_for_signal) retained
-            # for historical audit rows and in case the pre-filter needs
-            # to be resurrected. No active writers.
+            # trade_windows table — DORMANT since 2026-04-24 when
+            # retail_window_calculator.py and its DB helpers were removed.
+            # Trader now reads VALIDATED signals directly and relies on
+            # Gate 6 chase caps for anchor-based entry protection. Table
+            # retained for historical audit of Phase 3b-era rows. No
+            # active writers or readers. Resurrect from git commit
+            # 5f505a9^ if the pre-filter layer is ever needed again.
             """CREATE TABLE IF NOT EXISTS trade_windows (
                 signal_id     INTEGER NOT NULL,
                 customer_id   TEXT    NOT NULL,
@@ -1457,143 +1454,22 @@ class DB:
             )
             return cur.rowcount
 
-    # ── TRADE WINDOWS (Phase 3b of TRADER_RESTRUCTURE_PLAN) ───────────────
-    # Window TTL defaults. Macro = end-of-day-ish so enrichment tick
-    # (every 30 min) always finds a valid macro row to work from. Minor =
-    # 2 trade-daemon cycles at 30s each = 60s, with a small grace buffer.
-    WINDOW_TTL_SECONDS = {
-        'macro': 8 * 3600,     # 8h — covers 9:30 → 16:00 + morning pre-comp
-        'minor': 90,           # 1.5 min — ~2 trade daemon cycles at 30s
-    }
-
-    def write_trade_window(self, signal_id, customer_id, tier,
-                           entry_low, entry_high, stop, tp=None,
-                           ttl_seconds=None, atr=None):
-        """
-        Write a window row. Primary key is (signal_id, customer_id, tier).
-
-        Tier-specific semantics (Audit Round 4 — anchor-pinning fix):
-          - 'macro': INSERT-only. Once a macro band is written for a
-            signal+customer, subsequent writes are NO-OPs. This gives
-            the intended "wait for a real pullback into the entry
-            band" behavior — without pinning, every enrichment tick
-            recomputed the band around current price and the trader
-            effectively fired on any in-flight signal.
-          - 'minor': upsert. Short-TTL (90s) refire zone; designed to
-            track current price on every enrichment pass.
-
-        Args:
-            signal_id: FK to signals.id
-            customer_id: per-customer
-            tier: 'macro' | 'minor'
-            entry_low / entry_high: price range where entry is acceptable
-            stop: stop-loss level
-            tp: optional take-profit level
-            ttl_seconds: override default TTL for this tier
-            atr: ATR_14 at compute time (Phase 4.a)
-        """
-        if tier not in ('macro', 'minor'):
-            raise ValueError(f"tier must be 'macro' or 'minor', got {tier!r}")
-        if ttl_seconds is None:
-            ttl_seconds = self.WINDOW_TTL_SECONDS[tier]
-        now_dt = datetime.now(timezone.utc)
-        computed_at = now_dt.isoformat()
-        expires_at = (now_dt + timedelta(seconds=ttl_seconds)).isoformat()
-
-        if tier == 'macro':
-            # Pin the macro band: INSERT OR IGNORE. Stale-by-TTL rows
-            # still re-insert because expire_stale_trade_windows() has
-            # deleted them, so the PK is free.
-            sql = (
-                "INSERT OR IGNORE INTO trade_windows "
-                "(signal_id, customer_id, tier, entry_low, entry_high, "
-                "stop, tp, computed_at, expires_at, atr) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            )
-        else:
-            # Minor: upsert — refire zone follows current price
-            sql = (
-                "INSERT INTO trade_windows "
-                "(signal_id, customer_id, tier, entry_low, entry_high, "
-                "stop, tp, computed_at, expires_at, atr) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(signal_id, customer_id, tier) DO UPDATE SET "
-                "entry_low=excluded.entry_low, entry_high=excluded.entry_high, "
-                "stop=excluded.stop, tp=excluded.tp, "
-                "computed_at=excluded.computed_at, expires_at=excluded.expires_at, "
-                "atr=excluded.atr"
-            )
-        with self.conn() as c:
-            c.execute(
-                sql,
-                (int(signal_id), customer_id, tier,
-                 float(entry_low), float(entry_high), float(stop),
-                 None if tp is None else float(tp),
-                 computed_at, expires_at,
-                 None if atr is None else float(atr)),
-            )
-
-    def get_windows_for_signal(self, signal_id, customer_id):
-        """Return {'macro': row, 'minor': row} for the given signal+customer.
-        Missing tier returns None. Fresh_until filter applied — stale rows
-        excluded from the result."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self.conn() as c:
-            rows = c.execute(
-                "SELECT tier, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at, atr "
-                "FROM trade_windows "
-                "WHERE signal_id = ? AND customer_id = ? AND expires_at > ?",
-                (int(signal_id), customer_id, now),
-            ).fetchall()
-        out = {'macro': None, 'minor': None}
-        for r in rows:
-            out[r['tier']] = dict(r)
-        return out
-
-    def get_fresh_minor_windows(self, customer_id):
-        """
-        Used by trade daemon (Phase 3c) to find candidates ready to fire.
-        Returns all non-expired minor rows for the given customer.
-        Caller then joins to signals + live_prices to check entry bands.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        with self.conn() as c:
-            rows = c.execute(
-                "SELECT signal_id, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at, atr "
-                "FROM trade_windows "
-                "WHERE customer_id = ? AND tier = 'minor' AND expires_at > ?",
-                (customer_id, now),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_fresh_macro_windows(self, customer_id):
-        """
-        Used by trader (Phase 3c.b) as the entry filter. Returns all
-        non-expired macro rows for the given customer. Caller joins to
-        signals (master) + live_prices to find tickers currently within
-        their entry band, then runs the 13-gate evaluation.
-        """
-        now = datetime.now(timezone.utc).isoformat()
-        with self.conn() as c:
-            rows = c.execute(
-                "SELECT signal_id, entry_low, entry_high, stop, tp, "
-                "computed_at, expires_at, atr "
-                "FROM trade_windows "
-                "WHERE customer_id = ? AND tier = 'macro' AND expires_at > ?",
-                (customer_id, now),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def expire_stale_trade_windows(self):
-        """Housekeeping — prune expired window rows. Returns count deleted."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self.conn() as c:
-            cur = c.execute(
-                "DELETE FROM trade_windows WHERE expires_at <= ?", (now,)
-            )
-            return cur.rowcount
+    # ── TRADE WINDOWS — DORMANT ─────────────────────────────────────────
+    # retail_window_calculator.py was removed 2026-04-24 along with all
+    # readers/writers of this table (trader Phase 3c.b block, Gate 5
+    # window_proximity scoring nudge, market_daemon run_window_calculator).
+    # The trade_windows TABLE itself is retained for historical audit of
+    # the Phase 3b era but has zero active writers going forward.
+    #
+    # The write_trade_window / get_fresh_macro_windows / get_fresh_minor_windows
+    # / get_windows_for_signal / expire_stale_trade_windows helpers that
+    # used to live here were DELETED in the same pass. If window-based
+    # pre-filtering ever needs to be resurrected, restore from git history
+    # at commit 5f505a9^ (the commit before the deletion).
+    #
+    # Pruning old rows: a one-time cleanup is fine; the table will just
+    # accumulate forever otherwise since nothing expires rows anymore.
+    # Manual SQL: DELETE FROM trade_windows WHERE expires_at < datetime('now','-30 days');
 
     # ── CANDIDATE SIGNALS (Phase 3b of TRADER_RESTRUCTURE_PLAN) ───────────
     # Separate from upsert_signal() so we don't entangle candidate-source
