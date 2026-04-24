@@ -501,15 +501,32 @@ class TradeDecisionLog:
         }
 
     def commit(self, db):
-        """Write to system_log and logic_audits/. FLAG: move to trade_decisions table."""
+        """Write to system_log and logic_audits/.
+
+        Truncation: system_log.details is SQLite TEXT (no hard size cap;
+        effectively 1GB). Earlier versions truncated at 2000 chars which
+        produced invalid JSON for long gate traces — breaking every
+        downstream parser that tried to replay decisions. Now we keep
+        the full JSON up to a 64KB safety cap. Rows over 64KB would
+        indicate a runaway gate log and are cheap to truncate WITH a
+        marker so parsers can detect it."""
         human   = self.to_human()
         machine = self.to_machine()
         log.info("\n" + human)
         try:
+            payload = json.dumps(machine)
+            if len(payload) > 65536:
+                # Preserve valid JSON + flag: wrap in an envelope that
+                # records the original length and the prefix.
+                payload = json.dumps({
+                    "_truncated":    True,
+                    "_original_len": len(payload),
+                    "prefix":        payload[:60000],
+                })
             db.log_event(
                 "TRADE_DECISION",
                 agent="trade_logic_agent",
-                details=json.dumps(machine)[:2000],  # FLAG: truncation — need dedicated table
+                details=payload,
             )
         except Exception as e:
             log.warning(f"TradeDecisionLog.commit failed: {e}")
