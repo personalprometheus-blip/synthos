@@ -36,12 +36,12 @@
      You'll use this to log in at synth-cloud.com</p>
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
   <form method="POST">
-    <label>Password</label>
-    <input type="password" name="password" autofocus autocomplete="new-password"
+    <label for="sa-password">Password</label>
+    <input id="sa-password" type="password" name="password" autofocus autocomplete="new-password"
            placeholder="At least 12 characters" minlength="12">
     <div class="rule">Minimum 12 characters</div>
-    <label>Confirm Password</label>
-    <input type="password" name="confirm" autocomplete="new-password"
+    <label for="sa-confirm">Confirm Password</label>
+    <input id="sa-confirm" type="password" name="confirm" autocomplete="new-password"
            placeholder="Re-enter your password">
     <button type="submit">ACTIVATE ACCOUNT →</button>
   </form>

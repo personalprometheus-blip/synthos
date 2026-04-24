@@ -87,10 +87,10 @@
     <div class="card-sub">Sign in to your Synthos account</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="POST" action="/login">
-      <label>Email</label>
-      <input type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com">
-      <label>Password</label>
-      <input type="password" name="password" autocomplete="current-password" placeholder="••••••••">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" name="email" autofocus autocomplete="email" placeholder="you@example.com">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="••••••••">
       <button class="btn-submit" type="submit">Sign In →</button>
     </form>
     <div class="forgot-row">

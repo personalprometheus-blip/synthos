@@ -101,49 +101,49 @@
     {% else %}
     <form method="POST" action="/signup" autocomplete="off">
       <div class="field">
-        <label>Access Code</label>
-        <input type="text" name="access_code" placeholder="Enter your invite code" required
+        <label for="su-access-code">Access Code</label>
+        <input id="su-access-code" type="text" name="access_code" placeholder="Enter your invite code" required
                value="{{ request.form.get('access_code', '') }}">
         <div class="code-note">Contact the operator for an invite code</div>
       </div>
       <div class="field">
-        <label>Full Name</label>
-        <input type="text" name="name" placeholder="Jane Smith" required
+        <label for="su-name">Full Name</label>
+        <input id="su-name" type="text" name="name" placeholder="Jane Smith" required
                value="{{ request.form.get('name', '') }}">
       </div>
       <div class="field">
-        <label>Email</label>
-        <input type="email" name="email" placeholder="you@example.com" required
+        <label for="su-email">Email</label>
+        <input id="su-email" type="email" name="email" placeholder="you@example.com" required
                value="{{ request.form.get('email', '') }}">
       </div>
       <div class="field">
-        <label>Phone <span style="font-size:9px;color:rgba(255,255,255,0.3)">(optional)</span></label>
-        <input type="tel" name="phone" placeholder="+1 (555) 000-0000"
+        <label for="su-phone">Phone <span style="font-size:9px;color:rgba(255,255,255,0.3)">(optional)</span></label>
+        <input id="su-phone" type="tel" name="phone" placeholder="+1 (555) 000-0000"
                value="{{ request.form.get('phone', '') }}">
       </div>
       <div class="field-row">
         <div class="field">
-          <label>State</label>
-          <select name="state" required
+          <label for="su-state">State</label>
+          <select id="su-state" name="state" required
                   style="width:100%;padding:0.5rem 0.7rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:7px;color:rgba(255,255,255,0.88);font-family:inherit;font-size:0.82rem">
             <option value="">Select state...</option>
             <option value="GA" {{ 'selected' if request.form.get('state') == 'GA' else '' }}>Georgia</option>
           </select>
         </div>
         <div class="field">
-          <label>Zip Code</label>
-          <input type="text" name="zip_code" placeholder="30301" required pattern="[0-9]{5}"
+          <label for="su-zip">Zip Code</label>
+          <input id="su-zip" type="text" name="zip_code" placeholder="30301" required pattern="[0-9]{5}"
                  maxlength="5" value="{{ request.form.get('zip_code', '') }}">
         </div>
       </div>
       <div class="field-row">
         <div class="field">
-          <label>Password</label>
-          <input type="password" name="password" placeholder="Min 8 characters" required minlength="8">
+          <label for="su-password">Password</label>
+          <input id="su-password" type="password" name="password" placeholder="Min 8 characters" required minlength="8">
         </div>
         <div class="field">
-          <label>Confirm</label>
-          <input type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
+          <label for="su-confirm">Confirm</label>
+          <input id="su-confirm" type="password" name="confirm_password" placeholder="Re-enter" required minlength="8">
         </div>
       </div>
       <div class="tos-field">

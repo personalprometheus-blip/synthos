@@ -352,11 +352,15 @@ def _security_headers(response):
     h['Permissions-Policy']      = 'geolocation=(), microphone=(), camera=()'
     h['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        # Cloudflare Insights beacon (static.cloudflareinsights.com) is
+        # auto-injected by Cloudflare when Web Analytics is enabled on the
+        # hostname. If Web Analytics is turned off in the Cloudflare
+        # dashboard, these two entries become no-ops.
+        "script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; "
         "style-src 'self' 'unsafe-inline'; "
         "font-src 'self'; "
         "img-src 'self' data: https://cdn.benzinga.com https://*.benzinga.com; "
-        "connect-src 'self'; "
+        "connect-src 'self' https://cloudflareinsights.com; "
         "frame-ancestors 'none';"
     )
     # HSTS: only emit if running in HTTPS mode (default true in production).
