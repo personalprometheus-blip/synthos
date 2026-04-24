@@ -101,6 +101,43 @@ if TRADING_MODE not in ('PAPER', 'LIVE'):
 if TRADING_MODE == 'LIVE' and 'paper' in ALPACA_BASE_URL:
     print("ERROR: TRADING_MODE=LIVE but ALPACA_BASE_URL points to paper endpoint.")
     sys.exit(1)
+
+# ── LIVE TRADING BELT-AND-SUSPENDERS STAMP ─────────────────────────────
+# Env vars alone are too easy to flip accidentally (typo, stale config
+# restored, copy-paste from staging). Real-money trading additionally
+# requires a filesystem stamp file whose content exactly matches the
+# required string. Forgery requires shell access to pi5 — env-var-only
+# misconfiguration can't enable live trading.
+#
+# To go live:
+#   echo 'LIVE_TRADING_CONFIRMED' > synthos_build/user/LIVE_CONFIRM_STAMP
+#
+# To revoke: rm synthos_build/user/LIVE_CONFIRM_STAMP
+#
+# Paper mode skips this check entirely.
+if TRADING_MODE == 'LIVE':
+    _LIVE_STAMP_PATH    = os.path.join(_ROOT_DIR, 'user', 'LIVE_CONFIRM_STAMP')
+    _LIVE_STAMP_CONTENT = 'LIVE_TRADING_CONFIRMED'
+    if not os.path.exists(_LIVE_STAMP_PATH):
+        print(f"ERROR: TRADING_MODE=LIVE but stamp file does not exist.")
+        print(f"       Expected: {_LIVE_STAMP_PATH}")
+        print(f"       To enable: echo '{_LIVE_STAMP_CONTENT}' > {_LIVE_STAMP_PATH}")
+        print(f"       (Env-var alone is not sufficient to enable live trading.)")
+        sys.exit(1)
+    try:
+        _stamp_actual = open(_LIVE_STAMP_PATH).read().strip()
+    except Exception as _e:
+        print(f"ERROR: cannot read {_LIVE_STAMP_PATH}: {_e}")
+        sys.exit(1)
+    if _stamp_actual != _LIVE_STAMP_CONTENT:
+        print(f"ERROR: stamp file content mismatch.")
+        print(f"       Found:    {_stamp_actual!r}")
+        print(f"       Expected: {_LIVE_STAMP_CONTENT!r}")
+        sys.exit(1)
+    # If we got here, all three gates are aligned: TRADING_MODE=LIVE,
+    # ALPACA_BASE_URL is NOT paper, and stamp file is present + correct.
+    print(f"[LIVE_TRADING] All three gates verified — operating against {ALPACA_BASE_URL}")
+
 if OPERATING_MODE == 'AUTOMATIC' and not AUTONOMOUS_KEY:
     print(f"ERROR: OPERATING_MODE=AUTOMATIC requires AUTONOMOUS_UNLOCK_KEY in .env")
     sys.exit(1)
