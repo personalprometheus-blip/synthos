@@ -565,32 +565,6 @@ def run_candidate_generator():
         return False
 
 
-def run_window_calculator(mode='enrichment'):
-    """Run retail_window_calculator.py once in the requested mode.
-    Phase 3b of TRADER_RESTRUCTURE_PLAN. Computes macro + minor entry
-    windows per signal × customer into trade_windows. Populated only —
-    trader does not yet consume (Phase 3c cutover)."""
-    log.info(f"[WINDOW CALC] Starting ({mode})")
-    write_agent_running('retail_window_calculator.py', mode)
-    try:
-        import subprocess
-        result = subprocess.run(
-            [sys.executable,
-             str(_ROOT_DIR / 'agents' / 'retail_window_calculator.py'),
-             f'--mode={mode}'],
-            capture_output=True, text=True, timeout=120,
-            cwd=str(_ROOT_DIR / 'agents'),
-        )
-        if result.returncode != 0:
-            log.warning(f"[WINDOW CALC] Exit {result.returncode}: {result.stderr[-200:]}")
-        else:
-            log.info("[WINDOW CALC] Complete")
-        return result.returncode == 0
-    except Exception as e:
-        log.error(f"[WINDOW CALC] Error: {e}")
-        return False
-
-
 def run_price_poller():
     """Run price poller once (updates live_prices table for portal)."""
     try:
@@ -1009,13 +983,10 @@ def run_premarket_prep():
     if _shutdown_requested:
         return
 
-    # Phase 4d: Window Calculator (Phase 3b of TRADER_RESTRUCTURE_PLAN).
-    # Computes macro+minor entry/exit zones for VALIDATED + WATCHING
-    # signals × each active customer. Populates trade_windows; trader
-    # doesn't read it until 3c.
-    run_window_calculator(mode='enrichment')
-    if _shutdown_requested:
-        return
+    # (Removed 2026-04-24) Phase 4d window calculator — replaced by
+    # trader reading VALIDATED signals directly via get_validated_signals
+    # and using Gate 6 chase caps in place of the window pre-filter.
+    # See trade_lifecycle.md §3 for current signal-intake flow.
 
     # Phase 5: Price poll
     # NOTE: trader dispatch moved to retail_trade_daemon.py (Phase 1 of
@@ -1679,8 +1650,10 @@ def run_premarket_selfcheck():
     except Exception as e:
         failures.append(f"earnings_cache: query failed ({str(e)[:80]})")
 
-    # 4 + 5: Signals + windows in the OWNER's per-customer DB (shared signal
-    # pool + trade_windows both live there; candidate-gen writes into it).
+    # 4: Signals in the OWNER's per-customer DB (shared signal pool;
+    # candidate-gen writes into it). trade_windows check removed
+    # 2026-04-24 along with the window calculator; trader now reads
+    # VALIDATED signals directly.
     try:
         with _db.conn() as c:
             n_sig = c.execute(
@@ -1690,17 +1663,8 @@ def run_premarket_selfcheck():
                 failures.append("signals: zero VALIDATED signals in pool")
             else:
                 log.info(f"[SELFCHECK] signals: {n_sig} VALIDATED in pool")
-
-            n_win = c.execute(
-                "SELECT COUNT(*) FROM trade_windows WHERE computed_at >= ?",
-                (today_utc,)
-            ).fetchone()[0]
-            if n_win == 0:
-                failures.append(f"trade_windows: zero windows computed today ({today_utc})")
-            else:
-                log.info(f"[SELFCHECK] trade_windows: {n_win} computed today")
     except Exception as e:
-        failures.append(f"signals/windows: query failed ({str(e)[:80]})")
+        failures.append(f"signals: query failed ({str(e)[:80]})")
 
     # 6. live_prices
     try:

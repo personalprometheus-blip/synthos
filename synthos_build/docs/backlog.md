@@ -24,6 +24,88 @@ Each backlog item:
 
 ---
 
+## DYNAMIC-UNIVERSE-EXPANSION — replace 110 hand-curated sector tickers with full Alpaca tradable universe
+
+**Why deferred.** Current `retail_sector_screener.py` operates on 11
+sectors × 10 hand-curated holdings = 110 tickers. That ceiling
+misses 98% of Alpaca's ~5,000 tradable US stocks and forces a
+quarterly "review SPDR ETF fact sheets" manual task that nobody
+actually does on schedule. New additions to ETFs (ANET → XLK in
+2024, PLTR in 2025) are invisible to the screener until the next
+manual refresh. Also: per-ticker momentum scoring is duplicative —
+the trader's Gate 6 already computes MA20/ROC/momentum from fresh
+daily bars for every signal regardless of what the screener said.
+
+**Desired end state.**
+
+1. Screener output narrows to **sector-level regime only** (~11 API
+   calls/day, one per ETF). Per-ticker momentum scoring deleted.
+2. Ticker universe expands to **all Alpaca-tradable symbols** with
+   proper sector metadata. Use `/v2/assets` asset metadata
+   (already cached by `retail_tradable_cache.py`) which carries
+   sector classification for every tradable stock.
+3. Top-N-per-sector candidate generation runs against the full
+   universe each day using real momentum scoring — no hand-curated
+   constant required.
+4. Quarterly manual refresh requirement **deleted**. Holdings come
+   from live asset metadata, not a Python dict.
+
+**Entry conditions (all must be true):**
+
+1. **Window calculator deletion completed and stable** for ≥1 week.
+   This entry touches the same signal-intake pipeline; don't
+   compound two architectural changes in the same window.
+2. **Tradable cache sector-tagging verified.** Need to confirm
+   `retail_tradable_cache.py` actually writes sector metadata to
+   `tradable_cache` — if the sector column is NULL for most rows,
+   this entry blocks on enriching that cache.
+3. **Screener consumption review** — downstream consumers of
+   `screener_score` (Gate 5 weighted input, baseline stamp)
+   identified so we know what a "sector-level only" output breaks.
+
+**Scope.**
+
+- `retail_sector_screener.py` — massive simplification. Delete
+  SECTOR_CONFIG dict (~170 lines). Replace per-holding loop with
+  a tradable-cache query + top-N momentum ranker. New shape ~300
+  lines total instead of 814.
+- `retail_database.py` — `stamp_signals_screener` /
+  `stamp_signals_screener_baseline` / `flag_congressional_screening`
+  may need parameter updates.
+- Maybe a new `tradable_cache`-joined query helper.
+- `trade_lifecycle.md` — update §3 (validation chain) to reflect
+  sector-regime-only screener.
+
+Total: ~500-line net reduction + 1-2 new query methods. ~1 day
+of focused work.
+
+**Risk.**
+
+- Gate 5 composite scoring uses `screener_score` as a weighted
+  input. If the new screener only stamps sector-level scores
+  (via the baseline stamp path), every signal's screener component
+  becomes a sector-baseline rather than a per-ticker momentum
+  score. Need to confirm this doesn't degrade scoring quality.
+  Mitigation: ship in two phases — first widen the universe while
+  keeping per-ticker momentum, then later deprecate per-ticker
+  scoring once we've proven sector-baseline is sufficient.
+- Tradable cache sector tagging may be incomplete. Dry-run a
+  full cache enumeration first and verify sector coverage ≥90%.
+- ETF-specific tickers (sector ETFs themselves) should be excluded
+  from the candidate set — they'd dominate top-N by sector weight.
+
+**Related context.**
+
+- 2026-04-24 sector-screener audit: flagged the 110-ticker manual
+  ceiling. Noted that FMP `/etf-holder` is already in the .env but
+  was never wired — current tier may not include that endpoint
+  anyway, and this approach sidesteps the dependency.
+- Trader's Gate 6 at `retail_trade_logic_agent.py` L1870 — does
+  its own MA20/ROC from fresh bars, duplicating screener work.
+- `retail_tradable_cache.py` — asset metadata source.
+
+---
+
 ## TIER-CALIBRATION-EXPERIMENT — 5-day paper fleet behavior study
 
 **Why deferred.** Originally scheduled to start Monday 2026-04-20; pushed

@@ -922,10 +922,16 @@ class DB:
             "CREATE INDEX IF NOT EXISTS idx_news_flags_ticker_fresh ON news_flags(ticker, fresh_until)",
             "CREATE INDEX IF NOT EXISTS idx_news_flags_created ON news_flags(created_at)",
 
-            # Phase 3b of TRADER_RESTRUCTURE_PLAN (2026-04-20) — trade_windows
-            # table. Precomputed macro + minor entry/exit zones for each
-            # candidate. Populated by retail_window_calculator.py; consumed
-            # by trade daemon in Phase 3c.
+            # trade_windows table — originally populated by
+            # retail_window_calculator.py (Phase 3b of TRADER_RESTRUCTURE_PLAN).
+            # DORMANT since 2026-04-24: window_calculator was removed along
+            # with the trader's window-driven pre-filter — trader now reads
+            # VALIDATED signals directly and relies on Gate 6 chase caps
+            # for anchor-based entry protection. Schema + helper methods
+            # (write_trade_window, get_fresh_macro_windows,
+            # expire_stale_trade_windows, get_windows_for_signal) retained
+            # for historical audit rows and in case the pre-filter needs
+            # to be resurrected. No active writers.
             """CREATE TABLE IF NOT EXISTS trade_windows (
                 signal_id     INTEGER NOT NULL,
                 customer_id   TEXT    NOT NULL,

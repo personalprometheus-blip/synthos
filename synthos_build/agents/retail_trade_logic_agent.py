@@ -1770,37 +1770,12 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         log.debug(f"news_flags read failed for {ticker} at G5: {_e}")
     final_score = round(max(0.0, min(final_score + news_modifier, 1.0)), 4)
 
-    # Window proximity modifier — Phase 3c of TRADER_RESTRUCTURE_PLAN.
-    # Rewards entries deep in the minor band. price at entry_low → +0.04,
-    # price at entry_high → 0. Signals without a current minor window
-    # (e.g. news-triggered path before 3c.b cutover) get 0 — unchanged
-    # behavior. Once 3c.b lands, every window-driven entry carries this
-    # nudge, mildly preferring pullback fills over chase fills.
-    window_proximity_adj = 0.0
-    window_proximity_info = "no window"
-    try:
-        sig_id = signal.get('id')
-        if sig_id is not None:
-            w = _shared_db().get_windows_for_signal(int(sig_id), _CUSTOMER_ID)
-            minor = (w or {}).get('minor')
-            if minor:
-                lo = float(minor['entry_low'])
-                hi = float(minor['entry_high'])
-                lp = _shared_db().get_live_price(ticker) if hasattr(_shared_db(), 'get_live_price') else None
-                if lp is None:
-                    with _shared_db().conn() as _c:
-                        _r = _c.execute(
-                            "SELECT price FROM live_prices WHERE ticker = ?", (ticker,)
-                        ).fetchone()
-                    lp = float(_r['price']) if _r and _r['price'] is not None else None
-                if lp is not None and hi > lo:
-                    proximity = max(0.0, min(1.0, (hi - float(lp)) / (hi - lo)))
-                    window_proximity_adj = round(proximity * 0.04, 4)
-                    window_proximity_info = (f"price={lp:.2f} in [{lo:.2f}, {hi:.2f}], "
-                                             f"prox={proximity:.2f} → {window_proximity_adj:+.3f}")
-    except Exception as _e:
-        log.debug(f"window_proximity read failed for {ticker} at G5: {_e}")
-    final_score = round(max(0.0, min(final_score + window_proximity_adj, 1.0)), 4)
+    # (Removed 2026-04-24) Window-proximity scoring bonus — used to grant
+    # up to +0.04 to composite score based on how deep in the minor band
+    # the live price sat. Removed with window_calculator. The anti-chase
+    # signal previously encoded here is now enforced with stricter intent
+    # by Gate 6's chase caps (MOMENTUM/BREAKOUT/MEANREV), which block
+    # extended entries outright rather than down-weighting them.
 
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
@@ -1813,7 +1788,6 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
         "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
         "news_flags_mod":     f"{news_modifier:+.3f} ({news_modifier_info})",
-        "window_proximity":   f"{window_proximity_adj:+.3f} ({window_proximity_info})",
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
@@ -2655,12 +2629,11 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
     rotations = 0  # Hoisted so every early-return path returns a valid count
 
     try:
-        # Phase 3c.b — window-driven candidate pool for rotation too.
-        # Rotation ranks signals by score, so we want the same universe
-        # the main loop evaluates: in-band macro-window signals. Keeps
-        # the trader internally consistent (can't rotate into something
-        # the main loop would refuse to enter).
-        _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
+        # Signal pool for rotation — same source the main loop uses
+        # (post-window-calculator-deletion 2026-04-24). Pulls VALIDATED
+        # signals with tier quotas applied, then filters to those with
+        # a current live price (required by downstream scoring).
+        signals = shared_db.get_validated_signals()
         _price_map = {}
         try:
             with shared_db.conn() as _c:
@@ -2670,16 +2643,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                 _price_map = {r['ticker']: float(r['price']) for r in _pr if r['price']}
         except Exception:
             pass
-        signals = []
-        for _w in _windows:
-            _sig = shared_db.get_signal_by_id(_w['signal_id'])
-            if not _sig:
-                continue
-            _price = _price_map.get(_sig.get('ticker'))
-            if _price is None:
-                continue
-            if _w['entry_low'] <= _price <= _w['entry_high']:
-                signals.append(_sig)
+        signals = [s for s in signals if _price_map.get(s.get('ticker')) is not None]
         if not signals:
             return rotations
 
@@ -3526,16 +3490,18 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
         except Exception:
             pass
 
-        # Phase 3c.b — window-driven entry selection. Replaces the v1
-        # "evaluate every VALIDATED signal" loop. Flow:
-        #   1. Pull fresh macro windows for this customer
-        #   2. Look up live price for each window's ticker (via signal_id)
-        #   3. Keep only windows where live_price ∈ [entry_low, entry_high]
-        #   4. Feed the resulting signal list into the gate chain
-        # Macro TTL is 8h so the enrichment-tick cadence (30min) is
-        # sufficient to keep windows fresh. Refresh mode wiring is
-        # deferred to Phase 4 (ATR-anchored recompute).
-        _windows = db.get_fresh_macro_windows(_CUSTOMER_ID)
+        # Signal-source: pull VALIDATED signals directly from the master DB
+        # with tier-weighted quotas applied. Replaces the 2026 Phase 3c.b
+        # window-driven pre-filter that was removed 2026-04-24 — the
+        # trade_windows pre-filter was redundant with Gate 6 chase caps
+        # (which log every block with reason, whereas the window filter
+        # silently dropped out-of-band signals). Tier-quota capping lives
+        # inside get_validated_signals(); no-ops when pool is small.
+        signals = _shared_db().get_validated_signals()
+
+        # Live prices map — still needed downstream in the gate chain for
+        # current_price lookups and logging. Kept as a one-shot pull so we
+        # don't run a per-signal live_prices query inside the loop.
         _price_map = {}
         try:
             with _shared_db().conn() as _c:
@@ -3546,33 +3512,14 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
         except Exception as _e:
             log.warning(f"live_prices read failed: {_e}")
 
-        signals = []
-        _window_by_signal = {}  # Phase 4.d: sidecar for atr/stop passthrough
-        _out_of_band = 0
-        _no_price    = 0
-        _no_signal   = 0
-        for _w in _windows:
-            _sig = _shared_db().get_signal_by_id(_w['signal_id'])
-            if not _sig:
-                _no_signal += 1
-                continue
-            _tkr = _sig.get('ticker')
-            _price = _price_map.get(_tkr)
-            if _price is None:
-                _no_price += 1
-                continue
-            if not (_w['entry_low'] <= _price <= _w['entry_high']):
-                _out_of_band += 1
-                continue
-            signals.append(_sig)
-            _window_by_signal[_sig['id']] = _w
+        # Drop signals with no live price — gate chain can't evaluate them.
+        _no_price = sum(1 for s in signals if _price_map.get(s.get('ticker')) is None)
+        signals = [s for s in signals if _price_map.get(s.get('ticker')) is not None]
 
-        _set_phase('signal_evaluation', f"{len(signals)} in-band")
+        _set_phase('signal_evaluation', f"{len(signals)} signals to evaluate")
         log.info(
-            f"[WINDOW] {len(_windows)} macro window(s) → "
-            f"{len(signals)} in-band | skipped: "
-            f"{_out_of_band} out-of-band, {_no_price} no-price, "
-            f"{_no_signal} no-signal"
+            f"[SIGNAL_POOL] {len(signals)} VALIDATED signal(s) ready "
+            f"for gate chain | skipped {_no_price} with no live price"
         )
 
         for signal in signals:
@@ -3659,14 +3606,12 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 _mark_signal_evaluated(signal['id'], 'NO_ENTRY')
                 continue
 
-            # Get ATR for sizing and risk. Phase 4.d — prefer the
-            # ATR stored on the macro window (window_calculator fetches
-            # it once per enrichment, so we avoid a per-signal HTTP
-            # call here). Falls through to alpaca.get_atr for rows
-            # written before 4.a landed, and to the 2% proxy if
-            # that also fails.
-            _win = _window_by_signal.get(signal['id']) or {}
-            atr = _win.get('atr') or alpaca.get_atr(signal['ticker'])
+            # Get ATR for sizing and risk. Fresh Alpaca daily bars each
+            # call. The prior Phase 4.d optimization that read ATR from
+            # the macro window was removed with window_calculator on
+            # 2026-04-24 — the per-signal HTTP cost is negligible
+            # (cached by AlpacaClient) and fresh ATR is more accurate.
+            atr = alpaca.get_atr(signal['ticker'])
             if not atr:
                 atr = candidate['price'] * 0.02
 
