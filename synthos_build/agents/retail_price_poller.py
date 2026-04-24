@@ -107,11 +107,12 @@ def _get_held_tickers():
             log.warning(f"Could not read positions for {cid[:8]}: {e}")
 
     # In-flight signals — master DB is the single source of truth for
-    # intel the trader may act on. Phase 3c.b expands this from
-    # VALIDATED-only to also include WATCHING (Candidate Generator output)
-    # so window_calculator has prices to compute entry bands against.
-    # Without WATCHING in the poll set, candidate windows never populate
-    # and window-driven entries can't fire.
+    # intel the trader may act on. Includes WATCHING (Candidate Generator
+    # output) so prices are fresh the moment a candidate is promoted to
+    # VALIDATED and hits the trader's pool. Originally expanded to
+    # support window_calculator's band computations (Phase 3c.b, since
+    # removed 2026-04-24); the expanded poll set is retained because the
+    # trader + portal both benefit from fresh candidate-ticker prices.
     try:
         sdb = sqlite3.connect(_shared_db_path(), timeout=5)
         rows = sdb.execute(
@@ -152,8 +153,8 @@ def _fetch_prices_from_alpaca(needed_tickers=None):
          the P&L data feeds the dashboard and trader exit logic.
       2. Market-data /v2/stocks/trades/latest — bulk fetch for any ticker
          still missing after stage 1. Covers WATCHING candidate signals
-         and VALIDATED signals that aren't yet held (Phase 3c.b —
-         window_calculator needs these prices).
+         and VALIDATED signals that aren't yet held, so the trader has
+         fresh prices when it evaluates the active signal pool.
 
     Stage 2 uses owner/master credentials since market-data is account-
     agnostic for equities. Falls through silently if owner creds missing.
