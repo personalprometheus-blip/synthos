@@ -181,115 +181,19 @@ class ResearchControls:
     COMPOSITE_QUALITY_THRESH = float(os.environ.get('COMPOSITE_QUALITY_THRESH', '0.45'))
 
 
-# ── KEYWORD DICTIONARIES ──────────────────────────────────────────────────
-
-_POSITIVE = frozenset({
-    'beat', 'beats', 'exceeded', 'exceeds', 'surpassed', 'surpasses',
-    'growth', 'expanding', 'expansion', 'upgrade', 'upgraded', 'approved',
-    'approval', 'awarded', 'wins', 'won', 'partnership', 'bullish',
-    'recovery', 'recovers', 'strong', 'strength', 'gains', 'record',
-    'outperform', 'raised', 'raises', 'increased', 'increases', 'boost',
-    'boosted', 'profitable', 'profit', 'optimistic', 'upbeat', 'momentum',
-    'accelerating', 'breakout', 'advancing', 'progress', 'breakthrough',
-    'contract', 'deal', 'launch', 'launched', 'dividend', 'buyback',
-    'acquisition', 'merger', 'positive', 'upside', 'rebound', 'rally',
-})
-
-_NEGATIVE = frozenset({
-    'missed', 'miss', 'below', 'declined', 'decline', 'declining',
-    'loss', 'losses', 'layoffs', 'layoff', 'downgrade', 'downgraded',
-    'investigation', 'lawsuit', 'sanction', 'sanctions', 'bearish',
-    'concern', 'concerns', 'weak', 'weakness', 'fell', 'fall', 'falling',
-    'cut', 'cuts', 'reduce', 'reduces', 'suspend', 'suspends', 'halted',
-    'halt', 'recall', 'warning', 'default', 'bankruptcy', 'bankrupt',
-    'crisis', 'crash', 'downside', 'failure', 'failed', 'disappointing',
-    'disappoint', 'headwinds', 'headwind', 'negative', 'selloff',
-    'plunged', 'plunge', 'collapse', 'collapsed', 'probe', 'fine',
-    'penalty', 'charged', 'indicted', 'delisting', 'downward',
-})
-
-_UNCERTAINTY = frozenset({
-    'may', 'might', 'could', 'possible', 'possibly', 'potential',
-    'potentially', 'uncertain', 'uncertainty', 'unclear', 'unknown',
-    'pending', 'conditional', 'tentative', 'alleged', 'reportedly',
-    'rumored', 'expected', 'anticipated', 'likely', 'unlikely',
-    'if', 'whether', 'contingent', 'provisional', 'unconfirmed',
-})
-
-_MACRO_TERMS = (
-    'federal reserve', 'interest rate', 'inflation', 'gdp', 'unemployment',
-    'fomc', 'central bank', 'monetary policy', 'rate hike', 'rate cut',
-    'yield curve', 'treasury', 'deficit', 'fiscal', 'jobs report',
-    'payroll', 'recession', 'stagflation', 'quantitative easing',
+# ── KEYWORD DICTIONARIES, SECTOR MAPS ─────────────────────────────────────
+# Pure-data keyword sets, term tuples, and sector mappings live in
+# `agents/news/keywords.py` (extracted 2026-04-24 as phase-0 of the C9
+# module split). Re-imported here so internal references continue to
+# work unchanged. Adding a new keyword? Edit keywords.py, not this file.
+sys.path.insert(0, os.path.dirname(__file__))  # make agents/news/ importable
+from news.keywords import (  # noqa: E402  (sys.path adjustment above)
+    _POSITIVE, _NEGATIVE, _UNCERTAINTY,
+    _MACRO_TERMS, _EARNINGS_TERMS, _GEOPOLITICAL_TERMS,
+    _REGULATORY_TERMS, _PRIMARY_SOURCE_SIGNALS, _OPINION_SIGNALS,
+    _MARKET_STRUCTURE_TERMS,
+    SECTOR_ETF_MAP, CONFIDENCE_NUMERIC, SECTOR_TICKER_MAP,
 )
-
-_EARNINGS_TERMS = (
-    'earnings', 'revenue', ' eps ', 'guidance', 'quarterly results',
-    'net income', 'operating income', 'full year', 'annual results',
-    'beat estimates', 'missed estimates', 'first quarter', 'second quarter',
-    'third quarter', 'fourth quarter',
-)
-
-_GEOPOLITICAL_TERMS = (
-    'sanctions', 'tariff', 'election', 'diplomacy', 'geopolitical',
-    'military', 'invasion', 'nato', 'trade war', 'embargo', 'ceasefire',
-    'escalation', 'missile', 'nuclear',
-)
-
-_REGULATORY_TERMS = (
-    ' sec ', ' doj ', ' ftc ', ' fda ', ' epa ', 'legislation', 'compliance',
-    'antitrust', 'investigation', 'enforcement action', 'class action',
-    'subpoena', 'consent decree', 'indictment',
-)
-
-_PRIMARY_SOURCE_SIGNALS = frozenset({
-    'filing', 'press release', 'official statement', 'transcript',
-    'form 4', 'sec filing', '8-k', '10-k', '10-q', 'annual report',
-    'confirmed by', 'announced by', 'sec.gov', 'alpaca news',
-})
-
-_OPINION_SIGNALS = frozenset({
-    'opinion', 'analysis', 'commentary', 'editorial', 'column',
-    'perspective', 'viewpoint', 'argues', 'believes', 'thinks',
-    'according to analysts', 'analysts say', 'experts say',
-})
-
-_MARKET_STRUCTURE_TERMS = (
-    'circuit breaker', 'market maker', 'high frequency trading', 'hft',
-    'liquidity', 'market mechanics', 'order flow', 'dark pool',
-    'market structure', 'exchange halt', 'trading halt', 'market open',
-    'market close', 'settlement', 'clearing',
-)
-
-
-# ── SECTOR / ETF MAPS ─────────────────────────────────────────────────────
-
-SECTOR_ETF_MAP = {
-    "technology":             ("QQQ",  "XLK"),
-    "defense":                ("ITA",  "XLI"),
-    "healthcare":             ("IBB",  "XLV"),
-    "energy":                 ("XOP",  "XLE"),
-    "financials":             ("KRE",  "XLF"),
-    "materials":              ("PICK", "XLB"),
-    "industrials":            ("XLI",  "XLI"),
-    "consumer staples":       ("XLP",  "XLP"),
-    "consumer discretionary": ("XLY",  "XLY"),
-    "real estate":            ("XLRE", "XLRE"),
-    "utilities":              ("XLU",  "XLU"),
-    "communication":          ("XLC",  "XLC"),
-}
-
-CONFIDENCE_NUMERIC = {"HIGH": 1.0, "MEDIUM": 0.6, "LOW": 0.3, "NOISE": 0.0}
-
-SECTOR_TICKER_MAP = {
-    "defense":     ["LMT", "RTX", "NOC", "GD", "BA", "KTOS", "LHX"],
-    "technology":  ["NVDA", "MSFT", "AAPL", "GOOGL", "META", "AMD", "INTC"],
-    "healthcare":  ["LLY", "JNJ", "UNH", "PFE", "ABBV", "MRK"],
-    "energy":      ["XOM", "CVX", "NEE", "SO", "DUK"],
-    "financials":  ["JPM", "BAC", "WFC", "GS", "KRE"],
-    "materials":   ["MP", "ALB", "FCX", "NEM"],
-    "industrials": ["DE", "CAT", "GE", "HON"],
-}
 
 
 # ── BENCHMARK REGIME ──────────────────────────────────────────────────────
@@ -762,17 +666,8 @@ _ALPACA_HEADERS  = lambda: {
     "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
 }
 
-# Alpaca news source → tier mapping.
-# Benzinga is the primary content provider via Alpaca's news feed.
-_ALPACA_SOURCE_TIERS = {
-    "benzinga":  2,   # wire-level financial news
-    "reuters":   2,
-    "ap":        2,
-    "dow jones": 2,
-    "wsj":       2,
-    "ft":        2,
-    "bloomberg": 2,
-}
+# Alpaca news source → tier mapping. Data lives in news/keywords.py.
+from news.keywords import _ALPACA_SOURCE_TIERS  # noqa: E402
 
 
 def _alpaca_news_tier(source_name: str) -> int:
@@ -2701,17 +2596,26 @@ def gate19_persistence(topic, event, ctrl, ndl, state):
 
 def gate20_evaluation(item, action, ctrl, ndl, db, state):
     """
-    Evaluation loop — update relevance and confidence based on prior articles
-    and record the classification for future comparison.
-    Sets state.evaluation_note.
+    SCAFFOLDING — does NOT actually evaluate predicted-vs-realized outcomes.
 
-    TODO: DATA_DEPENDENCY — comparing predicted vs. realized market response
-    requires post-trade outcome data. Currently updates relevance score only.
+    The original docstring claimed this was a feedback loop comparing
+    classification predictions against realized market response. It isn't.
+    Today this gate only checks whether the ticker is still active in the
+    signals table (a relevance-staleness check, not an accuracy
+    measurement) and stamps the literal string "scaffolding" as the
+    accuracy note.
+
+    Real implementation deferred — see backlog entry NEWS-AGENT-GATE-20.
+    Conditions to land it: ≥50 closed `outcomes` rows with signal_id
+    backrefs, operator back from travel, and an explicit decision on
+    read-only-vs-adaptive feedback semantics. Don't fix this gate
+    in-place without reading that entry first.
     """
     action_state = action.get("action_state", "ignore")
     ticker       = (item.get("ticker") or "").upper()
 
-    # Recompute relevance: is ticker still active in signals DB?
+    # Relevance staleness: is ticker still active in the signals table?
+    # (NOT an accuracy measurement — see docstring.)
     ticker_active = False
     if ticker:
         try:
@@ -2727,9 +2631,8 @@ def gate20_evaluation(item, action, ctrl, ndl, db, state):
         except Exception as e:
             log.debug(f"active-ticker lookup failed for {ticker}: {e}")
 
-    # If same article type has historically been noisy, note it
-    # TODO: DATA_DEPENDENCY — event_class accuracy tracking not yet implemented
-    accuracy_note = "accuracy_tracking_pending"
+    # Honest placeholder — see backlog NEWS-AGENT-GATE-20.
+    accuracy_note = "scaffolding"
 
     evaluation_note = (f"ticker_active={ticker_active} action_state={action_state} "
                        f"accuracy={accuracy_note}")

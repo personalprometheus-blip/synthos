@@ -24,26 +24,13 @@ Each backlog item:
 
 ---
 
-## PIPELINE-AUDIT — Gap 4 (urgent_flags vs news_flags rationale doc)
+## ~~PIPELINE-AUDIT — Gap 4 (urgent_flags vs news_flags rationale doc)~~ ✅ DONE 2026-04-24
 
-**Why deferred.** Cosmetic — no bug, no runtime impact. The 2026-04-24
-pipeline audit clarified that `urgent_flags` (cascade-driven Gate 10
-PULSE_EXIT force-exits) and `news_flags` (per-ticker scoring adjustments
-for Gate 4 EVENT_RISK + Gate 5 composite modifier) serve distinct
-severity tiers with different schemas, TTLs, and consumers. An earlier
-session recommended unifying them. This entry captures the "keep
-separate" rationale so the question doesn't loop back.
-
-**Entry conditions.**
-1. Post-travel, when docs touches are low-risk.
-2. No parallel refactor in-flight on either table.
-
-**Scope.** Add a 15-line comment block at the top of each table's
-creation site in the schema module + a note in `retail_trade_lifecycle.md`.
-
-**Risk.** None — documentation only.
-
-**Related.** `docs/pipeline_audit_2026-04-24.md` Gap 4.
+Resolved: schema comments added to both `news_flags` and `urgent_flags`
+table definitions in `src/retail_database.py` explaining the
+keep-separate rationale; matching note added to
+`docs/trade_lifecycle.md` §7 covering both tables and their distinct
+roles in the trader (Gate 4/5 scoring vs Gate 10 PULSE_EXIT).
 
 ---
 
@@ -112,18 +99,18 @@ direct-upload if pi4b is unreachable for ≥24h. ~200 lines + one new
 env var set (R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET, R2_BUCKET).
 Reuse existing tar.gz pipeline.
 
-### 2. DEGRADED detector in fault_detection_agent
-Existing fault detection catches DOWN (missing heartbeats, stale
-prices, stale signals). It doesn't catch DEGRADED — trader running
-fine, heartbeats OK, but generating zero trade decisions for days.
-Could indicate over-restrictive gates (e.g. chase caps set too tight,
-signal pool empty, regime permanently BEAR).
+### ~~2. DEGRADED detector in fault_detection_agent~~ ✅ DONE 2026-04-24
 
-**Fix:** add a gate8 to `retail_fault_detection_agent.py` that
-compares "TRADE_DECISION rows in last 24h" against baseline
-(e.g. 30-day median). Flag WARNING if rate drops below 30% of
-baseline. Has to be careful not to cry wolf during legit
-quiet markets. ~80 lines.
+Implemented as `gate8_trade_activity_baseline` in
+`retail_fault_detection_agent.py` (~140 lines including comments and
+tunables). Compares today's `TRADE_DECISION` event count to the 30-day
+weekday median (excluding weekends + missing days). Fires WARNING
+`ACTIVITY_DEGRADED` if today < `DEGRADED_THRESHOLD_PCT` (default 30%)
+of baseline AND baseline ≥ `DEGRADED_MIN_BASELINE` (default 10/day).
+Skips on weekends, before 14:00 ET, during warm-up (<14 non-zero days
+of history), and in low-traffic regime. Detail field names the likely
+causes (over-restrictive gates, empty signal pool, validator stuck
+CAUTION, regime locked BEAR) so on-call doesn't have to think.
 
 ### 3. Monitor token rotation procedure
 `MONITOR_TOKEN` is a single shared secret pasted into pi4b, pi5,
@@ -263,6 +250,22 @@ deletion workflow — currently we have none.
 Not urgent until it is.
 
 ---
+
+## ENCRYPTION-KEY-ROTATION — tool BUILT 2026-04-24 (not yet run)
+
+Tool delivered at `synthos_build/tools/rotate_encryption_key.py` with
+3 modes: `--dry-run` (rotates a /tmp copy, leaves live DB untouched),
+`--commit` (backs up live DB then rotates), `--verify-key` (round-trip
+sanity check). Self-test at `tools/rotate_encryption_key_test.py`
+exercises rotation logic end-to-end on a synthetic 3-row fixture and
+asserts all 5 invariants (round-trip identity, OLD key fails after
+rotation, email_hash recomputed with NEW key, etc.). Test passes.
+
+Ready for operator use when a rotation is needed. Run dry-run first;
+follow the workflow in the tool's docstring. NOT yet exercised against
+production auth.db.
+
+### Original entry preserved below for context:
 
 ## ENCRYPTION-KEY-ROTATION — tooling to rotate the auth.db Fernet key without lockout
 
@@ -635,7 +638,22 @@ Revisit conditions (any one triggers reconsideration):
 
 ---
 
-## C9 — News agent module split
+## C9 — News agent module split (PHASE 0 LANDED 2026-04-24)
+
+**Phase 0 (this commit) — extracted pure data only.** Created
+`agents/news/__init__.py` + `agents/news/keywords.py` (163 lines)
+holding all 14 keyword frozensets, term tuples, sector maps, and the
+Alpaca-source tier dict. `retail_news_agent.py` shrunk by 105 lines
+(now 3,458) and re-imports every name verbatim — every internal
+reference works unchanged. No external callers depend on these
+constants (verified via repo-wide grep). Smoke-test confirms all 14
+names import with intact contents (53 +ve / 59 -ve / 12 sectors / etc).
+
+**Phase 0 deliberately stopped at data.** No fetcher/classifier/gate
+logic was moved — that still needs C8 (gate-pipeline registry) to
+land first per the original entry conditions below.
+
+**Remaining phases (still gated on C8 + golden-file fixtures):**
 
 **Why deferred.** `retail_news_agent.py` is 3,181 lines. Single-file
 constraint makes it hard to test fetchers, classifiers, or keyword
@@ -802,19 +820,26 @@ reinsert if SSD boot fails.
 
 ---
 
-## ITEM-8 — R2 vault path fix (company node)
+## ~~ITEM-8 — R2 vault path fix (company node)~~ ✅ RESOLVED 2026-04-24 (not actually a bug)
 
-**Why deferred.** Lives on pi4b (company node), not pi5. Requires shell
-access to the company host and coordination with whatever the R2
-backup chain is currently doing. Out of scope for weekend
-build-while-away work.
+**Diagnosis.** Investigation on pi4b found `company_vault.py` reporting
+"Backup run complete: 0/0 succeeded" daily — looked alarming, was
+actually correct behavior. The vault iterates `customers WHERE
+status='ACTIVE'` and the customers table is empty (no paying customers
+yet, system pre-launch). Zero customers → zero work → 0/0.
 
-**Entry conditions.** Pi4b accessible, R2 credentials confirmed in
-vault env, time window to test backup/restore round-trip safely.
+**The actual operator backup chain is healthy:** verified
+`company_strongbox.py` ran 2026-04-24 02:00 successfully —
+- `synthos_backup_company-pi_2026-04-24.tar.gz.enc` (852 KB) → R2
+- `synthos_backup_synthos-pi-retail_2026-04-24.tar.gz.enc` (37 MB) → R2
+both with sha256 stamps + 30-day retention enforced.
 
-**Scope.** Investigate `/home/pi/synthos-company/company_vault.py` on
-pi4b; diagnose the path issue mentioned in the Apr 17 morning session;
-fix and verify one successful backup lands in the R2 bucket.
+**Patch applied** (`agents/company_vault.py`): docstring updated to
+explain vault is fleet-management not operator-data; early-exit when
+customers list is empty so the log line reads "No ACTIVE customers in
+fleet — nothing to back up" instead of the misleading "0/0 succeeded".
+No alert fires now when there's no work; future paying-customer
+failures still alert as before.
 
 ---
 
@@ -945,7 +970,17 @@ login flow — worst case, revert the flag.
 
 ---
 
-## PORTAL-CSP-CHARTJS — self-host Chart.js or allow-list CDN
+## ~~PORTAL-CSP-CHARTJS — self-host Chart.js or allow-list CDN~~ ✅ DONE 2026-04-24
+
+Resolved via Option 1 (self-host). `chart.umd.min.js` v4.4.0 (200KB)
+copied into `synthos_build/static/js/`; `<script src=>` in
+`src/templates/portal.html` swapped from cdnjs URL to `/static/js/chart.umd.min.js`.
+No other Chart.js references in the codebase. CSP `'self'` now satisfies
+the script load.
+
+---
+
+## PORTAL-CSP-CHARTJS — self-host Chart.js or allow-list CDN _(historical detail below)_
 
 **Why deferred.** The Cloudflare tunnel serving `portal.synth-cloud.com`
 sets a Content-Security-Policy header of `script-src 'self' 'unsafe-inline'`,
@@ -1169,14 +1204,19 @@ now in the user's physical possession as a bootable recovery image.
 
 ## NEWS-AGENT-GATE-20 — implement real evaluation loop using `outcomes` table
 
-**Why deferred.** Gate 20 (`gate20_evaluation`) claims to be the news
-pipeline's feedback loop — "comparing predicted vs. realized market
-response" per its docstring — but the current implementation only
-checks whether the ticker is still in the active signals table and
-writes the literal string `accuracy_note="accuracy_tracking_pending"`.
-It is scaffolding: a gate slot and a decision-log entry with no
-actual evaluation logic behind them. Flagged in 2026-04-24 news
-agent audit.
+**Status (2026-04-24).** Honesty patch only — the gate's docstring no
+longer claims to be a feedback loop, and the misleading
+`accuracy_note="accuracy_tracking_pending"` placeholder was renamed to
+`"scaffolding"`. Behavior is unchanged. **Real implementation still
+deferred** per the entry conditions below.
+
+**Why deferred.** Gate 20 (`gate20_evaluation`) used to claim it was the
+news pipeline's feedback loop — "comparing predicted vs. realized market
+response" per its docstring — but the implementation only checked
+whether the ticker was still in the active signals table and wrote the
+string `"accuracy_tracking_pending"`. The 2026-04-24 news agent audit
+flagged the discrepancy; the docstring + placeholder are now honest
+about being scaffolding.
 
 This is the closest thing to a "learning" feedback loop the news
 pipeline could have, and the data to power it already exists — every

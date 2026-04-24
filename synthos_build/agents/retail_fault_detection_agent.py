@@ -7,7 +7,7 @@ Runs:
   Also: once at pre-market open, once at close
 
 Responsibilities:
-  - 7-gate deterministic system health analysis spine
+  - 8-gate deterministic system health analysis spine
   - Detect agent liveness failures (stale heartbeats, missed runs)
   - Detect data freshness degradation (stale prices, stale signals)
   - Verify API connectivity (Alpaca reachability)
@@ -805,6 +805,152 @@ def gate7_schedule_compliance(report: FaultReport, db):
 
 
 # ══════════════════════════════════════════════════════════════════════════
+#  GATE 8 — TRADE ACTIVITY BASELINE (DEGRADED DETECTOR)
+# ══════════════════════════════════════════════════════════════════════════
+# Catches the scenario the DOWN gates miss: trader is up, heartbeats fine,
+# logs flowing — but it's quietly producing zero new decisions for days.
+# Common causes: over-restrictive gate (e.g. chase caps tightened too far),
+# empty validated-signal pool (validator stuck CAUTION), regime locked into
+# permanent BEAR. Without this gate, the system can degrade silently.
+#
+# Strategy: compare today's TRADE_DECISION count (so far) to the 30-day
+# median. Fire WARNING if today < 30% of baseline AND baseline is large
+# enough (≥10) that the comparison is statistically meaningful.
+#
+# Skips that prevent false positives:
+#   - Pre-14:00 ET (current session hasn't accumulated enough yet)
+#   - Weekends (markets closed)
+#   - Warm-up: <14 weekdays of non-zero history → INFO, not WARNING
+#   - Low-traffic regime: baseline median < 10/day → INFO + skip
+#
+# Tunable via env: DEGRADED_THRESHOLD_PCT (default 0.30),
+# DEGRADED_MIN_BASELINE (default 10), DEGRADED_MIN_HISTORY_DAYS (default 14).
+
+DEGRADED_THRESHOLD_PCT     = float(os.environ.get('DEGRADED_THRESHOLD_PCT', '0.30'))
+DEGRADED_MIN_BASELINE      = int(os.environ.get('DEGRADED_MIN_BASELINE', '10'))
+DEGRADED_MIN_HISTORY_DAYS  = int(os.environ.get('DEGRADED_MIN_HISTORY_DAYS', '14'))
+
+
+def gate8_trade_activity_baseline(report: FaultReport, db):
+    """DEGRADED detector — alert when trader is producing far fewer
+    decisions than its own historical baseline."""
+    log.info("[GATE 8] Trade-decision activity baseline")
+
+    now_et = _now_et()
+
+    # Skip on weekends — by design no decisions get made.
+    if now_et.weekday() >= 5:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.OK,
+            code="ACTIVITY_SKIP_WEEKEND",
+            message="Outside trading week — gate skipped",
+        ))
+        return
+
+    # Pre-14:00 ET there isn't enough session data to compare meaningfully.
+    if now_et.hour < 14:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.OK,
+            code="ACTIVITY_SKIP_EARLY",
+            message=f"Pre-14:00 ET ({now_et.strftime('%H:%M')}) — too early to assess",
+        ))
+        return
+
+    today_str = now_et.strftime('%Y-%m-%d')
+
+    # Today's count so far
+    try:
+        with db.conn() as c:
+            today_row = c.execute(
+                "SELECT COUNT(*) as cnt FROM system_log "
+                "WHERE event='TRADE_DECISION' AND timestamp LIKE ?",
+                (f"{today_str}%",),
+            ).fetchone()
+        today_count = today_row['cnt'] if today_row else 0
+    except Exception as e:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.WARNING,
+            code="ACTIVITY_QUERY_FAIL",
+            message=f"Could not read TRADE_DECISION count: {e}",
+        ))
+        return
+
+    # 30-day weekday baseline
+    daily_counts = []
+    for d in range(1, 31):
+        day = (now_et - timedelta(days=d)).date()
+        if day.weekday() >= 5:
+            continue
+        try:
+            with db.conn() as c:
+                row = c.execute(
+                    "SELECT COUNT(*) as cnt FROM system_log "
+                    "WHERE event='TRADE_DECISION' AND timestamp LIKE ?",
+                    (f"{day.isoformat()}%",),
+                ).fetchone()
+            daily_counts.append(row['cnt'] if row else 0)
+        except Exception:
+            continue   # missing day = skip; don't poison the baseline
+
+    nonzero_days = [c for c in daily_counts if c > 0]
+    if len(nonzero_days) < DEGRADED_MIN_HISTORY_DAYS:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.INFO,
+            code="ACTIVITY_WARMUP",
+            message=(f"Insufficient history: {len(nonzero_days)} non-zero day(s) "
+                     f"in last 30 weekdays (need {DEGRADED_MIN_HISTORY_DAYS}). "
+                     f"Today: {today_count} decision(s)."),
+            detail="Detector activates after enough trading days accumulate.",
+        ))
+        return
+
+    nonzero_days.sort()
+    median_baseline = nonzero_days[len(nonzero_days) // 2]
+
+    if median_baseline < DEGRADED_MIN_BASELINE:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.OK,
+            code="ACTIVITY_LOW_TRAFFIC",
+            message=(f"Baseline median {median_baseline}/day below alert floor "
+                     f"({DEGRADED_MIN_BASELINE}). Today: {today_count}."),
+            detail="Low-traffic regime — degradation detector requires more volume to be reliable.",
+        ))
+        return
+
+    threshold = median_baseline * DEGRADED_THRESHOLD_PCT
+    pct_of_baseline = (today_count / median_baseline) * 100 if median_baseline else 0
+
+    if today_count < threshold:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.WARNING,
+            code="ACTIVITY_DEGRADED",
+            message=(f"Today {today_count} decision(s) vs 30-day median "
+                     f"{median_baseline} ({pct_of_baseline:.0f}% of baseline)"),
+            detail=(f"Threshold: {DEGRADED_THRESHOLD_PCT*100:.0f}% of baseline = "
+                    f"{threshold:.1f}. Likely causes: over-restrictive gate "
+                    f"(chase caps too tight, news veto firing too often), empty "
+                    f"VALIDATED signal pool, validator stuck on CAUTION, regime "
+                    f"locked into BEAR, or candidate generator producing too few "
+                    f"signals. Investigate: count VALIDATED signals, scan trade_logic_agent.log "
+                    f"for skip reasons."),
+        ))
+    else:
+        report.add(Finding(
+            gate="GATE8_ACTIVITY",
+            severity=Severity.OK,
+            code="ACTIVITY_NORMAL",
+            message=(f"Today {today_count} decision(s) vs 30-day median "
+                     f"{median_baseline} ({pct_of_baseline:.0f}% of baseline)"),
+        ))
+
+
+# ══════════════════════════════════════════════════════════════════════════
 #  MAIN RUN FUNCTION
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -826,14 +972,14 @@ def _get_active_customer_ids():
 
 
 def run():
-    """Execute the 7-gate fault detection spine."""
+    """Execute the 8-gate fault detection spine."""
     db = _master_db()
 
     # ── Lifecycle: START ──────────────────────────────────────────────
     db.log_event("AGENT_START", agent="Fault Detection", details="fault scan")
     db.log_heartbeat("fault_detection_agent", "RUNNING")
     log.info("=" * 70)
-    log.info("FAULT DETECTION AGENT — Starting 7-gate system health scan")
+    log.info("FAULT DETECTION AGENT — Starting 8-gate system health scan")
     log.info("=" * 70)
 
     report = FaultReport(started_at=_now_str())
@@ -894,6 +1040,14 @@ def run():
         log.error(f"Gate 7 failed: {e}", exc_info=True)
         report.add(Finding("GATE7_SCHEDULE", Severity.WARNING, "GATE7_ERROR",
                            f"Schedule compliance check failed: {e}"))
+
+    # ── Gate 8: Trade activity baseline (DEGRADED detector) ───────────
+    try:
+        gate8_trade_activity_baseline(report, db)
+    except Exception as e:
+        log.error(f"Gate 8 failed: {e}", exc_info=True)
+        report.add(Finding("GATE8_ACTIVITY", Severity.WARNING, "GATE8_ERROR",
+                           f"Trade activity baseline check failed: {e}"))
 
     # ── Aggregate results ─────────────────────────────────────────────
     report.completed_at = _now_str()

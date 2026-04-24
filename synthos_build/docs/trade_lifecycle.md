@@ -243,6 +243,26 @@ the user sees what would have traded and why it didn't.
 - Stop-loss fire (submits market SELL — overnight-gated if off-hours)
 - Take-profit tiers, holding-period expiry, close-session mode
 
+**News-derived inputs to position management.** Two separate tables
+feed the trader's exit logic, intentionally NOT unified despite both
+being "news-derived per-ticker annotations":
+
+- **`news_flags`** — *scoring modifier*. Per-event, per-ticker, with
+  score ∈ [-1, +1], category, and `fresh_until` TTL (30min-24h). Read
+  by Gate 4 (EVENT_RISK) for entry blocking and Gate 5 (composite
+  score) as a weighted modifier. Affects whether and how strongly to
+  enter; does not force exit.
+- **`urgent_flags`** — *binary pulse alarm*. Written only when
+  `retail_market_sentiment_agent` reports `cascade_detected=True`. No
+  score, no category — presence of a row means "exit now." Read by
+  Gate 10 PULSE_EXIT to force-exit existing positions regardless of
+  trail-stop state.
+
+The 2026-04-24 pipeline audit considered unifying them; rejected.
+Different severity tiers, different consumers, different schemas.
+Unification would add dead columns 99% of the time or strip away the
+modifier nuance.
+
 **Post-close reconciliation** sweeps open positions, compares to
 Alpaca's authoritative position list, auto-adopts orphans and closes
 ghosts. Differences are logged.

@@ -293,6 +293,29 @@ CREATE TABLE IF NOT EXISTS signals (
 -- originates the trigger (that's the sector-driven candidate
 -- generator in Phase 3).
 --
+-- ── DESIGN: news_flags vs urgent_flags (added 2026-04-24) ──────────────
+-- These two tables are intentionally NOT unified despite both being
+-- "news-derived per-ticker annotations." They occupy different severity
+-- tiers with different semantics, schemas, TTLs, and consumers:
+--
+--   news_flags    → SCORING modifier. Per-event, per-ticker, score
+--                   ∈ [-1, +1] with category + ttl. Lives 30min-24h.
+--                   Consumed by Gate 4 (EVENT_RISK) and Gate 5
+--                   (composite modifier) — modulates whether and how
+--                   strongly to enter, never forces exit.
+--   urgent_flags  → BINARY pulse alarm. Cascade-detection only,
+--                   triggered when sentiment_agent reports
+--                   cascade_detected=True. No score, no category — just
+--                   "this ticker is in a cascade, exit now." Consumed
+--                   by Gate 10 PULSE_EXIT to force-exit existing
+--                   positions regardless of trail-stop state.
+--
+-- Pipeline-audit 2026-04-24 originally proposed unifying them; closer
+-- look found these are different problems sharing a surface name.
+-- Unifying would require adding score+category to urgent_flags (dead
+-- columns 99% of the time) or stripping news_flags down to binary
+-- (loses the modifier nuance). Keep separate.
+--
 -- Phase 2 scope: create table + news agent writes to it. Trader
 -- does NOT read yet — that lands in Phase 3.
 --
@@ -427,7 +450,11 @@ CREATE TABLE IF NOT EXISTS system_log (
 );
 
 -- ── URGENT FLAGS ───────────────────────────────────────────────────────
--- Cascade alerts that bypass normal session schedule
+-- Cascade alerts that bypass normal session schedule. BINARY pulse —
+-- presence of a row means "exit this ticker now," consumed by Gate 10
+-- PULSE_EXIT. Distinct from news_flags (scoring modifier with score +
+-- category + TTL); see news_flags table comment for the keep-separate
+-- rationale (pipeline audit 2026-04-24).
 CREATE TABLE IF NOT EXISTS urgent_flags (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker          TEXT    NOT NULL,
