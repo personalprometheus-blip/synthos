@@ -1,7 +1,7 @@
 # PROJECT STATUS — Synthos
 
-**Last Updated:** 2026-04-05
-**Current Phase:** Phase 5 complete — Pi 5 retail build pending before Phase 6
+**Last Updated:** 2026-04-24
+**Current Phase:** Phase 5 complete — Pi 5 retail node live (NVMe boot); Phase 6 gating on 30-day paper review
 **Authority:** This document is the master cross-project tracker. For node-specific operational health, see each repo's STATUS.md.
 
 ---
@@ -10,7 +10,7 @@
 
 | Repo | Node | Role | Status |
 |------|------|------|--------|
-| [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 5, incoming) | Trading agents, portal, signals.db, ingestion pipeline | Hardware pending |
+| [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 5, NVMe boot) | Trading agents, portal, signals.db, ingestion pipeline | Active |
 | [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B) | Ops agents, company_server API, backups, monitoring | Active |
 | ~~personalprometheus-blip/synthos-process~~ | ~~process_node~~ | ~~News/signal ingestion~~ | CANCELLED — merged into retail_node |
 
@@ -189,9 +189,10 @@ portal.synth-cloud.com ──redirect──▶ app.synth-cloud.com (Pi 5 :5001)
 To be executed when Pi 5 arrives. All items must pass before Phase 6 consideration.
 
 ### Infrastructure
-- [ ] Pi 5 on network, SSH accessible via `ssh2.synth-cloud.com`
-- [ ] Cloudflare retail-pi tunnel config updated for Pi 5 MAC/IP
-- [ ] `app.synth-cloud.com` routes to Pi 5 port 5001 and returns HTTP 200
+- [x] Pi 5 on network, SSH accessible via `ssh2.synth-cloud.com`
+- [x] Cloudflare retail-pi tunnel config updated for Pi 5 MAC/IP
+- [x] `app.synth-cloud.com` routes to Pi 5 port 5001 and returns HTTP 200
+- [x] Pi 5 migrated from SD → NVMe boot (see `docs/pi5_nvme_migration.md`)
 
 ### Portal & Auth
 - [ ] `retail_portal.py` starts cleanly on Pi 5
@@ -320,4 +321,4 @@ shorthand ("the 2W", "the 4B", "the 5"), map to full designation.
 |---|---|---|
 | `pi4b` | Raspberry Pi 4B | ✅ Live — company server |
 | `pi2w_monitor_node` | Raspberry Pi Zero 2W | ✅ Live — monitor node |
-| `pi5` (TBD) | Raspberry Pi 5 | 🔲 Pending delivery — retail node |
+| `pi5` | Raspberry Pi 5 (NVMe boot) | ✅ Live — retail node (migrated SD → NVMe 2026-04-18) |

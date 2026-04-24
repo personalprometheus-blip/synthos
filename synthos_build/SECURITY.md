@@ -83,22 +83,27 @@ These settings should be applied immediately. None affect automated agent traffi
 | Browser Integrity Check | Security → Settings | **On** (confirm it's already on) | Challenges requests with suspicious or missing browser headers — stops basic scrapers and bots |
 | Hotlink Protection | Scrape Shield | **On** | Prevents external sites from embedding your portal resources |
 
-### 2.2 Hold Off Until After Live Test
+### 2.2 Edge Hardening — Activated 2026-04-24
 
-These settings could interfere with automated Pi agent traffic hitting the portal through the public Cloudflare URL.
+Live-test confirmed all automated Pi agent traffic egresses through the Cloudflare Tunnel
+or directly to third-party APIs (Alpaca, Yahoo, Resend, GitHub) — no agent hits the
+public portal URL. With that confirmed, the following were enabled at the Cloudflare edge:
 
-| Setting | Why Wait | When to Enable |
+| Setting | Status | Notes |
 |---|---|---|
-| **Bot Fight Mode** | If any Pi agent (heartbeat, watchdog, API poller) makes HTTP requests to the public portal URL, Bot Fight Mode may classify these as bots and block or JS-challenge them. | After confirming all automated traffic uses direct Cloudflare Tunnel paths, not the public URL |
-| **Security Level → Medium/High** | Medium security can show a JS challenge page to IPs it considers suspicious. Automated scripts can't solve JS challenges. | After confirming all agents that hit the portal are browser-based (i.e. human-operated only) |
-| **IP Access Rules** | Locking the portal to specific IP ranges is ideal long-term but would block customers in early testing | After customer base is known and geo-patterns are established |
+| **Bot Fight Mode** | ✅ Active | Browser-based portal traffic only; verified no agent traffic is classified as bot |
+| **Security Level → Medium** | ✅ Active | JS challenge shown only to suspicious source IPs; human-operated portal unaffected |
+| **IP Access Rules** | 🔲 Deferred | Revisit after customer base is known and geo-patterns are established |
+
+Re-check these if a new automated client is ever pointed at the public portal URL —
+that is the failure mode Bot Fight Mode is most likely to interfere with.
 
 ### 2.3 Steps to Apply Cloudflare Settings
 
 1. Log in at `dash.cloudflare.com`
 2. Select your domain
-3. Apply each setting in section 2.1 above
-4. After live test is complete and you've verified no agent traffic goes through the public portal URL, return and apply section 2.2 settings
+3. Apply each setting in section 2.1 above (baseline — safe at any time)
+4. Section 2.2 settings are now active; leave them on unless an automated client needs public-URL access
 
 ---
 
@@ -179,6 +184,6 @@ Security hardening applied directly in code.
 | 🟡 Medium | Add `Secure`/`HttpOnly`/`SameSite` to session cookie | No |
 | 🟡 Medium | Add CSRF tokens to portal forms | No |
 | 🟡 Medium | Add security headers (CSP, X-Frame-Options) | No |
-| 🟢 Low | Enable Bot Fight Mode (post-live-test) | No |
-| 🟢 Low | Enable Security Level → Medium (post-live-test) | No |
+| ~~🟢 Low~~ | ~~Enable Bot Fight Mode (post-live-test)~~ — ✅ Activated 2026-04-24 | No |
+| ~~🟢 Low~~ | ~~Enable Security Level → Medium (post-live-test)~~ — ✅ Activated 2026-04-24 | No |
 | 🟢 Low | Signed commits | No |
