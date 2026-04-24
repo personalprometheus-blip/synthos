@@ -24,6 +24,176 @@ Each backlog item:
 
 ---
 
+## OPERATIONAL-HARDENING — pi5 direct backup + DEGRADED detector + token rotation
+
+**Why deferred.** Three operational resilience items that don't each
+warrant a separate backlog entry but collectively close gaps flagged
+in the 2026-04-24 security/resilience audit. Grouped because they
+share tooling + ops-doc surface.
+
+### 1. Pi5 → R2 direct backup fallback
+Current backup chain is `pi5 retail_backup.py → pi4b /receive_backup
+→ strongbox → R2`. If pi4b dies during travel, pi5 keeps trading but
+produces no offsite backup until pi4b recovers. Older R2 backups
+remain intact.
+
+**Fix:** give pi5 direct R2 upload credentials so it can fall back to
+direct-upload if pi4b is unreachable for ≥24h. ~200 lines + one new
+env var set (R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET, R2_BUCKET).
+Reuse existing tar.gz pipeline.
+
+### 2. DEGRADED detector in fault_detection_agent
+Existing fault detection catches DOWN (missing heartbeats, stale
+prices, stale signals). It doesn't catch DEGRADED — trader running
+fine, heartbeats OK, but generating zero trade decisions for days.
+Could indicate over-restrictive gates (e.g. chase caps set too tight,
+signal pool empty, regime permanently BEAR).
+
+**Fix:** add a gate8 to `retail_fault_detection_agent.py` that
+compares "TRADE_DECISION rows in last 24h" against baseline
+(e.g. 30-day median). Flag WARNING if rate drops below 30% of
+baseline. Has to be careful not to cry wolf during legit
+quiet markets. ~80 lines.
+
+### 3. Monitor token rotation procedure
+`MONITOR_TOKEN` is a single shared secret pasted into pi4b, pi5,
+and pi2w `.env` files. Rotating requires updating all three
+atomically or alerts break mid-rotation. Today there's no tooling
+and no documented procedure.
+
+**Fix:** write `tools/rotate_monitor_token.py` that generates a
+new token, pushes to each node via SSH, verifies delivery, then
+swaps the live token. ~100 lines. Also document the manual
+procedure in `docs/operations/TOKEN_ROTATION.md` so a shell-only
+operator can do it without the tool.
+
+**Entry conditions (all three tasks):**
+1. Operator back from travel, 2-3 hours free.
+2. R2 credentials available with correct bucket scope for pi5 (not
+   just pi4b).
+3. Fault detection agent not in active tuning — add gate 8 cleanly,
+   don't interleave with other changes.
+
+**Scope.** ~380 lines across 3 new files + 1 new agent gate.
+
+**Risk.** Low. Each item is isolated and deployable independently.
+Token rotation tool has the highest potential for "oops I locked
+everyone out" — start with a dry-run mode that prints the plan
+without executing.
+
+---
+
+## CUSTOMER-RISK-DIFFERENTIATION — make the per-customer schema actually do something
+
+**Why deferred.** Today's code has per-customer schema
+(`customer_settings` table, per-customer `signals.db`, per-customer
+bias scans) that IMPLIES differentiation — different customers
+having different risk profiles. Operationally, every customer gets
+identical ATR multipliers, identical chase caps (2%/1.5%),
+identical vol buckets, identical stop behavior. The per-customer
+plumbing exists; the per-customer DATA doesn't differ.
+
+If any customer-facing material mentions "personalized risk
+settings," "tier-based management," "Conservative / Moderate /
+Aggressive presets," the code doesn't back that up.
+
+**Two paths:**
+
+### Path A — Soften the claim (no code change)
+Review marketing/portal copy, update to not imply differentiation
+that doesn't exist. Honest + zero engineering work.
+
+### Path B — Make it real (significant engineering)
+Add risk-preset field to customer_settings:
+`risk_preset ∈ {'Conservative', 'Moderate', 'Aggressive'}`.
+Parameterize stop multipliers, chase caps, sizing factors per
+preset. Trader consults preset when loading TradingControls for
+each customer. Portal settings slider to let customer choose.
+~400 lines across trader + portal + new migration.
+
+**Recommendation:** Path A first. Talk to customers, see if
+differentiation is actually wanted. Then decide whether Path B is
+worth it. Don't build infrastructure for demand you haven't
+confirmed.
+
+**Entry conditions.**
+1. Marketing copy review done (takes ~1 hour).
+2. Decision made: Path A (soften) or Path B (build). Don't
+   start Path B without committing to the portal UI work too —
+   a preset setting nobody can change is worse than no preset.
+
+---
+
+## UNIT-TESTS — pytest coverage for core gate functions
+
+**Why deferred.** All verification today is integration / dry-run.
+Refactors are one "it crashed in dry-run" away from silent subtle
+bugs. Unit tests around the core decision gates would catch the
+class of bugs that full-run tests miss (boundary conditions,
+exact-threshold behavior, regime-state edge cases).
+
+**Highest-ROI candidates** (ordered by impact × testability):
+1. `calculate_trail_stop()` — pure function of ATR + sector
+2. `gate6_entry()` chase caps — Gate 6 is the current risk hotspot
+3. `gate1_system()` kill conditions — drawdown, daily loss, api fail
+4. `apply_member_weight()` in news agent — simple transform
+5. `_compute_windows()` style anchor math (if window_calc ever
+   comes back) — deterministic given inputs
+
+**Scope.** `synthos_build/tests/` directory + pytest config.
+~200-300 lines initial coverage on gates 1, 6, plus helpers.
+Mock AlpacaClient, mock DB. CI hook optional.
+
+**Entry conditions.**
+1. Operator available to define expected behavior for boundary
+   cases (e.g. "if ATR is NaN, should stop default to 2% or
+   error?"). Subjective calls shouldn't be made in test code.
+2. No active refactor in trader — add tests AGAINST stable code,
+   not a moving target.
+
+**Related context.**
+- Every refactor in the 2026-04-23/24 session was verified by
+  dry-run only. Unit tests would have caught several earlier.
+
+---
+
+## CUSTOMER-DATA-DELETION — GDPR/CCPA deletion workflow
+
+**Why deferred.** Today an account can be deactivated (admin flips
+`is_active=0`), but positions, outcomes, notifications,
+signal_decisions, and member_weights tied to that customer stay
+forever. For US customers this is probably fine. If EU customers
+ever sign up, GDPR "right to be forgotten" requires a concrete
+deletion workflow — currently we have none.
+
+**Decision required before building:**
+- Retention policy: do we delete everything, or just PII
+  (email/phone/name) while keeping anonymized outcome rows?
+- Pseudo-deletion vs hard-deletion: mark rows as deleted vs
+  physically purge them?
+- Cascade: if we delete a customer, does that affect member_weights
+  they contributed to?
+
+**Scope (hard-deletion variant).**
+- Admin endpoint `/api/admin/delete-customer` with confirmation
+  step (like "enter email address to confirm").
+- Cascade helper: DELETE from positions WHERE customer_id=?;
+  DELETE FROM notifications; etc. ~8 tables to touch.
+- Audit trail: write a "CUSTOMER_DELETED" system_log event BEFORE
+  deletion for legal trail.
+- ~150 lines + retention policy doc.
+
+**Entry conditions.**
+1. At least one concrete request OR first EU customer signup.
+2. Retention policy finalized (legal review probably warranted
+   for EU customers).
+3. Backup immutability confirmed — "deleted" means deleted from
+   live DB; historical backups in R2 may still contain the data.
+
+Not urgent until it is.
+
+---
+
 ## ENCRYPTION-KEY-ROTATION — tooling to rotate the auth.db Fernet key without lockout
 
 **Why deferred.** Today the Fernet `ENCRYPTION_KEY` in `.env`
