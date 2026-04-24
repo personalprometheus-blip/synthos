@@ -3049,6 +3049,72 @@ class DB:
             ).fetchone()
             return dict(row) if row else None
 
+    # ── NEWS-AGENT FEEDBACK LOOP (read-only, 2026-04-24) ──────────────────
+    # Reads closed-trade outcomes for signals originated by the news agent
+    # at a given source_tier. Used by gate20_evaluation to log historical
+    # accuracy alongside each new article — INFORMATIONAL ONLY. Does not
+    # alter any score, weight, or future classification. The decision to
+    # keep this read-only (vs adaptive weight tuning) was operator-explicit
+    # 2026-04-24; see backlog NEWS-AGENT-GATE-20.
+
+    def get_news_accuracy_by_source_tier(self, source_tier, days_back=60):
+        """JOIN signals → positions → outcomes for closed trades whose
+        originating signal had source='news' and the given source_tier
+        within the last `days_back` days.
+
+        Returns a dict (never None — empty stats stay parseable):
+            {
+              'source_tier':  int,
+              'count':        int,        # closed outcomes
+              'wins':         int,        # outcomes with pnl_dollar > 0
+              'win_rate':     float|None, # wins/count, None if count==0
+              'avg_pnl_pct':  float|None,
+              'avg_pnl_dol':  float|None,
+              'window_days':  int,
+              'has_history':  bool,       # True iff count >= MIN_SAMPLES_FOR_DISPLAY
+            }
+
+        Pure read. No writes. Safe to call from any gate.
+        """
+        MIN_SAMPLES_FOR_DISPLAY = 5   # below this, treat as "insufficient history"
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).isoformat()
+        except Exception:
+            # Should never happen — datetime/timedelta are stdlib — but if it
+            # ever does, fall through with empty stats rather than 500 the gate.
+            cutoff = '1970-01-01T00:00:00'
+        try:
+            with self.conn() as c:
+                row = c.execute("""
+                    SELECT
+                      COUNT(o.id)                                     AS cnt,
+                      SUM(CASE WHEN o.pnl_dollar > 0 THEN 1 ELSE 0 END) AS wins,
+                      AVG(o.pnl_pct)                                  AS avg_pct,
+                      AVG(o.pnl_dollar)                               AS avg_dol
+                    FROM outcomes o
+                    JOIN positions p ON o.position_id = p.id
+                    JOIN signals   s ON p.signal_id   = s.id
+                    WHERE s.source = 'news'
+                      AND s.source_tier = ?
+                      AND o.created_at >= ?
+                """, (source_tier, cutoff)).fetchone()
+        except Exception:
+            row = None
+        cnt  = (row['cnt']  if row else 0) or 0
+        wins = (row['wins'] if row else 0) or 0
+        avg_pct = row['avg_pct'] if row and row['avg_pct'] is not None else None
+        avg_dol = row['avg_dol'] if row and row['avg_dol'] is not None else None
+        return {
+            'source_tier':  source_tier,
+            'count':        cnt,
+            'wins':         wins,
+            'win_rate':     (wins / cnt) if cnt > 0 else None,
+            'avg_pnl_pct':  avg_pct,
+            'avg_pnl_dol':  avg_dol,
+            'window_days':  days_back,
+            'has_history':  cnt >= MIN_SAMPLES_FOR_DISPLAY,
+        }
+
     # ── LEDGER ─────────────────────────────────────────────────────────────
 
     def add_ledger_entry(self, entry_type, description, amount, balance, position_id=None):

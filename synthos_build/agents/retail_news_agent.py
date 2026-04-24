@@ -2596,26 +2596,28 @@ def gate19_persistence(topic, event, ctrl, ndl, state):
 
 def gate20_evaluation(item, action, ctrl, ndl, db, state):
     """
-    SCAFFOLDING — does NOT actually evaluate predicted-vs-realized outcomes.
+    Read-only feedback loop. Stamps each article's decision-log entry
+    with historical win-rate and average P&L for signals from the same
+    source-tier. Pure information — does NOT alter scoring, weights,
+    or future classification logic.
 
-    The original docstring claimed this was a feedback loop comparing
-    classification predictions against realized market response. It isn't.
-    Today this gate only checks whether the ticker is still active in the
-    signals table (a relevance-staleness check, not an accuracy
-    measurement) and stamps the literal string "scaffolding" as the
-    accuracy note.
+    Two outputs into the decision log:
+      1. ticker_active — relevance-staleness check (is ticker still in
+         play in the signals table?)
+      2. tier_history — over the last NEWS_FEEDBACK_WINDOW_DAYS days,
+         how have closed trades originating from THIS article's
+         source_tier performed? (count / win_rate / avg_pnl)
 
-    Real implementation deferred — see backlog entry NEWS-AGENT-GATE-20.
-    Conditions to land it: ≥50 closed `outcomes` rows with signal_id
-    backrefs, operator back from travel, and an explicit decision on
-    read-only-vs-adaptive feedback semantics. Don't fix this gate
-    in-place without reading that entry first.
+    "Read-only" was an explicit operator decision 2026-04-24. Adaptive
+    feedback (where this gate's output mutates upstream gate weights)
+    is intentionally NOT implemented — see backlog NEWS-AGENT-GATE-20.
+    Don't add weight-tuning here without re-reading that entry first.
     """
     action_state = action.get("action_state", "ignore")
     ticker       = (item.get("ticker") or "").upper()
+    source_tier  = item.get("source_tier", 2)
 
-    # Relevance staleness: is ticker still active in the signals table?
-    # (NOT an accuracy measurement — see docstring.)
+    # Relevance staleness — is ticker still active in the signals table?
     ticker_active = False
     if ticker:
         try:
@@ -2631,15 +2633,43 @@ def gate20_evaluation(item, action, ctrl, ndl, db, state):
         except Exception as e:
             log.debug(f"active-ticker lookup failed for {ticker}: {e}")
 
-    # Honest placeholder — see backlog NEWS-AGENT-GATE-20.
-    accuracy_note = "scaffolding"
+    # Historical accuracy lookup by source_tier (read-only).
+    feedback_window = int(os.environ.get('NEWS_FEEDBACK_WINDOW_DAYS', '60'))
+    tier_stats = {}
+    accuracy_note = "history_unavailable"
+    try:
+        tier_stats = db.get_news_accuracy_by_source_tier(source_tier, feedback_window)
+        if not tier_stats.get('has_history'):
+            accuracy_note = (f"insufficient_history "
+                             f"(tier={source_tier}, n={tier_stats.get('count', 0)}, "
+                             f"window={feedback_window}d)")
+        else:
+            wr  = tier_stats['win_rate']
+            n   = tier_stats['count']
+            apd = tier_stats['avg_pnl_dol']
+            accuracy_note = (
+                f"tier{source_tier}_history "
+                f"win_rate={wr*100:.0f}% "
+                f"n={n} "
+                f"avg_pnl=${apd:+.2f} "
+                f"(window={feedback_window}d)"
+            )
+    except Exception as e:
+        log.debug(f"feedback lookup failed for tier {source_tier}: {e}")
+        accuracy_note = "history_lookup_error"
 
     evaluation_note = (f"ticker_active={ticker_active} action_state={action_state} "
                        f"accuracy={accuracy_note}")
     state.evaluation_note = evaluation_note
 
     ndl.gate(20, "EVALUATION_LOOP",
-             {"action_state": action_state, "ticker_active": ticker_active},
+             {"action_state":   action_state,
+              "ticker_active":  ticker_active,
+              "source_tier":    source_tier,
+              "tier_win_rate":  tier_stats.get('win_rate'),
+              "tier_count":     tier_stats.get('count', 0),
+              "tier_avg_pnl":   tier_stats.get('avg_pnl_dol'),
+              "feedback_window_days": feedback_window},
              f"relevance_ok={ticker_active or action_state in ('benchmark_signal','watch_only')}",
              accuracy_note)
     return {"ticker_active": ticker_active}
