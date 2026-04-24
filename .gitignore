@@ -25,3 +25,12 @@ synthos_build/data/auth.db
 synthos_build/data/auth.db-journal
 synthos_build/data/auth.db-wal
 synthos_build/data/auth.db-shm
+
+# Ad-hoc PDF / analysis reports written locally. Keep out of git so
+# generated artifacts don't churn history. The one PDF already in the
+# tree (reports/PnL_Deep_Dive_2026-04-24.pdf, committed in 5f505a9)
+# stays for reference; future reports land in the same folder but
+# are excluded from commits.
+reports/*.pdf
+reports/*.csv
+reports/*.html
