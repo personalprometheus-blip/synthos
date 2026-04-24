@@ -696,7 +696,8 @@ def check_auth():
     if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/') or request.path.startswith('/reset-password/'):
         return
     # Monitor-callable endpoints — bearer token handled inside the function
-    if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override'}:
+    if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override',
+                        '/api/admin/alert'}:
         return
     # Stripe webhook — authenticated by Stripe signature, not session
     if request.path == '/webhook/stripe':
@@ -2499,6 +2500,58 @@ def api_set_mode():
     except Exception as e:
         log.error(f"set-mode error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route('/api/admin/alert', methods=['POST'])
+def api_admin_alert():
+    """Tier-2 destination in the escalating-alert chain used by external
+    watchdogs (pi2w_monitor). Writes a notification to the OWNER's
+    per-customer DB with category='admin'. Authenticated via MONITOR_TOKEN
+    bearer (same token scheme as /api/logs-audit).
+
+    Payload (JSON):
+        {
+            "subject":  "short title",           # required
+            "body":     "longer detail text",    # optional
+            "priority": "normal|high|critical"   # optional, default 'normal'
+        }
+
+    Response: {"ok": true, "notification_id": <int>}
+    """
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    auth_header   = request.headers.get('Authorization', '')
+    x_token       = request.headers.get('X-Token', '')
+    token_ok = bool(monitor_token and
+                    (auth_header == f'Bearer {monitor_token}' or x_token == monitor_token))
+    if not token_ok:
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+
+    data = request.get_json(silent=True) or {}
+    subject  = (data.get('subject')  or '').strip()
+    body     = (data.get('body')     or '').strip()
+    priority = (data.get('priority') or 'normal').strip().lower()
+    if not subject:
+        return jsonify({'ok': False, 'error': 'subject required'}), 400
+
+    # Write into OWNER customer's notifications table (operator = owner).
+    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
+    if not owner_id:
+        log.error("api_admin_alert: OWNER_CUSTOMER_ID env missing — cannot route")
+        return jsonify({'ok': False, 'error': 'owner not configured'}), 500
+    try:
+        from retail_database import get_customer_db
+        odb = get_customer_db(owner_id)
+        nid = odb.add_notification(
+            category='admin',
+            title=subject[:120],
+            body=body[:2000],
+            meta={'source': 'external_watchdog', 'priority': priority},
+        )
+        log.info(f"[ADMIN_ALERT] wrote notification {nid}: {subject[:60]}")
+        return jsonify({'ok': True, 'notification_id': nid})
+    except Exception as e:
+        log.error(f"api_admin_alert write failed: {e}")
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
 
 
 @app.route('/api/admin-override', methods=['GET', 'POST'])

@@ -79,18 +79,18 @@
     {
       "id": "pi2w_monitor",
       "name": "pi2w_monitor_node",
-      "role": "External Watchdog (DISABLED)",
+      "role": "External Watchdog",
       "hardware": "Pi Zero 2W",
       "ip": "10.0.0.121",
       "network": "WiFi",
-      "status": "disabled",
+      "status": "live",
       "agents": [
-        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 1m", "status": "disabled"},
-        {"name": "node_watchdog.py", "desc": "Pings pi4b + pi5 + display, alerts on failure", "how": "cron 1m", "status": "disabled"}
+        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor (http://10.0.0.10:5050)", "how": "cron 1m", "status": "live"},
+        {"name": "node_watchdog.py", "desc": "Pings pi4b + pi5, alerts on silence via 4-tier escalating chain: (1) pi4b command portal /api/enqueue, (2) pi5 retail portal /api/admin/alert, (3) SMS via carrier gateway (if configured), (4) Resend email. Skips nodes in IGNORE_LIST (sentinel). 2026-04-24 re-enabled and refactored.", "how": "cron 1m", "status": "live"}
       ],
       "databases": [],
       "services": [],
-      "note": "DISABLED 2026-04-20 — node unreachable via SSH (58 NODE_UNREACHABLE hits/day). Auditor now skips this node via 'disabled': True in REMOTE_NODES config (company_auditor.py). Re-enable by removing the flag when hardware returns."
+      "note": "Re-enabled 2026-04-24 after confirmed reachability (3+ days uptime, WiFi stable). Role: external failure detector — last line of defense if pi4b or pi5 go silent. Watchdog alerts cascade through portals FIRST to avoid email-spam, then fall back to SMS/email if portals are unreachable."
     },
     {
       "id": "pi2w_sentinel",
