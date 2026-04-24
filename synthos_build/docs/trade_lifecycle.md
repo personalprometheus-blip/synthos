@@ -97,7 +97,10 @@ runs inside the trader before entry evaluation.
 
 ## 4. Decision — trade logic agent (`retail_trade_logic_agent.py`)
 
-**Gates.** 14 sequential checks per customer, per run:
+**Gates.** 13 sequential checks per customer, per run (gates numbered
+1-8, 10, 11, 13, 14 plus news-veto sub-check 5.5; gate 9 and gate 12
+were planned slots in an earlier design that were consolidated into
+gates 10 and 14 respectively — the numbering gap is intentional):
 - System: kill switch, API health, drawdown, daily-loss limits
 - Benchmark: SPY regime (trend, volatility, drawdown)
 - Regime: benchmark-relative risk posture

@@ -9,7 +9,7 @@ run on market time (seconds) instead of intel cadence (30 min).
 
 During market hours (9:30-16:00 ET weekdays), wakes every CYCLE_INTERVAL_SEC
 seconds, checks the halt flag, and dispatches the trader for all active
-customers. No new logic — same 14-gate trader, same 3-parallel subprocess
+customers. No new logic — same 13-gate trader, same 3-parallel subprocess
 pool, same per-process 240s timeout, same bolt_decisions.log target.
 
 WHAT CHANGES from v1:

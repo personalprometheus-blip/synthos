@@ -1567,7 +1567,7 @@ class DB:
         Used by trader (Phase 3c.b) as the entry filter. Returns all
         non-expired macro rows for the given customer. Caller joins to
         signals (master) + live_prices to find tickers currently within
-        their entry band, then runs the 14-gate evaluation.
+        their entry band, then runs the 13-gate evaluation.
         """
         now = datetime.now(timezone.utc).isoformat()
         with self.conn() as c:

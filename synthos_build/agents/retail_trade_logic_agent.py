@@ -6,7 +6,10 @@ Runs hourly 24/7 weekdays via retail_scheduler.py --session trade.
 Accepts --session (open/midday/close/hourly) for backward compatibility;
 actual behavior is driven by time of day (ET).
 
-Decision architecture: 14-gate deterministic control spine.
+Decision architecture: 13-gate deterministic control spine
+(gates 1-8, 10, 11, 13, 14 + 5.5 news-veto sub-check; gate 9/12
+numbers are skipped — the slots existed in an earlier design but
+were consolidated into 10/14 respectively).
 No LLM calls in any decision path.
 Every decision produces a structured human-readable audit log.
 
@@ -241,9 +244,6 @@ class TradingControls:
     ATR_TRAIL_MULTIPLIER      = float(os.environ.get('ATR_TRAIL_MULTIPLIER', '2.0'))
     MAX_HOLDING_DAYS          = int(os.environ.get('MAX_HOLDING_DAYS', '15'))
 
-    # Execution (Gate 9)
-    SLIPPAGE_TOLERANCE        = float(os.environ.get('SLIPPAGE_TOLERANCE', '0.002'))
-
     # Portfolio (Gate 11)
     MAX_DAILY_LOSS            = float(os.environ.get('MAX_DAILY_LOSS', '-500.0'))
     MAX_DRAWDOWN_PCT          = float(os.environ.get('MAX_DRAWDOWN_PCT', '0.15'))
@@ -256,7 +256,10 @@ class TradingControls:
     MAX_POSITIONS             = int(os.environ.get('MAX_POSITIONS', '10'))
     MAX_LEVERAGE              = float(os.environ.get('MAX_LEVERAGE', '1.0'))
 
-    # Adaptive (Gate 12)
+    # Adaptive kill-condition inputs — consumed by Gate 14 (Evaluation)
+    # for rolling Sharpe / drawdown suspension. "Gate 12" was a planned
+    # section in an earlier design; that logic was rolled into Gate 14
+    # and this header preserves that lineage without a phantom gate.
     MIN_SHARPE_THRESHOLD      = float(os.environ.get('MIN_SHARPE_THRESHOLD', '0.5'))
     PERFORMANCE_WINDOW_DAYS   = int(os.environ.get('PERFORMANCE_WINDOW_DAYS', '30'))
 

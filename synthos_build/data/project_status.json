@@ -21,7 +21,7 @@
       "status": "complete",
       "tasks": [
         {
-          "label": "retail_trade_logic_agent.py operational (14-gate spine)",
+          "label": "retail_trade_logic_agent.py operational (13-gate spine)",
           "done": true
         },
         {
@@ -547,7 +547,7 @@
       {
         "alias": "trader",
         "file": "retail_trade_logic_agent.py",
-        "job": "Trade execution, 14-gate spine, open/midday/close sessions",
+        "job": "Trade execution, 13-gate spine, open/midday/close sessions",
         "status": "built"
       },
       {

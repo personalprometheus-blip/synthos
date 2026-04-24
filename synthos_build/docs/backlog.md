@@ -616,7 +616,7 @@ confidence on widely-reported stories, which is generally correct.
 
 ## OVERVALUATION-ALERT — warn (don't block) when entry price exceeds historical P/E band
 
-**Why deferred.** The trader's 14-gate risk chain checks ATR, liquidity,
+**Why deferred.** The trader's 13-gate risk chain checks ATR, liquidity,
 correlation, and portfolio concentration. It does NOT check whether the
 entry price is meaningfully above the ticker's own historical valuation
 range or the sector's mean P/E. Strong-company-bad-timing is a known
@@ -651,7 +651,7 @@ false positives annoy the user with warnings on legitimate growth stocks
 
 **Related context.**
 - Original spec (deleted): `synthos-company/documentation/specs/AGENT_ENHANCEMENT_PLAN.md`
-- 14-gate chain: `synthos_build/agents/retail_trade_logic_agent.py`, gate4-gate11
+- 13-gate chain: `synthos_build/agents/retail_trade_logic_agent.py`, gate4-gate11
 
 ---
 
