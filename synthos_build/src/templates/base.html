@@ -20,9 +20,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos{% block title_suffix %}{% if title %} — {{ title }}{% endif %}{% endblock %}</title>
 
-  {# Shared SVG favicon (inline data URL — CSP-safe, one HTTP round-trip saved) #}
-  <link rel="icon" type="image/svg+xml"
-        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><defs><linearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22><stop offset=%220%25%22 stop-color=%22%2300f5d4%22/><stop offset=%22100%25%22 stop-color=%22%2300b4d8%22/></linearGradient></defs><rect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%23111520%22/><path d=%22M40 16 C28 16 20 20 20 28 C20 36 32 34 36 38 C40 42 36 48 24 48%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%225%22 stroke-linecap=%22round%22/><circle cx=%2240%22 cy=%2216%22 r=%223.5%22 fill=%22%2300f5d4%22/><circle cx=%2224%22 cy=%2248%22 r=%223.5%22 fill=%22%2300b4d8%22/><circle cx=%2228%22 cy=%2232%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/><circle cx=%2236%22 cy=%2238%22 r=%222%22 fill=%22%2300f5d4%22 opacity=%220.6%22/></svg>">
+  {# Favicon removed 2026-04-25 — placeholder that didn't fit the brand.
+     When the real one is ready, drop a <link rel="icon" ...> back here.
+     Same placeholder lives in portal.html (the dashboard doesn't extend
+     base.html); keep them in sync. #}
 
   {# Core design tokens, fonts, reset, pw-eye primitives #}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/core.css') }}">
