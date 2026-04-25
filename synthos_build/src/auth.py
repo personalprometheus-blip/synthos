@@ -174,6 +174,27 @@ def init_auth_db():
                 reviewed_at     TEXT,
                 reviewed_by     TEXT
             );
+            -- Pending email changes (Phase 2.5 MED-3 — added 2026-04-25).
+            -- /api/account/change-email creates a row here, sends a verify
+            -- link to the NEW address + an alert to the OLD address.
+            -- The actual email change to customers.email_hash/email_enc
+            -- happens only when /verify-email-change/<token> is hit.
+            -- 1h TTL. Single-use (consumed_at populated on success).
+            CREATE TABLE IF NOT EXISTS pending_email_changes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id     TEXT    NOT NULL,
+                old_email_hash  TEXT    NOT NULL,   -- snapshot for safety / cleanup queries
+                new_email_hash  TEXT    NOT NULL,   -- collision check at create + apply time
+                new_email_enc   BLOB    NOT NULL,   -- Fernet-encrypted new email
+                token           TEXT    NOT NULL UNIQUE,
+                expires_at      TEXT    NOT NULL,
+                created_at      TEXT    NOT NULL,
+                consumed_at     TEXT,
+                FOREIGN KEY (customer_id) REFERENCES customers(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_pec_customer  ON pending_email_changes(customer_id);
+            CREATE INDEX IF NOT EXISTS idx_pec_token     ON pending_email_changes(token);
+            CREATE INDEX IF NOT EXISTS idx_pec_expires   ON pending_email_changes(expires_at);
         """)
     _migrate_auth_db()
     _migrate_pending_signups()
@@ -916,7 +937,11 @@ def update_password(customer_id: str, current_password: str, new_password: str) 
 
 
 def update_email(customer_id: str, current_password: str, new_email: str) -> None:
-    """Change a customer's email after verifying the current password."""
+    """Direct email change. PRESERVED for backward compatibility but the
+    portal route /api/account/change-email now uses initiate_email_change
+    (Phase 2.5 MED-2/MED-3) which sends a verification link to the new
+    address and an alert to the old address. Direct callers (admin
+    tooling, migrations) can still use this."""
     new_email  = new_email.lower().strip()
     new_hash   = _email_lookup_hash(new_email)
     new_enc    = encrypt_field(new_email)
@@ -940,6 +965,131 @@ def update_email(customer_id: str, current_password: str, new_email: str) -> Non
             (new_hash, new_enc, customer_id)
         )
     log.info(f"Email updated for customer {customer_id}")
+
+
+# ── EMAIL CHANGE — TWO-STEP VERIFY FLOW (Phase 2.5 MED-2 + MED-3) ────────────
+# 1. initiate_email_change() — verifies password, validates new email is
+#    not already taken, creates pending_email_changes row with 1h TTL,
+#    returns (token, old_email, new_email) so the portal can send the
+#    verification email to the new address and the alert email to the old.
+# 2. confirm_email_change(token) — validates token+expiry+single-use,
+#    re-checks the new email isn't already taken (race protection between
+#    initiate and confirm), commits the change to customers.
+
+EMAIL_CHANGE_TTL_MINUTES = 60   # 1h verification window
+
+def initiate_email_change(customer_id: str, current_password: str,
+                          new_email: str) -> dict:
+    """Step 1 of secure email-change flow. Verifies password, checks new
+    email is not taken, creates a pending_email_changes row with a
+    1h-TTL verification token. Does NOT change customers.email_* yet —
+    that happens in confirm_email_change after the verification link
+    is clicked. Pre-existing pending changes for this customer are
+    superseded (only the most recent token is valid).
+
+    Returns: {'token': str, 'old_email': str, 'new_email': str}
+    Raises:  ValueError on bad password, taken email, or same-email no-op.
+    """
+    new_email = new_email.lower().strip()
+    new_hash  = _email_lookup_hash(new_email)
+    new_enc   = encrypt_field(new_email)
+
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT password_hash, email_hash, email_enc FROM customers "
+            "WHERE id = ? AND is_active = 1",
+            (customer_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("Account not found")
+        if not verify_password(current_password, row['password_hash']):
+            raise ValueError("Current password is incorrect")
+        if row['email_hash'] == new_hash:
+            raise ValueError("New email is the same as the current email")
+        # Collision check against existing customers AND any other
+        # in-flight pending changes (different customer pre-claiming
+        # the same email).
+        conflict = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ? AND id != ?",
+            (new_hash, customer_id)
+        ).fetchone()
+        if conflict:
+            raise ValueError("Email address is already in use")
+        pending_conflict = c.execute(
+            "SELECT id FROM pending_email_changes "
+            "WHERE new_email_hash = ? AND customer_id != ? "
+            "AND consumed_at IS NULL "
+            "AND expires_at > ?",
+            (new_hash, customer_id,
+             datetime.now(timezone.utc).isoformat())
+        ).fetchone()
+        if pending_conflict:
+            raise ValueError("Email address is already in use")
+        # Supersede prior pending changes for this customer
+        c.execute(
+            "DELETE FROM pending_email_changes "
+            "WHERE customer_id = ? AND consumed_at IS NULL",
+            (customer_id,)
+        )
+        token = secrets.token_urlsafe(32)
+        now   = datetime.now(timezone.utc)
+        expires = (now + timedelta(minutes=EMAIL_CHANGE_TTL_MINUTES)).isoformat()
+        c.execute(
+            """INSERT INTO pending_email_changes
+                 (customer_id, old_email_hash, new_email_hash, new_email_enc,
+                  token, expires_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (customer_id, row['email_hash'], new_hash, new_enc,
+             token, expires, now.isoformat())
+        )
+    old_email = decrypt_field(row['email_enc']) if row['email_enc'] else ''
+    log.info(f"Email-change initiated for customer {customer_id} "
+             f"(old→{new_email[:3]}***)")
+    return {'token': token, 'old_email': old_email, 'new_email': new_email}
+
+
+def confirm_email_change(token: str) -> str:
+    """Step 2 of secure email-change flow. Validates token+expiry,
+    commits the change to customers.email_hash/email_enc, marks the
+    pending row as consumed.
+
+    Returns: customer_id on success
+    Raises:  ValueError on invalid/expired/already-consumed token, or
+             if the email got taken between initiate and confirm.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _auth_conn() as c:
+        row = c.execute(
+            "SELECT id, customer_id, new_email_hash, new_email_enc, expires_at, consumed_at "
+            "FROM pending_email_changes WHERE token = ?",
+            (token,)
+        ).fetchone()
+        if not row:
+            raise ValueError("This verification link is invalid.")
+        if row['consumed_at']:
+            raise ValueError("This verification link has already been used.")
+        if row['expires_at'] < now_iso:
+            raise ValueError("This verification link has expired. "
+                             "Request a new email change from your account settings.")
+        # Race protection: re-check that the new email isn't already
+        # claimed by someone else (initiate→confirm window can be ≤1h).
+        conflict = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ? AND id != ?",
+            (row['new_email_hash'], row['customer_id'])
+        ).fetchone()
+        if conflict:
+            raise ValueError("Email address was claimed by another account "
+                             "during the verification window.")
+        c.execute(
+            "UPDATE customers SET email_hash = ?, email_enc = ? WHERE id = ?",
+            (row['new_email_hash'], row['new_email_enc'], row['customer_id'])
+        )
+        c.execute(
+            "UPDATE pending_email_changes SET consumed_at = ? WHERE id = ?",
+            (now_iso, row['id'])
+        )
+    log.info(f"Email-change confirmed for customer {row['customer_id']}")
+    return row['customer_id']
 
 
 def ensure_admin_account():

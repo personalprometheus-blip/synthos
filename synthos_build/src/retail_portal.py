@@ -322,6 +322,31 @@ from collections import deque as _deque
 
 _session_activity = {}           # {customer_id: {last_activity: datetime, ip: str}}
 _session_activity_lock = _threading.Lock()
+# Server-side session revocation map. Set when a customer's credentials
+# change (password reset, password update). Sessions whose `logged_in_at`
+# timestamp is earlier than the revoked_at value get force-logged-out
+# on next request. Cleared on portal restart (acceptable — portal restart
+# already invalidates _session_activity tracking). Added 2026-04-25
+# (security audit Phase 2.5 MED-1).
+_session_revoked_at = {}         # {customer_id: datetime (UTC)}
+_session_revoked_lock = _threading.Lock()
+
+
+def _revoke_customer_sessions(customer_id: str, reason: str = ''):
+    """Force-logout all of a customer's existing sessions on their next
+    request. Idempotent — calling repeatedly is safe.
+
+    Used after password reset or password change so the credentials no
+    longer recognised by the security model can't continue to ride the
+    8-hour cookie. The session itself stays valid client-side (cookie
+    is still signed and parseable), but before_request sees the
+    customer's revoked_at > session.logged_in_at and clears+redirects.
+    """
+    if not customer_id:
+        return
+    with _session_revoked_lock:
+        _session_revoked_at[customer_id] = datetime.now(timezone.utc)
+    log.info(f"[SESSIONS] Revoked all active sessions for {customer_id[:8]}… ({reason})")
 # Non-admin inactivity auto-logout window. Set via CUSTOMER_SESSION_TIMEOUT_MINUTES
 # env var (default 15). Set to 0 to disable the inactivity check entirely —
 # sessions then last until the 8-hour cookie expiry regardless of idle time.
@@ -697,7 +722,10 @@ def check_auth():
     if request.path in public_routes:
         return
     # Token-based routes are public (the token IS the auth)
-    if request.path.startswith('/setup-account/') or request.path.startswith('/verify-email/') or request.path.startswith('/reset-password/'):
+    if (request.path.startswith('/setup-account/')
+            or request.path.startswith('/verify-email/')
+            or request.path.startswith('/verify-email-change/')
+            or request.path.startswith('/reset-password/')):
         return
     # Monitor-callable endpoints — bearer token handled inside the function
     if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override',
@@ -709,8 +737,26 @@ def check_auth():
     if not is_authenticated():
         return redirect('/login')
 
-    # ── Session activity tracking + non-admin auto-logout ──
+    # ── Server-side credential-rotation revocation check ──
+    # If the customer's credentials were reset/changed since this session
+    # was issued, force re-login. Set by _revoke_customer_sessions() after
+    # password change / reset. Added 2026-04-25 (Phase 2.5 MED-1).
     _cid = session.get('customer_id')
+    if _cid:
+        revoked_at = _session_revoked_at.get(_cid)
+        if revoked_at:
+            sess_logged_in_at = session.get('logged_in_at')
+            try:
+                _sess_iso = datetime.fromisoformat(sess_logged_in_at) if sess_logged_in_at else None
+            except Exception:
+                _sess_iso = None
+            if _sess_iso is None or _sess_iso < revoked_at:
+                log.info(f"[SESSIONS] Force-logout {_cid[:8]}… "
+                         f"(session_issued_at={sess_logged_in_at} < revoked_at={revoked_at.isoformat()})")
+                session.clear()
+                return redirect('/login')
+
+    # ── Session activity tracking + non-admin auto-logout ──
     if _cid:
         _now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -784,6 +830,70 @@ def forgot_password_page():
             submitted = True  # Always show success (don't reveal if email exists)
 
     return render_template('forgot_password.html', submitted=submitted)
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password_page(token):
+    """Receive the password-reset link. Validates the token, lets the
+    customer set a new password.
+
+    Added 2026-04-25 (security audit Phase 2.5 HIGH-1 fix). Prior to this,
+    forgot_password_page() generated reset URLs but the corresponding
+    handler did not exist — clicking the email link returned 404.
+
+    GET — validates token, renders the new-password form
+    POST — sets the new password (min 12 chars), revokes all existing
+           sessions for this customer (so a stolen/leaked session
+           cannot continue), redirects to /login?reset=1.
+
+    Security properties:
+      • Token is 256-bit URL-safe random (auth.create_password_reset_token)
+      • 30-min TTL enforced by auth.verify_reset_token / auth.reset_password
+      • Single-use: auth.reset_password clears token+expires on success
+      • Re-render hides whether the customer's email is registered
+        (we already validated the token; if it's bad we say so)
+    """
+    # Validate token before rendering the form so a bad/expired token
+    # gets a clear error page instead of a working form that errors at submit.
+    customer_row = auth.verify_reset_token(token)
+    if not customer_row:
+        log.info(f"[RESET] invalid or expired reset token {token[:8]}…")
+        return render_template(
+            'reset_password.html',
+            error="This reset link is invalid or has expired. Request a new one from /forgot-password."
+        ), 400
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm', '')
+        if len(password) < 12:
+            return render_template('reset_password.html',
+                                   error="Password must be at least 12 characters.")
+        if password != confirm:
+            return render_template('reset_password.html',
+                                   error="Passwords do not match.")
+        try:
+            ok = auth.reset_password(token, password)
+        except Exception as e:
+            log.error(f"[RESET] password update failed: {e}")
+            ok = False
+        if not ok:
+            # Race: token expired between GET form-render and POST. Tell
+            # the customer plainly and direct them back to forgot-password.
+            return render_template(
+                'reset_password.html',
+                error="This reset link expired during submission. "
+                      "Request a new one from /forgot-password."
+            ), 400
+
+        # MED-1: revoke all of this customer's existing sessions. Any
+        # other browser/device still riding an 8h cookie will be force-
+        # logged-out on next request.
+        _revoke_customer_sessions(customer_row['id'], reason='password_reset')
+        log.info(f"[RESET] password reset succeeded for customer {customer_row['id']}")
+        return redirect('/login?reset=1')
+
+    return render_template('reset_password.html', error=None)
 
 
 @app.route('/signup', methods=['GET', 'POST'])
@@ -1102,6 +1212,11 @@ def login():
                     session['display_name'] = auth.get_display_name(customer)
                     session['access_reason']= reason   # 'active'|'trialing'|'grace_period'|'admin'
                     session['tos_version']  = customer['tos_version']
+                    # Issued-at marker for credential-rotation revocation
+                    # (Phase 2.5 MED-1). before_request compares this to
+                    # _session_revoked_at[customer_id] to force re-login
+                    # after password reset/change.
+                    session['logged_in_at'] = datetime.now(timezone.utc).isoformat()
                     session.permanent       = True
                     auth.record_login(customer['id'])
                     log.info(f"Login: {customer['id']} (role={customer['role']} access={reason})")
@@ -1629,6 +1744,8 @@ def sso_login():
     session['display_name'] = auth.get_display_name(customer)
     session['access_reason']= reason
     session['tos_version']  = customer['tos_version']
+    # See same field at /login for rationale (Phase 2.5 MED-1)
+    session['logged_in_at'] = datetime.now(timezone.utc).isoformat()
     session.permanent       = True
     auth.record_login(customer['id'])
     log.info(f'SSO login: {customer["id"]} ({email}) access={reason}')
@@ -2952,10 +3069,23 @@ def api_change_password():
         return jsonify({'ok': False, 'error': 'All fields are required'})
     if new_pw != confirm_pw:
         return jsonify({'ok': False, 'error': 'New passwords do not match'})
-    if len(new_pw) < 8:
-        return jsonify({'ok': False, 'error': 'New password must be at least 8 characters'})
+    # Min length 12 to match setup_account flow. Standardized 2026-04-25
+    # (security audit Phase 2.5 MED-4 — was 8). OWASP 2023 recommends
+    # ≥12 for non-MFA accounts.
+    if len(new_pw) < 12:
+        return jsonify({'ok': False, 'error': 'New password must be at least 12 characters'})
     try:
         auth.update_password(customer_id, current_pw, new_pw)
+        # MED-1: invalidate all OTHER active sessions for this customer.
+        # The current session is preserved by re-stamping logged_in_at
+        # AFTER the revocation timestamp — see comment below.
+        _revoke_customer_sessions(customer_id, reason='password_change')
+        # Re-stamp the active session's logged_in_at so this same session
+        # survives the revocation check (the customer doesn't want to be
+        # logged out of the tab they just used to change their password).
+        # Other tabs/devices have older logged_in_at values, so they get
+        # force-logged-out on their next request.
+        session['logged_in_at'] = datetime.now(timezone.utc).isoformat()
         return jsonify({'ok': True})
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)})
@@ -2966,7 +3096,23 @@ def api_change_password():
 @app.route('/api/account/change-email', methods=['POST'])
 @login_required
 def api_change_email():
-    """Change email — requires current password."""
+    """Initiate email change — TWO-STEP secure flow (Phase 2.5 MED-2 + MED-3,
+    rewritten 2026-04-25).
+
+    Step 1 (this endpoint): verify password, validate new email, create a
+    pending_email_changes row with a 1h-TTL verification token. Send:
+      • verification email to NEW address (must be clicked to commit change)
+      • alert email to OLD address ("if this wasn't you, ignore the
+        verification — your account email has not been changed")
+
+    Step 2 (the /verify-email-change/<token> route): clicking the link
+    in the new-address email actually commits the email change to
+    customers.email_hash + email_enc.
+
+    The customer's email field stays as the OLD address until step 2
+    is completed. If they never click, the change times out at 1h and
+    the row gets cleaned up.
+    """
     data        = request.get_json(silent=True) or {}
     current_pw  = data.get('current_password', '').strip()
     new_email   = data.get('new_email', '').strip()
@@ -2976,13 +3122,116 @@ def api_change_email():
     if '@' not in new_email or '.' not in new_email.split('@')[-1]:
         return jsonify({'ok': False, 'error': 'Invalid email address'})
     try:
-        auth.update_email(customer_id, current_pw, new_email)
-        session['customer_email'] = new_email
-        return jsonify({'ok': True})
+        result = auth.initiate_email_change(customer_id, current_pw, new_email)
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)})
     except Exception as e:
+        log.error(f"initiate_email_change failed: {e}")
         return jsonify({'ok': False, 'error': 'Server error'})
+
+    token       = result['token']
+    old_email   = result['old_email']
+    new_addr    = result['new_email']
+    portal_dom  = os.environ.get('PORTAL_DOMAIN', 'portal.synth-cloud.com')
+    verify_url  = f"https://{portal_dom}/verify-email-change/{token}"
+    resend_key  = os.environ.get('RESEND_API_KEY', '')
+    alert_from  = os.environ.get('ALERT_FROM', 'alerts@synth-cloud.com')
+
+    if not resend_key:
+        log.warning("RESEND_API_KEY not set — email-change emails NOT sent. "
+                    f"Verification link for testing: {verify_url}")
+        # Without Resend we still confirm the request was accepted; the
+        # operator running locally can pull the token from the log.
+        return jsonify({'ok': True,
+                        'message': 'Request accepted. Check your new email '
+                                   'inbox for the verification link.',
+                        'email_sent': False})
+
+    import requests as _req
+    sent_new = sent_old = False
+
+    # ── Verification email to NEW address (MED-3) ────────────────────
+    try:
+        _req.post("https://api.resend.com/emails", json={
+            "from":    f"Synthos <{alert_from}>",
+            "to":      [new_addr],
+            "subject": "Synthos — Confirm your new email address",
+            "html": (
+                f"<p>You requested to change your Synthos account email to this address.</p>"
+                f"<p><a href=\"{verify_url}\" style=\"display:inline-block;padding:12px 24px;"
+                f"background:#00f5d4;color:#000;text-decoration:none;border-radius:8px;"
+                f"font-weight:bold\">Confirm New Email</a></p>"
+                f"<p style=\"color:#888;font-size:12px\">This link expires in 1 hour. "
+                f"If you did not request this, ignore this email and your account email will "
+                f"remain unchanged.</p>"
+            ),
+        }, headers={"Authorization": f"Bearer {resend_key}"}, timeout=10)
+        sent_new = True
+    except Exception as e:
+        log.warning(f"Email-change verify mail to NEW address failed: {e}")
+
+    # ── Alert email to OLD address (MED-2) ───────────────────────────
+    try:
+        _req.post("https://api.resend.com/emails", json={
+            "from":    f"Synthos <{alert_from}>",
+            "to":      [old_email],
+            "subject": "Synthos — Email change request on your account",
+            "html": (
+                f"<p>An email-change request was just submitted on your Synthos account.</p>"
+                f"<p>Requested new address: <code>{new_addr}</code></p>"
+                f"<p><b>If this was you</b>, check your new inbox and click the verification "
+                f"link there. Your account email stays at this address until you do.</p>"
+                f"<p><b>If this was NOT you</b>, your account is fine — no email change has "
+                f"happened yet, and the verification link will expire in 1 hour. We strongly "
+                f"recommend you sign in and change your password immediately, since the request "
+                f"required a valid password to submit.</p>"
+                f"<p style=\"color:#888;font-size:12px\">This is an automated security notice "
+                f"from Synthos. The pending request will time out automatically if not confirmed.</p>"
+            ),
+        }, headers={"Authorization": f"Bearer {resend_key}"}, timeout=10)
+        sent_old = True
+    except Exception as e:
+        log.warning(f"Email-change alert mail to OLD address failed: {e}")
+
+    log.info(f"[EMAIL_CHANGE] customer {customer_id[:8]}… initiated change "
+             f"(verify mail to NEW: {sent_new}, alert mail to OLD: {sent_old})")
+    return jsonify({
+        'ok': True,
+        'message': 'Verification email sent. Check your new email inbox '
+                   'and click the link to complete the change. Your '
+                   'current account email has also been notified.',
+        'email_sent': sent_new and sent_old,
+    })
+
+
+@app.route('/verify-email-change/<token>')
+def verify_email_change(token):
+    """Step 2 of email-change flow. Visiting this URL (typically from
+    the verification email) confirms the new address and commits the
+    change to customers.email_hash + email_enc.
+
+    Logged in or not — the token is the auth. Customer can be on a
+    different device than the one that initiated.
+
+    Side effects:
+      • customers.email_hash + email_enc updated to new address
+      • pending_email_changes.consumed_at set
+      • If currently logged in as the affected customer, session
+        keeps working but the displayed email reflects the new value
+        on next page load
+    """
+    try:
+        customer_id = auth.confirm_email_change(token)
+    except ValueError as e:
+        return render_template('verify_error.html',
+                               error_msg=str(e)), 400
+    except Exception as e:
+        log.error(f"confirm_email_change failed: {e}")
+        return render_template('verify_error.html',
+                               error_msg="An unexpected error occurred."), 500
+
+    log.info(f"[EMAIL_CHANGE] customer {customer_id} email change confirmed")
+    return render_template('verify_success.html')
 
 # ══════════════════════════════════════════════════════════════════════════
 # EARLY-ACCESS TOS + SETUP OVERLAY — API ENDPOINTS (DORMANT)
