@@ -1462,19 +1462,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 </div>
 
 <!-- SIGNAL MODAL -->
-<div class="sig-modal-overlay" id="sig-modal-overlay" onclick="closeSigModal(event)">
-  <div class="sig-modal" id="sig-modal">
-    <div class="sig-modal-head">
-      <div class="sig-modal-icon" id="smi-icon"></div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:700;color:var(--text);line-height:1.4" id="smi-headline"></div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px" id="smi-source"></div>
-      </div>
-      <span class="sig-modal-close" onclick="closeSigModal()">✕</span>
-    </div>
-    <div class="sig-modal-body" id="smi-body"></div>
-  </div>
-</div>
+<!-- sig-modal DOM removed 2026-04-25 (Phase 7L) — see comment on
+     the deleted openSigModal function below for context. -->
 
 <!-- NEWS ARTICLE MODAL -->
 <!-- PORTFOLIO MODAL -->
@@ -4340,13 +4329,10 @@ function openApprovalDrawer(t) {
   let sizingParts = [];
   const shares = parseFloat(t.shares);
   const cost = (px > 0 && shares > 0) ? px * shares : null;
-  // Read portfolio value from the existing #stat-portfolio cell which
-  // /api/status populates (no extra fetch needed). Strip $ + commas.
-  let portfolioValue = 0;
-  try {
-    const pv = (document.getElementById('stat-portfolio') || {}).textContent || '';
-    portfolioValue = parseFloat(pv.replace(/[^0-9.]/g, '')) || 0;
-  } catch (e) {}
+  // Read portfolio value from the window cache populated by
+  // loadLiveStatus. Phase 7L (2026-04-25) replaced DOM-text scraping
+  // of #stat-portfolio which was brittle to formatting changes.
+  const portfolioValue = window._currentPortfolioValue || 0;
   const pctOfPortfolio = (cost && portfolioValue > 0) ? (cost / portfolioValue * 100) : null;
   if (shares > 0) {
     sizingParts.push(`<div class="drawer-row"><span class="drawer-label">Bot's plan</span><span class="drawer-val">${shares.toFixed(shares >= 1 ? 2 : 4)} shares</span></div>`);
@@ -4554,11 +4540,8 @@ function openPlanningDrawer(s) {
   // No "buy zone / stop / target" because those would be made-up
   // numbers (see Phase 7g design doc).
   const sizeEl = document.getElementById('pd-sizing');
-  let pVal = 0;
-  try {
-    const pv = (document.getElementById('stat-portfolio') || {}).textContent || '';
-    pVal = parseFloat(pv.replace(/[^0-9.]/g, '')) || 0;
-  } catch (e) {}
+  // Phase 7L (2026-04-25): read from window cache instead of DOM text.
+  const pVal = window._currentPortfolioValue || 0;
   const tkrUp = (s.ticker || '').toUpperCase();
   const lastBars = (window._sparklineCache || {})[tkrUp] || [];
   const px = lastBars.length ? lastBars[lastBars.length - 1] : 0;
@@ -4832,9 +4815,10 @@ async function loadPerformance() {
 
 // ── RISK TAB ──
 function loadRisk() {
-  // Wire exposure meter from live status data
-  const portVal = parseFloat((document.getElementById('stat-portfolio')||{}).textContent?.replace(/[$,]/g,'')) || 0;
-  const cash    = parseFloat((document.getElementById('stat-cash')||{}).textContent?.replace(/[$,]/g,'')) || 0;
+  // Phase 7L (2026-04-25): read from window cache populated by
+  // loadLiveStatus instead of scraping DOM text.
+  const portVal = window._currentPortfolioValue || 0;
+  const cash    = window._currentCash || 0;
   if (portVal > 0) {
     const pct = Math.round((1 - cash / portVal) * 100);
     const bar = document.getElementById('exposure-bar');
@@ -5945,6 +5929,11 @@ async function loadLiveStatus() {
     // Stats
     const sv = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=v; };
     sv('stat-portfolio', '$'+(s.portfolio_value||0).toFixed(2));
+    // Phase 7L (2026-04-25): also stash on window for drawers to read.
+    // Replaces three sites of brittle DOM-text scraping that broke
+    // silently if the #stat-portfolio cell ever changed format.
+    window._currentPortfolioValue = parseFloat(s.portfolio_value || 0) || 0;
+    window._currentCash           = parseFloat(s.cash || 0) || 0;
     sv('stat-cash', '$'+(s.cash||0).toFixed(2));
     sv('stat-positions', s.open_positions||0);
     sv('stat-pos-display', s.open_positions||0);
@@ -6695,39 +6684,13 @@ function renderSignalTrust(score100, opts) {
   `;
 }
 
-function openSigModal(s) {
-  const colors = {HIGH:'rgba(0,245,212,0.09)',MEDIUM:'rgba(123,97,255,0.09)',LOW:'rgba(245,166,35,0.15)',NOISE:'rgba(85,86,102,0.2)'};
-  const conf = (s.confidence||'NOISE').toUpperCase();
-  const icon = document.getElementById('smi-icon');
-  icon.textContent = (s.ticker||'?').slice(0,4);
-  icon.style.background = colors[conf]||colors.NOISE;
-  icon.style.color = conf==='HIGH'?'var(--teal)':conf==='MEDIUM'?'var(--purple)':conf==='LOW'?'var(--amber)':'var(--muted)';
-  document.getElementById('smi-headline').textContent = s.headline||'No headline';
-  document.getElementById('smi-source').textContent = (s.source||'Unknown source') + ' · ' + (s.disc_date||'').slice(0,10);
-  // Single derived 0-100 trust score. Same derivation logic as before
-  // (confidence bucket → base; sentiment magnitude bumps up; stale
-  // pushes down; corroborated pushes up) but presented as one number
-  // instead of three separate "Synthos / Alignment / Sentiment" rows.
-  const baseScore = s.confidence==='HIGH'?87:s.confidence==='MEDIUM'?63:s.confidence==='LOW'?30:15;
-  const sentBump  = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score)*15) : 0;
-  const adjust    = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
-  const trust     = Math.min(99, Math.max(5, baseScore + sentBump + adjust));
-  document.getElementById('smi-body').innerHTML = `
-    ${renderSignalTrust(trust)}
-    <div class="sig-modal-row"><span class="sig-modal-label">Ticker</span><span class="sig-modal-val">${s.ticker||'Unresolved'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Politician</span><span class="sig-modal-val">${s.politician||'—'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Staleness</span><span class="sig-modal-val">${s.staleness||'unknown'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Status</span><span class="sig-modal-val">${s.is_stale?'Archive (stale)':s.corroborated?'Corroborated':'Active'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Source</span><span class="sig-modal-val">${s.source||'—'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Detected</span><span class="sig-modal-val">${(s.created_at||'').slice(0,16)}</span></div>
-  `;
-  document.getElementById('sig-modal-overlay').classList.add('open');
-}
-function closeSigModal(e) {
-  if (!e || e.target === document.getElementById('sig-modal-overlay')) {
-    document.getElementById('sig-modal-overlay').classList.remove('open');
-  }
-}
+// openSigModal / closeSigModal removed 2026-04-25 (Phase 7L cleanup).
+// After 7j the dashboard's Watchlist/Planning rows route to
+// openPlanningDrawer instead of openSigModal, leaving the function
+// unreferenced. The corresponding #sig-modal-overlay DOM was also
+// removed since closeSigModal was its only user. Shared sig-modal-*
+// CSS classes are still used by portfolio-modal / news-modal /
+// notif-modal / ea-tos so those stylesheet rules remain in place.
 
 // ── AUDIT PANEL ──
 async function loadAudit() {

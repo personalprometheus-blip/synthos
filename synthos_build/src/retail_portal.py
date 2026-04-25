@@ -4698,12 +4698,19 @@ def api_watchlist():
 @app.route('/api/planning')
 @login_required
 def api_planning():
-    """Planning panel — real signal queue first, intel fallback when empty."""
+    """Planning panel — real signal queue first, watchlist fallback when empty.
+
+    Phase 7L (2026-04-25): fallback now reads the curated signals
+    table via get_signals_by_status(['WATCHING']) instead of news_feed
+    via get_watching_signals(). Same wiring fix as 7k applied to the
+    Planning card's empty-state fallback so MACR/? sentinels don't
+    leak through when the queue happens to be empty.
+    """
     try:
         queued = _shared_db().get_queued_signals()
         if queued:
             return jsonify({'signals': queued, 'mode': 'queue', 'count': len(queued)})
-        intel = _shared_db().get_watching_signals(limit=8)
+        intel = _shared_db().get_signals_by_status(['WATCHING'], limit=8)
         return jsonify({'signals': intel, 'mode': 'intel', 'count': len(intel)})
     except Exception as e:
         return jsonify({'signals': [], 'mode': 'intel', 'count': 0, 'error': str(e)})
