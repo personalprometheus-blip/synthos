@@ -16,16 +16,18 @@ WorkingDirectory=/home/pi516gb/synthos/synthos_build/src
 ExecStart=/home/pi516gb/.local/bin/gunicorn \
     --workers 2 \
     --threads 2 \
-    --bind 127.0.0.1:5001 \
+    --bind 0.0.0.0:5001 \
     --timeout 120 \
     --access-logfile - \
     --error-logfile - \
     retail_portal:app
-# Bind 127.0.0.1 only — public ingress is via the Cloudflare tunnel
-# daemon running on the same Pi (which can reach localhost). This stops
-# anyone on the LAN/Wi-Fi from hitting the portal directly over plain
-# HTTP, bypassing Cloudflare's TLS termination + CSP + WAF. Found
-# during 2026-04-24 security audit Phase 5.
+# Bind 0.0.0.0 is intentional — pi4b's cloudflared has
+#   portal.synth-cloud.com → http://10.0.0.11:5001
+# in /etc/cloudflared/config.yml, so the public ingress crosses the LAN.
+# Tried 127.0.0.1 binding 2026-04-24 and broke the portal — see audit
+# Phase 5 + the recommended architectural fix (move portal hostname to
+# pi5's own tunnel, which already terminates app.synth-cloud.com via
+# localhost, and the bind tightening becomes safe).
 Restart=always
 RestartSec=5
 StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/portal.log
