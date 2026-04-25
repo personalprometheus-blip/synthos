@@ -6553,7 +6553,12 @@ function renderIntelGrid(signals) {
 
     // Insert at positions
     cards.splice(Math.min(0, cards.length), 0, heroCard(heroTop, '#1 Conviction', 'hb-cyan'));
-    cards.splice(Math.min(3, cards.length), 0, heroCard(heroDiv, '#1 Divergence', 'hb-violet'));
+    // Badge label reflects WHY this card got the secondary hero slot:
+    // either corroboration (multi-source confirmation) or the next-best
+    // trust score. Phase 7j 2026-04-25 — was "#1 Divergence" which
+    // matched a now-removed scoring axis.
+    const heroDivBadge = heroDiv.corroborated ? 'Corroborated' : '#2 Conviction';
+    cards.splice(Math.min(3, cards.length), 0, heroCard(heroDiv, heroDivBadge, 'hb-violet'));
   }
 
   grid.innerHTML = cards.join('');
