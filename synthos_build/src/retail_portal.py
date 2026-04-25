@@ -2181,24 +2181,70 @@ def _enrich_flags(raw_flags, db_path):
 
 
 def _status_locked_mode(db, agent_running_info):
-    """Fast-path status response when agent is actively running (no Alpaca enrichment).
-    Returns the status dict.
+    """Fast-path status response when agent is actively running (no live
+    Alpaca enrichment). Returns the status dict.
+
+    During market hours an agent has the `.agent_running` lock most of
+    the time (sentiment+news every 30 min, trader every 30 s). Without
+    care this path used to hard-code `day_pl: 0.0`, which produced the
+    UX bug "today's gain/loss only shows after close." Fix (2026-04-24):
+    read live_prices (price_poller keeps it fresh every 60 s
+    independent of the agent lock) and compute day_pl locally per
+    position. Falls back to 0 if live_prices is missing the ticker or
+    has no prev_close.
     """
     portfolio = db.get_portfolio()
     positions = db.get_open_positions()
     last_hb   = db.get_last_heartbeat()
+
+    # Pull a snapshot of live_prices once. price_poller writes here every
+    # 60 s during 8 AM–6 PM ET on weekdays; pre-market / weekend / off-hours
+    # values may be stale but that's the same behaviour the non-locked path
+    # gets, so behaviour matches.
+    live_price_map = {}
+    try:
+        shared = _shared_db()
+        with shared.conn() as c:
+            for r in c.execute(
+                "SELECT ticker, price, prev_close, day_change, day_change_pct "
+                "FROM live_prices"
+            ).fetchall():
+                live_price_map[r['ticker']] = {
+                    'price':          float(r['price'] or 0),
+                    'prev_close':     float(r['prev_close'] or 0),
+                    'day_change':     float(r['day_change'] or 0),
+                    'day_change_pct': float(r['day_change_pct'] or 0),
+                }
+    except Exception as e:
+        log.debug(f"locked-mode live_prices read failed (showing 0 day_pl): {e}")
+
     basic_positions = []
     for p in positions:
-        entry = float(p.get('entry_price', 0) or 0)
+        entry  = float(p.get('entry_price', 0) or 0)
         shares = float(p.get('shares', 0) or 0)
-        cur = float(p.get('current_price', 0) or 0) or entry
+        ticker = (p.get('ticker') or '').upper()
+        lp = live_price_map.get(ticker, {})
+
+        # Prefer live price; fall back to last DB-recorded current_price; entry as last resort
+        cur = float(lp.get('price') or p.get('current_price') or 0) or entry
+
+        # Compute today's P&L from prev_close locally — robust to any
+        # qty drift between our DB and Alpaca's positions endpoint.
+        prev_close = lp.get('prev_close', 0) or 0
+        if prev_close and cur and shares:
+            day_pl   = round((cur - prev_close) * shares, 2)
+            day_plpc = round((cur - prev_close) / prev_close * 100, 2)
+        else:
+            day_pl, day_plpc = 0.0, 0.0
+
         basic_positions.append({
             **p,
             'current_price':    round(cur, 4),
             'market_value':     round(cur * shares, 2),
             'unrealized_pl':    round((cur - entry) * shares, 2),
             'unrealized_plpc':  round(((cur - entry) / entry * 100) if entry else 0, 2),
-            'day_pl': 0.0, 'day_plpc': 0.0,
+            'day_pl':           day_pl,
+            'day_plpc':         day_plpc,
             'avg_entry_price':  round(entry, 4),
             'cost_basis':       round(entry * shares, 2),
             'is_orphan':        False,
