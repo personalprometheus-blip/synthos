@@ -2606,7 +2606,19 @@ def api_admin_alert():
 
 @app.route('/api/admin-override', methods=['GET', 'POST'])
 def api_admin_override():
-    """Receive admin override push from monitor or return current state."""
+    """Receive admin override push from monitor (POST) or return current
+    state (GET).
+
+    Auth model (security audit 2026-04-24, fix for CRITICAL-1):
+      GET  → readable by any authenticated session OR by MONITOR_TOKEN.
+             The override state is informational; legitimate customer
+             UI may want to display "Trading Gate: PAPER (admin override)".
+      POST → mutates global .env (TRADING_MODE, OPERATING_MODE, and
+             forces every customer's mode). Restricted to MONITOR_TOKEN
+             OR an authenticated admin session. Customer sessions alone
+             are NOT sufficient — fixes the prior bug where any logged-in
+             customer could flip the system to LIVE trading.
+    """
     if request.method == 'GET':
         token = request.headers.get('X-Token', '')
         if token != MONITOR_TOKEN and not is_authenticated():
@@ -2616,9 +2628,14 @@ def api_admin_override():
             "operating_mode": os.environ.get('ADMIN_OPERATING_MODE', 'ALL'),
         })
 
-    # POST — verify token (monitor sends X-Token header)
+    # POST — verify token (monitor sends X-Token header) OR authenticated admin.
+    # NOT customer-authenticated alone — prior buggy check allowed any customer
+    # to mutate .env and force trading-mode flips.
     token = request.headers.get('X-Token', '')
-    if token != MONITOR_TOKEN and not is_authenticated():
+    if token != MONITOR_TOKEN and not (is_authenticated() and is_admin()):
+        log.warning(f"[ADMIN_OVERRIDE] POST denied — token_ok={token == MONITOR_TOKEN}, "
+                    f"authed={is_authenticated()}, admin={is_admin()}, "
+                    f"sid={(session.get('customer_id') or '')[:8]}")
         return jsonify({"ok": False, "error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
@@ -2753,7 +2770,18 @@ def api_unlock_autonomous():
 
 @app.route('/api/keys', methods=['POST'])
 def api_keys():
-    """Update API keys. Accepts portal session or monitor-token bearer."""
+    """Update API keys.
+
+    Auth model (security audit 2026-04-24, fix for CRITICAL-2):
+      Per-customer Alpaca credentials → encrypted to that customer's
+        auth.db row. Writable by the customer themselves OR by a
+        MONITOR_TOKEN bearer.
+      Global .env keys (LIVE_TRADING_ENABLED, ANTHROPIC_API_KEY,
+        MONITOR_TOKEN, RESEND_API_KEY, etc.) → require MONITOR_TOKEN
+        OR an authenticated admin. Customer sessions alone are NOT
+        sufficient. Prior bug let any customer rewrite global secrets
+        and flip live trading.
+    """
     auth_header   = request.headers.get('Authorization', '')
     monitor_token = os.environ.get('MONITOR_TOKEN', '')
     token_ok = bool(monitor_token and auth_header == f'Bearer {monitor_token}')
@@ -2761,10 +2789,16 @@ def api_keys():
         return jsonify({'ok': False, 'updated': [], 'errors': ['Not authenticated']}), 401
     data = request.get_json(silent=True) or {}
 
-    # Alpaca credentials go to auth.db (encrypted), not .env
+    # Alpaca credentials go to auth.db (encrypted), not .env. These are
+    # legitimately customer-writable (each customer manages their own
+    # broker credentials).
     ALPACA_KEYS = {'ALPACA_API_KEY', 'ALPACA_SECRET_KEY'}
 
-    # Whitelist of keys that write to .env
+    # Whitelist of keys that write to .env. Admin-only or token-only —
+    # see top-of-function auth model. Includes LIVE_TRADING_ENABLED,
+    # MONITOR_TOKEN, ANTHROPIC_API_KEY, RESEND_API_KEY, the Stripe keys,
+    # and the trading-mode levers — all of which affect every customer
+    # and the operator's billing surface.
     ALLOWED_KEYS = {
         'ANTHROPIC_API_KEY',
         'ALPACA_BASE_URL',
@@ -2816,6 +2850,25 @@ def api_keys():
                     updated.append('ALPACA_SECRET_KEY')
             except Exception as e:
                 errors.append(f"ALPACA credentials: {str(e)}")
+
+    # ── ADMIN-ONLY GATE for .env writes ───────────────────────────────
+    # Any remaining keys after the Alpaca-credentials pop above will go
+    # to global .env. Restrict to monitor-token bearers OR admin sessions.
+    # Customer sessions are blocked from .env writes — fixes CRITICAL-2
+    # from 2026-04-24 security audit. We separate this from the Alpaca
+    # path so a customer with no admin role can still update their own
+    # broker credentials.
+    env_write_allowed = token_ok or (is_authenticated() and is_admin())
+    env_keys_attempted = [k for k in data.keys() if k in ALLOWED_KEYS]
+    if env_keys_attempted and not env_write_allowed:
+        log.warning(
+            f"[KEYS] Customer {(session.get('customer_id') or '?')[:8]} attempted "
+            f"to write {len(env_keys_attempted)} global .env key(s): "
+            f"{env_keys_attempted} — denied (admin only)"
+        )
+        for k in env_keys_attempted:
+            errors.append(f"{k}: admin only")
+            data.pop(k, None)
 
     for key, value in data.items():
         if key not in ALLOWED_KEYS:
