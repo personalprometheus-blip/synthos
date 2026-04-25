@@ -2889,6 +2889,59 @@ setInterval(loadAgentPulse, 10000);
 
 </div>
 
+<!-- APPROVAL DETAIL DRAWER (Phase 7d, 2026-04-25) — for managed-mode
+     pending trades. Hero is the news headline (the actual pitch); the
+     setup/sizing/action moves out of the inline row card. Inline row
+     keeps quick approve/reject for power users; drawer adds memo
+     and full context. -->
+<div class="drawer-overlay" id="appr-drawer-overlay" onclick="closeApprovalDrawer(event)">
+</div>
+<div class="drawer" id="appr-drawer">
+  <div class="drawer-head">
+    <div id="ad-icon" style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0"></div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0" id="ad-title">—</div>
+        <span class="spark-slot" id="ad-spark" data-ticker="" style="width:80px;height:22px;flex-shrink:0"></span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px" id="ad-sub">—</div>
+    </div>
+    <button class="drawer-close" onclick="closeApprovalDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+    <!-- Signal Trust widget at top — uses the renderSignalTrust helper.
+         Reframes the conf chip's HIGH/MEDIUM/LOW as a 5-bar trust meter. -->
+    <div class="drawer-section" id="ad-trust-section"></div>
+    <!-- Why now — hero headline + image + source link. The signal IS the pitch. -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Why now</div>
+      <div id="ad-why-now"></div>
+    </div>
+    <!-- The setup — buy zone + stop + target + pattern -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">The setup</div>
+      <div id="ad-setup"></div>
+    </div>
+    <!-- Sizing — % of portfolio + dollar amount + bot's intended quantity -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Sizing</div>
+      <div id="ad-sizing"></div>
+    </div>
+    <!-- Action row — memo + approve / reject -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Decide</div>
+      <div style="padding:6px 0">
+        <textarea id="ad-memo" placeholder="Optional note (saved with your decision)…"
+                  style="width:100%;min-height:60px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.03);color:var(--text);font-size:11px;font-family:var(--mono);outline:none;resize:vertical;box-sizing:border-box"></textarea>
+        <div class="trade-actions" style="margin-top:10px">
+          <button class="btn-approve" id="ad-btn-approve" style="flex:1">✓ Approve</button>
+          <button class="btn-reject" id="ad-btn-reject" style="flex:1">✗ Reject</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- HISTORY DETAIL DRAWER (Phase 7c, 2026-04-25) — replaces the
      openLogicModal reuse hack. Specialised for closed trades: shows
      outcome, entry block (with frozen thesis when available), exit
@@ -4100,6 +4153,189 @@ function closeHistoryDrawer(e) {
   document.getElementById('hist-drawer').classList.remove('open');
 }
 
+// ── APPROVAL DRAWER (Phase 7d, 2026-04-25) ────────────────────────
+// Pending trade approval. Drawer adds: Signal Trust widget, hero
+// headline + image + source link, big setup/sizing breakdown, memo
+// input, and the primary approve/reject actions. Inline row keeps
+// quick approve/reject for fast cases.
+//
+// `t` is a row from /api/approvals (the same shape rendered inline
+// by renderApprovals). Actionable from the drawer via wired-up
+// buttons that read the memo and call actionTrade(id, status).
+function openApprovalDrawer(t) {
+  if (!t || typeof t !== 'object') return;
+  const accent = '#7b61ff';  // pending = purple accent
+  const accentRgb = '123,97,255';
+
+  // Header
+  const icon = document.getElementById('ad-icon');
+  icon.textContent = (t.ticker || '?').slice(0, 4);
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  const titleName = (t.company && t.company !== t.ticker) ? t.company : (t.ticker || '—');
+  const titleEl = document.getElementById('ad-title');
+  titleEl.textContent = titleName;
+  titleEl.title = titleName + (t.ticker ? ' · ' + t.ticker : '');
+  // Inline sparkline
+  const sparkSlot = document.getElementById('ad-spark');
+  if (sparkSlot) {
+    sparkSlot.dataset.ticker = (t.ticker || '').replace(/[^A-Z0-9.-]/gi, '');
+    sparkSlot.innerHTML = '';
+  }
+  document.getElementById('ad-sub').textContent =
+    'Pending review · queued ' + (t.queued_at || '').slice(0, 16)
+    + (t.politician ? ' · ' + t.politician : '');
+
+  // Signal Trust — derive a 0-100 score from the existing confidence chip.
+  // Same derivation as the sig-modal: HIGH=87, MEDIUM=63, LOW=30, NOISE=15.
+  // Light adjustment for staleness. Reuses renderSignalTrust() helper.
+  const conf = (t.confidence || 'NOISE').toString().toUpperCase();
+  const baseScore = conf === 'HIGH' ? 87 : conf === 'MEDIUM' ? 63 : conf === 'LOW' ? 30 : 15;
+  const stale = (t.staleness || '').toString().toLowerCase();
+  const adj = (stale.includes('stale') || stale.includes('old')) ? -10 : 0;
+  const trust = Math.min(99, Math.max(5, baseScore + adj));
+  document.getElementById('ad-trust-section').innerHTML = renderSignalTrust(trust);
+
+  // Why now — hero headline + image + source link.
+  const whyEl = document.getElementById('ad-why-now');
+  if (t.headline) {
+    const headlineHtml = t.signal_source_url || t.source_url
+      ? `<a href="${t.signal_source_url || t.source_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;border-bottom:1px solid var(--border2)">${t.headline}</a>`
+      : t.headline;
+    const imgHtml = t.signal_image_url
+      ? `<img src="${t.signal_image_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:10px;opacity:0.92" onerror="this.style.display='none'">`
+      : '';
+    whyEl.innerHTML = `
+      ${imgHtml}
+      <div style="font-size:13px;font-weight:600;line-height:1.5;color:var(--text);margin-bottom:8px">📰 ${headlineHtml}</div>
+      <div style="font-size:10px;color:var(--muted);font-family:var(--mono)">
+        ${t.source || 'News'}${t.politician ? ' · ' + t.politician : ''}${t.staleness ? ' · ' + t.staleness : ''}
+      </div>
+    `;
+  } else if (t.reasoning) {
+    whyEl.innerHTML = `<div style="font-size:11px;color:var(--muted);font-style:italic;line-height:1.5">${t.reasoning}</div>`;
+  } else {
+    whyEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No source detail captured.</div>';
+  }
+
+  // The setup — buy zone, stop, target, pattern badge.
+  const px = parseFloat(t.price);
+  const trail = parseFloat(t.trail_amt);
+  const setupEl = document.getElementById('ad-setup');
+  let setupParts = [];
+  if (px > 0) {
+    const lo = (px * 0.997).toFixed(2);
+    const hi = (px * 1.003).toFixed(2);
+    setupParts.push(`<div class="drawer-row"><span class="drawer-label">Buy zone</span><span class="drawer-val" style="color:var(--teal)">$${lo} – $${hi}</span></div>`);
+    setupParts.push(`<div class="drawer-row"><span class="drawer-label">Reference price</span><span class="drawer-val">$${px.toFixed(2)}<span style="font-size:9px;color:var(--dim);margin-left:6px">at queue time</span></span></div>`);
+    if (trail > 0) {
+      const stop   = (px - trail).toFixed(2);
+      const target = (px + 2 * trail).toFixed(2);
+      const stopPct   = ((trail / px) * 100).toFixed(1);
+      const targetPct = ((2 * trail / px) * 100).toFixed(1);
+      setupParts.push(`<div class="drawer-row"><span class="drawer-label">Stop loss</span><span class="drawer-val" style="color:var(--pink)">$${stop} (−${stopPct}%)</span></div>`);
+      setupParts.push(`<div class="drawer-row"><span class="drawer-label">Target</span><span class="drawer-val" style="color:var(--teal)">$${target} (+${targetPct}%) <span style="font-size:9px;color:var(--dim);margin-left:6px">2:1 R:R</span></span></div>`);
+    }
+  }
+  // Pattern badge — same palette as positions / history
+  const patPalette = {
+    MOMENTUM:       {fg:'#00f5d4', bg:'rgba(0,245,212,0.10)', bd:'rgba(0,245,212,0.30)', label:'MOMO'},
+    BREAKOUT:       {fg:'#7b61ff', bg:'rgba(123,97,255,0.12)', bd:'rgba(123,97,255,0.30)', label:'BRKO'},
+    MEAN_REVERSION: {fg:'#22d3ee', bg:'rgba(34,211,238,0.10)',  bd:'rgba(34,211,238,0.30)', label:'MEAN'},
+    PULLBACK:       {fg:'#a78bfa', bg:'rgba(167,139,250,0.10)', bd:'rgba(167,139,250,0.30)', label:'PULL'},
+    RESERVE:        {fg:'#f5a623', bg:'rgba(245,166,35,0.10)',  bd:'rgba(245,166,35,0.30)', label:'RSRV'},
+  };
+  const pat = (t.entry_pattern || '').toUpperCase();
+  const pp = patPalette[pat];
+  if (pp) {
+    setupParts.push(`<div class="drawer-row"><span class="drawer-label">Pattern</span><span class="drawer-val" style="font-family:inherit">${pat} <span title="Entry pattern: ${pat}" style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;background:${pp.bg};border:1px solid ${pp.bd};color:${pp.fg};margin-left:6px">${pp.label}</span></span></div>`);
+  }
+  if (t.sector) {
+    setupParts.push(`<div class="drawer-row"><span class="drawer-label">Sector</span><span class="drawer-val">${t.sector}</span></div>`);
+  }
+  setupEl.innerHTML = setupParts.join('') || '<div style="color:var(--dim);font-size:10px">No setup data.</div>';
+
+  // Sizing — % of portfolio + dollar amount + share count.
+  const sizingEl = document.getElementById('ad-sizing');
+  let sizingParts = [];
+  const shares = parseFloat(t.shares);
+  const cost = (px > 0 && shares > 0) ? px * shares : null;
+  // Read portfolio value from the existing #stat-portfolio cell which
+  // /api/status populates (no extra fetch needed). Strip $ + commas.
+  let portfolioValue = 0;
+  try {
+    const pv = (document.getElementById('stat-portfolio') || {}).textContent || '';
+    portfolioValue = parseFloat(pv.replace(/[^0-9.]/g, '')) || 0;
+  } catch (e) {}
+  const pctOfPortfolio = (cost && portfolioValue > 0) ? (cost / portfolioValue * 100) : null;
+  if (shares > 0) {
+    sizingParts.push(`<div class="drawer-row"><span class="drawer-label">Bot's plan</span><span class="drawer-val">${shares.toFixed(shares >= 1 ? 2 : 4)} shares</span></div>`);
+  }
+  if (cost) {
+    sizingParts.push(`<div class="drawer-row"><span class="drawer-label">Capital</span><span class="drawer-val">≈ $${cost.toFixed(2)}</span></div>`);
+  }
+  if (pctOfPortfolio !== null) {
+    const pctColor = pctOfPortfolio > 25 ? 'var(--amber)' : pctOfPortfolio > 50 ? 'var(--pink)' : 'var(--text)';
+    sizingParts.push(`<div class="drawer-row"><span class="drawer-label">Of portfolio</span><span class="drawer-val" style="color:${pctColor}">${pctOfPortfolio.toFixed(1)}%</span></div>`);
+  }
+  if (t.max_trade) {
+    sizingParts.push(`<div class="drawer-row"><span class="drawer-label">Max trade cap</span><span class="drawer-val">$${parseFloat(t.max_trade).toFixed(2)}</span></div>`);
+  }
+  sizingEl.innerHTML = sizingParts.join('') || '<div style="color:var(--dim);font-size:10px">No sizing data.</div>';
+
+  // Memo — clear and refocus
+  const memoEl = document.getElementById('ad-memo');
+  if (memoEl) memoEl.value = '';
+
+  // Wire up approve / reject buttons.  We replace the onclick each time
+  // (rather than capturing in a closure) so the handlers always reference
+  // the most-recent trade id.
+  document.getElementById('ad-btn-approve').onclick = function() {
+    const note = (document.getElementById('ad-memo') || {}).value || '';
+    actionTradeFromDrawer(t.id, 'APPROVED', note);
+  };
+  document.getElementById('ad-btn-reject').onclick = function() {
+    const note = (document.getElementById('ad-memo') || {}).value || '';
+    actionTradeFromDrawer(t.id, 'REJECTED', note);
+  };
+
+  document.getElementById('appr-drawer-overlay').classList.add('open');
+  document.getElementById('appr-drawer').classList.add('open');
+  // Sparkline render
+  try { populateSparklines(); loadSparklines(); } catch(e) {}
+}
+
+function closeApprovalDrawer(e) {
+  if (e && e.target !== document.getElementById('appr-drawer-overlay')) return;
+  document.getElementById('appr-drawer-overlay').classList.remove('open');
+  document.getElementById('appr-drawer').classList.remove('open');
+  // Clear sparkline so reopening for a different trade doesn't show stale art
+  const ss = document.getElementById('ad-spark');
+  if (ss) { ss.dataset.ticker = ''; ss.innerHTML = ''; }
+}
+
+// Drawer-flavoured wrapper around actionTrade that uses the drawer's
+// memo (not the per-row inline input) and closes the drawer on success.
+async function actionTradeFromDrawer(id, status, note) {
+  try {
+    const r = await fetch('/api/approval', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, status, note: note ? note.trim() : undefined})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const msgs = {APPROVED: '✓ Trade approved', REJECTED: '✗ Trade rejected'};
+      toast(msgs[status] || status, status === 'APPROVED' ? 'ok' : 'err');
+      closeApprovalDrawer();
+      if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    } else {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+    }
+  } catch (e) {
+    toast('Action failed: ' + e.message, 'err');
+  }
+}
+
 // ── SESSION TIMELINE UPDATE ──
 function updateSessionTimeline() {
   const now = new Date();
@@ -4362,23 +4598,30 @@ async function toggleMode() {
 }
 
 // ── APPROVAL ──
+// Quick-action approve/reject from the inline row (no memo).
+// For full review with memo, the row click opens openApprovalDrawer
+// which has its own actionTradeFromDrawer() wrapper.
 async function actionTrade(id, status) {
+  // Legacy memo-${id} input is gone; if any callers still use the
+  // memo path (queued/rejected card revoke flows) read it lazily.
   const memoEl = document.getElementById('memo-'+id);
-  const note = memoEl ? memoEl.value.trim() : '';
-  const r = await fetch('/api/approval', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({id, status, note: note || undefined})
-  });
-  const d = await r.json();
-  if (d.ok) {
-    const msgs = {'APPROVED': '✓ Trade approved', 'REJECTED': '✗ Trade rejected', 'PENDING_APPROVAL': '↩ Decision revoked'};
-    toast(msgs[status] || status, status === 'APPROVED' ? 'ok' : status === 'PENDING_APPROVAL' ? 'ok' : 'err');
-    
-// Wave code moved to inline script in Agent Status card
-
-
-loadLiveStatus();
+  const note = memoEl ? (memoEl.value || '').trim() : '';
+  try {
+    const r = await fetch('/api/approval', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({id, status, note: note || undefined})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const msgs = {'APPROVED': '✓ Trade approved', 'REJECTED': '✗ Trade rejected', 'PENDING_APPROVAL': '↩ Decision revoked'};
+      toast(msgs[status] || status, status === 'APPROVED' ? 'ok' : status === 'PENDING_APPROVAL' ? 'ok' : 'err');
+      if (typeof loadLiveStatus === 'function') loadLiveStatus();
+    } else {
+      toast(d.error || ('HTTP ' + r.status), 'err');
+    }
+  } catch (e) {
+    toast('Action failed: ' + e.message, 'err');
   }
 }
 
@@ -5134,7 +5377,13 @@ function renderApprovals(approvals) {
         : '';
       const shares  = t.shares ? `${parseFloat(t.shares).toFixed(4)} sh` : '';
       const cost    = (px > 0 && t.shares) ? `≈ $${(px * parseFloat(t.shares)).toFixed(2)}` : '';
-      return `<div class="trade-item">
+      // Stuff the full approval dict on the row so the new drawer can
+      // render without a re-fetch (matches openPositionDrawer pattern).
+      const tEsc = JSON.stringify(t).replace(/"/g,'&quot;');
+      // Click row body → open drawer for full review.
+      // Click ✓ / ✗ buttons → quick action without opening drawer
+      // (event.stopPropagation on the buttons prevents the row click).
+      return `<div class="trade-item" style="cursor:pointer" onclick="openApprovalDrawer(${tEsc})">
         <div class="trade-header">
           <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
           <div class="trade-meta">
@@ -5145,10 +5394,9 @@ function renderApprovals(approvals) {
         </div>
         ${planLine}
         ${thesisLine}
-        <input id="memo-${t.id}" placeholder="Add memo (optional)" style="width:100%;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.03);color:var(--text);font-size:10px;font-family:var(--mono);margin-bottom:6px;outline:none">
-        <div class="trade-actions">
-          <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
-          <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED')">✗ Reject</button>
+        <div class="trade-actions" onclick="event.stopPropagation()">
+          <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED');event.stopPropagation()" title="Quick approve (no memo). Click row for full review with memo.">✓ Approve</button>
+          <button class="btn-reject" onclick="actionTrade(${t.id},'REJECTED');event.stopPropagation()" title="Quick reject (no memo). Click row for full review with memo.">✗ Reject</button>
         </div>
       </div>`;
     }).join('');
