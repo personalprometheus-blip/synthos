@@ -4699,6 +4699,68 @@ def api_planning():
         return jsonify({'signals': [], 'mode': 'intel', 'count': 0, 'error': str(e)})
 
 
+@app.route('/api/ticker-news')
+@login_required
+def api_ticker_news():
+    """Recent news_feed articles for a single ticker — powers the
+    'Recent news' section of the planning drawer (Phase 7g, 2026-04-25).
+
+    The news pipeline already filters at ingestion time: tier-4 opinion
+    sources are excluded at gate 3, and articles below MIN_CREDIBILITY /
+    MIN_RELEVANCE never enter news_feed. So we render raw_headline as-is
+    — no client-side declickbait pass needed.
+
+    Query params:
+      ticker  — required, normalized to uppercase
+      limit   — default 15, max 30
+
+    Returns rows shaped for the drawer:
+      {timestamp, headline, source, source_url, image_url, sentiment_score}
+    The metadata JSON blob stored on each row is parsed server-side.
+    """
+    ticker = (request.args.get('ticker') or '').strip().upper()
+    if not ticker or not ticker.replace('.', '').replace('-', '').isalnum() or len(ticker) > 8:
+        return jsonify({'articles': [], 'error': 'invalid ticker'}), 400
+    try:
+        limit = max(1, min(30, int(request.args.get('limit') or 15)))
+    except (TypeError, ValueError):
+        limit = 15
+
+    try:
+        import sqlite3 as _sql
+        articles = []
+        # news_feed lives in the shared (owner) DB — written by the news
+        # agent and accessible to all customers. Use _shared_db's path.
+        with _sql.connect(_shared_db().path, timeout=5) as c:
+            c.row_factory = _sql.Row
+            rows = c.execute(
+                "SELECT id, timestamp, raw_headline, sentiment_score, source, "
+                "metadata, created_at "
+                "FROM news_feed WHERE UPPER(ticker)=? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (ticker, limit)
+            ).fetchall()
+        for r in rows:
+            md = {}
+            try:
+                md = json.loads(r['metadata']) if r['metadata'] else {}
+            except (ValueError, TypeError):
+                md = {}
+            articles.append({
+                'id':              r['id'],
+                'timestamp':       r['created_at'] or r['timestamp'],
+                'headline':        r['raw_headline'] or '',
+                'source':          md.get('source') or r['source'] or 'News',
+                'source_url':      md.get('link'),
+                'image_url':       md.get('image_url'),
+                'sentiment_score': r['sentiment_score'],
+            })
+        return jsonify({'ticker': ticker, 'articles': articles, 'count': len(articles)})
+    except Exception as e:
+        log.warning(f"/api/ticker-news error: {e}")
+        return jsonify({'ticker': ticker, 'articles': [], 'error': str(e)})
+
+
 @app.route('/api/screening')
 @login_required
 def api_screening():

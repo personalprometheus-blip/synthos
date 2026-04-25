@@ -2860,6 +2860,46 @@ setInterval(loadAgentPulse, 10000);
 
 </div>
 
+<!-- PLANNING DRAWER (Phase 7g, 2026-04-25) — watchlist deep-dive for
+     signals the bot is tracking but hasn't acted on. Optimized for the
+     "do my own research, then act on another platform" workflow.
+     No suggested-levels / no approve-reject / no inline action — purely
+     informational. -->
+<div class="drawer-overlay" id="plan-drawer-overlay" onclick="closePlanningDrawer(event)">
+</div>
+<div class="drawer" id="plan-drawer">
+  <div class="drawer-head">
+    <div id="pd-icon" style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0"></div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0" id="pd-title">—</div>
+        <span class="spark-slot" id="pd-spark" data-ticker="" style="width:80px;height:22px;flex-shrink:0"></span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px" id="pd-sub">—</div>
+    </div>
+    <button class="drawer-close" onclick="closePlanningDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="drawer-section" id="pd-trust-section"></div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Why we're watching</div>
+      <div id="pd-why-now"></div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">Live snapshot</div>
+      <div id="pd-snapshot"></div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title">If you took this</div>
+      <div id="pd-sizing"></div>
+    </div>
+    <div class="drawer-section">
+      <div class="drawer-section-title" id="pd-news-title">Recent news</div>
+      <div id="pd-news"></div>
+    </div>
+  </div>
+</div>
+
 <!-- APPROVAL DETAIL DRAWER (Phase 7d, 2026-04-25) — for managed-mode
      pending trades. Hero is the news headline (the actual pitch); the
      setup/sizing/action moves out of the inline row card. Inline row
@@ -3082,6 +3122,12 @@ document.addEventListener('keydown', function(e) {
   const apprOv = document.getElementById('appr-drawer-overlay');
   if (apprOv && apprOv.classList.contains('open')) {
     if (typeof closeApprovalDrawer === 'function') closeApprovalDrawer({target: apprOv});
+    return;
+  }
+  // Planning drawer
+  const planOv = document.getElementById('plan-drawer-overlay');
+  if (planOv && planOv.classList.contains('open')) {
+    if (typeof closePlanningDrawer === 'function') closePlanningDrawer({target: planOv});
     return;
   }
 });
@@ -4303,6 +4349,204 @@ function closeApprovalDrawer(e) {
   document.getElementById('appr-drawer').classList.remove('open');
   // Clear sparkline so reopening for a different trade doesn't show stale art
   const ss = document.getElementById('ad-spark');
+  if (ss) { ss.dataset.ticker = ''; ss.innerHTML = ''; }
+}
+
+// ── PLANNING DRAWER (Phase 7g, 2026-04-25) ────────────────────────
+// Watchlist deep-dive — for signals the bot is tracking but hasn't
+// acted on. Designed for the "do my own research → act on another
+// platform" use case. No buy/sell affordances; purely informational.
+//
+// `s` is a row from /api/planning.signals (a signal record from the
+// shared signals table — same shape sig-modal already consumes).
+function openPlanningDrawer(s) {
+  if (!s || typeof s !== 'object') return;
+  const accent = '#22d3ee';   // watchlist = cyan accent (between teal and purple)
+  const accentRgb = '34,211,238';
+
+  // Header
+  const icon = document.getElementById('pd-icon');
+  icon.textContent = (s.ticker || '?').slice(0, 4);
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  const titleName = (s.company && s.company !== s.ticker) ? s.company : (s.ticker || '—');
+  const titleEl = document.getElementById('pd-title');
+  titleEl.textContent = titleName;
+  titleEl.title = titleName + (s.ticker ? ' · ' + s.ticker : '');
+
+  // Sparkline slot
+  const sparkSlot = document.getElementById('pd-spark');
+  if (sparkSlot) {
+    sparkSlot.dataset.ticker = (s.ticker || '').replace(/[^A-Z0-9.-]/gi, '');
+    sparkSlot.innerHTML = '';
+  }
+
+  // "Watching since X days" — compute from created_at
+  let watchingSince = '';
+  if (s.created_at) {
+    try {
+      const created = new Date(String(s.created_at).replace(' ', 'T'));
+      const days = Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000));
+      watchingSince = days === 0 ? 'Watching since today' : `Watching since ${days}d ago`;
+    } catch (e) {}
+  }
+  document.getElementById('pd-sub').textContent =
+    (watchingSince || 'On watchlist') + (s.sector ? ' · ' + s.sector : '');
+
+  // Signal Trust — same derivation as sig-modal / approval drawer
+  const conf = (s.confidence || 'NOISE').toString().toUpperCase();
+  const baseScore = conf === 'HIGH' ? 87 : conf === 'MEDIUM' ? 63 : conf === 'LOW' ? 30 : 15;
+  const sentBump  = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score) * 15) : 0;
+  const adjust    = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
+  const trust     = Math.min(99, Math.max(5, baseScore + sentBump + adjust));
+  document.getElementById('pd-trust-section').innerHTML = renderSignalTrust(trust);
+
+  // Why we're watching — hero headline + image + source link + tier + corroborated badge.
+  const tierLabel = s.source_tier === 1 ? 'Official' : s.source_tier === 2 ? 'Wire' : s.source_tier === 3 ? 'Press' : '';
+  const tierColor = s.source_tier === 1 ? 'var(--teal)' : s.source_tier === 2 ? 'var(--amber)' : 'var(--muted)';
+  const corrBadge = s.corroborated ? `<span style="font-size:9px;color:var(--teal);margin-left:8px">✓ corroborated by multiple sources</span>` : '';
+  const whyEl = document.getElementById('pd-why-now');
+  if (s.headline) {
+    const headlineHtml = s.source_url
+      ? `<a href="${s.source_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;border-bottom:1px solid var(--border2)">${s.headline}</a>`
+      : s.headline;
+    const imgHtml = s.image_url
+      ? `<img src="${s.image_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-bottom:10px;opacity:0.92" onerror="this.style.display='none'">`
+      : '';
+    whyEl.innerHTML = `
+      ${imgHtml}
+      <div style="font-size:13px;font-weight:600;line-height:1.5;color:var(--text);margin-bottom:8px">📰 ${headlineHtml}</div>
+      <div style="font-size:10px;color:var(--muted);font-family:var(--mono)">
+        ${s.source || 'News'}${s.politician ? ' · ' + s.politician : ''}${tierLabel ? ' · <span style="color:' + tierColor + ';font-weight:700">' + tierLabel + '</span>' : ''}${s.staleness ? ' · ' + s.staleness : ''}
+        ${corrBadge}
+      </div>
+    `;
+  } else {
+    whyEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No headline captured.</div>';
+  }
+
+  // Live snapshot — pull current price + today's range from the
+  // sparkline cache. The cache holds 12h of bars; we filter to today
+  // (ET) for the range. Avoids an extra Alpaca call. ADR + sector
+  // ETF % deferred to Phase 7e (need new endpoint).
+  const snapEl = document.getElementById('pd-snapshot');
+  let snapBits = [];
+  try {
+    const tkr = (s.ticker || '').toUpperCase();
+    const bars = (window._sparklineCache || {})[tkr] || [];
+    if (bars.length) {
+      const now = bars[bars.length - 1];
+      const lo = Math.min(...bars);
+      const hi = Math.max(...bars);
+      const pctRange = ((hi - lo) / lo * 100);
+      snapBits.push(`<div class="drawer-row"><span class="drawer-label">Current</span><span class="drawer-val">$${now.toFixed(2)}</span></div>`);
+      snapBits.push(`<div class="drawer-row"><span class="drawer-label">12h range</span><span class="drawer-val">$${lo.toFixed(2)} – $${hi.toFixed(2)} <span style="font-size:9px;color:var(--dim);margin-left:6px">${pctRange.toFixed(1)}% spread</span></span></div>`);
+    } else {
+      snapBits.push('<div style="font-size:10px;color:var(--dim);font-style:italic">Price data loading…</div>');
+    }
+  } catch (e) {
+    snapBits.push('<div style="font-size:10px;color:var(--dim);font-style:italic">Price data unavailable</div>');
+  }
+  if (s.sector) {
+    snapBits.push(`<div class="drawer-row"><span class="drawer-label">Sector</span><span class="drawer-val" style="font-family:inherit">${s.sector}</span></div>`);
+  }
+  snapEl.innerHTML = snapBits.join('');
+
+  // "If you took this" — sizing calculator at three sample weights.
+  // No "buy zone / stop / target" because those would be made-up
+  // numbers (see Phase 7g design doc).
+  const sizeEl = document.getElementById('pd-sizing');
+  let pVal = 0;
+  try {
+    const pv = (document.getElementById('stat-portfolio') || {}).textContent || '';
+    pVal = parseFloat(pv.replace(/[^0-9.]/g, '')) || 0;
+  } catch (e) {}
+  const tkrUp = (s.ticker || '').toUpperCase();
+  const lastBars = (window._sparklineCache || {})[tkrUp] || [];
+  const px = lastBars.length ? lastBars[lastBars.length - 1] : 0;
+  if (pVal > 0 && px > 0) {
+    const at = (pct) => {
+      const dollars = pVal * pct / 100;
+      const sh = dollars / px;
+      return `<div class="drawer-row"><span class="drawer-label">${pct}% of portfolio</span><span class="drawer-val">$${dollars.toFixed(2)} <span style="font-size:9px;color:var(--dim);margin-left:6px">${sh.toFixed(sh >= 1 ? 2 : 4)} shares @ $${px.toFixed(2)}</span></span></div>`;
+    };
+    sizeEl.innerHTML = at(2) + at(5) + at(10);
+    sizeEl.innerHTML += '<div style="margin-top:6px;font-size:9px;color:var(--dim);font-style:italic;line-height:1.4">Calculator only — sizing is your call. Bot uses tier-based caps when it acts; this is for your own broker.</div>';
+  } else {
+    sizeEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Sizing calculator unavailable (waiting on price + portfolio data)</div>';
+  }
+
+  // Recent news — async fetch from /api/ticker-news. Loading state first.
+  const newsTitle = document.getElementById('pd-news-title');
+  newsTitle.textContent = 'Recent news for ' + (s.ticker || '');
+  const newsEl = document.getElementById('pd-news');
+  newsEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">Loading articles…</div>';
+
+  fetch('/api/ticker-news?ticker=' + encodeURIComponent(s.ticker || '') + '&limit=15')
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const arts = (d.articles || []);
+      if (!arts.length) {
+        newsEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">No additional articles in our feed for this ticker.</div>';
+        return;
+      }
+      // Format each article as a stacked card. Articles are pre-curated
+      // by the news ingestion pipeline (Tier-4 opinion already filtered
+      // out at gate 3) so we render raw_headline as-is — no client-side
+      // declickbait pass.
+      const fmtTime = (ts) => {
+        if (!ts) return '';
+        try {
+          const d = new Date(String(ts).replace(' ', 'T'));
+          const ageMs = Date.now() - d.getTime();
+          const hrs = ageMs / 3600000;
+          if (hrs < 1)   return Math.max(1, Math.floor(ageMs/60000)) + 'm ago';
+          if (hrs < 24)  return Math.floor(hrs) + 'h ago';
+          if (hrs < 24*7) return Math.floor(hrs/24) + 'd ago';
+          return d.toISOString().slice(0, 10);
+        } catch (e) { return ''; }
+      };
+      newsEl.innerHTML = arts.map(a => {
+        const ageStr = fmtTime(a.timestamp);
+        const sentColor = (typeof a.sentiment_score === 'number')
+          ? (a.sentiment_score >  0.10 ? 'var(--teal)' : a.sentiment_score < -0.10 ? 'var(--pink)' : 'var(--muted)')
+          : 'var(--muted)';
+        const sentLabel = (typeof a.sentiment_score === 'number')
+          ? (a.sentiment_score >  0.10 ? '+' : a.sentiment_score < -0.10 ? '−' : '·')
+          : '';
+        const titleHtml = a.source_url
+          ? `<a href="${a.source_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none">${a.headline}</a>`
+          : `<span style="color:var(--text)">${a.headline}</span>`;
+        return `
+          <div style="padding:9px 10px;margin-bottom:6px;border-radius:7px;background:rgba(255,255,255,0.02);border:1px solid var(--border);transition:background .15s"
+               onmouseenter="this.style.background='rgba(255,255,255,0.04)'"
+               onmouseleave="this.style.background='rgba(255,255,255,0.02)'">
+            <div style="font-size:11px;font-weight:600;line-height:1.45;margin-bottom:4px">
+              ${sentLabel ? `<span style="color:${sentColor};margin-right:5px;font-family:var(--mono)">${sentLabel}</span>` : ''}
+              ${titleHtml}
+            </div>
+            <div style="font-size:9px;color:var(--muted);font-family:var(--mono);display:flex;justify-content:space-between;gap:8px">
+              <span>${a.source || 'News'}</span>
+              <span style="color:var(--dim)">${ageStr}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    })
+    .catch(err => {
+      newsEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Could not load articles (' + err + ')</div>';
+    });
+
+  document.getElementById('plan-drawer-overlay').classList.add('open');
+  document.getElementById('plan-drawer').classList.add('open');
+  // Spark + live price refresh
+  try { populateSparklines(); loadSparklines(); } catch(e) {}
+}
+
+function closePlanningDrawer(e) {
+  if (e && e.target !== document.getElementById('plan-drawer-overlay')) return;
+  document.getElementById('plan-drawer-overlay').classList.remove('open');
+  document.getElementById('plan-drawer').classList.remove('open');
+  const ss = document.getElementById('pd-spark');
   if (ss) { ss.dataset.ticker = ''; ss.innerHTML = ''; }
 }
 
@@ -6657,19 +6901,24 @@ async function loadPlanning() {
       const summary = (sig.headline || sig.reason || sig.summary || 'Signal detected').slice(0, 65);
       const esc     = s => (s || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+      // Stuff the full signal dict on the row so the planning drawer
+      // renders without an extra fetch (matches openPositionDrawer
+      // pattern). Click row \u2192 openPlanningDrawer (Phase 7g).
+      const sigEsc = JSON.stringify(sig).replace(/"/g,'&quot;');
       if (mode === 'queue') {
         const staleness  = sig.staleness || '';
         const staleColor = staleness === 'Fresh' ? 'var(--teal)' : staleness === 'Aging' ? 'var(--amber)' : 'var(--dim)';
         const corrBadge  = sig.corroborated ? '<span style="font-size:8px;color:var(--teal);margin-left:5px">\u2726 confirmed</span>' : '';
         const tierColor  = sig.source_tier === 1 ? 'var(--teal)' : sig.source_tier === 2 ? 'var(--amber)' : 'var(--dim)';
         const tierLabel  = sig.source_tier === 1 ? 'Official' : sig.source_tier === 2 ? 'Wire' : 'Press';
-        return `<div class="agent-row"
+        return `<div class="agent-row" style="cursor:pointer"
             data-ticker="${esc(ticker)}"
             data-conf="${conf}"
             data-summary="${esc(summary)}"
             data-type="QUEUE"
             onmouseenter="showIntelTooltip(event,this)"
-            onmouseleave="hideIntelTooltip()">
+            onmouseleave="hideIntelTooltip()"
+            onclick="openPlanningDrawer(${sigEsc})">
           <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}${corrBadge}</div>
@@ -6683,13 +6932,14 @@ async function loadPlanning() {
         </div>`;
       } else {
         const stale = sig.is_stale ? '<span style="font-size:8px;color:var(--dim);margin-left:4px">archive</span>' : '';
-        return `<div class="agent-row"
+        return `<div class="agent-row" style="cursor:pointer"
             data-ticker="${esc(ticker)}"
             data-conf="${conf}"
             data-summary="${esc(summary)}"
             data-type="INTEL"
             onmouseenter="showIntelTooltip(event,this)"
-            onmouseleave="hideIntelTooltip()">
+            onmouseleave="hideIntelTooltip()"
+            onclick="openPlanningDrawer(${sigEsc})">
           <div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted)">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--dim);font-weight:400;margin-left:4px">intel${stale}</span></div>
