@@ -926,20 +926,58 @@ def gate8_trade_activity_baseline(report: FaultReport, db):
     pct_of_baseline = (today_count / median_baseline) * 100 if median_baseline else 0
 
     if today_count < threshold:
+        message = (f"Today {today_count} decision(s) vs 30-day median "
+                   f"{median_baseline} ({pct_of_baseline:.0f}% of baseline)")
+        detail = (f"Threshold: {DEGRADED_THRESHOLD_PCT*100:.0f}% of baseline = "
+                  f"{threshold:.1f}. Likely causes: over-restrictive gate "
+                  f"(chase caps too tight, news veto firing too often), empty "
+                  f"VALIDATED signal pool, validator stuck on CAUTION, regime "
+                  f"locked into BEAR, or candidate generator producing too few "
+                  f"signals. Investigate: count VALIDATED signals, scan trade_logic_agent.log "
+                  f"for skip reasons.")
         report.add(Finding(
             gate="GATE8_ACTIVITY",
             severity=Severity.WARNING,
             code="ACTIVITY_DEGRADED",
-            message=(f"Today {today_count} decision(s) vs 30-day median "
-                     f"{median_baseline} ({pct_of_baseline:.0f}% of baseline)"),
-            detail=(f"Threshold: {DEGRADED_THRESHOLD_PCT*100:.0f}% of baseline = "
-                    f"{threshold:.1f}. Likely causes: over-restrictive gate "
-                    f"(chase caps too tight, news veto firing too often), empty "
-                    f"VALIDATED signal pool, validator stuck on CAUTION, regime "
-                    f"locked into BEAR, or candidate generator producing too few "
-                    f"signals. Investigate: count VALIDATED signals, scan trade_logic_agent.log "
-                    f"for skip reasons."),
+            message=message,
+            detail=detail,
         ))
+        # Surface this WARNING in admin_alerts so it doesn't sit invisibly in
+        # _FAULT_SCAN_LAST. Idempotent — checks for an existing unresolved
+        # ACTIVITY_DEGRADED alert raised in the last 12h before writing a new
+        # one. Without this dedup the gate would write 24+ alerts/day at the
+        # 30-min fault-scan cadence.
+        try:
+            with db.conn() as c:
+                cutoff = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)).strftime('%Y-%m-%d %H:%M:%S')
+                existing = c.execute(
+                    "SELECT id FROM admin_alerts "
+                    "WHERE code='ACTIVITY_DEGRADED' AND resolved=0 AND created_at >= ? "
+                    "LIMIT 1",
+                    (cutoff,),
+                ).fetchone()
+            if not existing:
+                db.add_admin_alert(
+                    category='fault',
+                    severity='WARNING',
+                    title='Trade activity DEGRADED',
+                    body=f"{message}\n\n{detail}",
+                    source_agent='fault_detection_agent',
+                    source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
+                    code='ACTIVITY_DEGRADED',
+                    meta={
+                        "gate": "GATE8_ACTIVITY",
+                        "today_count": today_count,
+                        "baseline_median": median_baseline,
+                        "pct_of_baseline": round(pct_of_baseline, 1),
+                        "threshold_pct": DEGRADED_THRESHOLD_PCT,
+                    },
+                )
+                log.info("[GATE 8] ACTIVITY_DEGRADED alert written to admin_alerts")
+            else:
+                log.debug("[GATE 8] ACTIVITY_DEGRADED already alerted in last 12h — skipping duplicate")
+        except Exception as e:
+            log.warning(f"[GATE 8] Failed to write admin_alert: {e}")
     else:
         report.add(Finding(
             gate="GATE8_ACTIVITY",

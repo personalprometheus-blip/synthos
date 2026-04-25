@@ -102,15 +102,26 @@ Reuse existing tar.gz pipeline.
 ### ~~2. DEGRADED detector in fault_detection_agent~~ ✅ DONE 2026-04-24
 
 Implemented as `gate8_trade_activity_baseline` in
-`retail_fault_detection_agent.py` (~140 lines including comments and
-tunables). Compares today's `TRADE_DECISION` event count to the 30-day
+`retail_fault_detection_agent.py` (~190 lines incl. admin-alert
+plumbing). Compares today's `TRADE_DECISION` count to the 30-day
 weekday median (excluding weekends + missing days). Fires WARNING
 `ACTIVITY_DEGRADED` if today < `DEGRADED_THRESHOLD_PCT` (default 30%)
 of baseline AND baseline ≥ `DEGRADED_MIN_BASELINE` (default 10/day).
 Skips on weekends, before 14:00 ET, during warm-up (<14 non-zero days
-of history), and in low-traffic regime. Detail field names the likely
-causes (over-restrictive gates, empty signal pool, validator stuck
-CAUTION, regime locked BEAR) so on-call doesn't have to think.
+of history), and in low-traffic regime.
+
+**Visibility (added 2026-04-24).** When ACTIVITY_DEGRADED fires, the
+gate also writes an entry to `admin_alerts` (severity=WARNING)
+because the fault-scan summary alone is invisible — it sits in
+`_FAULT_SCAN_LAST` JSON unless the operator looks. The alert is
+idempotent: checks for an existing unresolved ACTIVITY_DEGRADED in
+the last 12h before writing, so the 30-min fault-scan cadence doesn't
+generate 48 dupes/day.
+
+**Cold start.** Detector is in WARMUP mode (`ACTIVITY_WARMUP` finding,
+no alert) until ≥14 non-zero weekdays of TRADE_DECISION history
+accumulate. Tunable via `DEGRADED_MIN_HISTORY_DAYS`. After warmup it
+auto-activates.
 
 ### 3. Monitor token rotation procedure
 `MONITOR_TOKEN` is a single shared secret pasted into pi4b, pi5,
