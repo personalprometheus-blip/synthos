@@ -6282,13 +6282,31 @@ window._trackedTickers = window._trackedTickers || {
 // Update helper — call from each loader. Argument shape:
 //   updateTrackedTickers({positions: ['AMD','TSLA'], watching: ['NVDA']})
 // Either field can be omitted; only the supplied one is replaced.
+// If the News page is currently visible, re-renders the grid so any
+// articles that should now be flagged "in portfolio" / "watching"
+// pick up their chips and the "Tracked tickers only" filter sees a
+// populated set. Phase 7i fixup 2026-04-25 — previously the news
+// grid would render before _trackedTickers populated, so cards looked
+// untracked even when held.
 function updateTrackedTickers(updates) {
   if (!updates) return;
+  let changed = false;
   if (Array.isArray(updates.positions)) {
     window._trackedTickers.positions = new Set(updates.positions.filter(Boolean).map(t => t.toUpperCase()));
+    changed = true;
   }
   if (Array.isArray(updates.watching)) {
     window._trackedTickers.watching = new Set(updates.watching.filter(Boolean).map(t => t.toUpperCase()));
+    changed = true;
+  }
+  // If news tab is active and articles are loaded, re-render to pick
+  // up newly-tracked tickers. Cheap (purely client-side filter pass).
+  if (changed) {
+    const newsTab = document.getElementById('tab-news');
+    const visible = newsTab && newsTab.style.display !== 'none';
+    if (visible && typeof _newsArticles !== 'undefined' && Array.isArray(_newsArticles) && _newsArticles.length && typeof renderNewsGrid === 'function') {
+      try { renderNewsGrid(); } catch(e) {}
+    }
   }
 }
 
@@ -6320,17 +6338,36 @@ function trackerChip(ticker) {
     + '👁 WATCHING</span>';
 }
 
-// ── CLICKBAIT HEURISTIC (Phase 7i, 2026-04-25) ────────────────────
+// ── LOW-QUALITY HEURISTIC (Phase 7i, refined 2026-04-25 after audit)
 // Client-side "Hide low-quality" pass — additive on top of the
-// ingestion-side Tier-4 + MIN_CREDIBILITY filter that's already
-// excluded most junk. Catches the residue: hype-tag prefixes
-// ("BREAKING:", "JUST IN:"), excessive emoji, ALL CAPS clauses,
-// listicles, vague teasers. Returns true if the headline looks
-// clickbaity and should be hidden when the toggle is ON.
+// ingestion-side Tier-4 + MIN_CREDIBILITY filter that already excluded
+// classic clickbait. The actual residue in news_feed turned out to
+// be a different shape of noise: celebrity-opinion takes ("Cuban
+// Slams...", "O'Leary Reveals..."), retread "Biggest Mistake/Regret"
+// frames, and quote-baiting headlines. These technically passed the
+// wire filter but don't carry market info — exactly what the user
+// wanted hidden behind the toggle.
+//
+// Threat model split:
+//   PREFIX/PHRASE/LISTICLE/EMOJI — traditional clickbait (rare here
+//                                   thanks to ingestion filter, but
+//                                   kept for defense in depth)
+//   OPINION_VERB                  — celebrity name + (Slams|Reveals|
+//                                   Says|Calls|Predicts...) — the
+//                                   dominant noisy pattern in current
+//                                   data
+//   RETREAD                       — "Biggest <Mistake|Regret|Secret>",
+//                                   "This One <X>", "Has Just One <X>"
 const _CLICKBAIT_PREFIX_RE = /^\s*(?:BREAKING|JUST IN|EXCLUSIVE|ALERT|URGENT|HUGE|MASSIVE|SHOCKING|WARNING)\b\s*[:!\-—]?/i;
 const _CLICKBAIT_PHRASES_RE = /\b(?:you won['’]t believe|wait until you see|this one (weird |simple )?(trick|secret|reason)|nobody is talking about|will (shock|stun|amaze) you|guess what happened|going (parabolic|nuclear)|to the moon|skyrocket(?:ing|ed)?)\b/i;
 const _LISTICLE_RE = /^\s*\d+\s+(?:reasons?|stocks?|things?|ways?|tips?)\b/i;
 const _EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+// Opinion-verb pattern: <Capitalized Name> + opinion verb. We use a
+// limited verb set to avoid false positives on legitimate corporate
+// news ("Apple Says Q4 Revenue Up" is fine because Apple isn't a
+// person). The pattern requires word boundaries on both sides.
+const _OPINION_VERB_RE = /\b(?:Slams|Reveals|Revealed|Predicts|Predicted|Mocks|Mocked|Blasts|Blasted|Trashes|Trashed|Calls Out|Called Out)\b/;
+const _RETREAD_RE = /\b(?:biggest (?:mistake|regret|secret|win|loss|fear|investing mistake)|this one (?:trick|secret|reason|thing)|has just one (?:taker|buyer|customer)|just did|just said)\b/i;
 
 function looksLikeClickbait(headline) {
   if (!headline) return false;
@@ -6338,12 +6375,21 @@ function looksLikeClickbait(headline) {
   if (_CLICKBAIT_PREFIX_RE.test(h)) return true;
   if (_CLICKBAIT_PHRASES_RE.test(h)) return true;
   if (_LISTICLE_RE.test(h))         return true;
+  if (_OPINION_VERB_RE.test(h))     return true;
+  if (_RETREAD_RE.test(h))          return true;
   // Emoji density — 2+ emojis in a single headline is usually a tell
   const emojis = h.match(_EMOJI_RE);
   if (emojis && emojis.length >= 2) return true;
   // ALL-CAPS run of 4+ words (rare in legitimate headlines)
   const allCapsRun = h.match(/(?:\b[A-Z]{2,}\b\s+){3,}\b[A-Z]{2,}\b/);
   if (allCapsRun) return true;
+  // Heavy quote density — when 30%+ of the headline is in quotes,
+  // it's usually quote-bait ("Trump: 'I have all the cards'" type).
+  const quoted = h.match(/['"][^'"]{8,}['"]/g);
+  if (quoted) {
+    const quotedLen = quoted.reduce((sum, q) => sum + q.length, 0);
+    if (quotedLen / h.length > 0.30) return true;
+  }
   return false;
 }
 
@@ -7424,9 +7470,15 @@ function renderNewsGrid() {
   if (!visible.length) {
     let msg = 'No news articles yet — News agent will populate on next run';
     if (_newsScope === 'tracked') {
-      msg = 'No articles for your tracked tickers right now. Switch back to "All" to see everything.';
+      // Distinguish "no tracked tickers loaded yet" from "no matches"
+      const trackedCount = window._trackedTickers.positions.size + window._trackedTickers.watching.size;
+      if (trackedCount === 0) {
+        msg = 'You don\'t have any tracked tickers yet. Open a position or wait for the watchlist to populate.';
+      } else {
+        msg = 'No recent articles for your tracked tickers (' + trackedCount + ' tracked). Switch back to "All" to see everything.';
+      }
     } else if (_newsHideClickbait && _newsArticles.length) {
-      msg = 'All current articles look low-quality. Toggle "Hide low-quality" off to see them.';
+      msg = 'All ' + _newsArticles.length + ' current articles look low-quality. Toggle "Hide low-quality" off to see them.';
     }
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">' + msg + '</div>';
     return;
