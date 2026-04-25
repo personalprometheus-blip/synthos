@@ -137,6 +137,39 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 
 ## ✅ Recently completed (last 7 days)
 
+### 2026-04-25 — Retail logs-audit triage (200+ → 27, then ~5-10 after 72h aging)
+
+Separate from the company auditor.db cleanup below — `/api/logs-audit`
+on the retail portal is a LIVE re-scan of pi5's log files on every
+page load, with no persistent resolution state. Two structural fixes
++ five rounds of IGNORE-pattern expansion brought it down from 200+
+findings to 27.
+
+- [x] **72h age filter** (`d6203dd`) — only surface log lines whose
+  parsed timestamp falls within the last 72 hours. Prevents stale
+  one-off lines from accumulating forever; real recurring bugs
+  reappear within a single trading day.
+- [x] **IGNORE pattern expansion** across multiple commits
+  (`d6203dd`, `d8db2c8`, `de07d94`, `b4d9d86`):
+  - Yahoo / circuit-breaker retry warnings
+  - `WARNING price_poller: Market-data fallback returned 400`
+    (after-hours SIP/IEX restriction noise — was 162 hits/scan)
+  - `WARNING price_poller: Alpaca <CID> fetch failed` /
+    `Market-data fallback fetch failed` (paper-API SSL + timeout
+    flakiness)
+  - `[KEYS] Customer X attempted to write` (auth gate blocking;
+    security accounting working as designed)
+  - `[ADMIN_OVERRIDE] POST denied` (same family)
+  - `WARNING watchdog: Interrogation not running` (watchdog auto-
+    restarting the listener — recovery action working)
+  - `[HB] POST failed: ... Max retries exceeded` (heartbeat retries
+    on its next tick; company_sentinel handles sustained silence)
+- [x] **Net effect** — retail audit went from "200 hits, mostly
+  noise" to "27 hits, mostly historical from before today's fixes
+  deployed (boot.log + market_daemon.log)". Those 17 historical
+  entries naturally age out within 72h leaving ~10 real items
+  (Stripe webhook secret + trader timeouts × 2 + a few outliers).
+
 ### 2026-04-25 — Auditor triage sweep (50 → 4 open findings)
 
 - [x] **`run_window_calculator` NameError on every overnight cycle** (`183bb68`) — agent retired in Phase C but two call sites in retail_market_daemon.py weren't cleaned up. Removed both. Auditor #261/#262/#282/#283 resolved.
