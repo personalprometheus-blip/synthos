@@ -4293,6 +4293,42 @@ function openApprovalDrawer(t) {
   }
   setupEl.innerHTML = setupParts.join('') || '<div style="color:var(--dim);font-size:10px">No setup data.</div>';
 
+  // Live current price + distance from buy zone (Phase 7h, 2026-04-25).
+  // Async fetch from /api/ticker-context — when it returns, prepend a
+  // Live row showing current price, distance from the buy zone, and
+  // sector relative move. Doesn't block anything else; stays as-is if
+  // the fetch fails.
+  if (px > 0) {
+    fetch('/api/ticker-context?ticker=' + encodeURIComponent(t.ticker || '')
+        + (t.sector ? '&sector=' + encodeURIComponent(t.sector) : ''))
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        if (typeof d.current_price !== 'number') return;
+        const cur = d.current_price;
+        // Distance from buy zone (lo = px*0.997, hi = px*1.003).
+        const lo = px * 0.997;
+        const hi = px * 1.003;
+        let zoneState = '', zoneColor = 'var(--muted)';
+        if (cur >= lo && cur <= hi) { zoneState = 'in buy zone';        zoneColor = 'var(--teal)';  }
+        else if (cur < lo)          { zoneState = `below by ${((lo-cur)/lo*100).toFixed(2)}%`; zoneColor = 'var(--teal)';  }
+        else                        { zoneState = `above by ${((cur-hi)/hi*100).toFixed(2)}%`; zoneColor = 'var(--amber)'; }
+        const todayPctStr = (typeof d.today_pct === 'number')
+          ? ` <span style="font-size:9px;font-weight:700;margin-left:6px;color:${d.today_pct >= 0 ? 'var(--teal)' : 'var(--pink)'}">${d.today_pct >= 0 ? '+' : ''}${d.today_pct.toFixed(2)}% today</span>`
+          : '';
+        // Build a small "Live" block that prepends to the setup section.
+        const liveHtml = `
+          <div class="drawer-row" style="background:rgba(34,211,238,0.04);margin:-2px 0 6px;padding:6px 8px;border-radius:6px;border:1px solid rgba(34,211,238,0.18)">
+            <span class="drawer-label" style="color:var(--text);font-weight:600">Live now</span>
+            <span class="drawer-val">$${cur.toFixed(2)}${todayPctStr}</span>
+          </div>
+          <div class="drawer-row" style="margin-bottom:6px"><span class="drawer-label">vs buy zone</span><span class="drawer-val" style="color:${zoneColor};font-family:inherit">${zoneState}</span></div>
+        `;
+        const elNow = document.getElementById('ad-setup');
+        if (elNow) elNow.innerHTML = liveHtml + elNow.innerHTML;
+      })
+      .catch(() => {});
+  }
+
   // Sizing — % of portfolio + dollar amount + share count.
   const sizingEl = document.getElementById('ad-sizing');
   let sizingParts = [];
@@ -4424,32 +4460,89 @@ function openPlanningDrawer(s) {
     whyEl.innerHTML = '<div style="font-size:10px;color:var(--dim)">No headline captured.</div>';
   }
 
-  // Live snapshot — pull current price + today's range from the
-  // sparkline cache. The cache holds 12h of bars; we filter to today
-  // (ET) for the range. Avoids an extra Alpaca call. ADR + sector
-  // ETF % deferred to Phase 7e (need new endpoint).
+  // Live snapshot — async fetch from /api/ticker-context. Returns
+  // current price, today's high/low/%, 14-day ADR, and sector ETF %.
+  // One Alpaca call per ticker, cached server-side for 60s. Renders
+  // a loading state immediately, then swaps in real values when the
+  // fetch returns. Falls back to the sparkline cache if Alpaca fails
+  // so the user sees *something*.
   const snapEl = document.getElementById('pd-snapshot');
-  let snapBits = [];
-  try {
-    const tkr = (s.ticker || '').toUpperCase();
-    const bars = (window._sparklineCache || {})[tkr] || [];
-    if (bars.length) {
-      const now = bars[bars.length - 1];
-      const lo = Math.min(...bars);
-      const hi = Math.max(...bars);
-      const pctRange = ((hi - lo) / lo * 100);
-      snapBits.push(`<div class="drawer-row"><span class="drawer-label">Current</span><span class="drawer-val">$${now.toFixed(2)}</span></div>`);
-      snapBits.push(`<div class="drawer-row"><span class="drawer-label">12h range</span><span class="drawer-val">$${lo.toFixed(2)} – $${hi.toFixed(2)} <span style="font-size:9px;color:var(--dim);margin-left:6px">${pctRange.toFixed(1)}% spread</span></span></div>`);
-    } else {
-      snapBits.push('<div style="font-size:10px;color:var(--dim);font-style:italic">Price data loading…</div>');
-    }
-  } catch (e) {
-    snapBits.push('<div style="font-size:10px;color:var(--dim);font-style:italic">Price data unavailable</div>');
-  }
-  if (s.sector) {
-    snapBits.push(`<div class="drawer-row"><span class="drawer-label">Sector</span><span class="drawer-val" style="font-family:inherit">${s.sector}</span></div>`);
-  }
-  snapEl.innerHTML = snapBits.join('');
+  snapEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Loading live snapshot…</div>';
+  const ctxQuery = '/api/ticker-context?ticker=' + encodeURIComponent(s.ticker || '')
+                 + (s.sector ? '&sector=' + encodeURIComponent(s.sector) : '');
+  fetch(ctxQuery)
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(d => {
+      const bits = [];
+      // Current price + today's % change.
+      if (typeof d.current_price === 'number') {
+        const pct = (typeof d.today_pct === 'number') ? d.today_pct : null;
+        const pctStr = (pct === null) ? ''
+          : ' <span style="font-size:9px;font-weight:700;margin-left:6px;color:' + (pct >= 0 ? 'var(--teal)' : 'var(--pink)') + '">'
+            + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '% today</span>';
+        bits.push(`<div class="drawer-row"><span class="drawer-label">Current</span><span class="drawer-val">$${d.current_price.toFixed(2)}${pctStr}</span></div>`);
+      }
+      // Today's range with normal/wide/quiet flag derived from ADR.
+      if (typeof d.today_high === 'number' && typeof d.today_low === 'number') {
+        const todayRangePct = (d.today_high - d.today_low) / d.today_low * 100;
+        let flag = '', flagColor = 'var(--dim)';
+        if (typeof d.adr_pct === 'number' && d.adr_pct > 0) {
+          const ratio = todayRangePct / d.adr_pct;
+          if (ratio > 1.4)      { flag = 'wider than usual';    flagColor = 'var(--amber)'; }
+          else if (ratio < 0.5) { flag = 'quieter than usual';  flagColor = 'var(--muted)'; }
+          else                  { flag = 'normal range';        flagColor = 'var(--teal)';  }
+        }
+        bits.push(`<div class="drawer-row"><span class="drawer-label">Today's range</span><span class="drawer-val">$${d.today_low.toFixed(2)} – $${d.today_high.toFixed(2)} <span style="font-size:9px;color:${flagColor};margin-left:6px">${flag ? '· ' + flag : ''}</span></span></div>`);
+      }
+      // 14-day ADR — gives the user a sense of normal volatility.
+      if (typeof d.adr_pct === 'number') {
+        bits.push(`<div class="drawer-row"><span class="drawer-label">Average daily range</span><span class="drawer-val">${d.adr_pct.toFixed(2)}% <span style="font-size:9px;color:var(--dim);margin-left:6px">14-day average</span></span></div>`);
+      }
+      // Sector + ETF context — relative move tells the user whether
+      // the ticker is leading or lagging its peers today.
+      if (s.sector) {
+        let sectorVal = s.sector;
+        if (d.sector_etf && typeof d.sector_etf_pct === 'number') {
+          const etfColor = d.sector_etf_pct >= 0 ? 'var(--teal)' : 'var(--pink)';
+          sectorVal = `${s.sector} <span style="font-size:9px;color:var(--dim);margin-left:6px">${d.sector_etf} <span style="color:${etfColor};font-weight:700">${d.sector_etf_pct >= 0 ? '+' : ''}${d.sector_etf_pct.toFixed(2)}%</span> today</span>`;
+        }
+        bits.push(`<div class="drawer-row"><span class="drawer-label">Sector</span><span class="drawer-val" style="font-family:inherit">${sectorVal}</span></div>`);
+      }
+      // Leader/laggard verdict — only when we have both this ticker
+      // and the sector ETF moving today. A useful one-glance answer.
+      if (typeof d.today_pct === 'number' && typeof d.sector_etf_pct === 'number') {
+        const diff = d.today_pct - d.sector_etf_pct;
+        let verdict = '', vColor = 'var(--muted)';
+        if (Math.abs(diff) < 0.15)      { verdict = 'tracking the sector';  vColor = 'var(--muted)'; }
+        else if (diff > 0)              { verdict = 'leading the sector';   vColor = 'var(--teal)';  }
+        else                            { verdict = 'lagging the sector';   vColor = 'var(--amber)'; }
+        bits.push(`<div class="drawer-row"><span class="drawer-label">vs sector</span><span class="drawer-val" style="color:${vColor};font-family:inherit">${verdict} (${diff >= 0 ? '+' : ''}${diff.toFixed(2)}%)</span></div>`);
+      }
+      if (!bits.length) {
+        snapEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">' + (d.error || 'No snapshot data available') + '</div>';
+      } else {
+        snapEl.innerHTML = bits.join('');
+      }
+    })
+    .catch(err => {
+      // Fallback: try the sparkline cache so the user sees something.
+      const tkr = (s.ticker || '').toUpperCase();
+      const bars = (window._sparklineCache || {})[tkr] || [];
+      if (bars.length) {
+        const px = bars[bars.length - 1];
+        const lo = Math.min(...bars);
+        const hi = Math.max(...bars);
+        const fb = [
+          `<div class="drawer-row"><span class="drawer-label">Current</span><span class="drawer-val">$${px.toFixed(2)}</span></div>`,
+          `<div class="drawer-row"><span class="drawer-label">12h range</span><span class="drawer-val">$${lo.toFixed(2)} – $${hi.toFixed(2)}</span></div>`,
+        ];
+        if (s.sector) fb.push(`<div class="drawer-row"><span class="drawer-label">Sector</span><span class="drawer-val" style="font-family:inherit">${s.sector}</span></div>`);
+        fb.push('<div style="margin-top:6px;font-size:9px;color:var(--dim);font-style:italic">(Daily-bar fetch failed — showing 12h cache only)</div>');
+        snapEl.innerHTML = fb.join('');
+      } else {
+        snapEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Snapshot unavailable</div>';
+      }
+    });
 
   // "If you took this" — sizing calculator at three sample weights.
   // No "buy zone / stop / target" because those would be made-up

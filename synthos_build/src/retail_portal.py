@@ -4703,7 +4703,8 @@ def api_planning():
 @login_required
 def api_ticker_news():
     """Recent news_feed articles for a single ticker — powers the
-    'Recent news' section of the planning drawer (Phase 7g, 2026-04-25).
+    'Recent news' section of the planning drawer (Phase 7g, 2026-04-25;
+    tightened in 7h to fresh-only top-10).
 
     The news pipeline already filters at ingestion time: tier-4 opinion
     sources are excluded at gate 3, and articles below MIN_CREDIBILITY /
@@ -4711,8 +4712,12 @@ def api_ticker_news():
     — no client-side declickbait pass needed.
 
     Query params:
-      ticker  — required, normalized to uppercase
-      limit   — default 15, max 30
+      ticker      — required, normalized to uppercase
+      limit       — default 10, max 20
+      since_days  — default 7, max 30. Only return articles whose
+                    created_at falls within the last N days. With 16k+
+                    rows in news_feed, "every article ever" was too many;
+                    a freshness window is what users actually want.
 
     Returns rows shaped for the drawer:
       {timestamp, headline, source, source_url, image_url, sentiment_score}
@@ -4722,9 +4727,13 @@ def api_ticker_news():
     if not ticker or not ticker.replace('.', '').replace('-', '').isalnum() or len(ticker) > 8:
         return jsonify({'articles': [], 'error': 'invalid ticker'}), 400
     try:
-        limit = max(1, min(30, int(request.args.get('limit') or 15)))
+        limit = max(1, min(20, int(request.args.get('limit') or 10)))
     except (TypeError, ValueError):
-        limit = 15
+        limit = 10
+    try:
+        since_days = max(1, min(30, int(request.args.get('since_days') or 7)))
+    except (TypeError, ValueError):
+        since_days = 7
 
     try:
         import sqlite3 as _sql
@@ -4737,8 +4746,9 @@ def api_ticker_news():
                 "SELECT id, timestamp, raw_headline, sentiment_score, source, "
                 "metadata, created_at "
                 "FROM news_feed WHERE UPPER(ticker)=? "
+                "AND created_at >= datetime('now', ?) "
                 "ORDER BY created_at DESC LIMIT ?",
-                (ticker, limit)
+                (ticker, f'-{since_days} days', limit)
             ).fetchall()
         for r in rows:
             md = {}
@@ -4755,10 +4765,168 @@ def api_ticker_news():
                 'image_url':       md.get('image_url'),
                 'sentiment_score': r['sentiment_score'],
             })
-        return jsonify({'ticker': ticker, 'articles': articles, 'count': len(articles)})
+        return jsonify({
+            'ticker': ticker, 'articles': articles, 'count': len(articles),
+            'since_days': since_days, 'limit': limit,
+        })
     except Exception as e:
         log.warning(f"/api/ticker-news error: {e}")
         return jsonify({'ticker': ticker, 'articles': [], 'error': str(e)})
+
+
+# ── /api/ticker-context support: in-process cache + sector→ETF map ──
+# Cache is an LRU-ish dict keyed by ticker, valid for 60 seconds. No
+# eviction beyond TTL because the cache is tiny in practice (one entry
+# per drawer-opened ticker). Cleared on portal restart, which is fine.
+_TICKER_CTX_CACHE = {}      # {ticker: (timestamp_epoch, payload)}
+_TICKER_CTX_TTL_SEC = 60
+
+# Subset of SECTOR_ETF_MAP from agents/news/keywords.py — kept in sync
+# manually because it's used cross-module in only this one spot. Sector
+# names are normalized lowercase before lookup.
+_SECTOR_ETF = {
+    "technology":             "XLK",
+    "defense":                "XLI",
+    "healthcare":             "XLV",
+    "energy":                 "XLE",
+    "financials":             "XLF",
+    "materials":              "XLB",
+    "industrials":            "XLI",
+    "consumer staples":       "XLP",
+    "consumer discretionary": "XLY",
+    "real estate":            "XLRE",
+    "utilities":              "XLU",
+    "communication":          "XLC",
+}
+
+
+@app.route('/api/ticker-context')
+@login_required
+def api_ticker_context():
+    """Live snapshot for a ticker — powers the planning drawer's "Live
+    snapshot" section and the approval drawer's live current price /
+    distance-from-buy-zone (Phase 7h, 2026-04-25).
+
+    Single Alpaca call returns 14 daily bars; we compute:
+      • current_price  — latest minute close (most recent bar)
+      • today_high / today_low / today_pct  — today's daily bar
+      • adr_pct        — 14-day average true daily range as % of close
+      • sector_etf     — symbol mapped from passed-in ?sector=
+      • sector_etf_pct — today's % change for that ETF (one extra call,
+                         memoized 60s)
+
+    Cached for 60s per ticker. ADR is shared market data so we use the
+    owner's ALPACA_API_KEY (same pattern as /api/sparklines), not the
+    customer's — see comment on Phase 3 sparklines fix.
+    """
+    ticker = (request.args.get('ticker') or '').strip().upper()
+    sector = (request.args.get('sector') or '').strip().lower()
+    if not ticker or not ticker.replace('.', '').replace('-', '').isalnum() or len(ticker) > 8:
+        return jsonify({'error': 'invalid ticker'}), 400
+
+    import time as _time
+    cache_key = f"{ticker}|{sector}"
+    now = _time.time()
+    cached = _TICKER_CTX_CACHE.get(cache_key)
+    if cached and (now - cached[0] < _TICKER_CTX_TTL_SEC):
+        return jsonify(cached[1])
+
+    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
+    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
+    alpaca_data_url = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets').rstrip('/')
+    if not (alpaca_key and alpaca_secret):
+        return jsonify({'ticker': ticker, 'error': 'alpaca creds unavailable'}), 503
+
+    payload = {'ticker': ticker, 'sector': sector or None}
+
+    try:
+        from datetime import datetime, timezone, timedelta
+        import requests as _req
+        # 14 trading days ≈ 22 calendar days back to be safe
+        end_dt   = datetime.now(timezone.utc) - timedelta(minutes=15)  # SIP delay
+        start_dt = end_dt - timedelta(days=22)
+
+        # Fetch daily bars for the ticker (+ optional sector ETF in same call).
+        symbols = [ticker]
+        sector_etf = _SECTOR_ETF.get(sector) if sector else None
+        if sector_etf and sector_etf != ticker:
+            symbols.append(sector_etf)
+
+        r = _req.get(
+            f"{alpaca_data_url}/v2/stocks/bars",
+            headers={'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret},
+            params={
+                'symbols':   ','.join(symbols),
+                'timeframe': '1Day',
+                'start':     start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'end':       end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'limit':     30,
+                'feed':      'iex',
+            },
+            timeout=8,
+        )
+        if r.status_code != 200:
+            log.debug(f"ticker-context fetch {ticker}: {r.status_code}")
+            return jsonify({'ticker': ticker, 'error': f'data fetch failed (HTTP {r.status_code})'}), 502
+
+        bars_by_sym = (r.json() or {}).get('bars', {}) or {}
+
+        # Primary ticker
+        ticker_bars = bars_by_sym.get(ticker, []) or []
+        if not ticker_bars:
+            payload['error'] = 'no bars for ticker'
+        else:
+            # Today's bar = newest. ADR = mean((h-l)/c) over the prior 14 bars.
+            today = ticker_bars[-1]
+            recent = ticker_bars[-15:-1] if len(ticker_bars) >= 15 else ticker_bars[:-1]
+            adr_vals = []
+            for b in recent:
+                try:
+                    h, l, c = float(b.get('h', 0)), float(b.get('l', 0)), float(b.get('c', 0))
+                    if c > 0:
+                        adr_vals.append((h - l) / c)
+                except (TypeError, ValueError):
+                    continue
+            adr_pct = (sum(adr_vals) / len(adr_vals) * 100) if adr_vals else None
+            try:
+                t_open  = float(today.get('o', 0)) or None
+                t_high  = float(today.get('h', 0)) or None
+                t_low   = float(today.get('l', 0)) or None
+                t_close = float(today.get('c', 0)) or None
+                # Day % change uses the prior-day close as denominator
+                # rather than today's open — matches how Alpaca portfolio
+                # P&L is computed and what most retail platforms display.
+                prev_close = float(ticker_bars[-2].get('c', 0)) if len(ticker_bars) >= 2 else None
+                day_pct = ((t_close - prev_close) / prev_close * 100) if (t_close and prev_close) else None
+                payload['current_price'] = round(t_close, 2) if t_close else None
+                payload['today_open']    = round(t_open, 2)  if t_open  else None
+                payload['today_high']    = round(t_high, 2)  if t_high  else None
+                payload['today_low']     = round(t_low, 2)   if t_low   else None
+                payload['today_pct']     = round(day_pct, 2) if day_pct is not None else None
+                payload['adr_pct']       = round(adr_pct, 2) if adr_pct is not None else None
+            except (TypeError, ValueError) as e:
+                log.debug(f"ticker-context parse {ticker}: {e}")
+
+        # Sector ETF context
+        if sector_etf:
+            etf_bars = bars_by_sym.get(sector_etf, []) or []
+            if len(etf_bars) >= 2:
+                try:
+                    etf_close = float(etf_bars[-1].get('c', 0))
+                    etf_prev  = float(etf_bars[-2].get('c', 0))
+                    if etf_prev > 0:
+                        etf_pct = (etf_close - etf_prev) / etf_prev * 100
+                        payload['sector_etf']     = sector_etf
+                        payload['sector_etf_pct'] = round(etf_pct, 2)
+                except (TypeError, ValueError):
+                    pass
+
+        _TICKER_CTX_CACHE[cache_key] = (now, payload)
+        return jsonify(payload)
+
+    except Exception as e:
+        log.warning(f"/api/ticker-context error: {e}")
+        return jsonify({'ticker': ticker, 'error': str(e)}), 500
 
 
 @app.route('/api/screening')
