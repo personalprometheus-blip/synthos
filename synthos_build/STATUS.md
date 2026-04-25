@@ -5,16 +5,18 @@
 > blockers that existed then. Everything below is preserved for
 > audit trail; none of it is the live state of the system.
 >
-> **Current state (2026-04-24):** The retail Pi 5 is deployed and
+> **Current state (2026-04-25):** The retail Pi 5 is deployed and
 > running on NVMe storage; the trading stack is in Phase 6 paper mode
-> with Phase C refactor and a full sentiment-chain wiring audit
-> already landed. The single source of truth for running agents,
-> services, cron schedules, data flow, and known issues is:
+> with Phase C refactor, full sentiment-chain wiring audit, and
+> pre-launch security audit complete. The single source of truth for
+> running agents, services, cron schedules, data flow, and known
+> issues is:
 >
-> - `data/system_architecture.json` (v3.12, living document)
+> - `data/system_architecture.json` (v3.13, living document)
 > - `docs/pipeline_audit_2026-04-24.md` (producer→consumer trace)
 > - `docs/trade_lifecycle.md` (per-trade decision path)
 > - `docs/backlog.md` (deferred work with entry conditions)
+> - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
 > - pi5 16GB deployed to NVMe (2026-04-18)
@@ -24,6 +26,16 @@
 > - Pipeline audit Gaps 1-3 wired (2026-04-24): validator verdict
 >   consumed by Gate 1, `_MARKET_STATE_SCORE` in Gate 5 composite,
 >   real fill price via `_resolve_fill_price`
+> - Pre-launch security audit (2026-04-24/25): closed 2 CRITICAL +
+>   2 HIGH customer→admin escalation paths; added /reset-password
+>   handler (forgot-password was broken); persistent login rate
+>   limiter (login_attempts table); two-step verify-new-email flow
+>   (pending_email_changes table); server-side credential-rotation
+>   revocation; Phase 4.5 file-upload audit 21/21 customer-side pass
+> - Attribution patch enforcement (2026-04-25): TICKER_REMAP +
+>   TICKER_REJECT flipped to True after 4.5-day shadow review
+> - Bonus bugfix (2026-04-25): auth.py state/zip_code migration
+>   entries had been silently broken since 2026-04-13
 >
 > **REPO IDENTITY:** `personalprometheus-blip/synthos` — local: `/home/pi/synthos/synthos_build/`
 > **This repo owns:** retail_node (Pi 5) — trading agents, portal, signals.db, ingestion pipeline
