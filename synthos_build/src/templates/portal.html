@@ -1883,7 +1883,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
     <div class="stat-card amber">
       <div class="stat-label">Agent Mode</div>
-      <div style="font-size:13px;font-weight:700;margin-top:4px;font-family:var(--mono)" id="mode-display">Loading</div>
+      <div style="display:flex;align-items:center;gap:7px;margin-top:4px">
+        <!-- Bot active dot — set by loadLiveStatus():
+             green = running, red = halted, amber = market closed/passive.
+             7px solid dot with halo. -->
+        <span id="bot-status-dot" title="Bot status"
+              style="width:8px;height:8px;border-radius:50%;flex-shrink:0;
+                     background:var(--muted);box-shadow:0 0 4px rgba(255,255,255,0.15);
+                     transition:background 0.3s, box-shadow 0.3s"></span>
+        <div style="font-size:13px;font-weight:700;font-family:var(--mono)" id="mode-display">Loading</div>
+      </div>
       <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="graph-tab" style="font-size:9px;padding:2px 10px" onclick="toggleMode()">Switch Mode</button>
         <button class="graph-tab" id="halt-agent-btn" style="font-size:9px;padding:2px 10px;border-color:rgba(245,166,35,0.4);color:var(--amber)" onclick="openHaltReason('activate',event)">Halt Agent</button>
@@ -3783,15 +3792,24 @@ function openPositionDrawer(p) {
     }
   }
 
-  // Trade info
+  // Trade info — Signal Trust widget at top, then ancillary fields below.
+  // entry_signal_score on positions is a 0..1 float; multiply by 100 for
+  // the 0-100 trust scale used by renderSignalTrust().
   var infoEl = document.getElementById('dr-trade-info');
   if (infoEl) {
+    var trustHtml = '';
+    if (p.entry_signal_score != null) {
+      var t = Math.round(parseFloat(p.entry_signal_score) * 100);
+      trustHtml = renderSignalTrust(t);
+    }
     var lines = [];
-    if (p.entry_signal_score) lines.push('Confidence: ' + p.entry_signal_score);
     if (p.vol_bucket) lines.push('Volatility: ' + p.vol_bucket);
-    if (p.opened_at) lines.push('Opened: ' + (p.opened_at||'').slice(0,16).replace('T',' '));
+    if (p.opened_at)  lines.push('Opened: ' + (p.opened_at||'').slice(0,16).replace('T',' '));
     if (p.exit_reason) lines.push('Exit: ' + p.exit_reason);
-    infoEl.innerHTML = lines.map(function(l) { return '<div style="padding:2px 0">' + l + '</div>'; }).join('') || '<div style="color:var(--dim)">—</div>';
+    var linesHtml = lines.length
+      ? lines.map(function(l) { return '<div style="padding:2px 0">' + l + '</div>'; }).join('')
+      : '';
+    infoEl.innerHTML = trustHtml + linesHtml || '<div style="color:var(--dim)">—</div>';
   }
 
   document.getElementById('drawer-overlay').classList.add('open');
@@ -4643,7 +4661,7 @@ function renderPositions(positions) {
         ${(p.ticker||'?').slice(0,4)}
       </div>
       <div style="min-width:0">
-        <div style="display:flex;align-items:center;gap:5px">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
           <span style="font-size:12px;font-weight:700;color:var(--text)">${p.ticker||'?'}</span>
           <span class="spark-slot" data-ticker="${(p.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>
           ${(function(){
@@ -4663,6 +4681,28 @@ function renderPositions(positions) {
                  + 'background:' + c.bg + ';border:1px solid ' + c.bd + ';color:' + c.fg + '">' + c.label + '</span>';
           })()}
           ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:#f5a623">ORPHAN</span>' : ''}
+          ${isOrphan ? '' : (function(){
+            // Lock chip — themed pill matching pattern badges. Always visible
+            // so the unlocked state is discoverable; locked is amber + bright,
+            // unlocked is muted + dim. Click toggles sticky=user. (Moved
+            // inline from the right-side Mgmt column 2026-04-25.)
+            const isSticky = (p.sticky === 'user');
+            const lockGlyph = isSticky ? '\u{1F512}' : '\u{1F513}';
+            const fg = isSticky ? '#f5a623' : 'var(--muted)';
+            const bg = isSticky ? 'rgba(245,166,35,0.10)' : 'rgba(255,255,255,0.03)';
+            const bd = isSticky ? 'rgba(245,166,35,0.30)' : 'rgba(255,255,255,0.10)';
+            const label = isSticky ? 'LOCKED' : 'AUTO';
+            const opacity = isSticky ? '1' : '0.55';
+            const title = isSticky
+              ? 'Sticky USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
+              : 'Click to lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker.';
+            return '<span onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky?'true':'false') + ',event)" '
+                 + 'title="' + title + '" '
+                 + 'style="padding:1px 6px 1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;'
+                 + 'cursor:pointer;display:inline-flex;align-items:center;gap:3px;opacity:' + opacity + ';'
+                 + 'background:' + bg + ';border:1px solid ' + bd + ';color:' + fg + '">'
+                 + '<span style="font-size:9px;line-height:1">' + lockGlyph + '</span>' + label + '</span>';
+          })()}
         </div>
         <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap">
@@ -4699,25 +4739,13 @@ function renderPositions(positions) {
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
-      <div style="text-align:right;min-width:54px;display:flex;flex-direction:column;gap:3px;align-items:flex-end" title="${toggleTitle}">
+      <div style="text-align:right;min-width:54px" title="${toggleTitle}">
         <div ${toggleOnClick}
              style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
                     background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
                     cursor:${cursorStyle};opacity:${opacity};text-align:center;min-width:40px">
           ${tagLabel}
         </div>
-        ${isOrphan ? '' : (function(){
-          const isSticky = (p.sticky === 'user');
-          const lockIcon = isSticky ? '\u{1F512}' : '\u{1F513}';  // 🔒 vs 🔓
-          const lockColor = isSticky ? 'rgba(245,166,35,1)' : 'var(--muted)';
-          const lockTitle = isSticky
-            ? 'Sticky USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
-            : 'Lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker';
-          return '<div onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky ? 'true' : 'false') + ',event)" '
-               + 'title="' + lockTitle + '" '
-               + 'style="font-size:11px;cursor:pointer;padding:1px 3px;opacity:' + (isSticky ? '1' : '0.45') + ';color:' + lockColor + '">'
-               + lockIcon + '</div>';
-        })()}
       </div>
     </div>`;
   };
@@ -5068,6 +5096,37 @@ async function loadLiveStatus() {
       const m = s.operating_mode || 'MANAGED';
       modeEl.textContent = m;
       modeEl.style.color = m === 'AUTOMATIC' ? 'var(--amber)' : 'var(--teal)';
+    }
+    // Bot Active dot — green/red/amber per state. Re-evaluated every poll
+    // so it tracks halt/unhalt and after-hours transitions live.
+    const dotEl = document.getElementById('bot-status-dot');
+    if (dotEl) {
+      const halt = window._lastHaltStatus;
+      const isHalted = !!(halt && (halt.customer_active || halt.admin_active));
+      // Detect market hours from session timeline data we already have:
+      // 9:30 ET (mins=570) → 16:00 ET (mins=960), Mon-Fri.
+      let isMarketHours = false;
+      try {
+        const etStr = new Date().toLocaleString('en-US', {timeZone:'America/New_York'});
+        const et = new Date(etStr);
+        const mins = et.getHours() * 60 + et.getMinutes();
+        const day  = et.getDay();
+        isMarketHours = (day !== 0 && day !== 6 && mins >= 570 && mins < 960);
+      } catch(e) {}
+      let color, halo, label;
+      if (isHalted) {
+        color = 'var(--pink)'; halo = 'rgba(255,75,110,0.6)';
+        label = 'HALTED — bot is paused';
+      } else if (isMarketHours) {
+        color = 'var(--teal)'; halo = 'rgba(0,245,212,0.6)';
+        label = 'ACTIVE — bot is running';
+      } else {
+        color = 'var(--amber)'; halo = 'rgba(245,166,35,0.4)';
+        label = 'PASSIVE — market closed';
+      }
+      dotEl.style.background = color;
+      dotEl.style.boxShadow  = '0 0 6px ' + halo;
+      dotEl.title = label;
     }
     const hbAge = document.getElementById('stat-hb-age');
     if (hbAge && s.last_heartbeat) {
@@ -5607,6 +5666,55 @@ function _drawSparkline(canvasId, values, color) {
 
 // updateHeroCards removed — heroes now built inline by renderIntelGrid
 
+// ── SIGNAL TRUST WIDGET (added 2026-04-25) ─────────────────────────
+// Single, reusable visualization for "how confident are we in the
+// information's validity" — NOT a buy recommendation. Replaces the
+// three internal scores (Synthos Score / Market Alignment / Sentiment
+// Score) that previously leaked our scoring methodology.
+//
+// Score 0-100 → 5-bar meter + bucket label.
+//   90+   VERY HIGH  (5 bars, teal)
+//   75-89 HIGH       (4 bars, teal)
+//   50-74 MEDIUM     (3 bars, amber)
+//   25-49 LOW        (2 bars, muted)
+//   0-24  NOISE      (1 bar,  dim)
+function renderSignalTrust(score100, opts) {
+  const s = Math.max(0, Math.min(100, Math.round(score100 || 0)));
+  const buckets = [
+    {min:90, label:'VERY HIGH', color:'var(--teal)',  rgb:'0,245,212',   bars:5},
+    {min:75, label:'HIGH',      color:'var(--teal)',  rgb:'0,245,212',   bars:4},
+    {min:50, label:'MEDIUM',    color:'var(--amber)', rgb:'245,166,35',  bars:3},
+    {min:25, label:'LOW',       color:'var(--muted)', rgb:'190,200,217', bars:2},
+    {min:0,  label:'NOISE',     color:'var(--dim)',   rgb:'120,130,150', bars:1},
+  ];
+  const b = buckets.find(x => s >= x.min);
+  const segs = Array.from({length:5}, (_,i) =>
+    `<span style="display:inline-block;width:5px;height:13px;border-radius:1px;`
+    + `background:${i < b.bars ? b.color : 'rgba(255,255,255,0.07)'}"></span>`
+  ).join('');
+  const compact = opts && opts.compact;
+  if (compact) {
+    return `<span title="Signal Trust: how confident we are in this information's validity (not a buy recommendation)" `
+      + `style="display:inline-flex;align-items:center;gap:4px">`
+      + `<span style="display:inline-flex;gap:2px">${segs}</span>`
+      + `<span style="font-family:var(--mono);font-size:10px;font-weight:700;color:${b.color}">${s}</span>`
+      + `</span>`;
+  }
+  return `
+    <div title="Signal Trust: how confident we are in this information's validity. This is NOT a buy recommendation."
+         style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;
+                background:rgba(${b.rgb},0.06);border:1px solid rgba(${b.rgb},0.20);margin-bottom:10px">
+      <div style="font-size:9px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;color:var(--muted)">Signal Trust</div>
+      <div style="display:flex;gap:2px;align-items:center">${segs}</div>
+      <div style="font-family:var(--mono);font-size:14px;font-weight:800;color:${b.color}">${s}</div>
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:${b.color}">${b.label}</div>
+      <div style="margin-left:auto;font-size:8px;color:var(--dim);font-style:italic;text-align:right;max-width:120px;line-height:1.3">
+        Validity score · not a buy signal
+      </div>
+    </div>
+  `;
+}
+
 function openSigModal(s) {
   const colors = {HIGH:'rgba(0,245,212,0.09)',MEDIUM:'rgba(123,97,255,0.09)',LOW:'rgba(245,166,35,0.15)',NOISE:'rgba(85,86,102,0.2)'};
   const conf = (s.confidence||'NOISE').toUpperCase();
@@ -5616,17 +5724,19 @@ function openSigModal(s) {
   icon.style.color = conf==='HIGH'?'var(--teal)':conf==='MEDIUM'?'var(--purple)':conf==='LOW'?'var(--amber)':'var(--muted)';
   document.getElementById('smi-headline').textContent = s.headline||'No headline';
   document.getElementById('smi-source').textContent = (s.source||'Unknown source') + ' · ' + (s.disc_date||'').slice(0,10);
-  const ascore = s.confidence==='HIGH'?87:s.confidence==='MEDIUM'?63:s.confidence==='LOW'?30:15;
-  const aAdj = Math.min(99,Math.max(5,ascore + (s.sentiment_score ? Math.round(Math.abs(s.sentiment_score)*20):0)));
-  const mAdj = Math.min(99,Math.max(5,aAdj - 8 + (s.is_stale?-12:s.corroborated?8:0)));
+  // Single derived 0-100 trust score. Same derivation logic as before
+  // (confidence bucket → base; sentiment magnitude bumps up; stale
+  // pushes down; corroborated pushes up) but presented as one number
+  // instead of three separate "Synthos / Alignment / Sentiment" rows.
+  const baseScore = s.confidence==='HIGH'?87:s.confidence==='MEDIUM'?63:s.confidence==='LOW'?30:15;
+  const sentBump  = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score)*15) : 0;
+  const adjust    = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
+  const trust     = Math.min(99, Math.max(5, baseScore + sentBump + adjust));
   document.getElementById('smi-body').innerHTML = `
-    <div class="sig-modal-row"><span class="sig-modal-label">Signal</span><span class="sig-modal-val">${conf}</span></div>
+    ${renderSignalTrust(trust)}
     <div class="sig-modal-row"><span class="sig-modal-label">Ticker</span><span class="sig-modal-val">${s.ticker||'Unresolved'}</span></div>
     <div class="sig-modal-row"><span class="sig-modal-label">Politician</span><span class="sig-modal-val">${s.politician||'—'}</span></div>
     <div class="sig-modal-row"><span class="sig-modal-label">Staleness</span><span class="sig-modal-val">${s.staleness||'unknown'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Sentiment Score</span><span class="sig-modal-val">${s.sentiment_score != null ? s.sentiment_score.toFixed(3) : '—'}</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Synthos Score</span><span class="sig-modal-val">${aAdj}/100</span></div>
-    <div class="sig-modal-row"><span class="sig-modal-label">Market Alignment</span><span class="sig-modal-val">${mAdj}/100</span></div>
     <div class="sig-modal-row"><span class="sig-modal-label">Status</span><span class="sig-modal-val">${s.is_stale?'Archive (stale)':s.corroborated?'Corroborated':'Active'}</span></div>
     <div class="sig-modal-row"><span class="sig-modal-label">Source</span><span class="sig-modal-val">${s.source||'—'}</span></div>
     <div class="sig-modal-row"><span class="sig-modal-label">Detected</span><span class="sig-modal-val">${(s.created_at||'').slice(0,16)}</span></div>
@@ -5919,16 +6029,19 @@ async function loadTraderActivity() {
       return;
     }
 
-    // Outcome classifier. "Protective" wins over win/loss for the LABEL —
-    // it's how the trade was closed, not the dollar result. A stop-loss can
-    // still be a small win. Icon + badge word use this color.
+    // Outcome classifier — TRUTH-IN-ADVERTISING (rev 2026-04-25).
+    // Outcome is ALWAYS based on the realized P&L sign, never on the exit
+    // reason. A trailing stop that fired at +$50 locked in a gain — that's
+    // a WIN. A trailing stop that fired at -$30 is a LOSS. The exit
+    // mechanism is shown separately as a sub-label (reasonLabel) so the
+    // user can see *how* it closed without conflating that with whether
+    // they made money. Previous version classified all stop-related
+    // exits as "PROTECTIVE" regardless of P&L which obscured profitable
+    // exits.
     const classify = (t) => {
-      const reason = (t.exit_reason || '').toLowerCase();
-      if (/(stop|protect|trail|safety)/.test(reason)) {
-        return { outcome: 'PROTECTIVE', color: 'var(--amber)', rgb: '245,166,35' };
-      }
-      if (t.pnl > 0)  return { outcome: 'WIN',  color: 'var(--teal)', rgb: '0,245,212' };
-      if (t.pnl < 0)  return { outcome: 'LOSS', color: 'var(--pink)', rgb: '255,75,110' };
+      const pnl = t.pnl || 0;
+      if (pnl > 0)  return { outcome: 'WIN',  color: 'var(--teal)', rgb: '0,245,212' };
+      if (pnl < 0)  return { outcome: 'LOSS', color: 'var(--pink)', rgb: '255,75,110' };
       return { outcome: 'EVEN', color: 'var(--muted)', rgb: '255,255,255' };
     };
 
