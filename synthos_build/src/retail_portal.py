@@ -5946,6 +5946,18 @@ def api_logs_audit():
         # session attempts to flip TRADING_MODE; the gate blocks it
         # because admin=False. Pre-launch security audit verified.
         _re.compile(r'\[ADMIN_OVERRIDE\]\s+POST denied', _re.I),
+        # Watchdog auto-restart of the interrogation listener — this
+        # is what the watchdog is supposed to do (recovery), but it
+        # logs a WARNING that surfaces on the dashboard. Not actionable
+        # at the dashboard level.
+        _re.compile(r'WARNING\s+watchdog:\s+Interrogation not running',
+                    _re.I),
+        # Heartbeat POST failed to company server — transient network
+        # blips. The heartbeat retries on its next tick and the
+        # company_sentinel detects sustained silence from its side.
+        # Single-shot warnings here are diagnostic-only.
+        _re.compile(r'WARNING\s+heartbeat:\s+\[HB\]\s+POST failed', _re.I),
+        _re.compile(r'\[HB\]\s+POST failed:.*Max retries exceeded', _re.I),
         # Sentiment-agent / price-poller generic retry/unavailable
         # warnings — same family.
         _re.compile(r'WARNING.*\b(?:retry|failed|unavailable)\b.*'
