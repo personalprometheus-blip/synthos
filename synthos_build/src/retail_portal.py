@@ -1336,8 +1336,13 @@ def _verify_stripe_signature(payload, sig_header):
     import time as _time
 
     if not STRIPE_WEBHOOK_SECRET:
+        # Return 503 (Service Unavailable) instead of 500 — this is a
+        # configuration state, not a server fault. Stripe retries on 5xx
+        # but treats 503 + a Retry-After hint correctly. The 401/403
+        # alternatives would tell an attacker the endpoint exists but
+        # is misconfigured; 503 is more honest about the actual state.
         log.error("Stripe webhook received but STRIPE_WEBHOOK_SECRET not set — rejecting")
-        return jsonify({"error": "webhook secret not configured"}), 500
+        return jsonify({"error": "webhook handler not configured"}), 503
 
     try:
         parts     = {k: v for k, v in (p.split('=', 1) for p in sig_header.split(',')
@@ -5001,9 +5006,14 @@ def api_logs_audit():
     })
 
 @app.route('/api/audit')
-@login_required
+@admin_required
 def api_audit():
-    """Latest audit result from agent4_audit.py."""
+    """Latest audit result from agent4_audit.py.
+
+    Admin-only — leaks system-level audit findings (file paths, log lines,
+    severity tags) which are infrastructure recon for an attacker. Was
+    previously @login_required, fixed 2026-04-24 (Phase 4 of security audit).
+    """
     audit_path = os.path.join(PROJECT_DIR, '.audit_latest.json')
     try:
         data = json.load(open(audit_path))
