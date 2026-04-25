@@ -1097,17 +1097,32 @@ def fetch_and_store_alpaca_display_news(db) -> int:
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         return 0
 
-    # Pull last-24h stored headlines for dedup
+    # Pull last-24h stored headlines AND URLs for dedup. Phase 7L
+    # 2026-04-25: added URL-based dedup as the primary check after
+    # observing Benzinga reposts with near-identical headlines slipping
+    # past the 0.70 Jaccard threshold. Same article from the same URL
+    # should always dedup regardless of headline phrasing drift; Jaccard
+    # remains as a backup for republishes via redirect / aggregator URL.
+    # Threshold tightened from 0.70 → 0.55 to catch near-paraphrases.
     stored_keys: list[str] = []
+    stored_urls: set = set()
     try:
         with db.conn() as c:
             rows = c.execute("""
-                SELECT raw_headline FROM news_feed
+                SELECT raw_headline, metadata FROM news_feed
                 WHERE source='NEWS'
                   AND created_at >= datetime('now','-24 hours')
             """).fetchall()
-        stored_keys = [re.sub(r'[^a-z0-9 ]', '', (r[0] or "").lower()).strip()
-                       for r in rows if r[0]]
+        for r in rows:
+            if r[0]:
+                stored_keys.append(re.sub(r'[^a-z0-9 ]', '', r[0].lower()).strip())
+            try:
+                m = json.loads(r[1] or '{}')
+                link = (m.get('link') or '').strip().lower()
+                if link:
+                    stored_urls.add(link)
+            except (TypeError, ValueError):
+                pass
     except Exception as e:
         # If dedup lookup fails we'll re-store duplicates this run —
         # surface the reason so we notice if it starts happening.
@@ -1126,13 +1141,22 @@ def fetch_and_store_alpaca_display_news(db) -> int:
         title = item["headline"]
         if not title:
             continue
+        # URL-based dedup (primary). Same source URL = same article.
+        url = (item.get('source_url') or '').strip().lower()
+        if url and url in stored_urls:
+            continue
         key = re.sub(r'[^a-z0-9 ]', '', title.lower()).strip()
         if not key:
             continue
-        # Skip if >70% similar to anything already stored
-        if any(_jaccard(key, sk) > 0.70 for sk in stored_keys):
+        # Headline Jaccard (backup) at tightened 0.55 threshold —
+        # was 0.70 which let near-paraphrases past. Together with the
+        # URL check, Benzinga reposts that drop subhead clauses are
+        # now caught.
+        if any(_jaccard(key, sk) > 0.55 for sk in stored_keys):
             continue
         stored_keys.append(key)
+        if url:
+            stored_urls.add(url)
         try:
             db.write_news_feed_entry(
                 congress_member = "",
