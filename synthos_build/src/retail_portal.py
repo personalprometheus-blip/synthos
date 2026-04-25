@@ -3943,10 +3943,14 @@ def api_sparklines():
         return jsonify({}), 500
 
     alpaca_data_url = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
-    alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
+    # Use OWNER's Alpaca creds for the bar fetch — sparkline data is shared
+    # market data (not customer-specific), so non-Alpaca-credentialed
+    # customers should still see sparklines on the dashboard.
+    alpaca_key    = os.environ.get('ALPACA_API_KEY', '')
+    alpaca_secret = os.environ.get('ALPACA_SECRET_KEY', '')
     if not alpaca_key:
-        # No creds — best-effort: return what's in cache
-        log.debug("sparklines: no Alpaca creds, serving from cache only")
+        # No owner creds — best-effort: return what's in cache
+        log.debug("sparklines: no owner Alpaca creds, serving from cache only")
 
     # RTH check helper — Alpaca bars are timestamped UTC ISO strings.
     # Convert to ET and check 9:30 <= time < 16:00 on weekday.
