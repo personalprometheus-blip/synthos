@@ -1021,39 +1021,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 }
 
 /* ═══════ Dashboard cards added 2026-04-25 ═══════
-   Three new strip-style cards on the dashboard:
-     • #regime-strip  — Bot / Regime / Market State / SPY / Validator / Last Decision
+   Two strip-style cards on the dashboard (the original Regime Strip
+   was retired 2026-04-25 — its SPY/Validator/Last-decision cells were
+   re-homed into the Agent Status card; Bot/Regime/Market State were
+   already shown there, so the strip became redundant):
      • #flow-strip    — Today: Entries / Exits / Day P&L / vs SPY / Decisions
      • #idle-card     — "Why isn't the bot trading?" (conditional, hidden until populated)
-   All driven by /api/dashboard-data on the existing poll cadence. */
-.regime-strip{
-  display:flex;align-items:center;gap:0;
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:8px 14px;
-  font-family:var(--mono);font-size:11px;
-  margin-bottom:14px;flex-wrap:wrap;
-}
-.regime-strip .cell{
-  display:flex;align-items:center;gap:8px;
-  padding:0 14px;border-right:1px solid var(--border);
-}
-.regime-strip .cell:last-child{border-right:0}
-.regime-strip .cell:first-child{padding-left:0}
-.regime-strip .lbl{color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase}
-.regime-strip .val{color:var(--text);font-weight:700;letter-spacing:0.04em}
-.regime-strip .val.bull{color:var(--teal)}
-.regime-strip .val.bear{color:var(--pink)}
-.regime-strip .val.neutral{color:var(--amber)}
-.regime-strip .pulse{
-  width:7px;height:7px;border-radius:50%;background:var(--teal);
-  box-shadow:0 0 6px var(--teal);
-  animation:rs-pulse 2s ease-in-out infinite;
-}
-.regime-strip .pulse.halted{background:var(--pink);box-shadow:0 0 6px var(--pink);animation:none}
-@keyframes rs-pulse{50%{opacity:0.4;transform:scale(0.8)}}
-
+   Both driven by /api/dashboard-data on the existing poll cadence. */
 .flow-strip{
   display:flex;align-items:center;gap:0;
   background:var(--surface);
@@ -1832,8 +1806,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div class="ap-status-strip">
       <span class="ap-persona" id="ap-persona">Synthos</span><span class="ap-action-prefix"> is </span><span class="ap-action" id="ap-action">on watch</span><span class="ap-sep"> · </span><span class="ap-aside" id="ap-aside">the tape is quiet</span>
     </div>
-    <!-- STATUS DETAILS (bottom) -->
-    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;border-top:1px solid var(--border)">
+    <!-- STATUS DETAILS (bottom) — 2 rows × 3 cols.
+         Row 1: existing big-number telemetry. Row 2: SPY% / Validator / Last
+         decision (re-homed from the now-deleted Regime Strip on 2026-04-25). -->
+    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 12px;border-top:1px solid var(--border)">
       <div style="text-align:center">
         <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
         <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
@@ -1846,21 +1822,24 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
         <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
       </div>
+      <!-- ROW 2 — compact telemetry -->
+      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)">
+        <div style="font-size:11px;font-weight:700;font-family:var(--mono)" id="ap-spy">—</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">SPY today</div>
+      </div>
+      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)">
+        <div style="font-size:11px;font-weight:700;font-family:var(--mono)" id="ap-validator">—</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Validator</div>
+      </div>
+      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)" title="Time of bot's most recent decision (any agent)">
+        <div style="font-size:11px;font-weight:700;font-family:var(--mono);color:var(--muted)" id="ap-last-decision">—</div>
+        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Last decision</div>
+      </div>
     </div>
   </div>
 
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
   <div id="user-warnings-banner"></div>
-
-  <!-- MARKET REGIME STRIP — populated by /api/dashboard-data; added 2026-04-25 -->
-  <div class="regime-strip" id="regime-strip" role="region" aria-label="Market regime">
-    <div class="cell"><div class="pulse" id="rs-pulse"></div><span class="lbl">Bot</span><span class="val" id="rs-bot">—</span></div>
-    <div class="cell"><span class="lbl">Regime</span><span class="val" id="rs-regime">—</span></div>
-    <div class="cell"><span class="lbl">Market State</span><span class="val" id="rs-mstate">—</span></div>
-    <div class="cell"><span class="lbl">SPY</span><span class="val" id="rs-spy">—</span></div>
-    <div class="cell"><span class="lbl">Validator</span><span class="val" id="rs-validator">—</span></div>
-    <div class="cell" style="margin-left:auto;border-right:0"><span class="lbl">Last decision</span><span class="val" id="rs-last">—</span></div>
-  </div>
 
   <!-- OPEN POSITIONS -->
   <div class="glass teal-glow" style="margin-bottom:14px">
@@ -1869,7 +1848,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
       <div id="positions-count" class="dash-panel-sub">0 open</div>
       <div class="dash-panel-right" id="positions-refresh-ts"></div>
     </div>
-    <div id="positions-list" style="height:300px;overflow-y:auto">
+    <div id="positions-list" style="min-height:60px;max-height:420px;overflow-y:auto">
       <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
     </div>
   </div>
@@ -4805,19 +4784,68 @@ function renderApprovals(approvals) {
     html += pending.map(t => {
       const conf    = (t.confidence||'').toUpperCase();
       const confCls = conf === 'HIGH' ? 'conf-high' : conf === 'MEDIUM' ? 'conf-med' : 'conf-low';
-      const reasoning = t.reasoning ? t.reasoning.slice(0,180) + (t.reasoning.length > 180 ? '...' : '') : '';
-      const price   = t.price ? ` · $${parseFloat(t.price).toFixed(2)}` : '';
-      const shares  = t.shares ? ` · ${parseFloat(t.shares).toFixed(4)} sh` : '';
+      // Trade-plan line: entry zone (±0.3% buffer for manual broker latency),
+      // stop loss (price - trail_amt), profit target (2:1 R:R = price + 2*trail_amt).
+      // All computed client-side from existing approval fields. If trail_amt
+      // is missing/zero, plan line is suppressed entirely.
+      const px = parseFloat(t.price);
+      const trail = parseFloat(t.trail_amt);
+      let planLine = '';
+      if (px > 0) {
+        const lo = (px * 0.997).toFixed(2);
+        const hi = (px * 1.003).toFixed(2);
+        let bits = [`<span style="color:var(--teal);font-weight:700">Buy zone $${lo}–$${hi}</span>`];
+        if (trail > 0) {
+          const stop   = (px - trail).toFixed(2);
+          const target = (px + 2*trail).toFixed(2);
+          const stopPct   = ((trail/px)*100).toFixed(1);
+          const targetPct = ((2*trail/px)*100).toFixed(1);
+          bits.push(`<span style="color:var(--pink)">Stop $${stop} (−${stopPct}%)</span>`);
+          bits.push(`<span style="color:var(--teal)">Target $${target} (+${targetPct}%)</span>`);
+        }
+        planLine = `<div style="font-size:10px;font-family:var(--mono);padding:5px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center">${bits.join('<span style="opacity:0.4">·</span>')}</div>`;
+      }
+      // Pattern badge — same palette as Open Positions row, for consistency
+      const pat = (t.entry_pattern||'').toUpperCase();
+      const patPalette = {
+        MOMENTUM:       {fg:'#00f5d4', bg:'rgba(0,245,212,0.10)', bd:'rgba(0,245,212,0.30)', label:'MOMO'},
+        BREAKOUT:       {fg:'#7b61ff', bg:'rgba(123,97,255,0.12)', bd:'rgba(123,97,255,0.30)', label:'BRKO'},
+        MEAN_REVERSION: {fg:'#22d3ee', bg:'rgba(34,211,238,0.10)',  bd:'rgba(34,211,238,0.30)', label:'MEAN'},
+        PULLBACK:       {fg:'#a78bfa', bg:'rgba(167,139,250,0.10)', bd:'rgba(167,139,250,0.30)', label:'PULL'},
+        RESERVE:        {fg:'#f5a623', bg:'rgba(245,166,35,0.10)',  bd:'rgba(245,166,35,0.30)', label:'RSRV'},
+      };
+      const pp = patPalette[pat];
+      const patBadge = pp
+        ? `<span title="Entry pattern: ${pat}" style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;background:${pp.bg};border:1px solid ${pp.bd};color:${pp.fg};margin-left:6px">${pp.label}</span>`
+        : '';
+      // Thesis line: prefer the news headline (one human-readable sentence)
+      // over the bot's own structured reasoning string. Headline is what
+      // a manual trader would actually want as the "why" — it's the source
+      // event that triggered the signal. Fall back to reasoning's first
+      // segment if no headline.
+      let thesis = '';
+      if (t.headline) {
+        thesis = t.headline.length > 120 ? t.headline.slice(0,117) + '…' : t.headline;
+      } else if (t.reasoning) {
+        const firstSeg = t.reasoning.split('|')[0].trim();
+        thesis = firstSeg.length > 120 ? firstSeg.slice(0,117) + '…' : firstSeg;
+      }
+      const thesisLine = thesis
+        ? `<div style="font-size:10px;color:var(--muted);font-style:italic;padding:4px 0;line-height:1.4">"${thesis}"</div>`
+        : '';
+      const shares  = t.shares ? `${parseFloat(t.shares).toFixed(4)} sh` : '';
+      const cost    = (px > 0 && t.shares) ? `≈ $${(px * parseFloat(t.shares)).toFixed(2)}` : '';
       return `<div class="trade-item">
         <div class="trade-header">
           <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
           <div class="trade-meta">
-            <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span> · ${t.politician||'Unknown'}</div>
-            <div class="trade-sub">${(t.queued_at||'').slice(0,16)}${price}${shares}</div>
+            <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>${patBadge} · ${t.politician||'Unknown'}</div>
+            <div class="trade-sub">${(t.queued_at||'').slice(0,16)}${shares ? ' · '+shares : ''}${cost ? ' '+cost : ''}</div>
           </div>
           <div class="conf-chip ${confCls}">${conf}</div>
         </div>
-        ${reasoning ? `<div class="trade-reasoning">${reasoning}</div>` : ''}
+        ${planLine}
+        ${thesisLine}
         <input id="memo-${t.id}" placeholder="Add memo (optional)" style="width:100%;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.03);color:var(--text);font-size:10px;font-family:var(--mono);margin-bottom:6px;outline:none">
         <div class="trade-actions">
           <button class="btn-approve" onclick="actionTrade(${t.id},'APPROVED')">✓ Approve</button>
@@ -5159,8 +5187,10 @@ async function loadLiveStatus() {
 }
 
 // ── DASHBOARD STRIPS (added 2026-04-25) ───────────────────────────
-// Populates 3 dashboard cards from /api/dashboard-data:
-//   • #regime-strip  — Bot / Regime / Market State / SPY / Validator / Last Decision
+// Populates dashboard cards from /api/dashboard-data:
+//   • Agent Status footer row 2 — SPY% / Validator / Last decision
+//     (re-homed from the original Regime Strip retired 2026-04-25;
+//      Bot/Regime/Market State were redundant with the persona + #ap-regime)
 //   • #flow-strip    — Today: Entries / Exits / Day P&L / vs SPY / Decisions
 //   • #idle-card     — Why isn't the bot trading? (conditional, hidden when idle=null)
 // Same poll cadence as loadLiveStatus (called from the same setInterval).
@@ -5172,67 +5202,36 @@ async function loadDashboardData() {
     if (!r.ok) return;
     const d = await r.json();
 
-    // ── Regime strip ──
+    // ── Agent Status row 2 (re-homed from deleted Regime Strip 2026-04-25) ──
+    // The Regime Strip used to show Bot/Regime/Market State/SPY/Validator/Last
+    // decision but Bot+Regime+Market State are already shown elsewhere on the
+    // Agent Status card (persona strip + #ap-regime). The 3 unique fields —
+    // SPY%, Validator, Last decision — now live in the Agent Status footer.
     const reg = d.regime || {};
-    const set = (id, txt, cls) => {
+    const setColored = (id, txt, cls) => {
       const el = document.getElementById(id);
       if (!el) return;
       if (txt !== undefined && txt !== null) el.textContent = txt;
-      // Reset color class then apply if provided
-      el.classList.remove('bull','bear','neutral','gain','loss');
+      el.classList.remove('gain','loss','go','nogo','caution');
       if (cls) el.classList.add(cls);
+      el.style.color = '';  // clear any inline color so class wins
+      if (cls === 'gain' || cls === 'go')  el.style.color = 'var(--teal)';
+      if (cls === 'loss' || cls === 'nogo') el.style.color = 'var(--pink)';
+      if (cls === 'caution')               el.style.color = 'var(--amber)';
     };
-
-    // Bot status — derive from agent-running setting we already track
-    // client-side via _lastHaltStatus (set by loadLiveStatus). Falls
-    // back to ACTIVE if unknown.
-    let botStatus = 'ACTIVE', botCls = 'bull';
-    try {
-      const halt = window._lastHaltStatus;
-      if (halt && (halt.customer_active || halt.admin_active)) {
-        botStatus = 'HALTED';
-        botCls = 'bear';
-        const p = document.getElementById('rs-pulse');
-        if (p) p.classList.add('halted');
-      } else {
-        const p = document.getElementById('rs-pulse');
-        if (p) p.classList.remove('halted');
-      }
-    } catch(e) {}
-    set('rs-bot', botStatus, botCls);
-
-    // Regime — color by macro_regime label
-    const macro = (reg.macro || 'NORMAL').toUpperCase();
-    let macroCls = 'neutral';
-    if (macro.includes('BULL') || macro === 'EXPANSION') macroCls = 'bull';
-    else if (macro.includes('BEAR') || macro === 'CONTRACTION') macroCls = 'bear';
-    set('rs-regime', macro, macroCls);
-
-    // Market State — show the named state + numeric score
-    const ms = (reg.market_state || '—').replace(/_/g, ' ');
-    const score = reg.market_state_score;
-    const scoreTxt = (typeof score === 'number')
-      ? (score >= 0 ? '+' : '') + score.toFixed(score < 10 ? 2 : 1)
-      : '';
-    let msCls = 'neutral';
-    if (typeof score === 'number') {
-      if (score >  60 || (score >= 0.2 && score <= 1.0)) msCls = 'bull';
-      else if (score < 40 || score < -0.2) msCls = 'bear';
-    }
-    set('rs-mstate', scoreTxt ? `${ms} ${scoreTxt}` : ms, msCls);
 
     // SPY day %
     if (typeof reg.spy_pct === 'number') {
       const spyTxt = (reg.spy_pct >= 0 ? '+' : '') + reg.spy_pct.toFixed(2) + '%';
-      set('rs-spy', spyTxt, reg.spy_pct >= 0 ? 'bull' : 'bear');
+      setColored('ap-spy', spyTxt, reg.spy_pct >= 0 ? 'gain' : 'loss');
     } else {
-      set('rs-spy', '—');
+      setColored('ap-spy', '—');
     }
 
     // Validator verdict
     const ver = (reg.validator || 'GO').toUpperCase();
-    const verCls = (ver === 'GO') ? 'bull' : (ver === 'NO_GO' || ver === 'NOGO') ? 'bear' : 'neutral';
-    set('rs-validator', ver, verCls);
+    const verCls = (ver === 'GO') ? 'go' : (ver === 'NO_GO' || ver === 'NOGO') ? 'nogo' : 'caution';
+    setColored('ap-validator', ver, verCls);
 
     // Last decision time — show HH:MM in local TZ if today, else MM-DD HH:MM
     if (reg.last_decision_at) {
@@ -5243,11 +5242,21 @@ async function loadDashboardData() {
         const txt = sameDay
           ? dt.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false})
           : dt.toLocaleString('en-US', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false});
-        set('rs-last', txt);
-      } catch(e) { set('rs-last', '—'); }
+        setColored('ap-last-decision', txt);
+      } catch(e) { setColored('ap-last-decision', '—'); }
     } else {
-      set('rs-last', '—');
+      setColored('ap-last-decision', '—');
     }
+
+    // shared `set` helper (used by Flow strip below) — keeps same signature
+    // as before so the rest of this function doesn't change.
+    const set = (id, txt, cls) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (txt !== undefined && txt !== null) el.textContent = txt;
+      el.classList.remove('bull','bear','neutral','gain','loss');
+      if (cls) el.classList.add(cls);
+    };
 
     // ── Flow strip ──
     const today = d.today || {};
