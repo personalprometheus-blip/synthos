@@ -3979,15 +3979,16 @@ function openPositionDrawer(p) {
     }
   }
 
-  // Trade info — Signal Trust widget at top, then ancillary fields below.
-  // entry_signal_score on positions is a 0..1 float; multiply by 100 for
-  // the 0-100 trust scale used by renderSignalTrust().
+  // Trade info — Signal Trust widget at top, then ancillary fields
+  // below. Phase 7L (2026-04-25): trust score now derived via the
+  // single computeSignalTrust() helper (was: bespoke ×100 of
+  // entry_signal_score) so the position drawer agrees with every
+  // other Signal Trust widget on the page.
   var infoEl = document.getElementById('dr-trade-info');
   if (infoEl) {
     var trustHtml = '';
     if (p.entry_signal_score != null) {
-      var t = Math.round(parseFloat(p.entry_signal_score) * 100);
-      trustHtml = renderSignalTrust(t);
+      trustHtml = renderSignalTrust(computeSignalTrust(p));
     }
     var lines = [];
     if (p.vol_bucket) lines.push('Volatility: ' + p.vol_bucket);
@@ -4219,15 +4220,10 @@ function openApprovalDrawer(t) {
     'Pending review · queued ' + (t.queued_at || '').slice(0, 16)
     + (t.politician ? ' · ' + t.politician : '');
 
-  // Signal Trust — derive a 0-100 score from the existing confidence chip.
-  // Same derivation as the sig-modal: HIGH=87, MEDIUM=63, LOW=30, NOISE=15.
-  // Light adjustment for staleness. Reuses renderSignalTrust() helper.
-  const conf = (t.confidence || 'NOISE').toString().toUpperCase();
-  const baseScore = conf === 'HIGH' ? 87 : conf === 'MEDIUM' ? 63 : conf === 'LOW' ? 30 : 15;
-  const stale = (t.staleness || '').toString().toLowerCase();
-  const adj = (stale.includes('stale') || stale.includes('old')) ? -10 : 0;
-  const trust = Math.min(99, Math.max(5, baseScore + adj));
-  document.getElementById('ad-trust-section').innerHTML = renderSignalTrust(trust);
+  // Signal Trust — Phase 7L (2026-04-25) consolidated to the single
+  // computeSignalTrust() helper used by every other widget on the page.
+  document.getElementById('ad-trust-section').innerHTML =
+    renderSignalTrust(computeSignalTrust(t));
 
   // Why now — hero headline + image + source link.
   const whyEl = document.getElementById('ad-why-now');
@@ -4420,13 +4416,10 @@ function openPlanningDrawer(s) {
   document.getElementById('pd-sub').textContent =
     (watchingSince || 'On watchlist') + (s.sector ? ' · ' + s.sector : '');
 
-  // Signal Trust — same derivation as sig-modal / approval drawer
-  const conf = (s.confidence || 'NOISE').toString().toUpperCase();
-  const baseScore = conf === 'HIGH' ? 87 : conf === 'MEDIUM' ? 63 : conf === 'LOW' ? 30 : 15;
-  const sentBump  = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score) * 15) : 0;
-  const adjust    = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
-  const trust     = Math.min(99, Math.max(5, baseScore + sentBump + adjust));
-  document.getElementById('pd-trust-section').innerHTML = renderSignalTrust(trust);
+  // Signal Trust — Phase 7L (2026-04-25): consolidated to the shared
+  // computeSignalTrust() helper.
+  document.getElementById('pd-trust-section').innerHTML =
+    renderSignalTrust(computeSignalTrust(s));
 
   // Why we're watching — hero headline + image + source link + tier + corroborated badge.
   const tierLabel = s.source_tier === 1 ? 'Official' : s.source_tier === 2 ? 'Wire' : s.source_tier === 3 ? 'Press' : '';
@@ -6508,19 +6501,13 @@ function renderIntelGrid(signals) {
     const sent = sentiment(s);
     return sent === 'bull' ? 'sb-bull' : sent === 'bear' ? 'sb-bear' : 'sb-neut';
   };
-  // Single trust score — same derivation as renderSignalTrust callers
-  // elsewhere. Confidence bucket → base, ± sentiment magnitude bump,
-  // ± corroborated/stale adjustments.
-  const trustScore = s => {
-    const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'LOW' ? 30 : 15;
-    const sentBump = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score) * 15) : 0;
-    const adj = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
-    return Math.min(99, Math.max(5, base + sentBump + adj));
-  };
+  // Phase 7L (2026-04-25): local trustScore helper removed — now uses
+  // the global computeSignalTrust() so this grid agrees with every
+  // other Signal Trust widget.
   var cards = signals.map((s,i) => {
     const sent = sentiment(s);
     const col  = colors[i%colors.length];
-    const trust = trustScore(s);
+    const trust = computeSignalTrust(s);
     const tkrChip = trackerChip(s.ticker);
     // sigEsc lets the click pass the FULL signal dict to the planning
     // drawer (matches the dashboard's queue/intel rows pattern).
@@ -6549,7 +6536,7 @@ function renderIntelGrid(signals) {
   // adjustment, which wasn't a meaningful "diverging signal" axis.
   var fresh = signals.filter(s => !s.is_stale);
   if (fresh.length >= 2) {
-    var ranked = fresh.slice().sort((a,b) => trustScore(b) - trustScore(a));
+    var ranked = fresh.slice().sort((a,b) => computeSignalTrust(b) - computeSignalTrust(a));
     var heroTop = ranked[0];
     // Pick second hero by corroboration if present, else next-highest trust
     var heroDiv = ranked.find(s => s.corroborated && s !== heroTop)
@@ -6558,7 +6545,7 @@ function renderIntelGrid(signals) {
     function heroCard(s, badge, badgeClass) {
       var sent = sentiment(s);
       var col = badgeClass === 'hb-cyan' ? colors[0] : colors[2];
-      var trust = trustScore(s);
+      var trust = computeSignalTrust(s);
       var tkrChip = trackerChip(s.ticker);
       var sigEsc = JSON.stringify(s).replace(/"/g,'&quot;');
       return `<div class="charm ${sent}" style="cursor:pointer;position:relative" onclick="openPlanningDrawer(${sigEsc})">
@@ -6647,6 +6634,51 @@ function _drawSparkline(canvasId, values, color) {
 //   50-74 MEDIUM     (3 bars, amber)
 //   25-49 LOW        (2 bars, muted)
 //   0-24  NOISE      (1 bar,  dim)
+// computeSignalTrust — single source of truth for the 0-100 trust score.
+// Phase 7L item 5 (2026-04-25): consolidates four near-duplicate
+// derivations that drifted apart (position drawer used
+// entry_signal_score×100, others used confidence-bucket-based bumps,
+// renderIntelGrid had its own local trustScore helper). Same trade
+// could show different scores in different drawers.
+//
+// Input shapes accepted:
+//   • Position-shaped: object with entry_signal_score (0-1 float).
+//     Returns score = round(entry_signal_score × 100).
+//   • Signal-shaped: object with confidence + (optional) sentiment_score
+//     + (optional) is_stale/staleness + (optional) corroborated.
+//     Returns base + sentiment-magnitude bump ± stale/corroborated adj.
+//   • Approval-shaped: same as signal-shaped (uses confidence + staleness).
+//
+// Always clamped to [5, 99] so the bar widget never shows 0 or 100
+// (which would imply certainty in either direction — we want the
+// scale to read as a likelihood, not a verdict).
+function computeSignalTrust(obj) {
+  if (!obj || typeof obj !== 'object') return 15;
+  // Position with stored entry_signal_score takes the canonical path.
+  // entry_signal_score is the bot's own gate-aggregate score from the
+  // signals table — already calibrated to [0, 1] by the gate pipeline.
+  if (typeof obj.entry_signal_score === 'number' && obj.entry_signal_score > 0) {
+    return Math.min(99, Math.max(5, Math.round(obj.entry_signal_score * 100)));
+  }
+  // Signal-shaped derivation. Confidence bucket → base score; sentiment
+  // magnitude → bump up; is_stale → push down; corroborated → push up.
+  const conf = String(obj.confidence || 'NOISE').toUpperCase();
+  const base = conf === 'HIGH'   ? 87
+             : conf === 'MEDIUM' ? 63
+             : conf === 'LOW'    ? 30
+             :                     15;
+  const sentBump = (typeof obj.sentiment_score === 'number')
+    ? Math.round(Math.abs(obj.sentiment_score) * 15)
+    : 0;
+  const staleLabel = String(obj.staleness || '').toLowerCase();
+  const isStale    = !!obj.is_stale
+                  || staleLabel.includes('stale')
+                  || staleLabel.includes('expired')
+                  || staleLabel.includes('old');
+  const adj = (isStale ? -12 : 0) + (obj.corroborated ? 8 : 0);
+  return Math.min(99, Math.max(5, base + sentBump + adj));
+}
+
 function renderSignalTrust(score100, opts) {
   const s = Math.max(0, Math.min(100, Math.round(score100 || 0)));
   const buckets = [
