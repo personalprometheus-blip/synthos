@@ -4594,17 +4594,51 @@ def api_performance_summary():
             cost    = (t.get('entry_price') or 0) * (t.get('shares') or 0)
             ret_pct = round(pnl / cost * 100, 2) if cost else 0.0
 
+            # Frozen thesis lookup (added 2026-04-25 for Phase 7c history
+            # drawer): if signal_id is present, fetch the headline /
+            # source from the shared signals table so the drawer can show
+            # "why we bought this" without exposing system internals.
+            # Most non-owner customers have signal_id=NULL — graceful
+            # fallback yields headline=None.
+            sig_headline = sig_source = sig_source_url = None
+            _sig_id = t.get('signal_id')
+            if _sig_id:
+                try:
+                    import sqlite3 as _sql
+                    with _sql.connect(_shared_db().path, timeout=5) as _sc:
+                        _sc.row_factory = _sql.Row
+                        _row = _sc.execute(
+                            "SELECT headline, source, source_url FROM signals WHERE id=?",
+                            (_sig_id,)
+                        ).fetchone()
+                        if _row:
+                            sig_headline   = _row['headline']
+                            sig_source     = _row['source']
+                            sig_source_url = _row['source_url'] if 'source_url' in _row.keys() else None
+                except Exception:
+                    pass
+
             rows.append({
-                'ticker':      t.get('ticker', '--'),
-                'side':        'LONG',
-                'entry':       round(t.get('entry_price') or 0, 2),
-                'exit':        round(t.get('current_price') or 0, 2),
-                'hold':        hold_label,
-                'pnl':         round(pnl, 2),
-                'ret_pct':     ret_pct,
-                'opened_at':   (t.get('opened_at') or '')[:10],
-                'closed_at':   (t.get('closed_at') or '')[:10],
-                'exit_reason': t.get('exit_reason') or '--',
+                'id':              t.get('id'),
+                'ticker':          t.get('ticker', '--'),
+                'company':         t.get('company') if t.get('company') and t.get('company') != t.get('ticker') else None,
+                'sector':          t.get('sector'),
+                'side':            'LONG',
+                'entry':           round(t.get('entry_price') or 0, 2),
+                'exit':            round(t.get('current_price') or 0, 2),
+                'shares':          float(t.get('shares') or 0),
+                'hold':            hold_label,
+                'hold_hours':      round(hrs, 1),
+                'pnl':             round(pnl, 2),
+                'ret_pct':         ret_pct,
+                'opened_at':       (t.get('opened_at') or '')[:16].replace('T', ' '),
+                'closed_at':       (t.get('closed_at') or '')[:16].replace('T', ' '),
+                'exit_reason':     t.get('exit_reason') or '--',
+                'entry_pattern':   t.get('entry_pattern'),  # NULL for pre-Phase-5 trades
+                'managed_by':      t.get('managed_by') or 'bot',
+                'signal_headline': sig_headline,
+                'signal_source':   sig_source,
+                'signal_source_url': sig_source_url,
             })
 
         total_trades  = wins + losses

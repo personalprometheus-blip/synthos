@@ -2889,6 +2889,69 @@ setInterval(loadAgentPulse, 10000);
 
 </div>
 
+<!-- HISTORY DETAIL DRAWER (Phase 7c, 2026-04-25) — replaces the
+     openLogicModal reuse hack. Specialised for closed trades: shows
+     outcome, entry block (with frozen thesis when available), exit
+     block (with reason), price-over-hold mini-viz. -->
+<div class="drawer-overlay" id="hist-drawer-overlay" onclick="closeHistoryDrawer(event)">
+</div>
+<div class="drawer" id="hist-drawer">
+  <div class="drawer-head">
+    <div id="hd-icon" style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0"></div>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0" id="hd-title">—</div>
+        <span class="hd-outcome-badge" id="hd-outcome-badge">—</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px" id="hd-sub">—</div>
+    </div>
+    <button class="drawer-close" onclick="closeHistoryDrawer()">✕</button>
+  </div>
+  <div class="drawer-body" id="hd-body">
+    <!-- Outcome strip — big P&L number + return + hold rate -->
+    <div class="drawer-section" id="hd-outcome-section">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:12px 14px;border-radius:10px;background:var(--surface2);border:1px solid var(--border)">
+        <div>
+          <div id="hd-pnl-big" style="font-size:24px;font-weight:800;font-family:var(--mono);line-height:1.1">—</div>
+          <div id="hd-pnl-pct" style="font-size:11px;font-weight:700;font-family:var(--mono);margin-top:3px">—</div>
+        </div>
+        <div style="text-align:right">
+          <div id="hd-hold-big" style="font-size:14px;font-weight:700;color:var(--text);font-family:var(--mono)">—</div>
+          <div style="font-size:9px;color:var(--dim);letter-spacing:0.06em;text-transform:uppercase;margin-top:2px">held</div>
+          <div id="hd-rate" style="font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:4px">—</div>
+        </div>
+      </div>
+    </div>
+    <!-- Price-over-hold mini-viz: entry dot → connecting line → exit dot.
+         No continuous chart for now; just a stylized two-point arc. -->
+    <div class="drawer-section" id="hd-arc-section">
+      <div style="position:relative;padding:10px 14px;border-radius:10px;background:var(--surface2);border:1px solid var(--border)">
+        <div style="font-size:9px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Entry → Exit</div>
+        <div id="hd-arc"></div>
+      </div>
+    </div>
+    <!-- Entry block -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Entry</div>
+      <div id="hd-entry"></div>
+    </div>
+    <!-- Exit block -->
+    <div class="drawer-section">
+      <div class="drawer-section-title">Exit</div>
+      <div id="hd-exit"></div>
+    </div>
+  </div>
+</div>
+<style>
+.hd-outcome-badge{
+  font-size:10px;font-weight:800;letter-spacing:0.10em;
+  padding:3px 9px;border-radius:99px;flex-shrink:0;
+}
+.hd-outcome-badge.win {background:rgba(0,245,212,0.12); border:1px solid rgba(0,245,212,0.32); color:#00f5d4}
+.hd-outcome-badge.loss{background:rgba(255,75,110,0.12);border:1px solid rgba(255,75,110,0.32);color:#ff4b6e}
+.hd-outcome-badge.even{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:var(--muted)}
+</style>
+
 <!-- POSITION DETAIL DRAWER -->
 <div class="drawer-overlay" id="drawer-overlay" onclick="closeDrawer(event)">
 </div>
@@ -3864,6 +3927,177 @@ function closeDrawer(e) {
   // (or for a logic-modal item with no company) doesn't show stale art.
   const ss = document.getElementById('drawer-spark');
   if (ss) { ss.dataset.ticker = ''; ss.innerHTML = ''; }
+}
+
+// ── HISTORY DRAWER (Phase 7c, 2026-04-25) ─────────────────────────
+// Specialised drawer for closed trades. Replaces the openLogicModal
+// reuse hack which stuffed history data into the position drawer DOM.
+//
+// `t` is a row from /api/performance-summary.trades and includes:
+//   ticker, company, sector, entry, exit, shares, hold, hold_hours,
+//   pnl, ret_pct, opened_at, closed_at, exit_reason, entry_pattern,
+//   managed_by, signal_headline, signal_source, signal_source_url
+//
+// Most fields degrade gracefully when missing (legacy trades).
+function openHistoryDrawer(t) {
+  if (!t || typeof t !== 'object') return;
+  const isWin = (t.pnl || 0) > 0;
+  const isLoss = (t.pnl || 0) < 0;
+  const accent = isWin ? 'var(--teal)' : isLoss ? 'var(--pink)' : 'var(--muted)';
+  const accentRgb = isWin ? '0,245,212' : isLoss ? '255,75,110' : '190,200,217';
+  const outcome = isWin ? 'WIN' : isLoss ? 'LOSS' : 'EVEN';
+  const outcomeCls = isWin ? 'win' : isLoss ? 'loss' : 'even';
+
+  // Header
+  const icon = document.getElementById('hd-icon');
+  icon.textContent = (t.ticker||'?').slice(0,4);
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  const titleName = (t.company && t.company !== t.ticker) ? t.company : (t.ticker || '—');
+  const titleEl = document.getElementById('hd-title');
+  titleEl.textContent = titleName;
+  titleEl.title = titleName + (t.ticker ? ' · ' + t.ticker : '');
+  document.getElementById('hd-sub').textContent =
+    (t.shares || 0).toFixed(t.shares >= 1 ? 2 : 4) + ' shares · '
+    + (t.managed_by === 'user' ? 'User-managed' : 'Bot-managed')
+    + (t.sector ? ' · ' + t.sector : '');
+  const badge = document.getElementById('hd-outcome-badge');
+  badge.textContent = outcome;
+  badge.className = 'hd-outcome-badge ' + outcomeCls;
+
+  // Outcome strip
+  const pnl = t.pnl || 0;
+  const sign = pnl >= 0 ? '+' : '−';
+  const pnlBig = document.getElementById('hd-pnl-big');
+  pnlBig.textContent = sign + '$' + Math.abs(pnl).toFixed(2);
+  pnlBig.style.color = accent;
+  const pnlPct = document.getElementById('hd-pnl-pct');
+  const ret = t.ret_pct || 0;
+  pnlPct.textContent = (ret >= 0 ? '+' : '') + ret.toFixed(2) + '% return';
+  pnlPct.style.color = accent;
+  document.getElementById('hd-hold-big').textContent = t.hold || '—';
+  // $/day rate — only meaningful if hold > a few hours
+  const rateEl = document.getElementById('hd-rate');
+  if (t.hold_hours && t.hold_hours >= 1) {
+    const days = t.hold_hours / 24;
+    if (days >= 0.5) {
+      const rate = pnl / days;
+      rateEl.textContent = (rate >= 0 ? '+' : '−') + '$' + Math.abs(rate).toFixed(2) + '/day';
+      rateEl.style.color = accent;
+    } else {
+      rateEl.textContent = '';
+    }
+  } else {
+    rateEl.textContent = '';
+  }
+
+  // Entry → Exit arc — minimal SVG, two dots + connecting line.
+  // Vertical position scales by relative price between entry and exit.
+  const entryP = t.entry || 0;
+  const exitP  = t.exit  || 0;
+  const arcEl = document.getElementById('hd-arc');
+  if (entryP > 0 && exitP > 0) {
+    const lo = Math.min(entryP, exitP);
+    const hi = Math.max(entryP, exitP);
+    const pad = (hi - lo) * 0.40 || (hi * 0.01);
+    const norm = (v) => 30 - ((v - (lo - pad)) / ((hi + pad) - (lo - pad))) * 26;
+    const yEntry = norm(entryP);
+    const yExit  = norm(exitP);
+    const lineColor = pnl >= 0 ? 'rgba(0,245,212,0.55)' : 'rgba(255,75,110,0.55)';
+    const dotColor = accent;
+    arcEl.innerHTML = `
+      <svg viewBox="0 0 320 36" preserveAspectRatio="none" style="width:100%;height:36px;display:block">
+        <defs>
+          <linearGradient id="hd-arc-grad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="${lineColor}" stop-opacity="0.0"/>
+            <stop offset="50%"  stop-color="${lineColor}" stop-opacity="1.0"/>
+            <stop offset="100%" stop-color="${lineColor}" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <line x1="20" y1="${yEntry}" x2="300" y2="${yExit}" stroke="url(#hd-arc-grad)" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="20"  cy="${yEntry}" r="3.5" fill="${dotColor}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+        <circle cx="300" cy="${yExit}"  r="3.5" fill="${dotColor}" stroke="rgba(0,0,0,0.4)" stroke-width="0.5"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;font-family:var(--mono);margin-top:4px">
+        <span style="color:var(--muted)">$${entryP.toFixed(2)}</span>
+        <span style="color:var(--muted)">$${exitP.toFixed(2)}</span>
+      </div>
+    `;
+  } else {
+    arcEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Price data unavailable</div>';
+  }
+
+  // Pattern palette (same as renderPositions / approval row)
+  const patPalette = {
+    MOMENTUM:       {fg:'#00f5d4', bg:'rgba(0,245,212,0.10)', bd:'rgba(0,245,212,0.30)', label:'MOMO'},
+    BREAKOUT:       {fg:'#7b61ff', bg:'rgba(123,97,255,0.12)', bd:'rgba(123,97,255,0.30)', label:'BRKO'},
+    MEAN_REVERSION: {fg:'#22d3ee', bg:'rgba(34,211,238,0.10)',  bd:'rgba(34,211,238,0.30)', label:'MEAN'},
+    PULLBACK:       {fg:'#a78bfa', bg:'rgba(167,139,250,0.10)', bd:'rgba(167,139,250,0.30)', label:'PULL'},
+    RESERVE:        {fg:'#f5a623', bg:'rgba(245,166,35,0.10)',  bd:'rgba(245,166,35,0.30)', label:'RSRV'},
+  };
+  const pat = (t.entry_pattern || '').toUpperCase();
+  const pp = patPalette[pat];
+  const patBadge = pp
+    ? `<span title="Entry pattern: ${pat}" style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;background:${pp.bg};border:1px solid ${pp.bd};color:${pp.fg};margin-left:6px">${pp.label}</span>`
+    : '';
+
+  // Entry block
+  const entryEl = document.getElementById('hd-entry');
+  let entryParts = [];
+  entryParts.push(`<div class="drawer-row"><span class="drawer-label">When</span><span class="drawer-val">${t.opened_at || '—'}</span></div>`);
+  entryParts.push(`<div class="drawer-row"><span class="drawer-label">Price</span><span class="drawer-val">$${(t.entry || 0).toFixed(2)}</span></div>`);
+  if (pat) {
+    entryParts.push(`<div class="drawer-row"><span class="drawer-label">Pattern</span><span class="drawer-val" style="font-family:inherit">${pat}${patBadge}</span></div>`);
+  }
+  // Frozen thesis — only show if we have a stored headline (owner customer
+  // primarily; non-owners have signal_id=NULL so this stays empty).
+  if (t.signal_headline) {
+    const headlineHtml = t.signal_source_url
+      ? `<a href="${t.signal_source_url}" target="_blank" rel="noopener" style="color:var(--text);text-decoration:none;border-bottom:1px solid var(--border2)">📰 ${t.signal_headline}</a>`
+      : `📰 ${t.signal_headline}`;
+    entryParts.push(`
+      <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+        <div style="font-size:9px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Why we bought</div>
+        <div style="font-size:11px;line-height:1.5;color:var(--text)">${headlineHtml}</div>
+        ${t.signal_source ? `<div style="font-size:10px;color:var(--muted);margin-top:5px">${t.signal_source}</div>` : ''}
+      </div>`);
+  }
+  entryEl.innerHTML = entryParts.join('');
+
+  // Exit block — translate the raw exit_reason code into a human label.
+  const exitReasonLabel = (raw) => {
+    if (!raw || raw === '--') return 'Unknown';
+    const r = String(raw).toLowerCase();
+    if (/take.?profit|target/.test(r))   return 'Hit profit target';
+    if (/trail/.test(r))                 return 'Trailing stop fired';
+    if (/stop.?loss|protective/.test(r)) return 'Stop loss fired';
+    if (/manual|user/.test(r))           return 'Manually closed';
+    if (/session|market.?close/.test(r)) return 'Session close';
+    if (/bil|rotation/.test(r))          return 'Rotated to better signal';
+    if (/conflict|reversal/.test(r))     return 'Signal conflict';
+    if (/cap|portfolio/.test(r))         return 'Portfolio cap';
+    return raw.replace(/_/g, ' ');
+  };
+  const exitEl = document.getElementById('hd-exit');
+  let exitParts = [];
+  exitParts.push(`<div class="drawer-row"><span class="drawer-label">When</span><span class="drawer-val">${t.closed_at || '—'}</span></div>`);
+  exitParts.push(`<div class="drawer-row"><span class="drawer-label">Price</span><span class="drawer-val">$${(t.exit || 0).toFixed(2)}</span></div>`);
+  exitParts.push(`<div class="drawer-row"><span class="drawer-label">Trigger</span><span class="drawer-val" style="font-family:inherit">${exitReasonLabel(t.exit_reason)}</span></div>`);
+  // For trail-stop wins, add a small note explaining outcome vs. mechanism
+  if (isWin && /trail|stop|protect/i.test(t.exit_reason || '')) {
+    exitParts.push(`<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:rgba(0,245,212,0.05);border:1px solid rgba(0,245,212,0.18);font-size:10px;color:var(--muted);line-height:1.4">
+      Trailing stop locked in the gain — the bot raised its stop as the price climbed and the stop fired above your entry.
+    </div>`);
+  }
+  exitEl.innerHTML = exitParts.join('');
+
+  document.getElementById('hist-drawer-overlay').classList.add('open');
+  document.getElementById('hist-drawer').classList.add('open');
+}
+
+function closeHistoryDrawer(e) {
+  if (e && e.target !== document.getElementById('hist-drawer-overlay')) return;
+  document.getElementById('hist-drawer-overlay').classList.remove('open');
+  document.getElementById('hist-drawer').classList.remove('open');
 }
 
 // ── SESSION TIMELINE UPDATE ──
@@ -6120,6 +6354,10 @@ async function loadTraderActivity() {
       const exit    = (t.exit  || 0).toFixed(2);
       const summary = 'Held ' + hold + ' \u00b7 $' + entry + ' \u2192 $' + exit;
 
+      // Stuff the entire trade dict into the row so the new history
+      // drawer can render it without an extra fetch (matches the
+      // openPositionDrawer pattern).
+      const tEsc = JSON.stringify(t).replace(/"/g,'&quot;');
       return `<div class="agent-row"
           data-ticker="${esc(ticker)}"
           data-conf="${c.outcome}"
@@ -6127,7 +6365,7 @@ async function loadTraderActivity() {
           data-type="TRADE"
           onmouseenter="showIntelTooltip(event,this)"
           onmouseleave="hideIntelTooltip()"
-          onclick="openLogicModal(this)">
+          onclick="openHistoryDrawer(${tEsc})">
         <div class="agent-row-icon" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
           <div class="agent-row-ticker">${ticker}<span class="spark-slot" data-ticker="${ticker.replace(/[^A-Z0-9.-]/gi,'')}"></span><span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
