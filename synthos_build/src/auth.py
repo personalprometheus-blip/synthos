@@ -195,6 +195,30 @@ def init_auth_db():
             CREATE INDEX IF NOT EXISTS idx_pec_customer  ON pending_email_changes(customer_id);
             CREATE INDEX IF NOT EXISTS idx_pec_token     ON pending_email_changes(token);
             CREATE INDEX IF NOT EXISTS idx_pec_expires   ON pending_email_changes(expires_at);
+
+            -- Login attempts (Phase 2.5 MEDIUM-7 — added 2026-04-25).
+            -- Persistent log of every login attempt (success + failure)
+            -- with email_hash + IP + user-agent. Used for:
+            --   • per-account lockout (10 failures/15min on same email_hash
+            --     → block, regardless of source IP — defeats IP rotation
+            --     by attackers)
+            --   • per-IP lockout (20 failures/5min from same IP → block,
+            --     regardless of email — defeats credential-stuffing across
+            --     many target accounts)
+            --   • triage / forensics — review user-agent + IP history when
+            --     a customer reports a compromise
+            -- Auto-pruned to last 7 days at write time for bounded growth.
+            CREATE TABLE IF NOT EXISTS login_attempts (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                email_hash    TEXT,                       -- nullable: blank-email submissions
+                ip            TEXT NOT NULL,
+                user_agent    TEXT,
+                success       INTEGER NOT NULL DEFAULT 0, -- 0=fail, 1=success
+                attempted_at  TEXT NOT NULL               -- UTC ISO
+            );
+            CREATE INDEX IF NOT EXISTS idx_la_email_attempt ON login_attempts(email_hash, attempted_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_la_ip_attempt    ON login_attempts(ip, attempted_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_la_attempted_at  ON login_attempts(attempted_at);
         """)
     _migrate_auth_db()
     _migrate_pending_signups()
@@ -356,6 +380,124 @@ def record_login(customer_id: str):
             "UPDATE customers SET last_login = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), customer_id)
         )
+
+
+# ── LOGIN RATE LIMITING (Phase 2.5 MEDIUM-7 — added 2026-04-25) ─────────────
+# Persistent per-account + per-IP failure tracking. Defeats two attack classes
+# the in-memory limiter alone cannot:
+#   • IP rotation: attacker brute-forces single account from many IPs.
+#     Per-account check counts failures by email_hash regardless of source IP.
+#   • Credential stuffing: attacker tries many email/password pairs from one
+#     IP. Per-IP check counts failures by IP regardless of email target.
+# In-memory _login_attempts in retail_portal.py stays as a coarse first gate
+# (cheap, no DB hit on the per-IP burst case). DB layer is checked AFTER and
+# adds the persistent + per-account dimensions.
+#
+# Tunables (env-overridable):
+#   LOGIN_ACCOUNT_LOCKOUT_MAX     — default 10
+#   LOGIN_ACCOUNT_LOCKOUT_WINDOW  — seconds, default 900 (15 min)
+#   LOGIN_IP_LOCKOUT_MAX          — default 20
+#   LOGIN_IP_LOCKOUT_WINDOW       — seconds, default 300 (5 min)
+#   LOGIN_ATTEMPT_RETENTION_DAYS  — default 7
+
+LOGIN_ACCOUNT_LOCKOUT_MAX    = int(os.environ.get('LOGIN_ACCOUNT_LOCKOUT_MAX',    '10'))
+LOGIN_ACCOUNT_LOCKOUT_WINDOW = int(os.environ.get('LOGIN_ACCOUNT_LOCKOUT_WINDOW', '900'))
+LOGIN_IP_LOCKOUT_MAX         = int(os.environ.get('LOGIN_IP_LOCKOUT_MAX',         '20'))
+LOGIN_IP_LOCKOUT_WINDOW      = int(os.environ.get('LOGIN_IP_LOCKOUT_WINDOW',      '300'))
+LOGIN_ATTEMPT_RETENTION_DAYS = int(os.environ.get('LOGIN_ATTEMPT_RETENTION_DAYS', '7'))
+
+
+def record_login_attempt(email: str, ip: str, user_agent: str, success: bool) -> None:
+    """Persist a single login attempt. Auto-prunes attempts older than
+    LOGIN_ATTEMPT_RETENTION_DAYS at the same write to keep table bounded.
+
+    `email` may be empty / None (blank-email POSTs are still recorded
+    with NULL email_hash so per-IP lockout still tracks them).
+    """
+    email_hash = _email_lookup_hash(email) if email else None
+    now_iso    = datetime.now(timezone.utc).isoformat()
+    cutoff     = (datetime.now(timezone.utc) - timedelta(days=LOGIN_ATTEMPT_RETENTION_DAYS)).isoformat()
+    try:
+        with _auth_conn() as c:
+            c.execute(
+                "INSERT INTO login_attempts (email_hash, ip, user_agent, success, attempted_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (email_hash, ip[:64], (user_agent or '')[:255], 1 if success else 0, now_iso)
+            )
+            c.execute(
+                "DELETE FROM login_attempts WHERE attempted_at < ?",
+                (cutoff,)
+            )
+    except Exception as e:
+        log.warning(f"record_login_attempt failed: {e}")
+
+
+def is_account_locked(email: str) -> tuple:
+    """Return (locked: bool, retry_after_seconds: int|None) based on the
+    per-account failure count. Counts FAILED attempts only (success=0)
+    in the LOGIN_ACCOUNT_LOCKOUT_WINDOW for this email_hash.
+
+    Caller-friendly: if locked, the second return value is the number of
+    seconds until the OLDEST counted failure ages out — i.e., when the
+    customer can try again.
+    """
+    if not email:
+        return (False, None)
+    email_hash = _email_lookup_hash(email)
+    cutoff_dt  = datetime.now(timezone.utc) - timedelta(seconds=LOGIN_ACCOUNT_LOCKOUT_WINDOW)
+    cutoff_iso = cutoff_dt.isoformat()
+    try:
+        with _auth_conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n, MIN(attempted_at) AS oldest FROM login_attempts "
+                "WHERE email_hash = ? AND success = 0 AND attempted_at >= ?",
+                (email_hash, cutoff_iso)
+            ).fetchone()
+    except Exception as e:
+        log.warning(f"is_account_locked failed: {e}")
+        return (False, None)
+    n = row['n'] or 0
+    if n < LOGIN_ACCOUNT_LOCKOUT_MAX:
+        return (False, None)
+    try:
+        oldest = datetime.fromisoformat(row['oldest'])
+        retry_at = oldest + timedelta(seconds=LOGIN_ACCOUNT_LOCKOUT_WINDOW)
+        retry_after = int((retry_at - datetime.now(timezone.utc)).total_seconds())
+        retry_after = max(0, retry_after)
+    except Exception:
+        retry_after = LOGIN_ACCOUNT_LOCKOUT_WINDOW
+    return (True, retry_after)
+
+
+def is_ip_locked(ip: str) -> tuple:
+    """Return (locked: bool, retry_after_seconds: int|None) based on the
+    per-IP failure count. Counts FAILED attempts only in the
+    LOGIN_IP_LOCKOUT_WINDOW for this IP."""
+    if not ip:
+        return (False, None)
+    cutoff_dt  = datetime.now(timezone.utc) - timedelta(seconds=LOGIN_IP_LOCKOUT_WINDOW)
+    cutoff_iso = cutoff_dt.isoformat()
+    try:
+        with _auth_conn() as c:
+            row = c.execute(
+                "SELECT COUNT(*) AS n, MIN(attempted_at) AS oldest FROM login_attempts "
+                "WHERE ip = ? AND success = 0 AND attempted_at >= ?",
+                (ip, cutoff_iso)
+            ).fetchone()
+    except Exception as e:
+        log.warning(f"is_ip_locked failed: {e}")
+        return (False, None)
+    n = row['n'] or 0
+    if n < LOGIN_IP_LOCKOUT_MAX:
+        return (False, None)
+    try:
+        oldest = datetime.fromisoformat(row['oldest'])
+        retry_at = oldest + timedelta(seconds=LOGIN_IP_LOCKOUT_WINDOW)
+        retry_after = int((retry_at - datetime.now(timezone.utc)).total_seconds())
+        retry_after = max(0, retry_after)
+    except Exception:
+        retry_after = LOGIN_IP_LOCKOUT_WINDOW
+    return (True, retry_after)
 
 
 def mark_tos_accepted(customer_id: str, version: str) -> None:

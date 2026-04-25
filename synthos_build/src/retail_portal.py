@@ -1180,14 +1180,47 @@ def login():
 
     if request.method == 'POST':
         ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
+        # Strip X-Forwarded-For chains down to the first hop (the real client
+        # IP per Cloudflare's docs); guards against spoofed long chains.
+        ip = ip.split(',')[0].strip()
+        ua = (request.headers.get('User-Agent') or '')[:255]
+
+        # ── In-memory per-IP burst limiter (cheap, first gate) ───────
         if _rate_limited(_login_attempts, ip, _LOGIN_MAX, _LOGIN_WINDOW):
-            log.warning("Login rate limit hit for IP %s", ip)
+            log.warning("Login rate limit hit (in-mem) for IP %s", ip)
             return render_template('login.html',
                 error="Too many login attempts — please wait a few minutes.",
                 maintenance_msg=_maintenance_msg())
 
+        # ── Persistent per-IP lockout (defeats restart-amnesia) ──────
+        ip_locked, ip_retry = auth.is_ip_locked(ip)
+        if ip_locked:
+            log.warning(f"Login IP-lockout active for {ip} (retry in {ip_retry}s)")
+            mins = max(1, (ip_retry or 60) // 60)
+            return render_template('login.html',
+                error=f"Too many failed login attempts from your network. "
+                      f"Try again in about {mins} minute{'s' if mins != 1 else ''}.",
+                maintenance_msg=_maintenance_msg())
+
         email    = request.form.get('email', '').strip()
         password = request.form.get('password', '')
+
+        # ── Persistent per-account lockout (defeats IP rotation) ──────
+        # Checked before password verification so the attacker doesn't get a
+        # pw-correct/incorrect oracle inside the lockout window.
+        if email:
+            acct_locked, acct_retry = auth.is_account_locked(email)
+            if acct_locked:
+                log.warning(f"Login account-lockout active for {email!r} (retry in {acct_retry}s)")
+                # Record the failure so the lockout window slides forward
+                # if the attacker keeps trying.
+                auth.record_login_attempt(email, ip, ua, success=False)
+                mins = max(1, (acct_retry or 900) // 60)
+                return render_template('login.html',
+                    error=f"This account is temporarily locked after too many failed attempts. "
+                          f"Try again in about {mins} minute{'s' if mins != 1 else ''}, or "
+                          f"reset your password using the 'Forgot password?' link below.",
+                    maintenance_msg=_maintenance_msg())
 
         # ── Primary: account-based auth via auth.db ──
         if email:
@@ -1197,6 +1230,9 @@ def login():
                     # ── Access gate: subscription + email verification ──────────
                     allowed, reason = auth.is_access_allowed(customer['id'], customer['role'])
                     if not allowed:
+                        # Even denied logins are recorded so abuse of valid
+                        # credentials against a deactivated account is visible.
+                        auth.record_login_attempt(email, ip, ua, success=False)
                         if reason == 'unverified':
                             # Account created but setup link not yet completed
                             return redirect('/check-email?reason=unverified')
@@ -1219,11 +1255,15 @@ def login():
                     session['logged_in_at'] = datetime.now(timezone.utc).isoformat()
                     session.permanent       = True
                     auth.record_login(customer['id'])
+                    auth.record_login_attempt(email, ip, ua, success=True)
                     log.info(f"Login: {customer['id']} (role={customer['role']} access={reason})")
                     return redirect('/')
             except Exception as e:
                 log.error(f"Auth error during login: {e}")
 
+        # Failed login (wrong password, missing customer, or exception above).
+        # Record so per-account + per-IP lockouts work.
+        auth.record_login_attempt(email, ip, ua, success=False)
         return render_template('login.html', error="Incorrect email or password", maintenance_msg=_maintenance_msg())
 
     return render_template('login.html', error=None, maintenance_msg=_maintenance_msg())
