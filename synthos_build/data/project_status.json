@@ -1,18 +1,23 @@
 {
   "meta": {
     "project": "Synthos",
-    "last_updated": "2026-04-18",
+    "last_updated": "2026-04-25",
     "current_phase": 7,
-    "total_phases": 10,
-    "version": "2.2",
-    "next_milestone": "Beta testing + paper trading review",
+    "total_phases": 11,
+    "version": "2.3",
+    "next_milestone": "Beta testing + paper trading review (Phase 8)",
     "domain_map": {
       "synth-cloud.com": "Redirect \u2192 portal.synth-cloud.com",
       "portal.synth-cloud.com": "Pi 5 port 5001 \u2014 retail portal (customer + admin)",
       "command.synth-cloud.com": "Pi 4B port 5050 \u2014 monitor/command portal",
       "ssh.synth-cloud.com": "Pi 4B port 22 \u2014 Cloudflare Access",
       "ssh2.synth-cloud.com": "Pi 5 port 22 \u2014 Cloudflare Access"
-    }
+    },
+    "recent_milestones": [
+      "2026-04-24/25 \u2014 Pre-launch security audit closed 2 CRITICAL + 2 HIGH customer\u2192admin escalation paths; added /reset-password handler; persistent login rate limiter (login_attempts table); two-step verify-new-email flow; Phase 4.5 file-upload audit 21/21 pass.",
+      "2026-04-25 \u2014 Attribution patch enforcement: TICKER_REMAP + TICKER_REJECT flipped True after 4.5-day shadow review. News-agent shadow data: 41% no_match noise, 33% wrong-ticker remaps, 13% of remaps reaching VALIDATED+.",
+      "2026-04-25 \u2014 Customer Dashboard UX overhaul (~20 commits, Phase 5\u201e7L). Sparklines, four specialized slide-out drawers (Position / History / Approval / Planning), Signal Trust widget replacing internal-score leak, lock chip + bot status light, news + watchlist page redesigns, /api/ticker-news + /api/ticker-context endpoints, watchlist wiring fix (was reading news_feed instead of signals table). Net diff across 11 phase commits: ~2,700 lines changed, 4 dead-code paths removed, 8 punch-list cleanups."
+    ]
   },
   "phases": [
     {
@@ -381,6 +386,69 @@
       ]
     },
     {
+      "id": 7.5,
+      "name": "Customer Dashboard UX Overhaul (2026-04-25)",
+      "status": "complete",
+      "tasks": [
+        {
+          "label": "Phase 5 — entry_pattern column on positions, row badge (MOMO/BRKO/MEAN/PULL/RSRV) + trail-stop% + days held + sector",
+          "done": true
+        },
+        {
+          "label": "Phase 6 — kill Regime Strip (data redundant with Agent Status), planning card upgrade with buy zone/stop/target/thesis",
+          "done": true
+        },
+        {
+          "label": "Phase 7a — quick wins: lock chip, Bot Active dot, history WIN/LOSS reclassified by P&L sign not exit reason, Signal Trust widget replacing internal-score leak",
+          "done": true
+        },
+        {
+          "label": "Phase 7b — circular lock icon (header-bell style), drawer header = company name + inline sparkline",
+          "done": true
+        },
+        {
+          "label": "Phase 7c — new History drawer (replaces openLogicModal hack): outcome strip / entry → exit arc / entry block with frozen thesis / exit block with reason",
+          "done": true
+        },
+        {
+          "label": "Phase 7d — new Approval drawer (replaces inline expansion): Signal Trust + hero headline + setup + sizing + memo",
+          "done": true
+        },
+        {
+          "label": "Phase 7f — cleanup: remove openLogicModal (~60 lines), Cost Basis dedup, ESC-to-close on all drawers",
+          "done": true
+        },
+        {
+          "label": "Phase 7g — Planning drawer (watchlist deep-dive): Signal Trust + Why we're watching + Live snapshot + sizing calculator + Recent news for ticker",
+          "done": true
+        },
+        {
+          "label": "Phase 7g — /api/ticker-news endpoint (per-ticker news with declickbait + freshness window)",
+          "done": true
+        },
+        {
+          "label": "Phase 7h — tighten ticker-news to fresh-only top-10; new /api/ticker-context endpoint (live price + ADR + today's range + sector ETF % + leader/laggard verdict)",
+          "done": true
+        },
+        {
+          "label": "Phase 7i — News page: kill dead category buttons, add Tracked-tickers filter, Hide-low-quality toggle, ticker chips on cards",
+          "done": true
+        },
+        {
+          "label": "Phase 7j — Intel page → 'Bot Watchlist' (rename + drop internal score leak + click → openPlanningDrawer + ticker chips)",
+          "done": true
+        },
+        {
+          "label": "Phase 7k — Watchlist wiring fix: /api/watchlist now reads signals table (was reading news_feed which had MACR/? sentinels)",
+          "done": true
+        },
+        {
+          "label": "Phase 7L — punch-list cleanup: openSigModal removed, /api/planning fallback fixed, sizing reads window cache not DOM, sync_to_github wrong-dir fix (MEDIUM-C audit), news dedup tightened (URL-primary + 0.55 Jaccard), positions.entry_thesis column for non-owner customers, computeSignalTrust unified across 4 widgets",
+          "done": true
+        }
+      ]
+    },
+    {
       "id": 8,
       "name": "Paper Trading Review",
       "status": "not_started",
@@ -398,8 +466,8 @@
           "done": false
         },
         {
-          "label": "Hero cards rendering on Intelligence page",
-          "done": false
+          "label": "Hero cards rendering on Intelligence page (renamed Bot Watchlist 2026-04-25)",
+          "done": true
         },
         {
           "label": "Schedule fidget v2 hourly cron on pi4b",

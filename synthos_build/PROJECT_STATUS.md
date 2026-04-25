@@ -2,12 +2,19 @@
 
 > **⚠ Historical snapshot (frozen 2026-04-05).** The phase tracker
 > below is preserved for audit trail. Current operational truth
-> lives in `data/system_architecture.json` (v3.13) — retail Pi 5 is
+> lives in `data/system_architecture.json` (v3.13) and the live
+> JSON dashboard at `data/project_status.json`. Retail Pi 5 is
 > deployed on NVMe, Phase C refactor + pipeline-audit Gaps 1-3 +
-> pre-launch security audit (2026-04-24/25) all landed, and the
-> stack is in supervised Phase 6 paper mode. For live data:
+> pre-launch security audit (2026-04-24/25) all landed. The stack
+> is in supervised Phase 6 paper mode and through 2026-04-25 the
+> entire customer-facing dashboard / news / intel pages were
+> overhauled (Phases 5–7L, ~20 commits). For live data:
 > `docs/pipeline_audit_2026-04-24.md`, `docs/security_review.md`,
 > `docs/trade_lifecycle.md`, `docs/backlog.md`.
+>
+> **Live phase pointer:** `data/project_status.json` (v2.3,
+> 2026-04-25). 11 phases tracked there — phases 1-7L complete,
+> phase 8 (Paper Trading Review) up next.
 
 ---
 
@@ -143,6 +150,74 @@ These items must be completed before any live trading or adversarial deployment.
 | ~~SYS-B02~~ | synthos | ~~CRITICAL~~ | ~~No license gate in boot_sequence.py~~ — DEFERRED_FROM_CURRENT_BASELINE |
 | ~~CL-009~~ | synthos-company | ~~HIGH~~ | ~~Company agents not classified in TOOL_DEPENDENCY_ARCHITECTURE.md~~ — RESOLVED 2026-03-30 |
 | ~~CL-012~~ | synthos-company | ~~HIGH~~ | ~~company.db schema undocumented~~ — RESOLVED: docs/specs/DATABASE_SCHEMA_CANONICAL.md |
+| ~~MEDIUM-C~~ | synthos | ~~MEDIUM~~ | ~~`sync_to_github` operates on wrong dir, portal uploads never reach GitHub~~ — RESOLVED 2026-04-25 (Phase 7L commit `fe5b3a6`) |
+
+---
+
+## Phase 7+ — Customer Dashboard UX Overhaul ✅ COMPLETE (2026-04-25)
+
+> **One-day work stream.** ~20 commits on main from `2b38efb` through
+> `9cd27cf`. Touched portal template, retail_portal.py,
+> retail_database.py, retail_news_agent.py, retail_trade_logic_agent.py.
+> Net code change: ~2,700 lines, with 4 dead-code paths removed and 8
+> punch-list cleanups landed. Live and verified on pi5.
+
+### Sub-phase summary
+
+| Sub-phase | Commit | What landed |
+|---|---|---|
+| **5** | `2b38efb` | `entry_pattern` column on positions; row badge (MOMO/BRKO/MEAN/PULL/RSRV) + trail-stop% + days held + sector |
+| **6** | `8347f06` | Killed Regime Strip (data redundant with Agent Status); planning card upgrade with buy zone / stop / target / thesis line |
+| **7a** | `2f43b0a` | Lock chip themed; Bot Active dot on Agent Mode card; history WIN/LOSS reclassified by realized P&L sign; Signal Trust widget replacing internal-score leak |
+| **7b** | `f94b2c7` | Lock = circular header-bell-style icon; drawer header = company name + inline sparkline |
+| **7c** | `3f4b64d` | New History drawer (outcome strip / entry→exit arc / entry block with frozen thesis / exit block with reason) |
+| **7d** | `84d7a1d` | New Approval drawer (Signal Trust + hero headline + buy zone/stop/target + sizing + memo) |
+| **7f** | `6a981ad` | Cleanup: removed `openLogicModal` (~60 lines), Cost Basis dedup, ESC-to-close on all drawers |
+| **7g** | `2889b32` | Planning drawer (watchlist deep-dive); `/api/ticker-news` endpoint |
+| **7h** | `d7280b8` | Tightened ticker-news (fresh-only top-10); new `/api/ticker-context` (live price + ADR + today's range + sector ETF %) |
+| **7i+j** | `e7998e9` | News page redesign (Tracked filter + Hide-low-quality toggle + ticker chips); Intel → "Bot Watchlist" rename + drop score leak + route to openPlanningDrawer |
+| **7k** | `b5963eb` | Watchlist wiring fix: `/api/watchlist` now reads signals table (was reading news_feed which had MACR/? sentinels) |
+| **7L** | `a7a7176`, `fe5b3a6`, `3181fe0`, `3b7ab14`, `9cd27cf` | Punch-list cleanup: openSigModal removed, /api/planning fallback fixed, sizing reads window cache, sync_to_github wrong-dir fix (MEDIUM-C), news dedup tightened, positions.entry_thesis column, computeSignalTrust unified across 4 widgets |
+
+### New schema columns (lazy ALTER, idempotent)
+
+| Table | Column | Purpose |
+|---|---|---|
+| `positions` | `entry_pattern TEXT` | Gate-6 type (MOMENTUM/BREAKOUT/MEAN_REVERSION/PULLBACK/RESERVE) for the dashboard pattern badge |
+| `positions` | `entry_thesis TEXT` | Frozen news headline at entry — works for non-owner customers where `signal_id` resolves NULL |
+| `pending_approvals` | `entry_pattern TEXT` | Plumbed through queue→approve→execute so the badge survives the round trip |
+
+### New endpoints
+
+| Endpoint | Returns |
+|---|---|
+| `/api/ticker-news?ticker=&limit=&since_days=` | Last 10 articles for ticker, freshness-windowed (default 7d). Reads `news_feed` (post-curation; pipeline already filters Tier-4 opinion at gate 3). |
+| `/api/ticker-context?ticker=&sector=` | Live current_price, today_open/high/low/pct, 14-day adr_pct, sector_etf + sector_etf_pct. One Alpaca daily-bars call per ticker; cached server-side 60s. |
+| `/api/watchlist` (rewired) | Now reads `signals` table via `get_signals_by_status(['WATCHING','QUEUED','VALIDATED'])` — produces ~50 clean curated signals instead of ~30 raw news_feed rows. |
+| `/api/planning` (fallback rewired) | Empty-queue fallback now also reads signals table (was news_feed). |
+
+### Visual / UX wins
+
+- **Four specialized slide-out drawers** (Position / History / Approval / Planning) — each with its own DOM, content tuned to context, ESC-to-close, sparkline in header, no DOM reuse hacks.
+- **Signal Trust widget** unified — same 5-bar meter / score / bucket-label across sig-modal, position drawer, approval drawer, planning drawer, watchlist cards. Single `computeSignalTrust(obj)` derivation so a trade can't read 75 in one place and 81 in another.
+- **Tracker chips** on news + watchlist cards: `📊 IN PORTFOLIO` (teal) when ticker is held, `👁 WATCHING` (cyan) when on bot's watchlist.
+- **News-page filters** rebuilt from "category" (100% Markets, useless) → task-oriented (All, Tracked-only, Hide low-quality toggle).
+- **"Why we bought"** in History drawer now works for ALL customers (not just owner) thanks to `entry_thesis` snapshot at open time.
+- **News dedup** tightened: URL-primary check + 0.55 Jaccard backup + opinion-verb / retread / quote-bait pattern matching catches the celebrity-opinion residue that was sneaking through (Cuban Slams, O'Leary Reveals, Scaramucci's Biggest Mistake).
+- **`sync_to_github` MEDIUM-C bug** from the file-upload audit fixed — portal uploads now actually reach GitHub (were silently no-oping in `git add` against the wrong directory).
+
+### Deferred from this work stream
+
+| Item | Why deferred |
+|---|---|
+| Continuous trade-arc chart on History drawer | Two-dot arc good enough; full chart needs Alpaca daily-bar fetch per drawer-open |
+| User memos surviving close into `closed_positions` | Schema add on `positions.user_memo`; not yet a stated need |
+| Pattern calibration line on Approval drawer ("bot's last 9 MOMOs: 6W/3L, +2.4%") | Needs ~30d of post-Phase-5 trade data before stats are meaningful |
+| Volatility-anchored "Suggested Levels" on Planning drawer | Approved approach (B), not built yet — replaces the rejected generic-percentage version with ATR-based bands |
+| User feedback button ("bot got this wrong") | Three flag types, queue-style backlog table — discussed, not built |
+| LLM article crawl | Pushed back: cost + latency + dependency outweigh marginal value over current regex filter |
+
+
 
 ---
 

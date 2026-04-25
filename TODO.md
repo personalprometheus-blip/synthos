@@ -2,21 +2,39 @@
 
 > Shared todo list — editable in Obsidian, git-tracked, used by Claude for context.
 > **Checkbox syntax**: `- [ ]` pending, `- [x]` done. Feel free to reorder, add, or delete.
-> Last sync: 2026-04-22
+> Last sync: 2026-04-25
 
 ---
 
 ## 🔥 Active this week
 
-- [ ] **Portal template extraction** — patch `patch/2026-04-22-portal-template-extraction`, page-by-page. `/terms` done locally, awaiting pi5 click-test. Pattern: move inline HTML strings → `src/templates/<page>.html` + `render_template()`.
-- [ ] **SD card swap on pi4b** — waiting on powered USB hub delivery. Attempt this weekend if hardware arrives. Trying physical store tomorrow.
 - [ ] **Pre-trip SD mitigations** (before user is away 3 weeks):
 	- [ ] Snapshot pi4b `.env` + systemd units to safe location
 	- [ ] Take full SD image → R2 (`dd | gzip | rclone`)
 	- [ ] Verify pi5 has independent R2 backup path (not dependent on pi4b strongbox)
 	- [ ] Confirm `daily_master` email actually sends (visibility signal during absence)
+- [ ] **SD card swap on pi4b** — waiting on powered USB hub delivery. Attempt this weekend if hardware arrives. Trying physical store tomorrow.
 - [ ] **Watch attribution patch behavior** — 482 flags today, 97% company populate. Review sample weekly.
 - [ ] **Verify stop-loss behavior 15:00-16:00 ET window** — first day with `LATE_DAY_TIGHTEN_PCT=0.0`. Expecting no noise stops on breakeven positions.
+
+## 🆕 Active follow-ups from 2026-04-25 dashboard sprint
+
+- [ ] **Monday 09:25 ET — verify Phase 7 work fires correctly** on first live trader run:
+	- [ ] history WIN/LOSS reclassification on first trail-stop win
+	- [ ] `entry_pattern` populates on next-opened position (Phase 5 lazy ALTER triggers)
+	- [ ] `entry_thesis` populates on next-opened position (Phase 7L)
+	- [ ] Planning drawer Live Snapshot loads ADR + sector ETF on real position
+	- [ ] News tracker chip appears on ticker-attached articles after dashboard polls run
+- [ ] **One-time staging cleanup on pi5** — pre-7L sync_to_github bug left files in `~/synthos/upload_staging/` that thought they'd been pushed. Manual review + push once.
+- [ ] **Track non-fix-able items deferred from Phase 7L recap**:
+	- [ ] `drawer-ticker` element ID is misnamed (holds company name) — documented, not renamed (rename has search/replace risk)
+	- [ ] `get_watching_signals()` legacy function still exists (no production callers after 7k/7L; tests still call it for backwards-compat smoke)
+	- [ ] Pattern-calibration line on Approval drawer needs ~30d post-Phase-5 trade data before stats are meaningful
+- [ ] **Phase 7e bucket** (deferred from today's UX sprint, ~3-5h total when scheduled):
+	- [ ] Continuous trade-arc chart on History drawer (replaces 2-dot arc; needs Alpaca daily-bar fetch on drawer-open)
+	- [ ] User memos surviving close into `closed_positions` (schema add `user_memo TEXT`)
+	- [ ] Volatility-anchored "Suggested Levels" on Planning drawer (ATR-based bands, replaces rejected generic-percentage version) — Option B, approved
+	- [ ] Feedback button ("bot got this wrong") with three flag types — discussed, queue-style backlog table
 
 ## 📱 Retail Portal
 
@@ -120,13 +138,44 @@ These surfaced during the ground-truth audit — **not urgent**, can roll into t
 
 ## ✅ Recently completed (last 7 days)
 
-- [x] 2026-04-21: News attribution patch (Fix A enforced, Fix C shadow, company populate, flag table)
-- [x] 2026-04-21: `LATE_DAY_TIGHTEN_PCT=0.0` disabled on pi5
-- [x] 2026-04-21: Enrichment pipeline reconstruction (timer 09:10→09:15, overnight cycle completion, standalone price_poller timer, pre-market self-check)
-- [x] 2026-04-21: Candidate-generator filter `combined_score` → `momentum_score` (threshold 0.45)
-- [x] 2026-04-21: `_MARKET_STATE_UPDATED` key-name fix (validator degradation)
-- [x] 2026-04-21: Second sector_screener pass at market close (2×/day)
-- [x] 2026-04-21: Cleaned 9 stale `claude/*` branches + 4 orphan worktrees
+### 2026-04-25 — Customer Dashboard UX Overhaul (Phases 5–7L, ~20 commits)
+
+- [x] **Phase 5** (`2b38efb`) — `entry_pattern` column on positions, row badge + trail-stop% + days held + sector
+- [x] **Phase 6** (`8347f06`) — kill Regime Strip, planning card upgrade with buy zone/stop/target/thesis
+- [x] **Phase 7a** (`2f43b0a`) — lock chip, Bot Active dot, history WIN/LOSS reclass, Signal Trust widget
+- [x] **Phase 7b** (`f94b2c7`) — circular lock icon, drawer header = company name + sparkline
+- [x] **Phase 7c** (`3f4b64d`) — new History drawer (replaces openLogicModal hack)
+- [x] **Phase 7d** (`84d7a1d`) — new Approval drawer (replaces inline expansion)
+- [x] **Phase 7f** (`6a981ad`) — cleanup: openLogicModal removed, Cost Basis dedup, ESC-to-close on all drawers
+- [x] **Phase 7g** (`2889b32`) — Planning drawer (watchlist deep-dive); `/api/ticker-news` endpoint
+- [x] **Phase 7h** (`d7280b8`) — fresh-only ticker-news; new `/api/ticker-context` (live price + ADR + sector ETF)
+- [x] **Phase 7i+j** (`e7998e9`, `bbc6feb`) — News page redesign (Tracked + Hide-low-quality + ticker chips); Intel → Bot Watchlist
+- [x] **Phase 7i fixup** (`4f214c0`) — News filters re-render on tracker-update; expanded clickbait regex (10% flag rate on real data)
+- [x] **Phase 7k** (`b5963eb`) — Watchlist wiring fix: `/api/watchlist` reads signals table not news_feed
+- [x] **Phase 7L** (`a7a7176`, `fe5b3a6`, `3181fe0`, `3b7ab14`, `9cd27cf`) — punch-list cleanup: openSigModal removed, /api/planning fallback fixed, sizing reads window cache, sync_to_github wrong-dir fix (MEDIUM-C audit), news dedup tightened, positions.entry_thesis column, computeSignalTrust unified
+
+### 2026-04-24/25 — Pre-launch security audit + attribution enforcement
+
+- [x] CRITICAL-1 closed: /api/admin-override admin gate
+- [x] CRITICAL-2 closed: /api/keys admin gate
+- [x] HIGH-1 closed: /reset-password handler added (forgot-password was broken)
+- [x] HIGH-3 closed: /api/audit promoted to @admin_required
+- [x] Persistent login rate limiter (login_attempts table) — 10 fails/15min per account, 20/5min per IP
+- [x] Two-step verify-new-email flow (pending_email_changes table)
+- [x] Password min-length standardized 8→12 (OWASP 2023)
+- [x] auth.py state/zip_code migration bug (silently broken since 2026-04-13)
+- [x] Phase 4.5 file-upload audit: 21/21 customer-side probes pass
+- [x] Attribution patch enforcement: TICKER_REMAP + TICKER_REJECT flipped True after 4.5-day shadow
+
+### 2026-04-21 (week of)
+
+- [x] News attribution patch (Fix A enforced, Fix C shadow, company populate, flag table)
+- [x] `LATE_DAY_TIGHTEN_PCT=0.0` disabled on pi5
+- [x] Enrichment pipeline reconstruction (timer 09:10→09:15, overnight cycle completion, standalone price_poller timer, pre-market self-check)
+- [x] Candidate-generator filter `combined_score` → `momentum_score` (threshold 0.45)
+- [x] `_MARKET_STATE_UPDATED` key-name fix (validator degradation)
+- [x] Second sector_screener pass at market close (2×/day)
+- [x] Cleaned 9 stale `claude/*` branches + 4 orphan worktrees
 
 ---
 
