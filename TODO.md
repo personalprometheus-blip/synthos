@@ -17,6 +17,14 @@
 - [ ] **Watch attribution patch behavior** — TICKER_REMAP + TICKER_REJECT enforcement now ON (2026-04-25). Sample real-world enforced rejects weekly to make sure no false positives are blocking legitimate signals.
 - [ ] **Verify stop-loss behavior 15:00-16:00 ET window** — `LATE_DAY_TIGHTEN_PCT=0.0` deployed 2026-04-21 (4+ trading days now). Pull `exit_performance` to confirm the 15:00-16:00 bucket no longer shows the breakeven-noise pattern.
 
+## 🟡 Auditor findings — kept visible by design
+
+After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
+
+- [ ] **#270 Stripe webhook secret unset** (HIGH, x3 hits) — Phase 8 task. Either wire up `STRIPE_WEBHOOK_SECRET` or firewall the endpoint when not in use.
+- [ ] **#249 / #255 Trader 240s timeout** (HIGH, x1 each) — customers `f313a3d9` (2026-04-22) and `80419c9e` (2026-04-24). Once each, days apart. Monitor for recurrence; investigate if a pattern emerges.
+- [ ] **#256 NEGATIVE_CASH owner $-0.01** (CRITICAL, x1) — paper-trade rounding artifact on owner customer (30eff008). Will self-clear on next portfolio reconcile/deposit. No action.
+
 ## 🆕 Active follow-ups from 2026-04-25 dashboard sprint
 
 - [ ] **Monday 09:25 ET — verify Phase 7 work fires correctly** on first live trader run:
@@ -128,6 +136,16 @@
 - [ ] C8 news-agent gate-pipeline refactor — baseline harness is on `patch/2026-04-24`, actual refactor is future work
 
 ## ✅ Recently completed (last 7 days)
+
+### 2026-04-25 — Auditor triage sweep (50 → 4 open findings)
+
+- [x] **`run_window_calculator` NameError on every overnight cycle** (`183bb68`) — agent retired in Phase C but two call sites in retail_market_daemon.py weren't cleaned up. Removed both. Auditor #261/#262/#282/#283 resolved.
+- [x] **synthos-watchdog 'inactive' false-positive at boot** (`183bb68`) — `_check_systemd_service` now polls `is-active` for up to 15s, treating 'activating'/'inactive' as transient. Boot-race between synthos-boot-sequence.service and synthos-watchdog.service no longer logs ERROR. Auditor #260/#281/#258/#279 resolved.
+- [x] **Test-customer debris on auditor** (`183bb68`) — `customer_health_check.py` now cross-references on-disk customer dirs against `auth.db` and silently skips dirs whose cid isn't an active customer. Smoke-test customers no longer generate MISSING_DB / NO_SETTINGS findings every audit run. 23 finding rows resolved.
+- [x] **pi2w_monitor unreachable findings stuck** (`018bdb4` synthos-company) — auditor's existing `disabled:True` skip logic prevented NEW findings but left historical ones unresolved. Now also auto-resolves any `<node>::unreachable` row when iterating a disabled node. Idempotent. Auditor #243 resolved.
+- [x] **Bulk-resolved 28 stale findings via direct SQL** to auditor.db (test-debris × 23 + pi2w_disabled × 1 + transient-from-portal-restart × 4).
+- [x] **Bulk-resolved 18 post-deploy findings** (4 window_calc + 2 watchdog + 2 service_down + 10 price_poller WARNING noise — circuit breaker mitigated, warnings are diagnostic only).
+- Result: 50 → 4 open findings; remaining are real items kept visible by design (Stripe webhook secret, trader timeouts × 2, NEGATIVE_CASH penny — all annotated in the new "Auditor findings — kept visible by design" section above).
 
 ### 2026-04-25 — Customer Dashboard UX Overhaul (Phases 5–7L, ~20 commits)
 
