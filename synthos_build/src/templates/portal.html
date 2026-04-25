@@ -4667,9 +4667,46 @@ function renderPositions(positions) {
         <div style="display:flex;align-items:center;gap:5px">
           <span style="font-size:12px;font-weight:700;color:var(--text)">${p.ticker||'?'}</span>
           <span class="spark-slot" data-ticker="${(p.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>
+          ${(function(){
+            // Pattern badge — compact 9px chip showing Gate-6 entry classification
+            const pat = (p.entry_pattern || '').toString().toUpperCase();
+            if (!pat) return '';
+            const palette = {
+              MOMENTUM:       {fg:'#00f5d4', bg:'rgba(0,245,212,0.10)', bd:'rgba(0,245,212,0.30)', label:'MOMO'},
+              BREAKOUT:       {fg:'#7b61ff', bg:'rgba(123,97,255,0.12)', bd:'rgba(123,97,255,0.30)', label:'BRKO'},
+              MEAN_REVERSION: {fg:'#22d3ee', bg:'rgba(34,211,238,0.10)',  bd:'rgba(34,211,238,0.30)', label:'MEAN'},
+              PULLBACK:       {fg:'#a78bfa', bg:'rgba(167,139,250,0.10)', bd:'rgba(167,139,250,0.30)', label:'PULL'},
+              RESERVE:        {fg:'#f5a623', bg:'rgba(245,166,35,0.10)',  bd:'rgba(245,166,35,0.30)', label:'RSRV'},
+            };
+            const c = palette[pat] || {fg:'var(--muted)', bg:'rgba(255,255,255,0.04)', bd:'rgba(255,255,255,0.10)', label:pat.slice(0,4)};
+            return '<span title="Entry pattern: ' + pat + '" '
+                 + 'style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;'
+                 + 'background:' + c.bg + ';border:1px solid ' + c.bd + ';color:' + c.fg + '">' + c.label + '</span>';
+          })()}
           ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:#f5a623">ORPHAN</span>' : ''}
         </div>
         <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
+        <div style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap">
+          ${(function(){
+            // Trailing-stop %, days held, sector — three compact metadata chips
+            const bits = [];
+            const tsp = parseFloat(p.trail_stop_pct);
+            if (!Number.isNaN(tsp) && tsp > 0) {
+              bits.push('<span title="Trailing stop distance">stop -' + (tsp*100).toFixed(1) + '%</span>');
+            }
+            if (p.opened_at) {
+              try {
+                const opened = new Date((p.opened_at||'').replace(' ', 'T'));
+                const days = Math.max(0, Math.floor((Date.now() - opened.getTime()) / 86400000));
+                bits.push('<span title="Days held">' + days + 'd held</span>');
+              } catch (e) {}
+            }
+            if (p.sector) {
+              bits.push('<span title="Sector" style="opacity:0.75">' + String(p.sector).slice(0,18) + '</span>');
+            }
+            return bits.join('<span style="opacity:0.4">·</span>');
+          })()}
+        </div>
       </div>
       <div style="text-align:right">
         <div style="font-size:12px;font-weight:700;color:var(--text)">$${mktVal.toFixed(2)}</div>

@@ -1248,7 +1248,7 @@ class DB:
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,
                       interrogation_status=None, price_history_used=None,
-                      managed_by='bot'):
+                      managed_by='bot', entry_pattern=None):
         """
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
@@ -1260,9 +1260,22 @@ class DB:
         be here — but if it gets called anyway, the trader's signal-eval
         path already blocks sticky-user tickers upstream; we don't second-
         guess the caller here.
+
+        entry_pattern (added 2026-04-25): one of {'MOMENTUM', 'BREAKOUT',
+        'MEAN_REVERSION', 'PULLBACK', 'RESERVE'} — the trader's Gate 6
+        classification at entry time. Used by the dashboard to render a
+        pattern badge per row. Nullable for backward compat with rows
+        opened before the column existed.
         """
         if managed_by not in ('bot', 'user'):
             raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
+        # Lazy migration: ensure the entry_pattern column exists. SQLite
+        # ADD COLUMN is idempotent-by-throwing, caught here.
+        try:
+            with self.conn() as _mc:
+                _mc.execute("ALTER TABLE positions ADD COLUMN entry_pattern TEXT")
+        except sqlite3.OperationalError:
+            pass  # already exists
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
 
@@ -1287,13 +1300,15 @@ class DB:
                      shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                      pnl, status, opened_at, signal_id,
                      entry_sentiment_score, entry_signal_score,
-                     interrogation_status, price_history_used, managed_by)
-                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?)
+                     interrogation_status, price_history_used, managed_by,
+                     entry_pattern)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?,?)
             """, (pos_id, ticker, company, sector, entry_price, entry_price,
                   shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                   self.now(), signal_id,
                   entry_sentiment_score, entry_signal_score,
-                  interrogation_status, price_history_used, managed_by))
+                  interrogation_status, price_history_used, managed_by,
+                  entry_pattern))
 
             c.execute("""
                 UPDATE portfolio SET cash=?, updated_at=? WHERE id=1
@@ -3876,7 +3891,8 @@ class DB:
                        headline='', price=None, shares=None, max_trade=None,
                        trail_amt=None, trail_pct=None, vol_label='',
                        reasoning='', session='',
-                       queue_origin='market', status='PENDING_APPROVAL'):
+                       queue_origin='market', status='PENDING_APPROVAL',
+                       entry_pattern=None):
         """
         Insert or replace a pending approval entry.
         Deduplicates by signal_id — re-queuing the same signal id
@@ -3888,11 +3904,26 @@ class DB:
           MANAGED/SUPERVISED + overnight → ('overnight', 'PENDING_APPROVAL')
           AUTOMATIC + overnight          → ('overnight', 'QUEUED_FOR_OPEN')
           Anything during market hours   → ('market',   'PENDING_APPROVAL')
+
+        entry_pattern (added 2026-04-25): persist the Gate 6 entry
+        classification ('MOMENTUM', 'BREAKOUT', 'MEAN_REVERSION',
+        'PULLBACK') so when the user accepts the approval the position
+        row inherits the same pattern badge as the originating signal.
+        Nullable for backward compat with rows queued before column
+        existed.
         """
         if status not in ('PENDING_APPROVAL', 'QUEUED_FOR_OPEN'):
             raise ValueError(f"queue_approval: invalid initial status {status!r}")
         if queue_origin not in ('market', 'overnight'):
             raise ValueError(f"queue_approval: invalid queue_origin {queue_origin!r}")
+
+        # Lazy migration: ensure entry_pattern column exists on
+        # pending_approvals. Idempotent-by-throwing.
+        try:
+            with self.conn() as _mc:
+                _mc.execute("ALTER TABLE pending_approvals ADD COLUMN entry_pattern TEXT")
+        except sqlite3.OperationalError:
+            pass  # already exists
 
         now = self.now()
         with self.conn() as c:
@@ -3902,9 +3933,9 @@ class DB:
                     confidence, staleness, headline,
                     price, shares, max_trade, trail_amt, trail_pct,
                     vol_label, reasoning, session,
-                    status, queued_at, queue_origin
+                    status, queued_at, queue_origin, entry_pattern
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     ticker          = excluded.ticker,
@@ -3925,6 +3956,7 @@ class DB:
                     status          = excluded.status,
                     queued_at       = excluded.queued_at,
                     queue_origin    = excluded.queue_origin,
+                    entry_pattern   = excluded.entry_pattern,
                     decided_at      = NULL,
                     decided_by      = NULL,
                     executed_at     = NULL,
@@ -3937,7 +3969,7 @@ class DB:
                 confidence, staleness, headline,
                 price, shares, max_trade, trail_amt, trail_pct,
                 vol_label, reasoning, session,
-                status, now, queue_origin,
+                status, now, queue_origin, entry_pattern,
             ))
         log.info(f"[DB] Approval queued: {ticker} id={signal_id} "
                  f"status={status} origin={queue_origin}")

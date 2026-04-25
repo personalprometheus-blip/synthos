@@ -2515,6 +2515,7 @@ def queue_for_approval(signal, decision_data):
             vol_label  = decision_data.get('vol_label'),
             reasoning  = decision_data.get('reasoning', ''),
             session    = decision_data.get('session', ''),
+            entry_pattern = decision_data.get('entry_pattern'),
         )
         log.info(f"[MANAGED] Trade queued: {signal['ticker']} ${decision_data.get('max_trade',0):.2f}")
     except Exception as e:
@@ -3076,6 +3077,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                             entry_signal_score=round(float(score), 4),
                             entry_sentiment_score=signal.get('sentiment_score'),
                             interrogation_status=signal.get('interrogation_status'),
+                            entry_pattern=candidate.get('type'),
                         )
                         alpaca.submit_order(signal['ticker'], size, "sell",
                                             order_type="trailing_stop", trail_price=trail_amt)
@@ -3696,7 +3698,8 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                      entry_signal_score=_appr_sig.get('entry_signal_score',
                                                                        approval.get('confidence')),
                                      entry_sentiment_score=_appr_sig.get('sentiment_score'),
-                                     interrogation_status=_appr_sig.get('interrogation_status'))
+                                     interrogation_status=_appr_sig.get('interrogation_status'),
+                                     entry_pattern=approval.get('entry_pattern'))
                     alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
@@ -3927,6 +3930,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 "trail_amt": trail_amt,
                 "trail_pct": trail_pct,
                 "vol_label": vol_label,
+                "entry_pattern": candidate.get('type'),
                 "reasoning": (
                     f"Entry type: {candidate['type']} | Score: {score:.4f} | "
                     f"Anchor: {candidate.get('anchor_type','?')} ${candidate.get('anchor_price',0):.2f} "
@@ -3958,6 +3962,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                         entry_signal_score=round(float(score), 4),
                         entry_sentiment_score=signal.get('sentiment_score'),
                         interrogation_status=signal.get('interrogation_status'),
+                        entry_pattern=candidate.get('type'),
                     )
                     alpaca.submit_order(signal['ticker'], size, "sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
