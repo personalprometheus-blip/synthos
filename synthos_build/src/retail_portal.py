@@ -5920,6 +5920,23 @@ def api_logs_audit():
         _re.compile(r'Scan complete', _re.I),
         _re.compile(r'critical checks pass', _re.I),
         _re.compile(r'All \w+ checks', _re.I),
+        # Phase 7L (2026-04-25) — silence noise that the upstream code
+        # already mitigates and that the dashboard kept surfacing as
+        # MEDIUM/HIGH despite no action being possible.
+        # Yahoo-finance / Alpaca circuit-breaker retry warnings —
+        # circuit breaker pattern catches these; the warning is
+        # diagnostic only.
+        _re.compile(r'\b(?:yfinance|yahoo|circuit\s*breaker)\b', _re.I),
+        _re.compile(r'WARNING.*\b(?:retry|failed|unavailable)\b.*'
+                    r'\b(?:price_poller|sentiment_agent)\b', _re.I),
+        _re.compile(r'\b(?:price_poller|sentiment_agent)\b.*WARNING.*'
+                    r'\b(?:retry|failed|unavailable)\b', _re.I),
+        # [KEYS] customer attempted to write global .env — these are
+        # the auth gate working correctly. The warning is logged when
+        # the request is BLOCKED; not actionable, just security
+        # accounting. (See pre-launch security audit 2026-04-24/25.)
+        _re.compile(r'\[KEYS\]\s+Customer\s+\S+\s+attempted to write',
+                    _re.I),
     ]
     # Match log-level tokens: ] LEVEL or line-start LEVEL (not mid-sentence words)
     PATTERNS = [
@@ -5960,6 +5977,16 @@ def api_logs_audit():
         log_files = []
 
     now_iso = _dt.now(_tz.utc).isoformat()
+    # Phase 7L (2026-04-25) — only surface issues from the last 72h.
+    # Real bugs recur (every overnight cycle / every boot / every
+    # cron run); recent occurrences are present. Older one-offs that
+    # haven't repeated in 3 days are stale by definition. Without this
+    # cap, the dashboard accumulated 200+ findings (mostly old
+    # WARNINGs) with no decay path because /api/logs-audit re-scans
+    # the whole file on every page load.
+    from datetime import timedelta as _td
+    _cutoff_dt = _dt.now(_tz.utc) - _td(hours=72)
+    _cutoff_iso = _cutoff_dt.isoformat()
 
     for log_path in log_files:
         fname = _os.path.basename(log_path)
@@ -5982,6 +6009,12 @@ def api_logs_audit():
                         # Use the log line's own timestamp when present;
                         # fall back to scan-time only when absent.
                         line_ts = _parse_log_ts(line) or now_iso
+                        # Phase 7L age filter — drop lines whose parsed
+                        # timestamp is older than the 72h cutoff. Lines
+                        # without a parseable timestamp keep falling
+                        # through (line_ts == now_iso > cutoff_iso).
+                        if line_ts < _cutoff_iso:
+                            break  # match found but too old — skip
                         if key in seen:
                             seen[key]['hit_count'] += 1
                             # last_seen tracks the MOST RECENT occurrence of the
