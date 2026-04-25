@@ -279,8 +279,18 @@ def _migrate_auth_db():
         ("pricing_locked_at",    "TEXT"),
         ("tos_accepted_at",      "TEXT"),
         ("tos_version",          "TEXT"),
-            ("state",              "ALTER TABLE customers ADD COLUMN state TEXT"),
-            ("zip_code",           "ALTER TABLE customers ADD COLUMN zip_code TEXT"),
+        # state/zip_code: dead-code migration entries fixed 2026-04-25.
+        # The original lines 282-283 had col_def values containing the
+        # full ALTER TABLE SQL string instead of just the column type,
+        # producing invalid SQL like "ALTER TABLE customers ADD COLUMN
+        # state ALTER TABLE customers ADD COLUMN state TEXT" which got
+        # silently swallowed by the OperationalError handler. Live DBs
+        # got the columns through a different path (manual ALTER or an
+        # earlier working version of this migration); the broken lines
+        # added nothing for years. See git commit 2f65e1c (2026-04-13)
+        # for the original copy-paste error.
+        ("state",                "TEXT"),
+        ("zip_code",             "TEXT"),
         ("phone_enc",            "BLOB"),
     ]
     with _auth_conn() as c:
