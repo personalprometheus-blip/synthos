@@ -179,6 +179,26 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .hdr-bell:hover{border-color:var(--signal);box-shadow:0 0 10px rgba(245,166,35,0.09)}
 .hdr-bell svg{color:rgba(255,255,255,0.4);width:14px;height:14px;transition:color .15s}
 .hdr-bell:hover svg{color:rgba(255,255,255,0.7)}
+
+/* Position-row lock toggle — same family as .hdr-bell (circular icon
+   button), sized down to fit beside the AUTO/USER pill. Grey by default;
+   turns amber when sticky=user is on. Hover hint matches notification
+   bell. */
+.row-lock{
+  position:relative;width:22px;height:22px;border-radius:50%;
+  background:var(--surface2);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s;
+  flex-shrink:0;font-size:10px;line-height:1;color:rgba(255,255,255,0.4);
+}
+.row-lock:hover{border-color:var(--signal);color:rgba(255,255,255,0.75)}
+.row-lock.locked{
+  background:rgba(245,166,35,0.14);
+  border-color:rgba(245,166,35,0.55);
+  color:#f5a623;
+  box-shadow:0 0 8px rgba(245,166,35,0.25);
+}
+.row-lock.locked:hover{background:rgba(245,166,35,0.22)}
 .bell-badge{
   position:absolute;top:-3px;right:-3px;
   min-width:16px;height:16px;border-radius:99px;
@@ -2875,9 +2895,15 @@ setInterval(loadAgentPulse, 10000);
 <div class="drawer" id="pos-drawer">
   <div class="drawer-head">
     <div id="drawer-icon" style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0"></div>
-    <div>
-      <div style="font-size:14px;font-weight:700;color:var(--text)" id="drawer-ticker">—</div>
-      <div style="font-size:10px;color:var(--muted)" id="drawer-sub">—</div>
+    <div style="flex:1;min-width:0">
+      <!-- drawer-ticker now holds the company NAME (the icon already
+           communicates the ticker symbol). Sparkline sits inline beside
+           the name. -->
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0" id="drawer-ticker">—</div>
+        <span class="spark-slot" id="drawer-spark" data-ticker="" style="width:80px;height:22px;flex-shrink:0"></span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px" id="drawer-sub">—</div>
     </div>
     <button class="drawer-close" onclick="closeDrawer()">✕</button>
   </div>
@@ -3752,7 +3778,18 @@ function openPositionDrawer(p) {
   document.getElementById('drawer-icon').textContent = (p.ticker||'?').slice(0,4);
   document.getElementById('drawer-icon').style.cssText =
     `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:${accent}18;border:1px solid ${accent}40;color:${accent}`;
-  document.getElementById('drawer-ticker').textContent = p.ticker || '—';
+  // Drawer header: COMPANY NAME (the icon already shows the ticker symbol).
+  // Falls back to ticker if company is missing. Sparkline is rendered into
+  // the inline #drawer-spark slot via the existing populateSparklines /
+  // loadSparklines pipeline.
+  const companyName = (p.company && p.company !== p.ticker) ? p.company : (p.ticker || '—');
+  document.getElementById('drawer-ticker').textContent = companyName;
+  document.getElementById('drawer-ticker').title = companyName + (p.ticker ? ' · ' + p.ticker : '');
+  const sparkSlot = document.getElementById('drawer-spark');
+  if (sparkSlot) {
+    sparkSlot.dataset.ticker = (p.ticker || '').replace(/[^A-Z0-9.-]/gi, '');
+    sparkSlot.innerHTML = '';  // clear any prior render so populateSparklines refills
+  }
   document.getElementById('drawer-sub').textContent =
     (p.shares||0).toFixed(2) + ' shares · ' + (p.is_orphan ? 'Orphan position' : 'Tracked');
 
@@ -3814,12 +3851,19 @@ function openPositionDrawer(p) {
 
   document.getElementById('drawer-overlay').classList.add('open');
   document.getElementById('pos-drawer').classList.add('open');
+  // Fill the inline sparkline in the drawer header. populateSparklines()
+  // checks the cache; loadSparklines() top-ups from API if needed.
+  try { populateSparklines(); loadSparklines(); } catch(e) {}
 }
 
 function closeDrawer(e) {
   if (e && e.target !== document.getElementById('drawer-overlay')) return;
   document.getElementById('drawer-overlay').classList.remove('open');
   document.getElementById('pos-drawer').classList.remove('open');
+  // Clear sparkline slot so reopening the drawer for a different position
+  // (or for a logic-modal item with no company) doesn't show stale art.
+  const ss = document.getElementById('drawer-spark');
+  if (ss) { ss.dataset.ticker = ''; ss.innerHTML = ''; }
 }
 
 // ── SESSION TIMELINE UPDATE ──
@@ -4681,28 +4725,6 @@ function renderPositions(positions) {
                  + 'background:' + c.bg + ';border:1px solid ' + c.bd + ';color:' + c.fg + '">' + c.label + '</span>';
           })()}
           ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:#f5a623">ORPHAN</span>' : ''}
-          ${isOrphan ? '' : (function(){
-            // Lock chip — themed pill matching pattern badges. Always visible
-            // so the unlocked state is discoverable; locked is amber + bright,
-            // unlocked is muted + dim. Click toggles sticky=user. (Moved
-            // inline from the right-side Mgmt column 2026-04-25.)
-            const isSticky = (p.sticky === 'user');
-            const lockGlyph = isSticky ? '\u{1F512}' : '\u{1F513}';
-            const fg = isSticky ? '#f5a623' : 'var(--muted)';
-            const bg = isSticky ? 'rgba(245,166,35,0.10)' : 'rgba(255,255,255,0.03)';
-            const bd = isSticky ? 'rgba(245,166,35,0.30)' : 'rgba(255,255,255,0.10)';
-            const label = isSticky ? 'LOCKED' : 'AUTO';
-            const opacity = isSticky ? '1' : '0.55';
-            const title = isSticky
-              ? 'Sticky USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
-              : 'Click to lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker.';
-            return '<span onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky?'true':'false') + ',event)" '
-                 + 'title="' + title + '" '
-                 + 'style="padding:1px 6px 1px 5px;border-radius:99px;font-size:8px;font-weight:700;letter-spacing:0.04em;'
-                 + 'cursor:pointer;display:inline-flex;align-items:center;gap:3px;opacity:' + opacity + ';'
-                 + 'background:' + bg + ';border:1px solid ' + bd + ';color:' + fg + '">'
-                 + '<span style="font-size:9px;line-height:1">' + lockGlyph + '</span>' + label + '</span>';
-          })()}
         </div>
         <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap">
@@ -4739,13 +4761,28 @@ function renderPositions(positions) {
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
-      <div style="text-align:right;min-width:54px" title="${toggleTitle}">
-        <div ${toggleOnClick}
+      <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;min-width:78px">
+        <div title="${toggleTitle}" ${toggleOnClick}
              style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
                     background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
                     cursor:${cursorStyle};opacity:${opacity};text-align:center;min-width:40px">
           ${tagLabel}
         </div>
+        ${isOrphan ? '' : (function(){
+          // Lock — circular icon button styled like the header notification
+          // bell. Grey when unused (sticky != user); amber when locked.
+          // Click toggles sticky=user. Sits to the right of the AUTO/USER
+          // pill in the Mgmt column.
+          const isSticky = (p.sticky === 'user');
+          const title = isSticky
+            ? 'Locked to USER — bot will skip ALL signals for ' + (p.ticker||'?') + '. Click to unlock.'
+            : 'Click to lock ' + (p.ticker||'?') + ' to USER — bot will skip all future signals for this ticker.';
+          return '<div class="row-lock' + (isSticky ? ' locked' : '') + '" '
+               + 'onclick="toggleStickyUser(\'' + (p.ticker||'').replace(/\'/g,'') + '\',' + (isSticky?'true':'false') + ',event)" '
+               + 'title="' + title + '">'
+               + (isSticky ? '\u{1F512}' : '\u{1F513}')
+               + '</div>';
+        })()}
       </div>
     </div>`;
   };
@@ -4755,7 +4792,7 @@ function renderPositions(positions) {
     + '<div style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
     + '<div style="text-align:right;min-width:72px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
     + '<div style="text-align:right;min-width:68px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
-    + '<div style="text-align:right;min-width:54px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
+    + '<div style="text-align:right;min-width:78px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
     + '</div>';
   const rows = [
     ...tracked.map((p,i) => renderRow(p, i, false)),
