@@ -1019,6 +1019,81 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .intel-grid{grid-template-columns:1fr}
 }
+
+/* ═══════ Dashboard cards added 2026-04-25 ═══════
+   Three new strip-style cards on the dashboard:
+     • #regime-strip  — Bot / Regime / Market State / SPY / Validator / Last Decision
+     • #flow-strip    — Today: Entries / Exits / Day P&L / vs SPY / Decisions
+     • #idle-card     — "Why isn't the bot trading?" (conditional, hidden until populated)
+   All driven by /api/dashboard-data on the existing poll cadence. */
+.regime-strip{
+  display:flex;align-items:center;gap:0;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:8px 14px;
+  font-family:var(--mono);font-size:11px;
+  margin-bottom:14px;flex-wrap:wrap;
+}
+.regime-strip .cell{
+  display:flex;align-items:center;gap:8px;
+  padding:0 14px;border-right:1px solid var(--border);
+}
+.regime-strip .cell:last-child{border-right:0}
+.regime-strip .cell:first-child{padding-left:0}
+.regime-strip .lbl{color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase}
+.regime-strip .val{color:var(--text);font-weight:700;letter-spacing:0.04em}
+.regime-strip .val.bull{color:var(--teal)}
+.regime-strip .val.bear{color:var(--pink)}
+.regime-strip .val.neutral{color:var(--amber)}
+.regime-strip .pulse{
+  width:7px;height:7px;border-radius:50%;background:var(--teal);
+  box-shadow:0 0 6px var(--teal);
+  animation:rs-pulse 2s ease-in-out infinite;
+}
+.regime-strip .pulse.halted{background:var(--pink);box-shadow:0 0 6px var(--pink);animation:none}
+@keyframes rs-pulse{50%{opacity:0.4;transform:scale(0.8)}}
+
+.flow-strip{
+  display:flex;align-items:center;gap:0;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 14px;
+  margin-bottom:14px;
+  font-family:var(--mono);font-size:11px;
+  flex-wrap:wrap;
+}
+.flow-strip .cell{display:flex;align-items:center;gap:6px;padding:0 16px;border-right:1px solid var(--border)}
+.flow-strip .cell:last-child{border-right:0}
+.flow-strip .cell:first-child{padding-left:0}
+.flow-strip .lbl{color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase}
+.flow-strip .val{color:var(--text);font-weight:700}
+.flow-strip .val.gain{color:var(--teal)}
+.flow-strip .val.loss{color:var(--pink)}
+
+.idle-card{
+  display:none;     /* JS toggles to block when /api/dashboard-data.idle is non-null */
+  background:linear-gradient(160deg,rgba(123,97,255,0.05) 0%, var(--surface) 55%);
+  border:1px solid rgba(123,97,255,0.13);
+  border-radius:12px;padding:14px 16px;margin-bottom:14px;
+}
+.idle-card.show{display:block}
+.idle-card .head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.idle-card .head .lbl{font-size:10px;color:var(--purple);font-weight:700;letter-spacing:0.1em;text-transform:uppercase}
+.idle-card .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
+.idle-card .item{font-family:var(--mono);font-size:10px}
+.idle-card .item .k{color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px}
+.idle-card .item .v{color:var(--text);font-size:13px;font-weight:700}
+.idle-card .item .v.go{color:var(--teal)}
+.idle-card .item .v.caution{color:var(--amber)}
+.idle-card .item .v.no_go{color:var(--pink)}
+.idle-card .detail{
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--border);
+  font-size:10px;color:var(--muted);font-family:var(--mono);line-height:1.7;
+}
+.idle-card .detail .clock{color:var(--amber);font-weight:600}
+
 </style>
 </head>
 <body>
@@ -1759,6 +1834,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
   <div id="user-warnings-banner"></div>
 
+  <!-- MARKET REGIME STRIP — populated by /api/dashboard-data; added 2026-04-25 -->
+  <div class="regime-strip" id="regime-strip" role="region" aria-label="Market regime">
+    <div class="cell"><div class="pulse" id="rs-pulse"></div><span class="lbl">Bot</span><span class="val" id="rs-bot">—</span></div>
+    <div class="cell"><span class="lbl">Regime</span><span class="val" id="rs-regime">—</span></div>
+    <div class="cell"><span class="lbl">Market State</span><span class="val" id="rs-mstate">—</span></div>
+    <div class="cell"><span class="lbl">SPY</span><span class="val" id="rs-spy">—</span></div>
+    <div class="cell"><span class="lbl">Validator</span><span class="val" id="rs-validator">—</span></div>
+    <div class="cell" style="margin-left:auto;border-right:0"><span class="lbl">Last decision</span><span class="val" id="rs-last">—</span></div>
+  </div>
+
   <!-- OPEN POSITIONS -->
   <div class="glass teal-glow" style="margin-bottom:14px">
     <div class="dash-panel-head">
@@ -1769,6 +1854,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div id="positions-list" style="height:300px;overflow-y:auto">
       <div class="empty-state" style="padding:16px 0"><div class="empty-icon">&#x1F4CA;</div>No open positions</div>
     </div>
+  </div>
+
+  <!-- TODAY'S FLOW STRIP — populated by /api/dashboard-data; added 2026-04-25 -->
+  <div class="flow-strip" id="flow-strip" role="region" aria-label="Today's activity">
+    <div class="cell"><span class="lbl">Today</span></div>
+    <div class="cell"><span class="lbl">Entries</span><span class="val" id="fs-entries">0</span></div>
+    <div class="cell"><span class="lbl">Exits</span><span class="val" id="fs-exits">0</span></div>
+    <div class="cell"><span class="lbl">Day P&amp;L</span><span class="val" id="fs-daypl">—</span></div>
+    <div class="cell"><span class="lbl">vs SPY</span><span class="val" id="fs-vspy">—</span></div>
+    <div class="cell" style="margin-left:auto;border-right:0"><span class="lbl">Decisions</span><span class="val" id="fs-decisions">0</span></div>
   </div>
 
   <!-- STATUS STRIP -->
@@ -1804,6 +1899,22 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
+  <!-- WHY ISN'T THE BOT TRADING? — conditional, populated by /api/dashboard-data; added 2026-04-25 -->
+  <div class="idle-card" id="idle-card" role="region" aria-label="Bot idle reason">
+    <div class="head">
+      <span class="lbl">Why isn't the bot trading?</span>
+      <span style="margin-left:auto;font-size:9px;color:var(--dim);font-family:var(--mono)" id="idle-mins"></span>
+    </div>
+    <div class="grid">
+      <div class="item"><div class="k">Validator</div><div class="v" id="idle-validator">—</div></div>
+      <div class="item"><div class="k">Macro Regime</div><div class="v" id="idle-regime">—</div></div>
+      <div class="item"><div class="k">Slot Utilization</div><div class="v" id="idle-slots">—</div></div>
+      <div class="item"><div class="k">Cash Available</div><div class="v" id="idle-cash">—</div></div>
+      <div class="item"><div class="k">Validated Pool</div><div class="v" id="idle-validated">—</div></div>
+      <div class="item"><div class="k">Cooling-off</div><div class="v" id="idle-cooling">—</div></div>
+    </div>
+    <div class="detail" id="idle-detail"></div>
+  </div>
 
   <!-- WAVE SCRIPT CONTAINER (no dash-row wrapper needed) -->
   <div style="display:none">
@@ -4986,6 +5097,169 @@ async function loadLiveStatus() {
   } catch(e) { console.log('Status load error:', e); }
 }
 
+// ── DASHBOARD STRIPS (added 2026-04-25) ───────────────────────────
+// Populates 3 dashboard cards from /api/dashboard-data:
+//   • #regime-strip  — Bot / Regime / Market State / SPY / Validator / Last Decision
+//   • #flow-strip    — Today: Entries / Exits / Day P&L / vs SPY / Decisions
+//   • #idle-card     — Why isn't the bot trading? (conditional, hidden when idle=null)
+// Same poll cadence as loadLiveStatus (called from the same setInterval).
+// Designed to fail open: every populator is wrapped so a missing field
+// just leaves the placeholder text in place.
+async function loadDashboardData() {
+  try {
+    const r = await fetch('/api/dashboard-data');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    // ── Regime strip ──
+    const reg = d.regime || {};
+    const set = (id, txt, cls) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (txt !== undefined && txt !== null) el.textContent = txt;
+      // Reset color class then apply if provided
+      el.classList.remove('bull','bear','neutral','gain','loss');
+      if (cls) el.classList.add(cls);
+    };
+
+    // Bot status — derive from agent-running setting we already track
+    // client-side via _lastHaltStatus (set by loadLiveStatus). Falls
+    // back to ACTIVE if unknown.
+    let botStatus = 'ACTIVE', botCls = 'bull';
+    try {
+      const halt = window._lastHaltStatus;
+      if (halt && (halt.customer_active || halt.admin_active)) {
+        botStatus = 'HALTED';
+        botCls = 'bear';
+        const p = document.getElementById('rs-pulse');
+        if (p) p.classList.add('halted');
+      } else {
+        const p = document.getElementById('rs-pulse');
+        if (p) p.classList.remove('halted');
+      }
+    } catch(e) {}
+    set('rs-bot', botStatus, botCls);
+
+    // Regime — color by macro_regime label
+    const macro = (reg.macro || 'NORMAL').toUpperCase();
+    let macroCls = 'neutral';
+    if (macro.includes('BULL') || macro === 'EXPANSION') macroCls = 'bull';
+    else if (macro.includes('BEAR') || macro === 'CONTRACTION') macroCls = 'bear';
+    set('rs-regime', macro, macroCls);
+
+    // Market State — show the named state + numeric score
+    const ms = (reg.market_state || '—').replace(/_/g, ' ');
+    const score = reg.market_state_score;
+    const scoreTxt = (typeof score === 'number')
+      ? (score >= 0 ? '+' : '') + score.toFixed(score < 10 ? 2 : 1)
+      : '';
+    let msCls = 'neutral';
+    if (typeof score === 'number') {
+      if (score >  60 || (score >= 0.2 && score <= 1.0)) msCls = 'bull';
+      else if (score < 40 || score < -0.2) msCls = 'bear';
+    }
+    set('rs-mstate', scoreTxt ? `${ms} ${scoreTxt}` : ms, msCls);
+
+    // SPY day %
+    if (typeof reg.spy_pct === 'number') {
+      const spyTxt = (reg.spy_pct >= 0 ? '+' : '') + reg.spy_pct.toFixed(2) + '%';
+      set('rs-spy', spyTxt, reg.spy_pct >= 0 ? 'bull' : 'bear');
+    } else {
+      set('rs-spy', '—');
+    }
+
+    // Validator verdict
+    const ver = (reg.validator || 'GO').toUpperCase();
+    const verCls = (ver === 'GO') ? 'bull' : (ver === 'NO_GO' || ver === 'NOGO') ? 'bear' : 'neutral';
+    set('rs-validator', ver, verCls);
+
+    // Last decision time — show HH:MM in local TZ if today, else MM-DD HH:MM
+    if (reg.last_decision_at) {
+      try {
+        const dt = new Date(reg.last_decision_at.replace(' ', 'T'));
+        const now = new Date();
+        const sameDay = dt.toDateString() === now.toDateString();
+        const txt = sameDay
+          ? dt.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false})
+          : dt.toLocaleString('en-US', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false});
+        set('rs-last', txt);
+      } catch(e) { set('rs-last', '—'); }
+    } else {
+      set('rs-last', '—');
+    }
+
+    // ── Flow strip ──
+    const today = d.today || {};
+    set('fs-entries',   today.entries   != null ? today.entries   : 0);
+    set('fs-exits',     today.exits     != null ? today.exits     : 0);
+    set('fs-decisions', today.decisions != null ? today.decisions : 0);
+    if (typeof today.day_pl === 'number') {
+      const sign = today.day_pl >= 0 ? '+' : '−';
+      const txt  = sign + '$' + Math.abs(today.day_pl).toFixed(2);
+      set('fs-daypl', txt, today.day_pl >= 0 ? 'gain' : 'loss');
+    } else {
+      set('fs-daypl', '—');
+    }
+    if (typeof today.vs_spy === 'number') {
+      const txt = (today.vs_spy >= 0 ? '+' : '') + today.vs_spy.toFixed(2) + '%';
+      set('fs-vspy', txt, today.vs_spy >= 0 ? 'gain' : 'loss');
+    } else {
+      set('fs-vspy', '—');
+    }
+
+    // ── Idle card (conditional) ──
+    const idleEl = document.getElementById('idle-card');
+    const idle = d.idle;
+    if (idle && idleEl) {
+      idleEl.classList.add('show');
+      // Validator
+      const v = (idle.validator || 'GO').toUpperCase();
+      const vEl = document.getElementById('idle-validator');
+      if (vEl) {
+        vEl.textContent = v;
+        vEl.classList.remove('go','caution','no_go');
+        vEl.classList.add(v === 'GO' ? 'go' : v === 'CAUTION' ? 'caution' : 'no_go');
+      }
+      set('idle-regime', (idle.macro_regime || 'NORMAL').toUpperCase());
+      set('idle-slots',  `${idle.open_positions || 0} / ${idle.max_positions || 0}`);
+      set('idle-cash',   '$' + (idle.cash || 0).toFixed(2));
+      set('idle-validated', `${idle.validated_count || 0} signals`);
+      set('idle-cooling',
+        (idle.cooling_off && idle.cooling_off.length)
+          ? `${idle.cooling_off.length} ticker${idle.cooling_off.length !== 1 ? 's' : ''}`
+          : 'none'
+      );
+      // Idle minutes label in header
+      const minsEl = document.getElementById('idle-mins');
+      if (minsEl) minsEl.textContent =
+        (typeof idle.idle_minutes === 'number')
+          ? `idle ${idle.idle_minutes.toFixed(0)} min`
+          : '';
+      // Cooling-off detail block
+      const detailEl = document.getElementById('idle-detail');
+      if (detailEl) {
+        const lines = [];
+        if (idle.cooling_off && idle.cooling_off.length) {
+          lines.push("Cooling-off blocks active:");
+          idle.cooling_off.forEach(co => {
+            try {
+              const t = new Date(co.until.replace(' ', 'T'));
+              const tStr = t.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:false});
+              lines.push(`· <span class="clock">${co.ticker}</span> until ${tStr} (${co.reason || 'cooldown'})`);
+            } catch(e) {}
+          });
+        }
+        if (idle.validated_count > 0) {
+          lines.push(`<div style="margin-top:6px;color:var(--dim)">${idle.validated_count} VALIDATED signals in queue, none currently passing Gate 5 + Gate 6 chase-cap. Bot will re-evaluate every 30s during market hours.</div>`);
+        }
+        detailEl.innerHTML = lines.join('<br>');
+      }
+    } else if (idleEl) {
+      idleEl.classList.remove('show');
+    }
+  } catch(e) { console.log('Dashboard data load error:', e); }
+}
+
 // ── INTELLIGENCE ──
 async function loadIntel() {
   try {
@@ -5903,6 +6177,9 @@ setInterval(loadAudit, 300000);
 setInterval(loadMarketIndices, 120000);
 setInterval(loadTraderActivity, 60000);
 setInterval(updateMarketClock, 60000);
+// Dashboard strips (added 2026-04-25) — same cadence as loadLiveStatus
+loadDashboardData();
+setInterval(loadDashboardData, 30000);
 
 // ── NEWS ──
 let _newsCat = 'all';
