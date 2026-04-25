@@ -1081,8 +1081,12 @@ def run_market_loop():
             # these until Phase 3c cutover; 3b populates only.
             if not _shutdown_requested:
                 run_candidate_generator()
-            if not _shutdown_requested:
-                run_window_calculator(mode='enrichment')
+            # window_calculator agent retired in Phase C (2026-04-24) —
+            # ATR is now fetched fresh per-signal in trader at trade
+            # time (gate8_risk via alpaca.get_atr). Phase 7L cleanup
+            # 2026-04-25: removed the leftover run_window_calculator()
+            # call that was crashing this cycle every iteration with a
+            # NameError. See auditor finding #261/#282.
             # Trader dispatch moved to retail_trade_daemon.py (Phase 1 of
             # TRADER_RESTRUCTURE_PLAN). Enrichment daemon produces intel
             # (VALIDATED signals, validator verdicts, sentiment scores,
@@ -1575,13 +1579,17 @@ def run_overnight_cycle():
         promote_validated_signals()
         if _shutdown_requested: return
 
-        # Candidate + event calendar + windows (was missing — caused
-        # Monday pre-market to build from an empty slate)
+        # Candidate + event calendar (was missing — caused Monday
+        # pre-market to build from an empty slate). Phase 7L cleanup
+        # 2026-04-25: removed run_window_calculator(mode='overnight')
+        # which was crashing this cycle every overnight run with a
+        # NameError — the window_calculator agent was retired in Phase
+        # C (2026-04-24) but this call wasn't cleaned up. ATR is now
+        # fetched fresh per-signal at trade time. Auditor finding
+        # #283 / log line "name 'run_window_calculator' is not defined".
         run_candidate_generator()
         if _shutdown_requested: return
         run_earnings_refresh()
-        if _shutdown_requested: return
-        run_window_calculator(mode='overnight')
     except Exception as e:
         log.error(f"[OVERNIGHT] Cycle error: {e}", exc_info=True)
     finally:

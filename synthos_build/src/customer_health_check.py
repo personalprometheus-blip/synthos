@@ -3,10 +3,35 @@ import sqlite3, os, json, sys
 from datetime import datetime, timedelta, timezone
 
 customers_dir = '/home/pi516gb/synthos/synthos_build/data/customers'
+auth_db_path = '/home/pi516gb/synthos/synthos_build/data/auth.db'
 results = []
+
+# Phase 7L (2026-04-25): cross-reference on-disk customer directories
+# against auth.db so stale dirs left behind by deleted test customers
+# don't generate spurious MISSING_DB / NO_SETTINGS findings on the
+# auditor (each iteration was producing 14+ HIGH and 9 MEDIUM rows
+# until they aged out — auditor finding bucket "test debris").
+# Active customer set is the source of truth; anything on disk without
+# a matching auth row is treated as debris and skipped silently.
+active_cids: set = set()
+try:
+    with sqlite3.connect(auth_db_path, timeout=5) as _ac:
+        _ac.row_factory = sqlite3.Row
+        for r in _ac.execute("SELECT id FROM customers"):
+            active_cids.add(r['id'])
+except Exception:
+    # If auth.db is unreachable, fall back to scanning every dir as
+    # before so we don't go silent during a real outage.
+    active_cids = None
 
 for cid in os.listdir(customers_dir):
     if cid == 'default':
+        continue
+    # Skip directories whose customer id no longer exists in auth.db —
+    # these are leftover test-customer dirs from smoke tests, not real
+    # missing data. (active_cids=None means auth.db lookup failed; in
+    # that case we keep the old behavior to avoid false negatives.)
+    if active_cids is not None and cid not in active_cids:
         continue
     db_path = os.path.join(customers_dir, cid, 'signals.db')
     if not os.path.exists(db_path):

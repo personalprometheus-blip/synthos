@@ -92,7 +92,7 @@ def step(name, passed, detail=""):
     return passed
 
 
-def _check_systemd_service(unit, label):
+def _check_systemd_service(unit, label, settle_secs=15):
     """Check whether a systemd unit is active. Replaces the legacy
     'Popen a second copy and see if it exits' pattern used by step6 /
     step7 / step8: that pattern collided with systemd-owned services
@@ -100,18 +100,38 @@ def _check_systemd_service(unit, label):
     port, exited immediately, and logged ~180 false ERROR/day. Moving
     to a status check means the boot sequence now agrees with reality.
 
+    Phase 7L (2026-04-25) — boot-race fix. Watchdog has
+    `After=network.target synthos-portal.service` on its unit but
+    boot-sequence isn't ordered before it, so step6_watchdog runs in
+    parallel with watchdog's startup and could see 'activating' or
+    'inactive' for the first few seconds — generating a false
+    ERROR every boot (auditor finding #260 / #281). Now poll
+    `is-active` for up to `settle_secs` seconds, treating
+    'activating' as a transient state we wait on.
+
     Returns the result of step() — pass if the unit reports 'active',
     fail otherwise with the actual state (inactive, failed, etc.) in
     the detail field so the operator can `systemctl status` into it.
     """
+    import time as _t
+    deadline = _t.time() + max(0, settle_secs)
+    state = 'unknown'
     try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', unit],
-            capture_output=True, text=True, timeout=5,
-        )
-        state = result.stdout.strip() or 'unknown'
-        if state == 'active':
-            return step(label, True, f"active (systemd unit {unit})")
+        while True:
+            result = subprocess.run(
+                ['systemctl', 'is-active', unit],
+                capture_output=True, text=True, timeout=5,
+            )
+            state = result.stdout.strip() or 'unknown'
+            if state == 'active':
+                return step(label, True, f"active (systemd unit {unit})")
+            # 'activating' is transient — only wait on it
+            # (and on 'inactive' for a brief grace window since systemd
+            # ordering may not be wired). 'failed' / 'deactivating' /
+            # 'inactive-after-grace' are real and reported.
+            if state not in ('activating', 'inactive') or _t.time() >= deadline:
+                break
+            _t.sleep(1.0)
         return step(label, False,
                     f"{unit} is '{state}' — run `systemctl status {unit}`")
     except FileNotFoundError:
