@@ -1094,6 +1094,24 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 }
 .idle-card .detail .clock{color:var(--amber);font-weight:600}
 
+/* ── Sparkline (added 2026-04-25) ──
+   Inline 24-hour-of-RTH price sparkline, rendered next to every ticker
+   in Open Positions / Approvals / History. Width 60px so it fits
+   inside existing row layouts without resizing. Colour:
+     teal   = up over window
+     pink   = down over window
+     grey   = flat (≤0.3% movement)
+   Population: backend /api/sparklines populates window._sparklineCache;
+   populateSparklines() finds .spark-slot[data-ticker] and fills with SVG. */
+.spark-slot{display:inline-block;width:60px;height:18px;vertical-align:middle;margin-left:8px}
+.spark-slot svg{width:100%;height:100%;display:block;overflow:visible}
+.spark-up{color:var(--teal)}
+.spark-down{color:var(--pink)}
+.spark-flat{color:var(--muted)}
+.spark-line{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linejoin:round;stroke-linecap:round;filter:drop-shadow(0 0 2px currentColor)}
+.spark-area{fill:currentColor;opacity:0.10}
+.spark-dot{fill:currentColor}
+
 </style>
 </head>
 <body>
@@ -4648,6 +4666,7 @@ function renderPositions(positions) {
       <div style="min-width:0">
         <div style="display:flex;align-items:center;gap:5px">
           <span style="font-size:12px;font-weight:700;color:var(--text)">${p.ticker||'?'}</span>
+          <span class="spark-slot" data-ticker="${(p.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>
           ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:#f5a623">ORPHAN</span>' : ''}
         </div>
         <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
@@ -4699,6 +4718,9 @@ function renderPositions(positions) {
     ...orphans.map((p,i) => renderRow(p, i, true)),
   ];
   el.innerHTML = rows.length ? (headerRow + rows.join('')) : '<div class="empty-state" style="padding:12px 0"><div class="empty-icon">📊</div>No open positions</div>';
+  // Sparklines (added 2026-04-25): paint from cache immediately, then
+  // kick off a fetch to refresh / populate any missing tickers.
+  try { populateSparklines(); loadSparklines(); } catch(e) {}
 }
 
 function renderApprovals(approvals) {
@@ -4722,7 +4744,7 @@ function renderApprovals(approvals) {
       return `<div class="trade-item"><div class="trade-header">
         <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
         <div class="trade-meta">
-          <div class="trade-headline">${t.ticker||'?'} <span style="font-size:8px;padding:2px 6px;border-radius:99px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.14);color:#00f5d4">${t.status}</span></div>
+          <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span> <span style="font-size:8px;padding:2px 6px;border-radius:99px;background:rgba(0,245,212,0.1);border:1px solid rgba(0,245,212,0.14);color:#00f5d4">${t.status}</span></div>
           <div class="trade-sub">${(t.executed_at||t.queued_at||'').slice(0,16)}</div>
         </div>
         <div class="conf-chip ${confCls}">${conf}</div>
@@ -4753,7 +4775,7 @@ function renderApprovals(approvals) {
         <div class="trade-header">
           <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
           <div class="trade-meta">
-            <div class="trade-headline">${t.ticker||'?'} · ${t.politician||'Unknown'}</div>
+            <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span> · ${t.politician||'Unknown'}</div>
             <div class="trade-sub">${(t.queued_at||'').slice(0,16)}${price}${shares}</div>
           </div>
           <div class="conf-chip ${confCls}">${conf}</div>
@@ -4777,7 +4799,7 @@ function renderApprovals(approvals) {
       return `<div class="queued-card qc-approved">
         <div class="qc-ticker">${(t.ticker||'?').slice(0,4)}</div>
         <div class="qc-info">
-          <div class="qc-name">${t.ticker||'?'}</div>
+          <div class="qc-name">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span></div>
           <div class="qc-detail">${shares} @ ${price} · ${t.session||'next'} session</div>
         </div>
         <button class="btn-revoke" onclick="actionTrade(${t.id},'PENDING_APPROVAL')">Revoke</button>
@@ -4794,7 +4816,7 @@ function renderApprovals(approvals) {
       return `<div class="queued-card qc-rejected">
         <div class="qc-ticker">${(t.ticker||'?').slice(0,4)}</div>
         <div class="qc-info">
-          <div class="qc-name">${t.ticker||'?'}</div>
+          <div class="qc-name">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span></div>
           <div class="qc-detail">${shares} @ ${price}</div>
         </div>
         <button class="btn-reapprove" onclick="actionTrade(${t.id},'APPROVED')">Approve</button>
@@ -4808,6 +4830,8 @@ function renderApprovals(approvals) {
   }
 
   el.innerHTML = html;
+  // Sparklines next to ticker (added 2026-04-25)
+  try { populateSparklines(); loadSparklines(); } catch(e) {}
 }
 
 // ── SYSTEM HEALTH ──
@@ -5258,6 +5282,89 @@ async function loadDashboardData() {
       idleEl.classList.remove('show');
     }
   } catch(e) { console.log('Dashboard data load error:', e); }
+}
+
+// ── SPARKLINES (added 2026-04-25) ─────────────────────────────────
+// Inline 60×18px price-history sparkline next to every ticker in
+// Open Positions / Approvals / History. Backend /api/sparklines
+// returns { ticker: [closes...] }; we cache client-side and render
+// SVG markup into <span class="spark-slot" data-ticker="X"></span>
+// placeholders that the existing render functions inject.
+//
+// Render flow:
+//   1. renderPositions / renderApprovals / loadTraderActivity each
+//      inject empty .spark-slot placeholders during normal rendering.
+//   2. After rendering, those handlers call populateSparklines() to
+//      fill any slot whose ticker is in the cache.
+//   3. setInterval(loadSparklines, 60000) refreshes from /api/sparklines
+//      for the current set of visible tickers, then populateSparklines()
+//      to repaint with fresh data.
+window._sparklineCache = window._sparklineCache || {};
+
+function getSparklineSvg(ticker) {
+  const closes = window._sparklineCache[ticker];
+  if (!closes || closes.length < 2) return '';
+  const w = 60, h = 18, pad = 1;
+  let min = Infinity, max = -Infinity;
+  for (const c of closes) { if (c < min) min = c; if (c > max) max = c; }
+  const range = (max - min) || 1;
+  const n = closes.length;
+  const pts = closes.map((c, i) => {
+    const x = pad + (i / (n - 1)) * (w - 2*pad);
+    const y = h - pad - ((c - min) / range) * (h - 2*pad);
+    return [x.toFixed(1), y.toFixed(1)];
+  });
+  const dLine = 'M' + pts.map(p => p[0] + ',' + p[1]).join(' L');
+  const dArea = dLine + ' L' + pts[n-1][0] + ',' + h + ' L' + pts[0][0] + ',' + h + ' Z';
+  // Direction: compare last to first; use 0.3% deadband for "flat"
+  const start = closes[0], end = closes[n-1];
+  const pct = (end - start) / start;
+  const dir = pct > 0.003 ? 'up' : pct < -0.003 ? 'down' : 'flat';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" class="spark-${dir}">`
+       + (dir !== 'flat' ? `<path class="spark-area" d="${dArea}"/>` : '')
+       + `<path class="spark-line" d="${dLine}"/>`
+       + `<circle class="spark-dot" cx="${pts[n-1][0]}" cy="${pts[n-1][1]}" r="1.4"/>`
+       + `</svg>`;
+}
+
+function populateSparklines() {
+  const slots = document.querySelectorAll('.spark-slot[data-ticker]');
+  slots.forEach(el => {
+    const tkr = el.getAttribute('data-ticker');
+    if (tkr && window._sparklineCache[tkr] && !el.dataset.painted) {
+      const svg = getSparklineSvg(tkr);
+      if (svg) {
+        el.innerHTML = svg;
+        el.dataset.painted = '1';
+      }
+    } else if (tkr && window._sparklineCache[tkr]) {
+      // Already painted — only re-render if data changed (live tip moved)
+      el.innerHTML = getSparklineSvg(tkr);
+    }
+  });
+}
+
+let _sparklineFetchInflight = false;
+async function loadSparklines() {
+  if (_sparklineFetchInflight) return;
+  // Gather currently-visible tickers from .spark-slot[data-ticker]
+  const slots = document.querySelectorAll('.spark-slot[data-ticker]');
+  const set = new Set();
+  slots.forEach(el => { const t = el.getAttribute('data-ticker'); if (t) set.add(t); });
+  const tickers = [...set];
+  if (!tickers.length) return;
+  _sparklineFetchInflight = true;
+  try {
+    const r = await fetch('/api/sparklines?tickers=' + encodeURIComponent(tickers.join(',')));
+    if (r.ok) {
+      const data = await r.json();
+      Object.assign(window._sparklineCache, data);
+      // Force re-render of all slots (live tip may have moved)
+      slots.forEach(el => { delete el.dataset.painted; });
+      populateSparklines();
+    }
+  } catch(e) { console.log('Sparkline load error:', e); }
+  _sparklineFetchInflight = false;
 }
 
 // ── INTELLIGENCE ──
@@ -5827,7 +5934,7 @@ async function loadTraderActivity() {
           onclick="openLogicModal(this)">
         <div class="agent-row-icon" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
-          <div class="agent-row-ticker">${ticker}<span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
+          <div class="agent-row-ticker">${ticker}<span class="spark-slot" data-ticker="${ticker.replace(/[^A-Z0-9.-]/gi,'')}"></span><span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
           <div class="agent-row-sub">${summary}</div>
         </div>
         <div class="agent-row-right">
@@ -5838,6 +5945,8 @@ async function loadTraderActivity() {
     }).join('');
 
     if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+    // Sparklines next to ticker (added 2026-04-25)
+    try { populateSparklines(); loadSparklines(); } catch(e) {}
   } catch(e) { console.log('History error:', e); }
 }
 
@@ -6180,6 +6289,10 @@ setInterval(updateMarketClock, 60000);
 // Dashboard strips (added 2026-04-25) — same cadence as loadLiveStatus
 loadDashboardData();
 setInterval(loadDashboardData, 30000);
+
+// Sparklines refresh (added 2026-04-25) — every 60s; first paint
+// happens immediately after positions/approvals/history render.
+setInterval(loadSparklines, 60000);
 
 // ── NEWS ──
 let _newsCat = 'all';
