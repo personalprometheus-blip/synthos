@@ -6265,13 +6265,26 @@ def api_files_upload():
 
 def sync_to_github(files):
     """
-    Stage uploaded files and push to GitHub.
-    Uses GITHUB_TOKEN from .env if available.
-    Returns dict with ok, message.
+    Copy uploaded files from staging into PROJECT_DIR, stage them,
+    commit, and push to GitHub. Uses GITHUB_TOKEN from .env if
+    available. Returns dict with ok, message.
+
+    Phase 7L (2026-04-25) wrong-dir bug fix (MEDIUM-C from the
+    file-upload audit): files are uploaded to ~/synthos/upload_staging/
+    via /api/files/upload but were never copied into PROJECT_DIR
+    (~/synthos/synthos_build/). The previous version ran `git add`
+    against PROJECT_DIR with bare basenames — basenames that didn't
+    exist there — so git silently no-op'd, the diff was empty, and
+    the function returned "Already up to date" while the upload sat
+    in staging. Operators thought files had been pushed when they
+    hadn't. Fix: explicit copy STAGING_DIR/<f> → PROJECT_DIR/<f>
+    before staging.
     """
     import subprocess
+    import shutil
 
     github_token = os.environ.get('GITHUB_TOKEN', '')
+    STAGING_DIR  = os.path.join(os.path.dirname(PROJECT_DIR), 'upload_staging')
 
     try:
         # Check git is available and we're in a repo
@@ -6281,6 +6294,37 @@ def sync_to_github(files):
         )
         if check.returncode != 0:
             return {'ok': False, 'message': 'Not a git repository'}
+
+        # Copy from staging into the live project dir. Each file's
+        # absence in staging is logged but doesn't abort the rest of
+        # the batch. Once copied, the source staging copy is removed
+        # so the staging dir doesn't accumulate stale uploads.
+        copied = []
+        copy_errors = []
+        for fname in files:
+            src = os.path.join(STAGING_DIR, fname)
+            dst = os.path.join(PROJECT_DIR, fname)
+            if not os.path.isfile(src):
+                copy_errors.append(f'{fname}: not in staging')
+                log.warning(f"sync_to_github: source missing in staging: {src}")
+                continue
+            try:
+                shutil.copy2(src, dst)
+                copied.append(fname)
+                log.info(f"sync_to_github: copied {fname} staging → project")
+                try:
+                    os.unlink(src)
+                except OSError:
+                    pass  # remove failure is non-fatal
+            except OSError as e:
+                copy_errors.append(f'{fname}: copy failed ({e})')
+                log.warning(f"sync_to_github: copy failed for {fname}: {e}")
+
+        if not copied:
+            return {
+                'ok': False,
+                'message': 'No files copied to project dir: ' + '; '.join(copy_errors[:3])
+            }
 
         # Configure token-based auth if available
         if github_token:
@@ -6298,9 +6342,9 @@ def sync_to_github(files):
                         capture_output=True, cwd=PROJECT_DIR, timeout=5
                     )
 
-        # Stage files
+        # Stage the copied files (now they actually exist in PROJECT_DIR)
         subprocess.run(
-            ['git', 'add', '-f'] + files,
+            ['git', 'add', '-f'] + copied,
             capture_output=True, text=True, cwd=PROJECT_DIR, timeout=10
         )
 
@@ -6310,10 +6354,11 @@ def sync_to_github(files):
             capture_output=True, text=True, cwd=PROJECT_DIR, timeout=5
         )
         if not status.stdout.strip():
-            return {'ok': True, 'message': 'Already up to date on GitHub'}
+            return {'ok': True, 'message': 'Already up to date on GitHub (no diff after copy)'}
 
-        # Commit
-        msg = f"Portal upload: {', '.join(files)}"
+        # Commit — use the actually-copied filenames, not the requested
+        # set, since the staging-missing case may have dropped some.
+        msg = f"Portal upload: {', '.join(copied)}"
         subprocess.run(
             ['git', 'commit', '-m', msg],
             capture_output=True, text=True, cwd=PROJECT_DIR, timeout=15
@@ -6332,8 +6377,9 @@ def sync_to_github(files):
         )
 
         if push.returncode == 0:
-            log.info(f"GitHub sync OK: {files}")
-            return {'ok': True, 'message': f"Pushed to GitHub: {', '.join(files)}"}
+            log.info(f"GitHub sync OK: {copied}")
+            tail = ' (' + '; '.join(copy_errors[:2]) + ')' if copy_errors else ''
+            return {'ok': True, 'message': f"Pushed to GitHub: {', '.join(copied)}" + tail}
         else:
             err = (push.stderr or push.stdout or '').strip()[:200]
             log.warning(f"GitHub push failed: {err}")
