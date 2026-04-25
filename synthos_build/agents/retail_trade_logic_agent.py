@@ -2732,6 +2732,72 @@ def send_protective_exit_email(ticker, reason, reasoning, entry_price,
         _direct_send_fallback(subject, body, "enqueue_failed_protective_exit")
 
 
+# ── POSITION QTY RECONCILIATION (added 2026-04-25) ───────────────────────────
+# Gate 0's reconciliation handles three cases historically:
+#   • orphans  — ticker on Alpaca, not in DB → adopt
+#   • ghosts   — ticker in DB, not on Alpaca → close
+#   • match    — ticker on both → update current_price only
+#
+# But the match path was SILENT on qty drift: if Alpaca held 189.56 shares of
+# BIL and the DB row said 108.32, the trader updated the price and left the
+# qty mismatched. This silently broke portfolio_value displayed in the portal
+# (DB qty × Alpaca price = wrong market_value, $7,443 underreport in the BIL
+# case caught 2026-04-25). Root cause was sync_bil_reserve writing to Alpaca
+# without updating the DB row; this reconciler treats Alpaca as truth and
+# heals any drift it finds, regardless of which code path caused it.
+
+def _reconcile_position_qty(db, alpaca_pos):
+    """Ensure DB's OPEN position for this ticker matches Alpaca's qty +
+    avg_entry_price. Updates the DB row if drift is detected. Returns
+    True if a write happened, False if already in sync or no DB row exists.
+
+    Caller is responsible for orphan-adoption when the DB has no row at
+    all — this helper only reconciles existing matched positions.
+
+    Tolerance: 1e-6 share threshold (handles fractional-share rounding).
+    """
+    ticker = alpaca_pos.get('symbol', '').upper()
+    if not ticker:
+        return False
+    try:
+        a_qty   = float(alpaca_pos.get('qty', 0) or 0)
+        a_entry = float(alpaca_pos.get('avg_entry_price', 0) or 0)
+    except (TypeError, ValueError):
+        return False
+
+    db_pos = next((p for p in db.get_open_positions()
+                   if (p.get('ticker') or '').upper() == ticker), None)
+    if not db_pos:
+        return False  # caller handles orphan adoption
+
+    db_qty = float(db_pos.get('shares', 0) or 0)
+    if abs(db_qty - a_qty) < 1e-6:
+        return False  # already in sync
+
+    log.warning(
+        f"[RECONCILE] {ticker} qty drift: DB={db_qty:.6f}sh "
+        f"Alpaca={a_qty:.6f}sh ({(a_qty - db_qty):+.6f}sh) — "
+        f"updating DB to match Alpaca"
+    )
+    try:
+        with db.conn() as c:
+            c.execute(
+                "UPDATE positions SET shares=?, entry_price=? WHERE id=?",
+                (a_qty, a_entry or db_pos.get('entry_price'), db_pos['id'])
+            )
+        db.log_event(
+            "POSITION_RECONCILED",
+            agent="Trade Logic",
+            details=(f"{ticker}: shares {db_qty:.6f}→{a_qty:.6f}, "
+                     f"entry_price ${db_pos.get('entry_price', 0):.4f}"
+                     f"→${(a_entry or db_pos.get('entry_price')):.4f}")
+        )
+        return True
+    except Exception as e:
+        log.error(f"[RECONCILE] Failed to update {ticker}: {e}")
+        return False
+
+
 # ── BIL RESERVE (KEEP from v1.x — REVIEW: integrate into Gate 11) ────────────
 
 def sync_bil_reserve(db, alpaca):
@@ -2772,16 +2838,40 @@ def sync_bil_reserve(db, alpaca):
             if alpaca._submit_notional(C.BIL_TICKER, buy, "buy"):
                 db.log_event("BIL_BUY", agent="Trade Logic",
                              details=f"Bought ${buy:.2f} BIL")
+                # Reconcile DB to Alpaca's post-trade BIL position
+                # (added 2026-04-25). Without this, sync_bil_reserve grew
+                # the Alpaca position while the DB row stayed stale,
+                # silently underreporting portfolio_value in the portal
+                # by the full BIL increment ($7,443 BIL drift caught
+                # 2026-04-25). Defense-in-depth: Gate 0's reconciler
+                # would catch this on the next cycle anyway, but doing
+                # it inline keeps DB and Alpaca in step trade-by-trade.
+                try:
+                    _bil_post = alpaca.get_position_safe(C.BIL_TICKER)
+                    if _bil_post:
+                        _reconcile_position_qty(db, _bil_post)
+                except Exception as _re:
+                    log.debug(f"[BIL] post-trade reconcile failed: {_re}")
         else:
             sell = abs(delta)
             if sell >= bil_value * 0.99:
                 if alpaca.close_position(C.BIL_TICKER):
                     db.log_event("BIL_SELL", agent="Trade Logic",
                                  details=f"Sold all BIL (${bil_value:.2f})")
+                    # close_position() at Alpaca → BIL ticker should now
+                    # be a ghost. Gate 0's existing ghost-detection on the
+                    # next run handles cleanup; no inline action needed.
             else:
                 if alpaca._submit_notional(C.BIL_TICKER, sell, "sell"):
                     db.log_event("BIL_SELL", agent="Trade Logic",
                                  details=f"Sold ${sell:.2f} BIL")
+                    # Partial sell — reconcile DB to remaining qty.
+                    try:
+                        _bil_post = alpaca.get_position_safe(C.BIL_TICKER)
+                        if _bil_post:
+                            _reconcile_position_qty(db, _bil_post)
+                    except Exception as _re:
+                        log.debug(f"[BIL] post-trade reconcile failed: {_re}")
     except Exception as e:
         log.error(f"[BIL] sync error: {e}")
 
@@ -3177,13 +3267,17 @@ def _run_gate0_account_health(db, alpaca, session_log):
         except Exception as _e:
             log.error(f"[GATE 0] Failed to close ghost {t}: {_e}")
 
-    # Update prices on all matched positions
+    # Update prices on all matched positions + reconcile any qty drift.
+    # Qty-drift reconciliation added 2026-04-25 — see _reconcile_position_qty
+    # docstring for rationale. Self-heals BIL drift caused by sync_bil_reserve
+    # not writing to DB historically.
     for ap in alpaca_positions:
         cp = float(ap.get('current_price', 0))
         if cp:
             for pos in db.get_open_positions():
                 if pos['ticker'] == ap['symbol']:
                     db.update_position_price(pos['id'], cp)
+        _reconcile_position_qty(db, ap)
 
     # Backfill empty sectors on existing positions via the resolution cascade:
     #   hardcoded map → ticker_sectors cache → sector_screening

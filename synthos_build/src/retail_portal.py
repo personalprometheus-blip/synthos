@@ -2060,16 +2060,44 @@ def _fetch_alpaca_positions():
 def _enrich_single_db_position(p, alpaca_pos_map):
     """Enrich a single DB position dict with Alpaca live data and signal metadata.
     Returns the enriched position dict.
+
+    Qty-drift defense (added 2026-04-25): when Alpaca reports a different
+    qty than the DB row holds, the portal trusts Alpaca for the displayed
+    shares + market_value (Alpaca is truth — that's the actual broker
+    position). This closes the customer-display gap immediately, even if
+    the trader's reconciliation hasn't run yet. The DB row itself is NOT
+    written to here; the trader's _reconcile_position_qty handles the
+    write on its next cycle.
     """
     ticker = p.get('ticker', '')
     ap = alpaca_pos_map.get(ticker, {})
     entry = float(p.get('entry_price', 0) or 0)
-    shares = float(p.get('shares', 0) or 0)
+    db_shares = float(p.get('shares', 0) or 0)
+    # Defensive qty-drift handling: prefer Alpaca's qty when it reports a
+    # different value than DB. Tolerance of 1e-6 handles fractional rounding.
+    if ap:
+        try:
+            a_qty = float(ap.get('qty', 0) or 0)
+        except (TypeError, ValueError):
+            a_qty = db_shares
+    else:
+        a_qty = db_shares
+    if ap and a_qty > 0 and abs(db_shares - a_qty) > 1e-6:
+        log.warning(f"[QTY_DRIFT] {ticker}: DB={db_shares:.6f} Alpaca={a_qty:.6f} "
+                    f"({a_qty - db_shares:+.6f}) — using Alpaca qty for display")
+        shares = a_qty
+    else:
+        shares = db_shares
     cost = round(entry * shares, 2)
     if ap:
         cur_price   = float(ap.get('current_price', entry) or entry)
         avg_entry   = float(ap.get('avg_entry_price', entry) or entry)
-        mkt_value   = round(cur_price * shares, 2) if cur_price else cost
+        # Prefer Alpaca's market_value when present (broker truth) — the
+        # multiply path is a fallback for the rare case Alpaca returns the
+        # field as 0/missing.
+        a_mkt_value = float(ap.get('market_value', 0) or 0)
+        mkt_value   = round(a_mkt_value, 2) if a_mkt_value > 0 else (
+                      round(cur_price * shares, 2) if cur_price else cost)
         unreal_pl   = float(ap.get('unrealized_pl', 0) or 0)
         unreal_plpc = float(ap.get('unrealized_plpc', 0) or 0)
         if unreal_pl == 0.0 and cur_price and entry and cur_price != entry:
@@ -2118,6 +2146,7 @@ def _enrich_single_db_position(p, alpaca_pos_map):
 
     return {
         **p,
+        'shares':            shares,          # may differ from p['shares'] when qty-drift triggered above
         'current_price':     round(cur_price, 4),
         'market_value':      round(mkt_value, 2),
         'unrealized_pl':     round(unreal_pl, 2),
