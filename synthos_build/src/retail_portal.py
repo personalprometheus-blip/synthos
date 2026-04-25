@@ -3698,6 +3698,197 @@ def api_status():
     return jsonify(get_system_status())
 
 
+@app.route('/api/dashboard-data')
+@login_required
+def api_dashboard_data():
+    """Single-shot data feed for the new dashboard cards (added 2026-04-25):
+      • Market Regime Strip — macro regime + market-state score + validator
+        verdict + last decision time + SPY day %
+      • Today's Flow Strip — entries / exits / decisions / day P&L / vs SPY
+      • Idle-reason card (conditional) — only populated when bot has been
+        idle ≥30 min during market hours; null otherwise
+
+    Designed to be polled on the same cadence as /api/status (~30 s). All
+    queries are read-only and degrade gracefully — missing settings or
+    empty tables return defaults so the frontend never crashes.
+    """
+    db     = _customer_db()
+    shared = _shared_db()
+    today_iso = datetime.now(ET).strftime('%Y-%m-%d')
+
+    # ── Regime data ──────────────────────────────────────────────
+    macro_regime       = shared.get_setting('_MACRO_REGIME')       or 'NORMAL'
+    market_state       = shared.get_setting('_MARKET_STATE')       or 'OPEN'
+    try:
+        market_state_score = float(shared.get_setting('_MARKET_STATE_SCORE') or 0)
+    except (TypeError, ValueError):
+        market_state_score = 0.0
+    validator_verdict  = (db.get_setting('_VALIDATOR_VERDICT')     or 'GO').upper()
+
+    # SPY day % — pull from live_prices if SPY is being polled, else
+    # leave at None and let the frontend show '—'. Avoids an extra
+    # Alpaca call on every dashboard refresh.
+    spy_pct = None
+    try:
+        with shared.conn() as c:
+            row = c.execute(
+                "SELECT day_change_pct FROM live_prices WHERE ticker = 'SPY'"
+            ).fetchone()
+            if row and row['day_change_pct'] is not None:
+                spy_pct = round(float(row['day_change_pct']), 2)
+    except Exception:
+        pass
+
+    # Last decision time — most recent TRADE_DECISION row in system_log
+    last_decision_at = None
+    try:
+        with db.conn() as c:
+            r = c.execute(
+                "SELECT timestamp FROM system_log WHERE event = 'TRADE_DECISION' "
+                "ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+            if r:
+                last_decision_at = r['timestamp']
+    except Exception:
+        pass
+
+    # ── Today's flow ─────────────────────────────────────────────
+    today_entries = today_exits = today_decisions = 0
+    try:
+        with db.conn() as c:
+            today_entries = c.execute(
+                "SELECT COUNT(*) AS n FROM positions WHERE date(opened_at) = ?",
+                (today_iso,)
+            ).fetchone()['n'] or 0
+            today_exits = c.execute(
+                "SELECT COUNT(*) AS n FROM outcomes WHERE date(created_at) = ?",
+                (today_iso,)
+            ).fetchone()['n'] or 0
+            today_decisions = c.execute(
+                "SELECT COUNT(*) AS n FROM system_log "
+                "WHERE event = 'TRADE_DECISION' AND date(timestamp) = ?",
+                (today_iso,)
+            ).fetchone()['n'] or 0
+    except Exception as e:
+        log.debug(f"dashboard-data today queries failed: {e}")
+
+    # Day P&L — already computed by the same path as /api/status. Re-derive
+    # here so the frontend doesn't have to combine two endpoints.
+    day_pl = None
+    try:
+        st = get_system_status()
+        positions = st.get('positions', [])
+        day_pl = round(sum(float(p.get('day_pl', 0) or 0) for p in positions), 2)
+    except Exception:
+        pass
+
+    # vs SPY (today) — operator's day return % minus SPY's day %.
+    # Operator return = day_pl / (portfolio_value - day_pl). Computed
+    # client-side too in the existing UI; re-derived here for the strip.
+    vs_spy = None
+    try:
+        if day_pl is not None and spy_pct is not None and st:
+            port_val = float(st.get('portfolio_value', 0) or 0)
+            if port_val and (port_val - day_pl) > 0:
+                day_pl_pct = (day_pl / (port_val - day_pl)) * 100
+                vs_spy = round(day_pl_pct - spy_pct, 2)
+    except Exception:
+        pass
+
+    # ── Idle-reason card ─────────────────────────────────────────
+    # Only populated when bot has been idle ≥30 min during market hours.
+    # Outside market hours: null (the card stays hidden client-side).
+    idle = None
+    try:
+        IDLE_THRESHOLD_MIN = int(os.environ.get('DASHBOARD_IDLE_THRESHOLD_MIN', '30'))
+        if is_market_hours_utc_now():
+            # Find the most recent ENTRY/EXIT in system_log
+            with db.conn() as c:
+                r = c.execute(
+                    "SELECT MAX(timestamp) AS ts FROM system_log "
+                    "WHERE event IN ('TRADE_OPENED','TRADE_CLOSED','POSITION_OPENED','POSITION_CLOSED')"
+                ).fetchone()
+                last_action_at = r['ts'] if r else None
+            idle_minutes = None
+            if last_action_at:
+                try:
+                    last_dt = datetime.fromisoformat(
+                        last_action_at.replace('Z','').replace(' ', 'T')[:19]
+                    )
+                    idle_minutes = (datetime.now() - last_dt).total_seconds() / 60.0
+                except Exception:
+                    idle_minutes = None
+            if idle_minutes is None or idle_minutes >= IDLE_THRESHOLD_MIN:
+                # Compute slot utilization
+                portfolio = db.get_portfolio()
+                equity = float(st.get('portfolio_value', 0) or 0) if st else float(portfolio.get('cash', 0) or 0)
+                # Tier max_positions lookup (same constants as trade_logic_agent)
+                _tiers = [
+                    (0,      3),  (1000,   5),  (5000,   8),
+                    (20000, 10),  (50000, 12),
+                ]
+                max_positions = next(
+                    (mp for thr, mp in reversed(_tiers) if equity >= thr),
+                    3
+                )
+                open_count = (st.get('open_positions', 0) if st else 0)
+                # Validated-pool count
+                validated = 0
+                try:
+                    with shared.conn() as c:
+                        validated = c.execute(
+                            "SELECT COUNT(*) AS n FROM signals WHERE status = 'VALIDATED'"
+                        ).fetchone()['n'] or 0
+                except Exception:
+                    pass
+                # Cooling-off list (active only)
+                cooling = []
+                try:
+                    with db.conn() as c:
+                        rows = c.execute(
+                            "SELECT ticker, cool_until, reason FROM cooling_off "
+                            "WHERE cool_until > ? ORDER BY cool_until ASC LIMIT 10",
+                            (datetime.now(timezone.utc).isoformat(),)
+                        ).fetchall()
+                        cooling = [
+                            {'ticker': r['ticker'], 'until': r['cool_until'], 'reason': r['reason']}
+                            for r in rows
+                        ]
+                except Exception:
+                    pass
+                idle = {
+                    'idle_minutes':    round(idle_minutes, 1) if idle_minutes is not None else None,
+                    'validator':       validator_verdict,
+                    'macro_regime':    macro_regime,
+                    'open_positions':  open_count,
+                    'max_positions':   max_positions,
+                    'cash':            round(float(st.get('cash', 0) or 0), 2) if st else 0,
+                    'validated_count': validated,
+                    'cooling_off':     cooling,
+                }
+    except Exception as e:
+        log.debug(f"dashboard-data idle computation failed: {e}")
+
+    return jsonify({
+        'regime': {
+            'macro':              macro_regime,
+            'market_state':       market_state,
+            'market_state_score': market_state_score,
+            'validator':          validator_verdict,
+            'spy_pct':            spy_pct,
+            'last_decision_at':   last_decision_at,
+        },
+        'today': {
+            'entries':   today_entries,
+            'exits':     today_exits,
+            'decisions': today_decisions,
+            'day_pl':    day_pl,
+            'vs_spy':    vs_spy,
+        },
+        'idle': idle,
+    })
+
+
 @app.route('/api/approvals')
 @login_required
 def api_approvals():
