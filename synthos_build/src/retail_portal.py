@@ -2156,7 +2156,11 @@ def _enrich_single_db_position(p, alpaca_pos_map):
         'avg_entry_price':   round(avg_entry, 4),
         'cost_basis':        round(cost, 2),
         'is_orphan':         False,
-        'signal_headline':   _sig_headline,
+        # Phase 7L (2026-04-25): fall back to entry_thesis (headline
+        # copied to the positions row at open time) when the signal_id
+        # lookup didn't resolve. Owner customer typically has both;
+        # non-owners only have entry_thesis.
+        'signal_headline':   _sig_headline or p.get('entry_thesis'),
         'signal_source':     _sig_source,
         'signal_confidence': _sig_confidence,
         'signal_image_url':  _sig_image_url,
@@ -4636,9 +4640,16 @@ def api_performance_summary():
                 'exit_reason':     t.get('exit_reason') or '--',
                 'entry_pattern':   t.get('entry_pattern'),  # NULL for pre-Phase-5 trades
                 'managed_by':      t.get('managed_by') or 'bot',
-                'signal_headline': sig_headline,
+                # signal_headline comes from the signals table via signal_id
+                # lookup (only resolves for owner customer; ~22% coverage).
+                # entry_thesis is the same headline copied to the position
+                # row at open time — works for ALL customers (Phase 7L).
+                # Frontend uses signal_headline first, falls back to
+                # entry_thesis when signal_id was NULL.
+                'signal_headline': sig_headline or t.get('entry_thesis'),
                 'signal_source':   sig_source,
                 'signal_source_url': sig_source_url,
+                'entry_thesis':    t.get('entry_thesis'),
             })
 
         total_trades  = wins + losses

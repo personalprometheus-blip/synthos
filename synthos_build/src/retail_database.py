@@ -1248,7 +1248,7 @@ class DB:
                       trail_stop_amt, trail_stop_pct, vol_bucket, signal_id=None,
                       entry_sentiment_score=None, entry_signal_score=None,
                       interrogation_status=None, price_history_used=None,
-                      managed_by='bot', entry_pattern=None):
+                      managed_by='bot', entry_pattern=None, entry_thesis=None):
         """
         Opens a new position. Also deducts cost from portfolio cash
         and writes a ledger entry.
@@ -1266,16 +1266,28 @@ class DB:
         classification at entry time. Used by the dashboard to render a
         pattern badge per row. Nullable for backward compat with rows
         opened before the column existed.
+
+        entry_thesis (added 2026-04-25 Phase 7L item 3): the news
+        headline that triggered the entry, copied verbatim from the
+        signals table at open time. Lets the History drawer surface
+        "why we bought this" for ALL closed positions including non-
+        owner customers (whose signal_id is NULL because the signals
+        FK only resolves in the owner's DB). Auditing showed 78% of
+        closed positions had signal_id=NULL meaning the History
+        drawer's thesis panel was blank for most rows.
         """
         if managed_by not in ('bot', 'user'):
             raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
-        # Lazy migration: ensure the entry_pattern column exists. SQLite
-        # ADD COLUMN is idempotent-by-throwing, caught here.
-        try:
-            with self.conn() as _mc:
-                _mc.execute("ALTER TABLE positions ADD COLUMN entry_pattern TEXT")
-        except sqlite3.OperationalError:
-            pass  # already exists
+        # Lazy migration: ensure both new columns exist. Each ADD COLUMN
+        # is independently idempotent-by-throwing — wrap separately so a
+        # partial-existing schema (entry_pattern present, entry_thesis
+        # missing) still works.
+        for col in ('entry_pattern', 'entry_thesis'):
+            try:
+                with self.conn() as _mc:
+                    _mc.execute(f"ALTER TABLE positions ADD COLUMN {col} TEXT")
+            except sqlite3.OperationalError:
+                pass  # already exists
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
 
@@ -1301,14 +1313,14 @@ class DB:
                      pnl, status, opened_at, signal_id,
                      entry_sentiment_score, entry_signal_score,
                      interrogation_status, price_history_used, managed_by,
-                     entry_pattern)
-                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?,?)
+                     entry_pattern, entry_thesis)
+                VALUES (?,?,?,?,?,?,?,?,?,?,0.0,'OPEN',?,?,?,?,?,?,?,?,?)
             """, (pos_id, ticker, company, sector, entry_price, entry_price,
                   shares, trail_stop_amt, trail_stop_pct, vol_bucket,
                   self.now(), signal_id,
                   entry_sentiment_score, entry_signal_score,
                   interrogation_status, price_history_used, managed_by,
-                  entry_pattern))
+                  entry_pattern, entry_thesis))
 
             c.execute("""
                 UPDATE portfolio SET cash=?, updated_at=? WHERE id=1

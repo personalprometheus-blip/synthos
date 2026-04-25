@@ -3078,6 +3078,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                             entry_sentiment_score=signal.get('sentiment_score'),
                             interrogation_status=signal.get('interrogation_status'),
                             entry_pattern=candidate.get('type'),
+                            entry_thesis=signal.get('headline'),
                         )
                         alpaca.submit_order(signal['ticker'], size, "sell",
                                             order_type="trailing_stop", trail_price=trail_amt)
@@ -3699,7 +3700,8 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                                                        approval.get('confidence')),
                                      entry_sentiment_score=_appr_sig.get('sentiment_score'),
                                      interrogation_status=_appr_sig.get('interrogation_status'),
-                                     entry_pattern=approval.get('entry_pattern'))
+                                     entry_pattern=approval.get('entry_pattern'),
+                                     entry_thesis=approval.get('headline'))
                     alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
@@ -3963,6 +3965,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                         entry_sentiment_score=signal.get('sentiment_score'),
                         interrogation_status=signal.get('interrogation_status'),
                         entry_pattern=candidate.get('type'),
+                        entry_thesis=signal.get('headline'),
                     )
                     alpaca.submit_order(signal['ticker'], size, "sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
