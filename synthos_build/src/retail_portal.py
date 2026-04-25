@@ -5933,6 +5933,19 @@ def api_logs_audit():
         # surfacing 100+ identical WARNINGs/day was pure noise.
         _re.compile(r'WARNING\s+price_poller:\s+Market-data fallback returned',
                     _re.I),
+        # price_poller Alpaca paper-API SSL/timeout flakiness — same
+        # category, different phrasing. Per-customer SSL EOF, retries
+        # exhausted, connection-reset-by-peer. Diagnostic; the poller
+        # retries on its next 60s tick.
+        _re.compile(r'WARNING\s+price_poller:\s+Alpaca\s+\S+\s+fetch failed',
+                    _re.I),
+        _re.compile(r'WARNING\s+price_poller:\s+Market-data fallback fetch failed',
+                    _re.I),
+        # [ADMIN_OVERRIDE] POST denied — same shape as [KEYS]: the auth
+        # gate working correctly. The warning is logged when a customer
+        # session attempts to flip TRADING_MODE; the gate blocks it
+        # because admin=False. Pre-launch security audit verified.
+        _re.compile(r'\[ADMIN_OVERRIDE\]\s+POST denied', _re.I),
         # Sentiment-agent / price-poller generic retry/unavailable
         # warnings — same family.
         _re.compile(r'WARNING.*\b(?:retry|failed|unavailable)\b.*'
