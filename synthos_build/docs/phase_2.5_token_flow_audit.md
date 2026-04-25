@@ -2,9 +2,30 @@
 
 **Date:** 2026-04-25
 **Scope:** All token-bearing flows in `synthos_build/src/retail_portal.py`
-and `synthos_build/src/auth.py`. Static analysis only — no live probes
-in this pass.
+and `synthos_build/src/auth.py`. Static analysis + live test-customer
+smoke verification of fixes.
 **Prior audit:** [`security_audit_2026-04-24.md`](./security_audit_2026-04-24.md) §"Token-flow audit" gap
+
+---
+
+## RESOLUTION SUMMARY (2026-04-25 same-day fix)
+
+All 5 actionable findings from this audit (HIGH-1 + 4 MEDIUMs) were
+fixed and verified in commit `8c5b158`. Live smoke test against pi5
+returned **14/14 pass**:
+
+| Finding | Status | Verification |
+|---|---|---|
+| 🔴 HIGH-1 missing /reset-password handler | ✅ FIXED | Bad token→400, good token→200 form, POST→302 /login?reset=1 |
+| 🟡 MED-1 session revocation on credential change | ✅ FIXED | Old cookie force-logged-out, new pw works, old pw rejected |
+| 🟡 MED-2 old-email alert | ✅ FIXED | Code path exercised (Resend dispatch unverified — would burn API credits) |
+| 🟡 MED-3 verify new email | ✅ FIXED | email_hash unchanged at request, only updated after token verify; consumed_at set |
+| 🟡 MED-4 password length 8→12 | ✅ FIXED | 11-char pw correctly rejected |
+| 🟢 LOW-1/2/3 | DEFERRED | per original audit, defensive improvements for after launch |
+
+The original findings text is preserved below for record.
+
+---
 
 ---
 
