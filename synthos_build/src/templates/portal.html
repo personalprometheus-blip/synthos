@@ -2203,14 +2203,14 @@ setInterval(loadAgentPulse, 10000);
 <div class="page" id="tab-intel" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
     <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
-      Market <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Intelligence</span>
+      Bot <span style="background:linear-gradient(90deg,var(--teal),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Watchlist</span>
     </div>
     <div style="display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;background:rgba(255,255,255,0.04);border:1px solid var(--border);font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.05em;text-transform:uppercase">
       <div class="status-dot dot-on" style="width:5px;height:5px"></div>
       <span id="intel-count">Loading</span>
     </div>
   </div>
-  <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Today · Synthos Agent + Public Analyst Consensus</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Signals the bot is tracking · click any card for the full deep-dive</div>
   <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap" id="intel-filters">
     <button class="graph-tab active" onclick="filterIntel('all',this)">All</button>
     <button class="graph-tab" onclick="filterIntel('high',this)">High signal</button>
@@ -2242,12 +2242,18 @@ setInterval(loadAgentPulse, 10000);
     </div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Live headlines · MarketWatch · Display only — not used in signal calculations</div>
-  <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap" id="news-filters">
-    <button class="graph-tab active" onclick="switchNews('all',this)">All</button>
-    <button class="graph-tab" onclick="switchNews('Breaking',this)">Breaking</button>
-    <button class="graph-tab" onclick="switchNews('Markets',this)">Markets</button>
-    <button class="graph-tab" onclick="switchNews('US',this)">US</button>
-    <button class="graph-tab" onclick="switchNews('Global',this)">Global</button>
+  <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;align-items:center" id="news-filters">
+    <!-- Phase 7i: dropped Breaking/Markets/US/Global (data audit
+         confirmed 100% of articles are tagged "Markets" so the other
+         three filtered nothing). New filter set is task-oriented. -->
+    <button class="graph-tab active" onclick="switchNewsScope('all',this)">All</button>
+    <button class="graph-tab" onclick="switchNewsScope('tracked',this)" title="Show only articles for tickers you hold or are watching">Tracked tickers only</button>
+    <span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:10px;color:var(--muted);user-select:none;cursor:pointer" title="Hide hype-tagged headlines (BREAKING:, listicles, excessive emoji). Additive on top of the ingestion filter that already excludes opinion sources." onclick="toggleClickbaitHide(this)">
+      <span id="clickbait-toggle-dot" style="width:30px;height:16px;border-radius:99px;background:rgba(255,255,255,0.06);border:1px solid var(--border);position:relative;transition:background .15s">
+        <span id="clickbait-toggle-knob" style="position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:var(--muted);transition:left .15s,background .15s"></span>
+      </span>
+      <span id="clickbait-toggle-label">Hide low-quality</span>
+    </span>
   </div>
   <div class="intel-grid" id="news-grid">
     <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading news...</div>
@@ -5919,6 +5925,13 @@ async function loadLiveStatus() {
     try { renderApprovals(a); } catch(ae) { console.log('Approvals render error:', ae); }
     try { renderPositions(s.positions||[]); } catch(pe) { console.log('Positions render error:', pe); }
     try { renderUserWarnings(s.user_warnings||[]); } catch(we) { console.log('User warnings render error:', we); }
+    // Populate tracked-tickers index (positions side) for ticker chips on
+    // News + Watchlist. Phase 7i, 2026-04-25.
+    try {
+      updateTrackedTickers({
+        positions: (s.positions || []).map(p => p.ticker).filter(Boolean),
+      });
+    } catch(te) {}
     // Halt banner — fetched independently so a halt-API failure doesn't
     // block other status rendering
     try {
@@ -6255,6 +6268,85 @@ async function loadDashboardData() {
 //      to repaint with fresh data.
 window._sparklineCache = window._sparklineCache || {};
 
+// ── TRACKED TICKERS (Phase 7i, 2026-04-25) ────────────────────────
+// Shared client-side index of tickers the user is currently engaged
+// with. Powers the "in your portfolio / watching" chips on news +
+// watchlist cards, and the "Tracked tickers only" filter on the news
+// page. Updated whenever loadLiveStatus / loadPlanning / loadIntel
+// completes — passive, no extra fetches.
+window._trackedTickers = window._trackedTickers || {
+  positions: new Set(),  // tickers held in Open Positions (bot OR user managed)
+  watching:  new Set(),  // tickers on the watchlist (queue + intel)
+};
+
+// Update helper — call from each loader. Argument shape:
+//   updateTrackedTickers({positions: ['AMD','TSLA'], watching: ['NVDA']})
+// Either field can be omitted; only the supplied one is replaced.
+function updateTrackedTickers(updates) {
+  if (!updates) return;
+  if (Array.isArray(updates.positions)) {
+    window._trackedTickers.positions = new Set(updates.positions.filter(Boolean).map(t => t.toUpperCase()));
+  }
+  if (Array.isArray(updates.watching)) {
+    window._trackedTickers.watching = new Set(updates.watching.filter(Boolean).map(t => t.toUpperCase()));
+  }
+}
+
+// Tracker-status lookup. Returns 'position' | 'watching' | null.
+// Position status wins when a ticker is in both sets.
+function getTrackerStatus(ticker) {
+  if (!ticker) return null;
+  const t = String(ticker).toUpperCase();
+  if (window._trackedTickers.positions.has(t)) return 'position';
+  if (window._trackedTickers.watching.has(t))  return 'watching';
+  return null;
+}
+
+// Themed chip HTML for a tracker status — null returns ''.
+function trackerChip(ticker) {
+  const st = getTrackerStatus(ticker);
+  if (!st) return '';
+  if (st === 'position') {
+    return '<span title="You hold this position" '
+      + 'style="display:inline-flex;align-items:center;gap:3px;'
+      + 'padding:1px 6px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;'
+      + 'background:rgba(0,245,212,0.10);border:1px solid rgba(0,245,212,0.30);color:#00f5d4">'
+      + '📊 IN PORTFOLIO</span>';
+  }
+  return '<span title="On the bot\'s watchlist" '
+    + 'style="display:inline-flex;align-items:center;gap:3px;'
+    + 'padding:1px 6px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.04em;'
+    + 'background:rgba(34,211,238,0.10);border:1px solid rgba(34,211,238,0.30);color:#22d3ee">'
+    + '👁 WATCHING</span>';
+}
+
+// ── CLICKBAIT HEURISTIC (Phase 7i, 2026-04-25) ────────────────────
+// Client-side "Hide low-quality" pass — additive on top of the
+// ingestion-side Tier-4 + MIN_CREDIBILITY filter that's already
+// excluded most junk. Catches the residue: hype-tag prefixes
+// ("BREAKING:", "JUST IN:"), excessive emoji, ALL CAPS clauses,
+// listicles, vague teasers. Returns true if the headline looks
+// clickbaity and should be hidden when the toggle is ON.
+const _CLICKBAIT_PREFIX_RE = /^\s*(?:BREAKING|JUST IN|EXCLUSIVE|ALERT|URGENT|HUGE|MASSIVE|SHOCKING|WARNING)\b\s*[:!\-—]?/i;
+const _CLICKBAIT_PHRASES_RE = /\b(?:you won['’]t believe|wait until you see|this one (weird |simple )?(trick|secret|reason)|nobody is talking about|will (shock|stun|amaze) you|guess what happened|going (parabolic|nuclear)|to the moon|skyrocket(?:ing|ed)?)\b/i;
+const _LISTICLE_RE = /^\s*\d+\s+(?:reasons?|stocks?|things?|ways?|tips?)\b/i;
+const _EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu;
+
+function looksLikeClickbait(headline) {
+  if (!headline) return false;
+  const h = String(headline);
+  if (_CLICKBAIT_PREFIX_RE.test(h)) return true;
+  if (_CLICKBAIT_PHRASES_RE.test(h)) return true;
+  if (_LISTICLE_RE.test(h))         return true;
+  // Emoji density — 2+ emojis in a single headline is usually a tell
+  const emojis = h.match(_EMOJI_RE);
+  if (emojis && emojis.length >= 2) return true;
+  // ALL-CAPS run of 4+ words (rare in legitimate headlines)
+  const allCapsRun = h.match(/(?:\b[A-Z]{2,}\b\s+){3,}\b[A-Z]{2,}\b/);
+  if (allCapsRun) return true;
+  return false;
+}
+
 function getSparklineSvg(ticker) {
   const closes = window._sparklineCache[ticker];
   if (!closes || closes.length < 2) return '';
@@ -6332,6 +6424,14 @@ async function loadIntel() {
     const staleCount = signals.length - freshCount;
     document.getElementById('intel-count').textContent =
       freshCount + ' fresh' + (staleCount ? ' · ' + staleCount + ' archive' : '');
+    // Populate tracked-tickers (watching side) — used by News/Watchlist
+    // chips. Only fresh (non-stale, non-archive) signals count as
+    // "watching" so archived items don't taint your news feed.
+    try {
+      updateTrackedTickers({
+        watching: signals.filter(s => !s.is_stale).map(s => s.ticker).filter(Boolean),
+      });
+    } catch(te) {}
     renderIntelGrid(signals);
   } catch(e) { console.error('loadIntel error:', e); }
 }
@@ -6354,110 +6454,90 @@ function renderIntelGrid(signals) {
     return;
   }
   const colors = ['background:linear-gradient(135deg,rgba(0,245,212,0.18),rgba(0,245,212,0.1));border:1px solid rgba(0,245,212,0.14);color:#00f5d4','background:linear-gradient(135deg,rgba(123,97,255,0.18),rgba(123,97,255,0.1));border:1px solid rgba(123,97,255,0.14);color:#a78bfa','background:linear-gradient(135deg,rgba(245,166,35,0.3),rgba(245,166,35,0.1));border:1px solid rgba(245,166,35,0.25);color:#f5a623','background:linear-gradient(135deg,rgba(255,75,110,0.18),rgba(255,75,110,0.1));border:1px solid rgba(255,75,110,0.14);color:#ff4b6e'];
-  // Derive sentiment from Pulse tier, corroboration, and confidence
-  const pulseTier = s => {
-    const note = s.corroboration_note || '';
-    const m = note.match(/PULSE Tier (\d)/);
-    return m ? parseInt(m[1]) : 0;
-  };
+  // Phase 7j (2026-04-25): card sentiment is now derived ONLY from
+  // confidence + corroboration + staleness — the prior version mixed
+  // in Pulse tier (a system internal). Trust score uses the same
+  // renderSignalTrust derivation as the sig-modal / approval drawer
+  // so users see one consistent score, not a per-card "Synthos Score
+  // / Market Alignment" breakdown that leaked the scoring methodology.
   const sentiment = s => {
-    const tier = pulseTier(s);
-    if (s.corroborated || tier >= 3 || s.confidence === 'HIGH') return 'bull';
-    if (s.confidence === 'LOW' || s.is_stale || tier === 1) return 'bear';
+    if (s.corroborated || s.confidence === 'HIGH') return 'bull';
+    if (s.confidence === 'LOW' || s.is_stale)      return 'bear';
     return 'neut';
   };
   const sentLabel = s => {
     const sent = sentiment(s);
-    return sent === 'bull' ? '↑ Bullish' : sent === 'bear' ? '↓ Bearish' : '— Neutral';
+    return sent === 'bull' ? '↑ Strong' : sent === 'bear' ? '↓ Weak' : '— Mixed';
   };
   const sentBadge = s => {
     const sent = sentiment(s);
     return sent === 'bull' ? 'sb-bull' : sent === 'bear' ? 'sb-bear' : 'sb-neut';
   };
-  const agentScore = s => {
-    const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'NOISE' ? 15 : 30;
-    const sentBonus = s.sentiment_score ? Math.round(s.sentiment_score * 80) : 0;
-    const tier = pulseTier(s);
-    const tierBonus = tier >= 3 ? 12 : tier === 2 ? 5 : tier === 1 ? -5 : 0;
-    const corrBonus = s.corroborated ? 10 : 0;
-    const staleHit = s.is_stale ? -15 : 0;
-    return Math.min(99, Math.max(5, base + sentBonus + tierBonus + corrBonus + staleHit));
+  // Single trust score — same derivation as renderSignalTrust callers
+  // elsewhere. Confidence bucket → base, ± sentiment magnitude bump,
+  // ± corroborated/stale adjustments.
+  const trustScore = s => {
+    const base = s.confidence === 'HIGH' ? 87 : s.confidence === 'MEDIUM' ? 63 : s.confidence === 'LOW' ? 30 : 15;
+    const sentBump = s.sentiment_score ? Math.round(Math.abs(s.sentiment_score) * 15) : 0;
+    const adj = (s.is_stale ? -12 : 0) + (s.corroborated ? 8 : 0);
+    return Math.min(99, Math.max(5, base + sentBump + adj));
   };
-  const marketScore = s => {
-    const as = agentScore(s);
-    const adj = s.is_stale ? -12 : (s.corroborated ? 8 : -5);
-    return Math.min(99, Math.max(5, as + adj));
-  };
-  const sentClass = s => agentScore(s) > 60 ? 'of-ab' : agentScore(s) < 40 ? 'of-ar' : 'of-an';
-  const mSentClass = s => agentScore(s) > 60 ? 'of-mb' : agentScore(s) < 40 ? 'of-mr' : 'of-mn';
-  const valClass = s => agentScore(s) > 60 ? 'oval-b' : agentScore(s) < 40 ? 'oval-r' : 'oval-n';
   var cards = signals.map((s,i) => {
-    const as = agentScore(s); const ms = marketScore(s);
     const sent = sentiment(s);
-    const col = colors[i%colors.length];
-    return `<div class="charm ${sent}" style="cursor:pointer" data-sig-idx="${i}" onclick="openSigModal(allSignals[this.dataset.sigIdx])">
+    const col  = colors[i%colors.length];
+    const trust = trustScore(s);
+    const tkrChip = trackerChip(s.ticker);
+    // sigEsc lets the click pass the FULL signal dict to the planning
+    // drawer (matches the dashboard's queue/intel rows pattern).
+    const sigEsc = JSON.stringify(s).replace(/"/g,'&quot;');
+    return `<div class="charm ${sent}" style="cursor:pointer" onclick="openPlanningDrawer(${sigEsc})">
       <div class="charm-top">
         <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
         <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
       </div>
       <div class="charm-body">
+        ${tkrChip ? '<div style="margin-bottom:6px">' + tkrChip + '</div>' : ''}
         <div class="charm-source">${s.politician||'Unknown'} · ${(s.disc_date||s.created_at||'').slice(0,10)}</div>
         <div class="charm-headline">${s.headline||s.ticker+' — Congressional disclosure'}</div>
         <div class="charm-snippet">${s.amount_range||'Amount not disclosed'} · ${s.staleness||'Unknown age'} · ${s.sector||'Unknown sector'}</div>
-        <div class="opinion-bar">
-          <div class="op-row">
-            <span class="op-label ol-agent">Synthos</span>
-            <div class="op-track"><div class="op-fill ${sentClass(s)}" style="width:${as}%"></div></div>
-            <span class="op-val ${valClass(s)}">${as}</span>
-          </div>
-          <div class="op-row">
-            <span class="op-label ol-market">Market</span>
-            <div class="op-track"><div class="op-fill ${mSentClass(s)}" style="width:${ms}%"></div></div>
-            <span class="op-val ${valClass(s)}">${ms}</span>
-          </div>
-        </div>
+        <div style="margin-top:8px">${renderSignalTrust(trust, {compact:true})}</div>
       </div>
       ${s.corroborated ? `<div class="alert-strip"><div class="alert-dot"></div>Corroborated signal</div>` : ''}
       ${s.is_stale ? `<div style="padding:4px 12px 8px;font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:0.08em">Archive · ${s.staleness||'stale'}</div>` : ''}
     </div>`;
   });
 
-  // Build hero cards as .charm cards with a badge — insert into the flow
+  // Build hero cards as .charm cards with a badge — insert into the flow.
+  // Hero ranking now uses a unified trust score (ranking) + corroboration
+  // tiebreak. Phase 7j dropped the agent/market score divergence ranker
+  // since both sides used the same internal scoring with a small
+  // adjustment, which wasn't a meaningful "diverging signal" axis.
   var fresh = signals.filter(s => !s.is_stale);
   if (fresh.length >= 2) {
-    var ranked = fresh.slice().sort((a,b) => (agentScore(b)+(b.corroborated?10:0)) - (agentScore(a)+(a.corroborated?10:0)));
-    var divList = fresh.slice().sort((a,b) => Math.abs(agentScore(b)-marketScore(b)) - Math.abs(agentScore(a)-marketScore(a)));
+    var ranked = fresh.slice().sort((a,b) => trustScore(b) - trustScore(a));
     var heroTop = ranked[0];
-    var heroDiv = divList[0];
-    if (heroDiv === heroTop && divList.length > 1) heroDiv = divList[1];
+    // Pick second hero by corroboration if present, else next-highest trust
+    var heroDiv = ranked.find(s => s.corroborated && s !== heroTop)
+               || (ranked.length > 1 ? ranked[1] : null);
 
     function heroCard(s, badge, badgeClass) {
-      var as = agentScore(s), ms = marketScore(s);
       var sent = sentiment(s);
       var col = badgeClass === 'hb-cyan' ? colors[0] : colors[2];
-      var sigIdx = allSignals.findIndex(function(x){return x.ticker===s.ticker && x.headline===s.headline});
-      return `<div class="charm ${sent}" style="cursor:pointer;position:relative" onclick="openSigModal(allSignals[${sigIdx >= 0 ? sigIdx : 0}])">
+      var trust = trustScore(s);
+      var tkrChip = trackerChip(s.ticker);
+      var sigEsc = JSON.stringify(s).replace(/"/g,'&quot;');
+      return `<div class="charm ${sent}" style="cursor:pointer;position:relative" onclick="openPlanningDrawer(${sigEsc})">
         <div class="hero-badge ${badgeClass}">${badge}</div>
         <div class="charm-top">
           <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
           <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
         </div>
         <div class="charm-body">
+          ${tkrChip ? '<div style="margin-bottom:6px">' + tkrChip + '</div>' : ''}
           <div class="charm-source">${s.politician||'Unknown'} · ${(s.disc_date||s.created_at||'').slice(0,10)}</div>
           <div class="charm-headline">${s.headline||s.ticker+' — Congressional disclosure'}</div>
           <div class="charm-snippet">${s.amount_range||'Amount not disclosed'} · ${s.staleness||'Unknown age'} · ${s.sector||'Unknown sector'}</div>
-          <div class="opinion-bar">
-            <div class="op-row">
-              <span class="op-label ol-agent">Synthos</span>
-              <div class="op-track"><div class="op-fill ${sentClass(s)}" style="width:${as}%"></div></div>
-              <span class="op-val ${valClass(s)}">${as}</span>
-            </div>
-            <div class="op-row">
-              <span class="op-label ol-market">Market</span>
-              <div class="op-track"><div class="op-fill ${mSentClass(s)}" style="width:${ms}%"></div></div>
-              <span class="op-val ${valClass(s)}">${ms}</span>
-            </div>
-          </div>
+          <div style="margin-top:8px">${renderSignalTrust(trust, {compact:true})}</div>
         </div>
         ${s.corroborated ? '<div class="alert-strip"><div class="alert-dot"></div>Corroborated signal</div>' : ''}
       </div>`;
@@ -6973,6 +7053,14 @@ async function loadPlanning() {
     const cntEl   = document.getElementById('planning-count');
     const subEl   = document.getElementById('planning-sub');
     if (!el) return;
+    // Populate tracked-tickers (watching side) — Planning card runs
+    // more often than Intel page so this gives us the freshest watching
+    // set. Phase 7i, 2026-04-25.
+    try {
+      updateTrackedTickers({
+        watching: signals.filter(s => !s.is_stale).map(s => s.ticker).filter(Boolean),
+      });
+    } catch(te) {}
 
     if (mode === 'queue') {
       if (cntEl) cntEl.textContent = signals.length + ' queued';
@@ -7269,68 +7357,177 @@ let _newsCat = 'all';
 const _metaCache = {};   // url → {image, description}
 let   _newsArticles = [];
 
-async function loadNews(category) {
-  if (category !== undefined) _newsCat = category;
+// News-page filter state (Phase 7i, 2026-04-25):
+//   _newsScope:        'all' | 'tracked'  — narrows by tracked-ticker membership
+//   _newsHideClickbait: boolean           — additive UI-side clickbait pass
+// Replaces the old _newsCat (Breaking/US/Global) which filtered on a
+// metadata field that's never set in practice.
+let _newsScope = 'all';
+let _newsHideClickbait = false;
+
+async function loadNews(_legacyArg) {
+  // Backward-compat: tab-switch / setInterval still call loadNews().
+  // The legacy positional arg is ignored; scope is read from state.
   const grid = document.getElementById('news-grid');
   const cnt  = document.getElementById('news-count');
   if (!grid) return;
   try {
-    const r = await fetch('/api/news-headlines?category=' + encodeURIComponent(_newsCat));
+    // Always fetch with category=all server-side and let the client
+    // do scope/clickbait filtering — much faster to refilter without a
+    // round trip when the user toggles.
+    const r = await fetch('/api/news-headlines?category=all');
     const d = await r.json();
     _newsArticles = d.articles || [];
-    cnt.textContent = _newsArticles.length + ' article' + (_newsArticles.length===1?'':'s');
-    if (!_newsArticles.length) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">No news articles yet — News agent will populate on next run</div>';
-      return;
-    }
-    grid.innerHTML = _newsArticles.map((a, idx) => {
-      const stale  = a.staleness && a.staleness !== 'fresh';
-      const cat    = a.category || 'Markets';
-      const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
-      const age    = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
-      const storedImg = a.image_url || '';
-      const cachedImg = a.link && _metaCache[a.link] && _metaCache[a.link].image;
-      const imgSrc    = storedImg || cachedImg || '';
-      const imgHtml   = imgSrc
-        ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${imgSrc}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
-        : `<div class="news-img-placeholder" id="nip-${idx}" style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center"><span style="font-size:22px;opacity:0.18">📰</span></div>`;
-      return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative"
-                   onclick="openNewsModal(${idx})">
-        ${imgHtml}
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
-          <span style="font-size:10px;font-weight:700;color:${catCol};text-transform:uppercase;letter-spacing:0.06em">${cat}</span>
-          <span style="font-size:10px;color:var(--muted)">${stale?'Archive · ':''}${age}</span>
-        </div>
-        <div style="font-size:12px;font-weight:600;color:var(--text);line-height:1.5;margin-bottom:5px">${escHtml(a.headline)}</div>
-        <div style="font-size:11px;color:var(--muted)">${a.source || 'MarketWatch'}</div>
-      </div>`;
-    }).join('');
-    // Lazy-load OG images only for articles with no stored image_url
-    _newsArticles.forEach((a, idx) => {
-      if (!a.image_url && a.link && !_metaCache[a.link]) {
-        fetch('/api/article-meta?url=' + encodeURIComponent(a.link))
-          .then(r => r.json()).then(m => {
-            _metaCache[a.link] = m;
-            const ph = document.getElementById('nip-' + idx);
-            if (ph && m.image) {
-              ph.outerHTML = `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${m.image}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`;
-            }
-          }).catch(() => {});
-      }
-    });
+    renderNewsGrid();
   } catch(e) {
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--red);font-size:13px">Error loading news</div>';
   }
 }
 
-function switchNews(cat, btn) {
+// Pure render of _newsArticles using current filter state. Called both
+// by loadNews and by the toggle handlers — no re-fetch on toggle.
+function renderNewsGrid() {
+  const grid = document.getElementById('news-grid');
+  const cnt  = document.getElementById('news-count');
+  if (!grid) return;
+  // Apply filters
+  let visible = _newsArticles.slice();
+  let hiddenByScope = 0, hiddenByClickbait = 0;
+  if (_newsScope === 'tracked') {
+    visible = visible.filter(a => {
+      const t = (a.ticker || '').toUpperCase();
+      const tracked = !!getTrackerStatus(t);
+      if (!tracked) hiddenByScope++;
+      return tracked;
+    });
+  }
+  if (_newsHideClickbait) {
+    visible = visible.filter(a => {
+      const cb = looksLikeClickbait(a.headline);
+      if (cb) hiddenByClickbait++;
+      return !cb;
+    });
+  }
+  // Header count: show net visible, plus a parenthesized "of N" when
+  // filters are active so the user understands what's been hidden.
+  if (_newsScope !== 'all' || _newsHideClickbait) {
+    cnt.textContent = visible.length + ' of ' + _newsArticles.length;
+  } else {
+    cnt.textContent = visible.length + ' article' + (visible.length === 1 ? '' : 's');
+  }
+
+  if (!visible.length) {
+    let msg = 'No news articles yet — News agent will populate on next run';
+    if (_newsScope === 'tracked') {
+      msg = 'No articles for your tracked tickers right now. Switch back to "All" to see everything.';
+    } else if (_newsHideClickbait && _newsArticles.length) {
+      msg = 'All current articles look low-quality. Toggle "Hide low-quality" off to see them.';
+    }
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">' + msg + '</div>';
+    return;
+  }
+
+  grid.innerHTML = visible.map((a, idx) => {
+    const stale  = a.staleness && a.staleness !== 'fresh';
+    // Phase 7i: drop the per-article category label since 100% of
+    // articles are "Markets" — replaced with a tracked-ticker chip
+    // when the article references a portfolio/watchlist ticker.
+    const tkrStatus = getTrackerStatus(a.ticker);
+    const headerLeft = tkrStatus
+      ? trackerChip(a.ticker)
+      : (a.ticker
+          ? `<span style="font-size:10px;font-weight:600;color:var(--muted);font-family:var(--mono)">${escHtml(a.ticker)}</span>`
+          : '<span style="font-size:10px;font-weight:600;color:var(--dim)">Markets</span>');
+    const age = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
+    const storedImg = a.image_url || '';
+    const cachedImg = a.link && _metaCache[a.link] && _metaCache[a.link].image;
+    const imgSrc    = storedImg || cachedImg || '';
+    const imgHtml   = imgSrc
+      ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${imgSrc}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
+      : `<div class="news-img-placeholder" id="nip-${idx}" style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center"><span style="font-size:22px;opacity:0.18">📰</span></div>`;
+    // Outer card gets a faint accent border when ticker is tracked so
+    // the user can spot relevant cards without reading every chip.
+    const accentBorder = tkrStatus === 'position' ? 'border:1px solid rgba(0,245,212,0.25)'
+                       : tkrStatus === 'watching' ? 'border:1px solid rgba(34,211,238,0.25)'
+                       : '';
+    return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative;${accentBorder}"
+                 onclick="openNewsModal(${idx})">
+      ${imgHtml}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px">
+        ${headerLeft}
+        <span style="font-size:10px;color:var(--muted);flex-shrink:0">${stale?'Archive · ':''}${age}</span>
+      </div>
+      <div style="font-size:12px;font-weight:600;color:var(--text);line-height:1.5;margin-bottom:5px">${escHtml(a.headline)}</div>
+      <div style="font-size:11px;color:var(--muted)">${a.source || 'MarketWatch'}</div>
+    </div>`;
+  }).join('');
+  // Lazy-load OG images for articles with no stored image_url
+  visible.forEach((a, idx) => {
+    if (!a.image_url && a.link && !_metaCache[a.link]) {
+      fetch('/api/article-meta?url=' + encodeURIComponent(a.link))
+        .then(r => r.json()).then(m => {
+          _metaCache[a.link] = m;
+          const ph = document.getElementById('nip-' + idx);
+          if (ph && m.image) {
+            ph.outerHTML = `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${m.image}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`;
+          }
+        }).catch(() => {});
+    }
+  });
+  // Re-bind the visible articles' index back to _newsArticles so the
+  // modal opens the right one. Since we're filtering, idx in the
+  // visible array != idx in the full _newsArticles array. We rewrite
+  // openNewsModal to accept the article object instead of an index.
+  // Simpler: re-export _newsArticlesVisible for the modal.
+  window._newsArticlesVisible = visible;
+}
+
+function switchNewsScope(scope, btn) {
   document.querySelectorAll('#news-filters .graph-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  loadNews(cat);
+  _newsScope = scope;
+  renderNewsGrid();
+}
+
+function toggleClickbaitHide(el) {
+  _newsHideClickbait = !_newsHideClickbait;
+  // Update visual toggle state
+  const dot   = document.getElementById('clickbait-toggle-dot');
+  const knob  = document.getElementById('clickbait-toggle-knob');
+  const label = document.getElementById('clickbait-toggle-label');
+  if (_newsHideClickbait) {
+    dot.style.background  = 'rgba(0,245,212,0.20)';
+    dot.style.borderColor = 'rgba(0,245,212,0.40)';
+    knob.style.left       = '15px';
+    knob.style.background = 'var(--teal)';
+    if (label) label.style.color = 'var(--teal)';
+  } else {
+    dot.style.background  = 'rgba(255,255,255,0.06)';
+    dot.style.borderColor = '';
+    knob.style.left       = '1px';
+    knob.style.background = 'var(--muted)';
+    if (label) label.style.color = '';
+  }
+  renderNewsGrid();
+}
+
+// Backward-compat shim — older callers used switchNews(cat,btn).
+// Map them through to the new scope-based flow when possible; ignore
+// dead categories (Breaking/Markets/US/Global).
+function switchNews(cat, btn) {
+  if (cat === 'all') return switchNewsScope('all', btn);
+  // Anything else (legacy categories) — treat as all + log
+  console.log('switchNews: legacy category "' + cat + '" ignored, defaulting to all');
+  return switchNewsScope('all', btn);
 }
 
 async function openNewsModal(idx) {
-  const a = _newsArticles[idx];
+  // Phase 7i: when the news grid is filtered (scope or clickbait),
+  // the index passed by onclick refers to the VISIBLE array, not
+  // _newsArticles. Prefer _newsArticlesVisible; fall back to
+  // _newsArticles for any legacy callers.
+  const a = (window._newsArticlesVisible && window._newsArticlesVisible[idx])
+    || _newsArticles[idx];
   if (!a) return;
   const cat    = a.category || 'Markets';
   const catCol = cat==='Breaking' ? 'var(--red)' : cat==='US' ? 'var(--teal)' : cat==='Global' ? 'var(--purple)' : 'var(--muted)';
