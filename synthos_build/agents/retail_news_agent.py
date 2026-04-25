@@ -701,9 +701,20 @@ def _alpaca_news_tier(source_name: str) -> int:
 # close-session digest summarises daily counts into the notifications
 # table for portal review.
 
-TICKER_REMAP_ENFORCE   = False   # shadow: still pick symbols[0]; flag remap diffs
-TICKER_REJECT_ENFORCE  = False   # shadow: keep no-match signals; flag them
+TICKER_REMAP_ENFORCE   = True    # enforced 2026-04-25 (was False/shadow 2026-04-21)
+TICKER_REJECT_ENFORCE  = True    # enforced 2026-04-25 (was False/shadow 2026-04-21)
 TICKER_UNTRADABLE_DROP = True    # enforced day 1 — Fix A
+# 2026-04-25 enforcement decision: 4.5-day shadow review found
+#   • 1321 no_match flags — nearly all noise (off-topic articles tagged with
+#     unrelated tickers, 130-symbol earnings calendars). Drop them.
+#   • 1054 remap_differs flags — clear wrong attributions ("Intel Jumps 23%"
+#     shipped as AMD signal, "Procter & Gamble" shipped as AUUD).
+#   • 13% of remap_differs reached VALIDATED+ status — real trades on wrong
+#     tickers. Enforce remap to fix in-flight.
+#   • 751 conflict flags (ties at same headline-match score) stay in shadow;
+#     conflict-aware drop mode is a separate backlog item.
+# Full review: docs/attribution_review_2026-04-25.md.
+# Rollback: flip both back to False, next 30-min news cycle picks it up.
 
 # Symbol suffix set for crypto pairs Alpaca tags on market-commentary
 # articles (we can't trade these on our paper equity account).
