@@ -1003,18 +1003,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .intel-point{display:flex;align-items:flex-start;gap:6px;font-size:10px;color:var(--text);margin-bottom:4px;line-height:1.4}
 .intel-point:last-child{margin-bottom:0}
 .intel-point-dot{width:4px;height:4px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:5px}
-.logic-overlay{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center}
-.logic-overlay.open{display:flex}
-.logic-modal{background:var(--surface);border:1px solid var(--border2);border-radius:20px;width:min(560px,92vw);max-height:80vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.6)}
-.logic-modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
-.logic-modal-title{font-size:13px;font-weight:700;color:var(--text);flex:1}
-.logic-modal-close{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:2px 4px;line-height:1}
-.logic-modal-close:hover{color:var(--text)}
-.logic-modal-body{padding:20px;overflow-y:auto;flex:1}
-.logic-placeholder{text-align:center;padding:32px 0;color:var(--muted)}
-.logic-placeholder-icon{font-size:32px;margin-bottom:10px}
-.logic-placeholder-title{font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
-.logic-placeholder-sub{font-size:11px;color:var(--muted);line-height:1.6}
 
 /* ── DASHBOARD PANELS ROW ── */
 .dash-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
@@ -2210,23 +2198,6 @@ setInterval(loadAgentPulse, 10000);
   <div id="intel-tooltip-body"></div>
 </div>
 
-<!-- LOGIC MODAL -->
-<div class="logic-overlay" id="logic-overlay" onclick="closeLogicModal(event)">
-  <div class="logic-modal">
-    <div class="logic-modal-head">
-      <div class="logic-modal-title" id="logic-modal-title">Agent Logic Breakdown</div>
-      <div></div>
-      <button class="logic-modal-close" onclick="closeLogicModal()">&#xD7;</button>
-    </div>
-    <div class="logic-modal-body" id="logic-modal-body">
-      <div class="logic-placeholder">
-        <div class="logic-placeholder-icon">&#x1F9E0;</div>
-        <div class="logic-placeholder-title">Logic Breakdown</div>
-        <div class="logic-placeholder-sub">Full agent reasoning will appear here.</div>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- ══════════════ INTELLIGENCE TAB ══════════════ -->
 <div class="page" id="tab-intel" style="display:none">
@@ -3030,7 +3001,6 @@ setInterval(loadAgentPulse, 10000);
       <div class="drawer-row"><span class="drawer-label">Shares</span><span class="drawer-val" id="dr-shares">—</span></div>
       <div class="drawer-row"><span class="drawer-label">Avg Entry</span><span class="drawer-val" id="dr-entry">—</span></div>
       <div class="drawer-row"><span class="drawer-label">Current Price</span><span class="drawer-val" id="dr-price">—</span></div>
-      <div class="drawer-row"><span class="drawer-label">Cost Basis</span><span class="drawer-val" id="dr-basis">—</span></div>
     </div>
     <div class="drawer-section">
       <div class="drawer-section-title">Returns</div>
@@ -3090,6 +3060,30 @@ document.addEventListener('click', function(e){
   const bell = document.getElementById('hdr-bell');
   const bdrop = document.getElementById('bell-drop');
   if (bell && bdrop && !bell.contains(e.target)) bdrop.classList.remove('open');
+});
+
+// ESC-to-close for the three slide-out drawers (Position / History /
+// Approval). Closes whichever is currently open. Phase 7f, 2026-04-25.
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  // Position drawer
+  const posOv = document.getElementById('drawer-overlay');
+  if (posOv && posOv.classList.contains('open')) {
+    if (typeof closeDrawer === 'function') closeDrawer({target: posOv});
+    return;
+  }
+  // History drawer
+  const histOv = document.getElementById('hist-drawer-overlay');
+  if (histOv && histOv.classList.contains('open')) {
+    if (typeof closeHistoryDrawer === 'function') closeHistoryDrawer({target: histOv});
+    return;
+  }
+  // Approval drawer
+  const apprOv = document.getElementById('appr-drawer-overlay');
+  if (apprOv && apprOv.classList.contains('open')) {
+    if (typeof closeApprovalDrawer === 'function') closeApprovalDrawer({target: apprOv});
+    return;
+  }
 });
 
 // ── NOTIFICATION BELL ──
@@ -3914,7 +3908,6 @@ function openPositionDrawer(p) {
   sv('dr-shares',  (p.shares||0).toFixed(4));
   sv('dr-entry',   '$' + (p.avg_entry_price||0).toFixed(2));
   sv('dr-price',   '$' + (p.current_price||0).toFixed(2));
-  sv('dr-basis',   '$' + ((p.avg_entry_price||0) * (p.shares||0)).toFixed(2));
 
   const urEl = document.getElementById('dr-unreal');
   const urPctEl = document.getElementById('dr-unreal-pct');
@@ -6676,8 +6669,7 @@ async function loadPlanning() {
             data-summary="${esc(summary)}"
             data-type="QUEUE"
             onmouseenter="showIntelTooltip(event,this)"
-            onmouseleave="hideIntelTooltip()"
-            onclick="openLogicModal(this)">
+            onmouseleave="hideIntelTooltip()">
           <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}${corrBadge}</div>
@@ -6697,8 +6689,7 @@ async function loadPlanning() {
             data-summary="${esc(summary)}"
             data-type="INTEL"
             onmouseenter="showIntelTooltip(event,this)"
-            onmouseleave="hideIntelTooltip()"
-            onclick="openLogicModal(this)">
+            onmouseleave="hideIntelTooltip()">
           <div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted)">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--dim);font-weight:400;margin-left:4px">intel${stale}</span></div>
@@ -6734,64 +6725,18 @@ function hideIntelTooltip() {
   if (tt) tt.classList.remove('visible');
 }
 
-// ── LOGIC MODAL ──
-function openLogicModal(el) {
-  hideIntelTooltip();
-  const ticker  = el.dataset.ticker  || '?';
-  const conf    = el.dataset.conf    || 'LOW';
-  const summary = el.dataset.summary || '';
-  const type    = el.dataset.type    || 'SIGNAL';
-
-  // Reuse position drawer in signal mode
-  const confColor = conf==='HIGH'?'var(--teal)':conf==='MEDIUM'?'var(--amber)':'var(--muted)';
-  document.getElementById('drawer-icon').textContent = ticker.slice(0,4);
-  document.getElementById('drawer-icon').style.cssText =
-    'width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(0,245,212,0.08);border:1px solid rgba(0,245,212,0.15);color:var(--teal)';
-  document.getElementById('drawer-ticker').textContent = ticker;
-  document.getElementById('drawer-sub').textContent = type + ' signal';
-
-  // Position section — show signal data instead
-  var sv = function(id, v) { var el = document.getElementById(id); if(el) el.textContent = v; };
-  sv('dr-mktval',  '—');
-  sv('dr-shares',  '—');
-  sv('dr-entry',   '—');
-  sv('dr-price',   '—');
-  sv('dr-basis',   '—');
-  sv('dr-unreal',  '—');
-  sv('dr-unreal-pct', '—');
-  sv('dr-day-pl',  '—');
-  sv('dr-day-pct', '—');
-
-  // Rename position section header temporarily
-  var posHeaders = document.querySelectorAll('.drawer-section-title');
-  if (posHeaders[0]) posHeaders[0].textContent = 'Signal Details';
-  sv('dr-mktval',  conf);
-  sv('dr-shares',  type);
-  sv('dr-entry',   '—');
-  sv('dr-price',   'Pending');
-  sv('dr-basis',   '—');
-
-  // Signal source
-  var srcEl = document.getElementById('dr-signal-source');
-  if (srcEl) {
-    srcEl.innerHTML = '<div style="font-size:11px;color:var(--text);margin-bottom:4px">&#x1F4F0; ' + summary + '</div>'
-      + '<div style="font-size:10px;color:var(--muted)">Confidence: <span style="color:' + confColor + '">' + conf + '</span> \u00b7 Status: ' + type + '</div>';
-  }
-
-  // Trade info
-  var infoEl = document.getElementById('dr-trade-info');
-  if (infoEl) {
-    infoEl.innerHTML = '<div style="color:var(--dim);font-size:10px">Signal under watch \u2014 not yet traded</div>';
-  }
-
-  document.getElementById('drawer-overlay').classList.add('open');
-  document.getElementById('pos-drawer').classList.add('open');
-}
-function closeLogicModal(e) {
-  if (e && e.target !== document.getElementById('logic-overlay')) return;
-  const o = document.getElementById('logic-overlay');
-  if (o) o.classList.remove('open');
-}
+// ── openLogicModal / closeLogicModal removed 2026-04-25 (Phase 7f) ──
+//
+// The function reused the position drawer's DOM but stuffed signal
+// watch data into position-shaped fields (forcing every row to "—"
+// then overwriting a few). It also mutated drawer-section-title text
+// without restoring it — leaving the position drawer's "Position"
+// header stuck at "Signal Details" until next page reload.
+//
+// The intel/queue rows it served already show the same data on-row
+// (ticker · headline · confidence chip · staleness · tier badge)
+// and hovering surfaces a tooltip via showIntelTooltip(). Click
+// added no information. Both function and its onclick handlers removed.
 
 // ── SETTINGS SAVE (dashboard + settings tab share one function) ──
 async function saveQuickSettings() {
