@@ -5927,6 +5927,14 @@ def api_logs_audit():
         # circuit breaker pattern catches these; the warning is
         # diagnostic only.
         _re.compile(r'\b(?:yfinance|yahoo|circuit\s*breaker)\b', _re.I),
+        # price_poller after-hours fallback noise — Market-data
+        # fallback returns 400 minute-by-minute when SIP/IEX are
+        # restricted off-hours. The fallback's own retry handles it;
+        # surfacing 100+ identical WARNINGs/day was pure noise.
+        _re.compile(r'WARNING\s+price_poller:\s+Market-data fallback returned',
+                    _re.I),
+        # Sentiment-agent / price-poller generic retry/unavailable
+        # warnings — same family.
         _re.compile(r'WARNING.*\b(?:retry|failed|unavailable)\b.*'
                     r'\b(?:price_poller|sentiment_agent)\b', _re.I),
         _re.compile(r'\b(?:price_poller|sentiment_agent)\b.*WARNING.*'
