@@ -3889,6 +3889,224 @@ def api_dashboard_data():
     })
 
 
+@app.route('/api/sparklines')
+@login_required
+def api_sparklines():
+    """Returns 12-trading-hours of 15-min bar closes per ticker, RTH-only.
+    48 closes per ticker (12h × 4 bars/h). Last point is overlaid with the
+    live price from live_prices for sub-15-min freshness.
+
+    Backend: persistent SQLite cache table sparkline_bars(ticker, bar_ts,
+    close). Top-up from Alpaca when stale (<5 min old serves from cache,
+    older fetches missing range only). Designed to handle ticker churn
+    cleanly: dropped tickers age out via 7-day prune; new tickers do one
+    cold fetch then live on top-ups.
+
+    Added 2026-04-25 — see docs/security_review.md for caching/eviction
+    discussion.
+
+    Query params:
+      tickers — comma-separated, max 50
+
+    Response:
+      { "AMD": [347.10, 347.34, ..., 347.81], "AMZN": [...], ... }
+      Closing prices in chronological order. May be shorter than 48 if
+      not enough RTH history exists yet (e.g., new ticker, weekend).
+    """
+    import requests as _req
+    from datetime import timezone as _tz
+
+    tickers_str = request.args.get('tickers', '')
+    tickers = [t.strip().upper() for t in tickers_str.split(',') if t.strip()]
+    tickers = list(dict.fromkeys(tickers))  # de-dupe preserving order
+    if not tickers:
+        return jsonify({})
+    if len(tickers) > 50:
+        return jsonify({'error': 'too many tickers (max 50)'}), 400
+
+    shared = _shared_db()
+
+    # ── Lazy-create the cache table on first call ────────────────
+    try:
+        with shared.conn() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS sparkline_bars (
+                    ticker  TEXT NOT NULL,
+                    bar_ts  TEXT NOT NULL,
+                    close   REAL NOT NULL,
+                    PRIMARY KEY (ticker, bar_ts)
+                )
+            """)
+            c.execute("CREATE INDEX IF NOT EXISTS idx_spark_ts ON sparkline_bars(bar_ts)")
+    except Exception as e:
+        log.warning(f"sparkline_bars table init failed: {e}")
+        return jsonify({}), 500
+
+    alpaca_data_url = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+    alpaca_key, alpaca_secret, _ = _get_customer_alpaca_creds()
+    if not alpaca_key:
+        # No creds — best-effort: return what's in cache
+        log.debug("sparklines: no Alpaca creds, serving from cache only")
+
+    # RTH check helper — Alpaca bars are timestamped UTC ISO strings.
+    # Convert to ET and check 9:30 <= time < 16:00 on weekday.
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        _ET = _ZI('America/New_York')
+    except Exception:
+        _ET = ET
+
+    def _is_rth(iso_ts):
+        try:
+            dt = datetime.fromisoformat(iso_ts.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            et = dt.astimezone(_ET)
+            if et.weekday() > 4:  # weekend
+                return False
+            mins = et.hour * 60 + et.minute
+            # 9:30 = 570, 16:00 = 960
+            return 570 <= mins < 960
+        except Exception:
+            return False
+
+    # ── Fetch + cache helper ─────────────────────────────────────
+    def _topup_from_alpaca(ticker, since_iso=None):
+        """Pull bars from Alpaca and INSERT into sparkline_bars. since_iso
+        cuts the start time so we only fetch missing range. Returns count
+        of new rows inserted (0 if no creds or API error)."""
+        if not alpaca_key:
+            return 0
+        # Window: 36 calendar hours covers ~12 RTH hours plus weekend buffer.
+        # If since_iso provided, start from there but cap at 36h ago.
+        end_dt   = datetime.now(timezone.utc).replace(microsecond=0)
+        start_dt = end_dt - timedelta(hours=36)
+        if since_iso:
+            try:
+                hint = datetime.fromisoformat(since_iso.replace('Z', '+00:00'))
+                if hint.tzinfo is None:
+                    hint = hint.replace(tzinfo=timezone.utc)
+                # Top-up: start a bit BEFORE since_iso to handle clock skew
+                start_dt = max(start_dt, hint - timedelta(minutes=15))
+            except Exception:
+                pass
+        try:
+            r = _req.get(
+                f"{alpaca_data_url}/v2/stocks/bars",
+                headers={'APCA-API-KEY-ID': alpaca_key, 'APCA-API-SECRET-KEY': alpaca_secret},
+                params={
+                    'symbols':   ticker,
+                    'timeframe': '15Min',
+                    'start':     start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'end':       end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'limit':     200,
+                    'feed':      'iex',
+                },
+                timeout=8,
+            )
+            if r.status_code != 200:
+                log.debug(f"sparklines fetch {ticker}: {r.status_code}")
+                return 0
+            bars = (r.json() or {}).get('bars', {}).get(ticker, []) or []
+            if not bars:
+                return 0
+            rows = [
+                (ticker, b['t'], float(b['c']))
+                for b in bars
+                if 't' in b and 'c' in b
+            ]
+            with shared.conn() as c:
+                c.executemany(
+                    "INSERT OR REPLACE INTO sparkline_bars (ticker, bar_ts, close) "
+                    "VALUES (?, ?, ?)",
+                    rows
+                )
+                # Prune anything older than 7 days at the same time — bounded growth.
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                c.execute("DELETE FROM sparkline_bars WHERE bar_ts < ?", (cutoff,))
+            return len(rows)
+        except Exception as e:
+            log.debug(f"sparklines fetch {ticker} error: {e}")
+            return 0
+
+    # ── Per-ticker logic ─────────────────────────────────────────
+    NEEDED_BARS  = 48                 # 12 trading hours × 4 bars/hour
+    FRESH_WINDOW = timedelta(minutes=15)
+    FETCH_AFTER  = timedelta(minutes=5)
+    now_utc      = datetime.now(timezone.utc)
+    cutoff_db    = (now_utc - timedelta(hours=36)).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    result = {}
+    for ticker in tickers:
+        # Read existing cached bars
+        try:
+            with shared.conn() as c:
+                rows = c.execute(
+                    "SELECT bar_ts, close FROM sparkline_bars "
+                    "WHERE ticker = ? AND bar_ts >= ? "
+                    "ORDER BY bar_ts ASC",
+                    (ticker, cutoff_db)
+                ).fetchall()
+        except Exception:
+            rows = []
+
+        # Decide whether to top up from Alpaca
+        latest_ts = rows[-1]['bar_ts'] if rows else None
+        need_fetch = False
+        if not rows:
+            need_fetch = True   # cold cache
+        else:
+            try:
+                latest_dt = datetime.fromisoformat(latest_ts.replace('Z', '+00:00'))
+                if latest_dt.tzinfo is None:
+                    latest_dt = latest_dt.replace(tzinfo=timezone.utc)
+                age = now_utc - latest_dt
+                # Only refetch if (a) latest bar is at least 5 min old AND
+                # (b) more than 15 min has passed since we'd expect a new
+                # bar. Avoids hammering Alpaca on rapid dashboard refreshes.
+                if age > FRESH_WINDOW + FETCH_AFTER:
+                    need_fetch = True
+            except Exception:
+                need_fetch = True
+
+        if need_fetch:
+            _topup_from_alpaca(ticker, since_iso=latest_ts)
+            try:
+                with shared.conn() as c:
+                    rows = c.execute(
+                        "SELECT bar_ts, close FROM sparkline_bars "
+                        "WHERE ticker = ? AND bar_ts >= ? "
+                        "ORDER BY bar_ts ASC",
+                        (ticker, cutoff_db)
+                    ).fetchall()
+            except Exception:
+                pass
+
+        # Filter to RTH and take last NEEDED_BARS
+        rth = [(r['bar_ts'], float(r['close'])) for r in rows if _is_rth(r['bar_ts'])]
+        rth = rth[-NEEDED_BARS:]
+
+        # Overlay live tail from live_prices (sub-15-min freshness)
+        try:
+            with shared.conn() as c:
+                lp = c.execute(
+                    "SELECT price, updated_at FROM live_prices WHERE ticker = ?",
+                    (ticker,)
+                ).fetchone()
+            if lp and lp['price']:
+                live_price = float(lp['price'])
+                if rth:
+                    rth[-1] = (rth[-1][0], live_price)
+                else:
+                    rth = [(now_utc.strftime('%Y-%m-%dT%H:%M:%SZ'), live_price)]
+        except Exception:
+            pass
+
+        result[ticker] = [round(close, 4) for _, close in rth]
+
+    return jsonify(result)
+
+
 @app.route('/api/approvals')
 @login_required
 def api_approvals():
