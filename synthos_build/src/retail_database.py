@@ -3177,6 +3177,69 @@ class DB:
             """, (cutoff,)).fetchall()
             return [{'date': r['date'], 'value': round(r['value'], 2)} for r in rows]
 
+    def get_signals_by_status(self, statuses, limit=50):
+        """Return signals from the curated signals table filtered by
+        lifecycle status — for the Watchlist (Intelligence) page after
+        the Phase 7k wiring fix (2026-04-25).
+
+        Distinct from get_watching_signals() which reads news_feed (raw
+        article inbox, contains MACRO sentinels and unresolved tickers)
+        despite the misleading name. THIS function reads the curated
+        signals table — every row has a real ticker, confidence bucket,
+        politician (when applicable), and lifecycle state.
+
+        Args:
+          statuses: list of status values to include, e.g.
+                    ['WATCHING', 'QUEUED', 'VALIDATED'].
+          limit:    row cap (default 50).
+
+        Sort order: HIGH confidence first, then corroborated, then
+        newest. Reflects how "what should I look at next" is ordered.
+
+        Filters out any rows with ticker=NULL/''/MACRO defensively even
+        though the audit confirmed signals table is clean — belt-and-
+        suspenders for future ingestion bugs.
+        """
+        if not statuses:
+            return []
+        placeholders = ','.join(['?'] * len(statuses))
+        with self.conn() as c:
+            rows = c.execute(f"""
+                SELECT id, ticker, company, sector, source, source_tier,
+                       headline, politician, tx_date, disc_date,
+                       amount_range, confidence, staleness, corroborated,
+                       corroboration_note, status, sentiment_score,
+                       image_url, source_url, created_at, updated_at,
+                       expires_at, entry_signal_score, transaction_type,
+                       is_amended, is_spousal
+                FROM signals
+                WHERE status IN ({placeholders})
+                  AND ticker IS NOT NULL AND ticker != ''
+                  AND UPPER(ticker) != 'MACRO'
+                ORDER BY
+                  CASE confidence
+                    WHEN 'HIGH' THEN 1
+                    WHEN 'MEDIUM' THEN 2
+                    WHEN 'LOW' THEN 3
+                    ELSE 4
+                  END,
+                  corroborated DESC,
+                  created_at DESC
+                LIMIT ?
+            """, list(statuses) + [limit]).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                # Map staleness text label → is_stale boolean for the
+                # frontend's renderIntelGrid (which expects a boolean
+                # flag, not the underlying text). 'Stale' / 'Expired' /
+                # 'Old' all collapse to is_stale=True; 'Fresh' / 'Aging'
+                # → False.
+                stale_label = (d.get('staleness') or '').lower()
+                d['is_stale'] = stale_label in ('stale', 'expired', 'old')
+                out.append(d)
+            return out
+
     def get_watching_signals(self, limit=100, min_floor=30):
         """Return signals for the Intelligence page from news_feed.
 

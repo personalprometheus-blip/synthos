@@ -4674,13 +4674,23 @@ def api_performance_summary():
 @app.route('/api/watchlist')
 @login_required
 def api_watchlist():
-    """Signals from shared intelligence — all customers see the same market data.
-    (Decorator order fixed — @app.route must be outermost so login_required
-    actually wraps the view; previously was inside the route binding and
-    likely bypassed entirely.)"""
+    """Signals from shared intelligence — all customers see the same
+    market data.
+
+    Phase 7k (2026-04-25): repointed from get_watching_signals() →
+    get_signals_by_status(). The old function read news_feed (the raw
+    article inbox) which has 1100+ MACRO sentinels and articles with
+    unresolved tickers, displayed on the Watchlist page as "MACR" and
+    "?" — making the page look like dirty data. The signals table
+    itself is clean (zero MACRO, zero null tickers across 1800+ rows);
+    we just weren't reading from it. This change surfaces the actual
+    bot watchlist (status WATCHING / QUEUED / VALIDATED).
+    """
     try:
-        signals = _shared_db().get_watching_signals(limit=10)
-        return jsonify({'signals': signals})
+        signals = _shared_db().get_signals_by_status(
+            ['WATCHING', 'QUEUED', 'VALIDATED'], limit=50
+        )
+        return jsonify({'signals': signals, 'count': len(signals)})
     except Exception as e:
         return jsonify({'signals': [], 'error': str(e)})
 
