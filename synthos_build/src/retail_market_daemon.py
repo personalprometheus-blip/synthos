@@ -379,11 +379,33 @@ def run_trade_all_customers(session='open'):
     pending        = list(customers)
     active: dict   = {}   # {customer_id: Popen}
     proc_started: dict = {}  # {customer_id: monotonic start ts}
+    # Phase 7L+ (2026-04-26) — per-customer subprocess log file handles.
+    # Trader subprocesses redirect stdout+stderr into customer-specific
+    # files so when one hangs and gets killed at 240s, we have a
+    # persistent record of WHERE in startup it stalled (Alpaca call,
+    # DB lock, etc.). Previously the Popen pipes were never read on a
+    # timeout-kill path so all subprocess output was lost.
+    proc_logfh:   dict = {}  # {customer_id: open file handle}
+    proc_logpath: dict = {}  # {customer_id: log path string}
 
     def _retire(cid: str, proc, status: str, note: str = "") -> None:
         """Close streams, count the result, and drop from active.
         status is 'ok' | 'fail' | 'timeout'."""
         nonlocal ok, fail, timeout_count
+        # Flush + close the per-customer subprocess log file. The
+        # subprocess wrote directly to disk via stdout/stderr
+        # redirection so all output is already persisted; this is just
+        # cleanup.
+        fh = proc_logfh.pop(cid, None)
+        if fh is not None:
+            try:
+                fh.flush()
+                fh.close()
+            except Exception:
+                pass
+        proc_logpath.pop(cid, None)
+        # Close any remaining pipe handles defensively (shouldn't be
+        # any after the file-redirect change, but doesn't hurt).
         try:
             if proc.stdout: proc.stdout.close()
             if proc.stderr: proc.stderr.close()
@@ -420,10 +442,37 @@ def run_trade_all_customers(session='open'):
                     f'--session={session}',
                     f'--customer-id={cid}',
                 ]
-                p = _sp.Popen(
-                    cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
-                    text=True, cwd=str(_ROOT_DIR / 'agents'),
-                )
+                # Phase 7L+ (2026-04-26): redirect subprocess stdout AND
+                # stderr to a per-customer log file (append mode). The
+                # daemon's shared trade_daemon.log gets the dispatch
+                # summary; the customer's own file gets the trader's
+                # full chatter (ExecutionAgent startup, watchdog beats,
+                # gate decisions, Alpaca call results, errors). When a
+                # trader hangs, this is what tells us WHERE.
+                cust_log_path = _ROOT_DIR / 'logs' / f'customer_{cid[:8]}_trader.log'
+                try:
+                    log_fh = open(cust_log_path, 'a', buffering=1)  # line-buffered
+                    log_fh.write(
+                        f"\n=== {datetime.now(ET).isoformat(timespec='seconds')} "
+                        f"session={session} cid={cid} ===\n"
+                    )
+                    log_fh.flush()
+                    p = _sp.Popen(
+                        cmd, stdout=log_fh, stderr=_sp.STDOUT,
+                        text=True, cwd=str(_ROOT_DIR / 'agents'),
+                    )
+                    proc_logfh[cid]   = log_fh
+                    proc_logpath[cid] = str(cust_log_path)
+                except OSError as _le:
+                    # Disk full / permissions — fall back to PIPE so
+                    # the trader still runs; we lose subprocess output
+                    # but the kill path still works.
+                    log.warning(f"[DISPATCH] Could not open {cust_log_path}: {_le}; "
+                                f"falling back to PIPE")
+                    p = _sp.Popen(
+                        cmd, stdout=_sp.PIPE, stderr=_sp.PIPE,
+                        text=True, cwd=str(_ROOT_DIR / 'agents'),
+                    )
                 active[cid]       = p
                 proc_started[cid] = time.monotonic()
                 vrd = verdicts.get(cid, '?')
@@ -450,9 +499,15 @@ def run_trade_all_customers(session='open'):
             elif now_mono - proc_started[cid] > TRADE_INDIVIDUAL_TIMEOUT_SEC:
                 # Individual deadline exceeded — this is the fix for the
                 # 1-hour DISPATCH hangs. Kill, reap, and move on so the pool
-                # stays responsive.
+                # stays responsive. Phase 7L+ (2026-04-26): include the
+                # path of the per-customer subprocess log on the kill so
+                # the operator can `tail -100 <path>` to see where it
+                # hung. Previously the only signal was "killed after Ns"
+                # with zero diagnostic context.
+                _path_hint = proc_logpath.get(cid)
+                _hint_str = f" (see {_path_hint})" if _path_hint else ""
                 log.error(
-                    f"[TRADE] {cid[:8]} exceeded {TRADE_INDIVIDUAL_TIMEOUT_SEC}s — killing"
+                    f"[TRADE] {cid[:8]} exceeded {TRADE_INDIVIDUAL_TIMEOUT_SEC}s — killing{_hint_str}"
                 )
                 try:
                     proc.kill()

@@ -5958,6 +5958,17 @@ def api_logs_audit():
         # Single-shot warnings here are diagnostic-only.
         _re.compile(r'WARNING\s+heartbeat:\s+\[HB\]\s+POST failed', _re.I),
         _re.compile(r'\[HB\]\s+POST failed:.*Max retries exceeded', _re.I),
+        # Trader-timeout follow-up lines — when a trader subprocess is
+        # killed at 240s the daemon emits THREE lines:
+        #   ERROR daemon: [TRADE] <cid> exceeded 240s — killing
+        #   WARNING daemon: [TRADE] <cid> timeout: killed after 240s
+        #   INFO  daemon: [TRADE] Complete: N/M ok, X failed, Y timeout in 241.0s
+        # The auditor was surfacing all three as separate findings;
+        # only the ERROR carries new information. Suppress the WARNING
+        # and INFO follow-ups so one timeout = one finding. Phase 7L+
+        # (2026-04-26).
+        _re.compile(r'\[TRADE\]\s+\S+\s+timeout:\s+killed after \d+s', _re.I),
+        _re.compile(r'\[TRADE\]\s+Complete:.*\btimeout in', _re.I),
         # Sentiment-agent / price-poller generic retry/unavailable
         # warnings — same family.
         _re.compile(r'WARNING.*\b(?:retry|failed|unavailable)\b.*'
