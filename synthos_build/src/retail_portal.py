@@ -4682,6 +4682,51 @@ def api_performance_summary():
                         'trades': [], 'error': str(e)})
 
 
+@app.route('/api/behavior-baseline')
+@login_required
+def api_behavior_baseline():
+    """Trader-behavior baseline + days-since counter for the dashboard
+    'stable for N days' widget. Phase 7L+ (2026-04-26).
+
+    Returns:
+      baseline:            { set_at, set_by, commit_sha, reason }  | null
+      calendar_days_since: int (today - set_at, by date)
+      trading_days_since:  int (Mon-Fri count, ignores holidays)
+    """
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        baseline = _shared_db().get_current_baseline()
+        if not baseline:
+            return jsonify({'baseline': None})
+        try:
+            set_dt = _dt.fromisoformat(
+                str(baseline['set_at']).replace('Z', '+00:00').replace(' ', 'T')
+            )
+        except (TypeError, ValueError):
+            set_dt = None
+        cal_days = trading_days = None
+        if set_dt:
+            now_naive = _dt.now() if set_dt.tzinfo is None else _dt.now(set_dt.tzinfo)
+            cal_days = max(0, (now_naive.date() - set_dt.date()).days)
+            # Count Mon-Fri days strictly between set_at and today.
+            # Holidays are rare enough we approximate; the user knows
+            # if a market holiday fell in the window.
+            trading_days = 0
+            d = set_dt.date()
+            while d < now_naive.date():
+                d = d + _td(days=1)
+                if d.weekday() < 5:
+                    trading_days += 1
+        return jsonify({
+            'baseline': baseline,
+            'calendar_days_since': cal_days,
+            'trading_days_since': trading_days,
+        })
+    except Exception as e:
+        log.warning(f"/api/behavior-baseline error: {e}")
+        return jsonify({'baseline': None, 'error': str(e)})
+
+
 @app.route('/api/watchlist')
 @login_required
 def api_watchlist():

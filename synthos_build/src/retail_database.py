@@ -3189,6 +3189,51 @@ class DB:
             """, (cutoff,)).fetchall()
             return [{'date': r['date'], 'value': round(r['value'], 2)} for r in rows]
 
+    # ── BEHAVIOR BASELINE COUNTER (Phase 7L+, 2026-04-26) ──────────────
+    # Tracks the timestamp of the last trader-behavior change so the
+    # dashboard can show "stable for N days." Intentionally tiny: one
+    # table, two methods, easy to remove if it stops being useful.
+    # Lives in the shared (owner) DB — every customer sees the same
+    # baseline because the trader's gate logic is system-wide.
+    def set_behavior_baseline(self, reason, commit_sha=None, set_by='admin'):
+        """Record a new trader-behavior baseline. Inactivates any prior
+        baselines and inserts a new active row. Call this when shipping
+        a change that alters the trader's decision-making (gate logic,
+        threshold tweaks, new agents in the chain). Do NOT call for UI,
+        audit, or schema-only changes."""
+        with self.conn() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_baselines (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    set_at      TEXT    NOT NULL,
+                    set_by      TEXT    NOT NULL,
+                    commit_sha  TEXT,
+                    reason      TEXT    NOT NULL,
+                    active      INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            c.execute("UPDATE behavior_baselines SET active=0 WHERE active=1")
+            c.execute("""
+                INSERT INTO behavior_baselines
+                    (set_at, set_by, commit_sha, reason, active)
+                VALUES (?,?,?,?,1)
+            """, (self.now(), set_by, commit_sha, reason))
+
+    def get_current_baseline(self):
+        """Return the active behavior baseline as a dict, or None.
+        Idempotent — gracefully handles the table not existing yet."""
+        try:
+            with self.conn() as c:
+                rows = c.execute("""
+                    SELECT id, set_at, set_by, commit_sha, reason
+                    FROM behavior_baselines
+                    WHERE active=1
+                    ORDER BY set_at DESC LIMIT 1
+                """).fetchall()
+                return dict(rows[0]) if rows else None
+        except sqlite3.OperationalError:
+            return None  # table doesn't exist yet — no baseline set
+
     def get_signals_by_status(self, statuses, limit=50):
         """Return signals from the curated signals table filtered by
         lifecycle status — for the Watchlist (Intelligence) page after
