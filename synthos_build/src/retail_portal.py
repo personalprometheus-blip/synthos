@@ -4683,16 +4683,22 @@ def api_performance_summary():
 
 
 @app.route('/api/behavior-baseline')
-@login_required
 def api_behavior_baseline():
-    """Trader-behavior baseline + days-since counter for the dashboard
-    'stable for N days' widget. Phase 7L+ (2026-04-26).
+    """Trader-behavior baseline + days-since counter.
+    Operator-only signal — moved off the retail dashboard 2026-04-26;
+    now consumed by the command portal (pi4b) over the local network.
+    Auth: requires the same Bearer MONITOR_TOKEN that /api/logs-audit
+    uses, so customer sessions cannot read or enumerate it.
 
     Returns:
       baseline:            { set_at, set_by, commit_sha, reason }  | null
       calendar_days_since: int (today - set_at, by date)
       trading_days_since:  int (Mon-Fri count, ignores holidays)
     """
+    auth_header   = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_token or auth_header != f'Bearer {monitor_token}':
+        return jsonify({'error': 'unauthorized'}), 401
     try:
         from datetime import datetime as _dt, timedelta as _td
         baseline = _shared_db().get_current_baseline()

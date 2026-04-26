@@ -1835,15 +1835,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
         <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Last decision</div>
       </div>
     </div>
-    <!-- Behavior baseline counter (Phase 7L+ 2026-04-26) — populated by
-         /api/behavior-baseline. Tiny single-line element; tells the
-         operator at a glance how long the trader has been running on
-         the current decision-logic baseline. Easily removable: delete
-         this <div>, the JS in loadDashboardData, the API route, and
-         the DB methods set/get_current_baseline. -->
-    <div id="behavior-baseline-row" style="padding:6px 14px;border-top:1px dashed rgba(255,255,255,0.06);font-size:9px;color:var(--muted);font-family:var(--mono);text-align:center;letter-spacing:0.04em;display:none">
-      <span id="bb-text">—</span>
-    </div>
+    <!-- Behavior baseline counter moved to the command portal 2026-04-26 —
+         the trader-behavior baseline is operator-only (decides observation
+         window for live-trading promotion); doesn't help end users.
+         Lives at command.synth-cloud.com instead. -->
   </div>
 
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
@@ -6110,44 +6105,8 @@ async function loadLiveStatus() {
 // Same poll cadence as loadLiveStatus (called from the same setInterval).
 // Designed to fail open: every populator is wrapped so a missing field
 // just leaves the placeholder text in place.
-// Behavior baseline counter (Phase 7L+ 2026-04-26) — separate fetch
-// from /api/dashboard-data because it has its own DB-side query and
-// changes infrequently (only when admin records a new baseline). Same
-// 30s poll cadence as loadDashboardData via the setInterval at the
-// bottom; that's plenty given baseline changes are admin actions.
-async function loadBehaviorBaseline() {
-  try {
-    const r = await fetch('/api/behavior-baseline');
-    if (!r.ok) return;
-    const d = await r.json();
-    const row = document.getElementById('behavior-baseline-row');
-    const txt = document.getElementById('bb-text');
-    if (!row || !txt) return;
-    const b = d.baseline;
-    if (!b) {
-      row.style.display = 'none';
-      return;
-    }
-    // Compose: "STABLE — 2026-04-23 · 1 trading day (3d cal)"
-    const dateStr = (b.set_at || '').slice(0, 10);
-    const td = (typeof d.trading_days_since === 'number') ? d.trading_days_since : null;
-    const cd = (typeof d.calendar_days_since === 'number') ? d.calendar_days_since : null;
-    const tdStr = (td !== null) ? `${td} trading day${td === 1 ? '' : 's'}` : '';
-    const cdStr = (cd !== null) ? `${cd}d cal` : '';
-    const reasonShort = (b.reason || '').length > 50
-      ? (b.reason || '').slice(0, 47) + '…'
-      : (b.reason || '');
-    const sha = b.commit_sha ? ` · ${b.commit_sha.slice(0, 7)}` : '';
-    txt.innerHTML =
-      `<span style="color:var(--teal);font-weight:700;letter-spacing:0.08em">STABLE</span>` +
-      ` — ${dateStr}${sha}` +
-      (tdStr ? ` · <span style="color:var(--text)">${tdStr}</span>` : '') +
-      (cdStr ? ` <span style="opacity:0.6">(${cdStr})</span>` : '') +
-      (reasonShort ? `<br><span style="opacity:0.7;font-size:8px">${reasonShort}</span>` : '');
-    txt.title = `Last trader-behavior change: ${b.set_at}\nReason: ${b.reason}\n(Counter resets when admin records a new baseline.)`;
-    row.style.display = 'block';
-  } catch (e) { /* silent */ }
-}
+// Behavior baseline counter moved to the command portal (pi4b) on
+// 2026-04-26 — operator-only signal, not customer-facing.
 
 async function loadDashboardData() {
   try {
@@ -7443,8 +7402,6 @@ setInterval(updateMarketClock, 60000);
 // Dashboard strips (added 2026-04-25) — same cadence as loadLiveStatus
 loadDashboardData();
 setInterval(loadDashboardData, 30000);
-loadBehaviorBaseline();
-setInterval(loadBehaviorBaseline, 60000);
 
 // Sparklines refresh (added 2026-04-25) — every 60s; first paint
 // happens immediately after positions/approvals/history render.
