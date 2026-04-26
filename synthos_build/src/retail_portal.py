@@ -729,7 +729,7 @@ def check_auth():
         return
     # Monitor-callable endpoints — bearer token handled inside the function
     if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override',
-                        '/api/admin/alert'}:
+                        '/api/admin/alert', '/api/behavior-baseline'}:
         return
     # Stripe webhook — authenticated by Stripe signature, not session
     if request.path == '/webhook/stripe':
