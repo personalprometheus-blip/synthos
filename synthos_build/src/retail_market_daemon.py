@@ -497,18 +497,28 @@ def run_trade_all_customers(session='open'):
                         pass
                     _retire(cid, proc, 'fail', note=f"exit={ret} {stderr[:100]}")
             elif now_mono - proc_started[cid] > TRADE_INDIVIDUAL_TIMEOUT_SEC:
-                # Individual deadline exceeded — this is the fix for the
-                # 1-hour DISPATCH hangs. Kill, reap, and move on so the pool
-                # stays responsive. Phase 7L+ (2026-04-26): include the
-                # path of the per-customer subprocess log on the kill so
-                # the operator can `tail -100 <path>` to see where it
-                # hung. Previously the only signal was "killed after Ns"
-                # with zero diagnostic context.
+                # Individual deadline exceeded. Phase 7L+ (2026-04-27)
+                # diagnostic upgrade: send SIGUSR1 first so the trader's
+                # signal handler dumps every thread's Python stack to its
+                # per-customer subprocess log, wait briefly for the dump,
+                # THEN SIGKILL. Without this we only see "exceeded 240s"
+                # and have to guess which Alpaca call / DB lock / network
+                # read was stuck. The dump tells us the exact line.
                 _path_hint = proc_logpath.get(cid)
                 _hint_str = f" (see {_path_hint})" if _path_hint else ""
                 log.error(
-                    f"[TRADE] {cid[:8]} exceeded {TRADE_INDIVIDUAL_TIMEOUT_SEC}s — killing{_hint_str}"
+                    f"[TRADE] {cid[:8]} exceeded {TRADE_INDIVIDUAL_TIMEOUT_SEC}s — "
+                    f"sending SIGUSR1 for stack dump, then killing{_hint_str}"
                 )
+                try:
+                    import signal as _signal_dm
+                    proc.send_signal(_signal_dm.SIGUSR1)
+                    # Give the trader 3s to write the stack dump to its
+                    # per-customer log before we hard-kill. If it's so
+                    # hung that it can't even handle SIGUSR1, we move on.
+                    time.sleep(3)
+                except Exception as _e:
+                    log.debug(f"[TRADE] SIGUSR1 send failed for {cid[:8]}: {_e}")
                 try:
                     proc.kill()
                     proc.wait(timeout=5)

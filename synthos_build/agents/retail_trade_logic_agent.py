@@ -44,6 +44,50 @@ import json
 import logging
 import argparse
 import requests
+import signal as _signal_mod
+import threading as _threading_top
+import traceback as _traceback
+
+# Phase 7L+ (2026-04-27) — emit subprocess startup markers to stdout
+# (which the daemon redirects to customer_<cid8>_trader.log per the
+# Phase 7L+ subprocess-log change). These markers are visible BEFORE
+# the runtime watchdog starts logging at t=15s, so a hang during
+# imports / module init / Gate 1 still has a recorded last-known
+# phase. Cheap (a few flushed prints on a path that runs once per
+# trader invocation).
+def _early_phase(name: str) -> None:
+    print(f"[EARLY-PHASE] t={time.monotonic():.2f}s  {name}", flush=True)
+
+_early_phase("imports complete (top of file)")
+
+# SIGUSR1 stack-dumper. Daemon sends SIGUSR1 5s before SIGKILL on a
+# timeout-kill so we get a Python stack trace for every thread at the
+# exact moment the trader was hung. Without this, all we know is
+# "exceeded 240s" — useless for debugging which Alpaca call / DB
+# lock / network read was stuck.
+def _dump_all_stacks(signum, frame):
+    try:
+        print(f"\n[STACK-DUMP] SIGUSR1 received at t={time.monotonic():.2f}s — all threads:", flush=True)
+        for tid, fr in sys._current_frames().items():
+            tname = next((t.name for t in _threading_top.enumerate() if t.ident == tid), '?')
+            print(f"\n  ── thread tid={tid} name={tname} ──", flush=True)
+            for line in _traceback.format_stack(fr):
+                print(f"    {line.rstrip()}", flush=True)
+        print(f"[STACK-DUMP] complete\n", flush=True)
+    except Exception as _e:
+        # Defensive — never let a dump-handler error mask the real issue.
+        try:
+            print(f"[STACK-DUMP] handler error: {_e}", flush=True)
+        except Exception:
+            pass
+
+try:
+    _signal_mod.signal(_signal_mod.SIGUSR1, _dump_all_stacks)
+    _early_phase("SIGUSR1 stack-dump handler installed")
+except (ValueError, AttributeError, OSError):
+    # SIGUSR1 isn't available on Windows / non-main thread / stripped envs.
+    # Don't fail the trader over a missing diagnostic.
+    pass
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date, timezone
 from calendar import monthrange
@@ -3141,15 +3185,21 @@ def _start_watchdog():
 
 def _init_clients(session):
     """Create DB/Alpaca clients, log AGENT_START, run Gate 1. Returns (db, alpaca, now, session_log)."""
+    _early_phase("_init_clients: about to call _db()")
     db     = _db()
+    _early_phase("_init_clients: _db() returned, about to construct AlpacaClient")
     alpaca = AlpacaClient()
+    _early_phase("_init_clients: AlpacaClient constructed")
     now    = datetime.now(ET)
 
     log.info(f"ExecutionAgent starting — session={session} mode={TRADING_MODE} "
              f"operating={OPERATING_MODE} time={now.strftime('%H:%M ET')}")
+    _early_phase("_init_clients: about to write AGENT_START to system_log")
     db.log_event("AGENT_START", agent="Trade Logic",
                  details=f"session={session} mode={TRADING_MODE} operating={OPERATING_MODE}")
+    _early_phase("_init_clients: AGENT_START written, writing heartbeat")
     db.log_heartbeat("trade_logic_agent", "RUNNING")
+    _early_phase("_init_clients: heartbeat written, entering Gate 1")
 
     session_log = TradeDecisionLog(session=session)
 
@@ -4067,9 +4117,13 @@ def _send_daily_report(db, session, now, total_value, positions):
 
 
 def run(session='open'):
+    _early_phase(f"run({session=}) entered")
     _run_halt_check()
+    _early_phase("halt check passed")
     _wd = _start_watchdog()
+    _early_phase("watchdog started")
     db, alpaca, now, session_log = _init_clients(session)
+    _early_phase("clients initialized — entering Gate 0")
     account, equity, cash, positions = _run_gate0_account_health(db, alpaca, session_log)
     if account is None:
         return
