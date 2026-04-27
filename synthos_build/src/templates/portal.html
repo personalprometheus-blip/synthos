@@ -5539,7 +5539,10 @@ function renderPositions(positions) {
               } catch (e) {}
             }
             if (p.sector) {
-              bits.push('<span title="Sector" style="opacity:0.75">' + String(p.sector).slice(0,18) + '</span>');
+              // Phase 7L+ (2026-04-26): use shortSector() to keep the
+              // chip narrow enough that the metadata line stays on one
+              // row on mobile. Hover gives the full name.
+              bits.push('<span title="Sector: ' + String(p.sector).replace(/"/g, '&quot;') + '" style="opacity:0.75">' + shortSector(p.sector) + '</span>');
             }
             return bits.join('<span style="opacity:0.4">·</span>');
           })()}
@@ -6259,6 +6262,38 @@ async function loadDashboardData() {
 //      to repaint with fresh data.
 window._sparklineCache = window._sparklineCache || {};
 
+// ── SECTOR LABEL SHORTENER (Phase 7L+, 2026-04-26) ──────────────────
+// Long sector names like "Communication Services" / "Consumer
+// Discretionary" / "Consumer Defensive" / "Technology" wrap the
+// position-row metadata line on mobile, pushing rows to multi-line
+// height. This map translates the canonical Yahoo/Alpaca sector
+// strings into short codes that fit on a phone alongside stop% +
+// days-held chips. Falls back to the first 10 chars if a sector
+// isn't in the map (covers future sectors without breaking).
+const _SECTOR_SHORT = {
+  'technology':              'Tech',
+  'communication services':  'Comm',
+  'consumer cyclical':       'Cons Cyc',
+  'consumer discretionary':  'Cons Disc',
+  'consumer defensive':      'Cons Def',
+  'consumer staples':        'Staples',
+  'financial services':      'Financials',
+  'financials':              'Financials',
+  'healthcare':              'Health',
+  'industrials':             'Indust',
+  'energy':                  'Energy',
+  'utilities':               'Util',
+  'real estate':             'RE',
+  'basic materials':         'Materials',
+  'materials':               'Materials',
+  'defense':                 'Defense',
+};
+function shortSector(s) {
+  if (!s) return '';
+  const k = String(s).toLowerCase().trim();
+  return _SECTOR_SHORT[k] || String(s).slice(0, 10);
+}
+
 // ── TRACKED TICKERS (Phase 7i, 2026-04-25) ────────────────────────
 // Shared client-side index of tickers the user is currently engaged
 // with. Powers the "in your portfolio / watching" chips on news +
@@ -6924,7 +6959,11 @@ function updateMarketClock() {
   const isWeekend = day === 0 || day === 6;
   let status, dotCls, pillCls, nextLabel, minsToNext, nextOpenStr;
 
-  // Compute next market open date+time for display when closed/weekend
+  // Compute next market open date+time for display when closed/weekend.
+  // Phase 7L+ (2026-04-26): shortened from "Mon Apr 27 9:30a ET" to
+  // "Mon 9:30a ET" — the dayname implies which upcoming weekday so the
+  // explicit month/date was redundant and was overflowing the pill on
+  // mobile viewports (≤640px) where the header row is already tight.
   function getNextMarketOpen(etNow) {
     const d = new Date(etNow);
     const dow = d.getDay();
@@ -6935,9 +6974,8 @@ function updateMarketClock() {
       d.setDate(d.getDate() + (dow === 5 ? 3 : 1));   // Fri → Mon, else +1
     }
     d.setHours(9, 30, 0, 0);
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    return dayNames[d.getDay()] + ' ' + mon[d.getMonth()] + ' ' + d.getDate() + ' 9:30a ET';
+    return dayNames[d.getDay()] + ' 9:30a ET';
   }
 
   if (isWeekend) {
