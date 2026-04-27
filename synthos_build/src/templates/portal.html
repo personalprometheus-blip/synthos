@@ -1024,10 +1024,66 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 /* ── RESPONSIVE ── */
 @media(max-width:640px){
   .header{padding:0 10px}
-  .status-pill{min-width:160px}
+  /* Phase 7L+ (2026-04-26) — hide the market-status pill in the
+     header on mobile. It was overlapping the AUTO/MANAGED mode pill
+     in screenshot evidence (the "9:30" got truncated to "9:5"). The
+     same market state info is still visible on the dashboard's
+     status strip below, so no info is lost — just freed up header
+     space for hamburger + wordmark + mode pill + bell + avatar. */
+  .status-pill{display:none}
   .page{padding:14px}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
   .intel-grid{grid-template-columns:1fr}
+}
+
+/* ── POSITION ROW MOBILE LAYOUT (Phase 7L+, 2026-04-26) ─────────────
+   Desktop: 6-column grid (icon / ticker info / value / today / total / mgmt).
+   Mobile: 2-row grid — top row has the 3 most important cells
+   (icon / ticker info / total P&L), bottom row condenses value+today
+   into a single stats line + the mgmt cell. Hides the standalone
+   value and today columns since their info is captured in the
+   stats line. Drawer is one tap away for full detail. */
+.position-row {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto auto auto;
+  grid-template-areas: "icon ticker mktval today total mgmt";
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+}
+.position-row .pc-icon   { grid-area: icon; }
+.position-row .pc-ticker { grid-area: ticker; min-width: 0; }
+.position-row .pc-mktval { grid-area: mktval; }
+.position-row .pc-today  { grid-area: today; }
+.position-row .pc-total  { grid-area: total; }
+.position-row .pc-mgmt   { grid-area: mgmt; }
+.position-row .pc-stats-mobile { display: none; }  /* hidden on desktop */
+
+@media (max-width: 640px) {
+  .position-row {
+    grid-template-columns: 32px 1fr auto;
+    grid-template-areas:
+      "icon ticker total"
+      "icon stats  mgmt";
+    row-gap: 4px;
+    column-gap: 8px;
+  }
+  .position-row .pc-mktval,
+  .position-row .pc-today {
+    display: none;
+  }
+  .position-row .pc-stats-mobile {
+    grid-area: stats;
+    display: block;
+    font-size: 9px;
+    color: var(--dim);
+    font-family: var(--mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ═══════ Dashboard cards added 2026-04-25 ═══════
@@ -5489,18 +5545,16 @@ function renderPositions(positions) {
       ? `onclick=\"toggleManagedBy('${p.id || ''}','${mb}','${(p.ticker||'').replace(/'/g,'')}',event)\"`
       : '';
 
-    return `<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;
-              padding:7px 16px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;
-              ${isOrphan ? 'background:rgba(245,166,35,0.03)' : ''}"
+    return `<div class="position-row" style="${isOrphan ? 'background:rgba(245,166,35,0.03);' : ''}"
               onclick="openPositionDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})"
               onmouseenter="this.style.background='rgba(255,255,255,0.02)'"
               onmouseleave="this.style.background='${isOrphan ? 'rgba(245,166,35,0.03)' : 'transparent'}'">
-      <div style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+      <div class="pc-icon" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
            font-size:9px;font-weight:800;letter-spacing:0.02em;
            background:${accent}18;border:1px solid ${accent}40;color:${accent}">
         ${(p.ticker||'?').slice(0,4)}
       </div>
-      <div style="min-width:0">
+      <div class="pc-ticker">
         <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
           <span style="font-size:12px;font-weight:700;color:var(--text)">${p.ticker||'?'}</span>
           <span class="spark-slot" data-ticker="${(p.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>
@@ -5548,19 +5602,23 @@ function renderPositions(positions) {
           })()}
         </div>
       </div>
-      <div style="text-align:right">
+      <div class="pc-mktval" style="text-align:right">
         <div style="font-size:12px;font-weight:700;color:var(--text)">$${mktVal.toFixed(2)}</div>
         <div style="font-size:10px;color:var(--dim)">@ $${curPrice.toFixed(2)}</div>
       </div>
-      <div style="text-align:right;min-width:72px">
+      <div class="pc-today" style="text-align:right;min-width:72px">
         <div style="font-size:10px;color:${dayCol}">${daySign}$${Math.abs(dayPl).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">Today ${daySign}${Math.abs(dayPct).toFixed(2)}%</div>
       </div>
-      <div style="text-align:right;min-width:68px">
+      <!-- Mobile-only stats line — combines the desktop mktval+today
+           cells into a single compact line. CSS hides on desktop and
+           shows on ≤640px viewports via the .pc-stats-mobile rule. -->
+      <div class="pc-stats-mobile">$${mktVal.toFixed(2)} mkt · ${daySign}${Math.abs(dayPct).toFixed(2)}% today · @ $${curPrice.toFixed(2)}</div>
+      <div class="pc-total" style="text-align:right;min-width:68px">
         <div style="font-size:11px;font-weight:700;color:${plCol}">${plSign}$${Math.abs(unreal).toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim)">${plSign}${Math.abs(urealPct).toFixed(2)}% total</div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;min-width:78px">
+      <div class="pc-mgmt" style="display:flex;align-items:center;gap:6px;justify-content:flex-end;min-width:78px">
         <div title="${toggleTitle}" ${toggleOnClick}
              style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:700;letter-spacing:0.06em;
                     background:${tagBg};border:1px solid ${tagBorder};color:${tagColor};
@@ -5586,12 +5644,17 @@ function renderPositions(positions) {
     </div>`;
   };
 
-  const headerRow = '<div style="display:grid;grid-template-columns:32px 1fr auto auto auto auto;align-items:center;gap:10px;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
-    + '<div></div><div style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Position</div>'
-    + '<div style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
-    + '<div style="text-align:right;min-width:72px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
-    + '<div style="text-align:right;min-width:68px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
-    + '<div style="text-align:right;min-width:78px;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
+  // Column-header row uses the same .position-row class so the
+  // mobile @media rule reflows it the same way (and hides the same
+  // cells). Cursor unset since the header isn't clickable.
+  const headerRow = '<div class="position-row" style="cursor:default;padding:4px 16px 6px;border-bottom:1px solid rgba(255,255,255,0.06)">'
+    + '<div class="pc-icon"></div>'
+    + '<div class="pc-ticker" style="font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Position</div>'
+    + '<div class="pc-mktval" style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Value</div>'
+    + '<div class="pc-today" style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Today</div>'
+    + '<div class="pc-stats-mobile"></div>'
+    + '<div class="pc-total" style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Total P&L</div>'
+    + '<div class="pc-mgmt" style="text-align:right;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Mgmt</div>'
     + '</div>';
   const rows = [
     ...tracked.map((p,i) => renderRow(p, i, false)),
