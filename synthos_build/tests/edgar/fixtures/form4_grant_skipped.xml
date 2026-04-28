@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+  <schemaVersion>X0306</schemaVersion>
+  <documentType>4</documentType>
+  <periodOfReport>2026-04-25</periodOfReport>
+  <issuer>
+    <issuerCik>0000789019</issuerCik>
+    <issuerName>Microsoft Corporation</issuerName>
+    <issuerTradingSymbol>MSFT</issuerTradingSymbol>
+  </issuer>
+  <reportingOwner>
+    <reportingOwnerId>
+      <rptOwnerName>NADELLA SATYA</rptOwnerName>
+    </reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>1</isDirector>
+      <isOfficer>1</isOfficer>
+      <officerTitle>CEO and Chairman</officerTitle>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <securityTitle><value>Common Stock</value></securityTitle>
+      <transactionDate><value>2026-04-25</value></transactionDate>
+      <transactionCoding>
+        <transactionCode>A</transactionCode>
+      </transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>50000</value></transactionShares>
+        <transactionPricePerShare><value>0.0</value></transactionPricePerShare>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>

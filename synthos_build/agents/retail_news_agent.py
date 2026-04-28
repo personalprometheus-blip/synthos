@@ -3029,6 +3029,34 @@ def run(session="market"):
         alpaca_stored = fetch_and_store_alpaca_display_news(db)
         log.info(f"Overnight news refresh: {alpaca_stored} new headlines stored")
 
+    # ── EDGAR sources (feature-flagged, default OFF) ────────────────────────
+    # Added 2026-04-27 for the EDGAR ingestion expansion.  Flags are read
+    # at run() time so they can be toggled by editing user/.env without
+    # restarting any service that imports this module.
+    #   EDGAR_FORM4_ENABLED — corporate insider Form 4 filings (Phase 1.1)
+    #   EDGAR_8K_ENABLED    — 8-K filtered by item code (Phase 2.1)
+    # Both require SEC_EDGAR_UA_NAME and SEC_EDGAR_UA_EMAIL env vars
+    # (SEC enforces a 'real user-agent with contact info' policy).
+    if os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true" or \
+       os.environ.get("EDGAR_8K_ENABLED",    "false").lower() == "true":
+        try:
+            from news.edgar_client import EdgarClient, EdgarUserAgentMissing
+            edgar = EdgarClient(external_fetch=fetch_with_retry)
+            if os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true":
+                from news.edgar_form4 import fetch_form4_signals
+                f4 = fetch_form4_signals(edgar, since_days=2, max_filings=100)
+                all_raw.extend(f4)
+                log.info(f"EDGAR Form 4: {len(f4)} signal items added")
+            if os.environ.get("EDGAR_8K_ENABLED", "false").lower() == "true":
+                from news.edgar_8k import fetch_8k_signals
+                eight_k = fetch_8k_signals(edgar, since_days=2, max_filings=200)
+                all_raw.extend(eight_k)
+                log.info(f"EDGAR 8-K: {len(eight_k)} signal items added")
+        except EdgarUserAgentMissing as _e:
+            log.warning(f"[EDGAR] disabled — {_e}")
+        except Exception as _e:
+            log.warning(f"[EDGAR] ingestion failed (continuing without): {_e}")
+
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
     # ── Process each item through 22-gate spine ───────────────────────────
