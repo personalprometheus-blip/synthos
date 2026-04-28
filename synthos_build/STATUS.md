@@ -19,6 +19,19 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Phase G pill-usage telemetry (2026-04-27)**: closes the loop
+>   on Phases E+F. New `pill_interactions` table on shared
+>   user/signals.db captures every drawer/screener pill click
+>   (customer_id, pill_type, label, ticker, drawer_kind, page,
+>   created_at). 30-day retention sweep. POST `/api/pill-interaction`
+>   (customer-side, best-effort) + GET `/api/admin/pill-usage`
+>   (Bearer-token, returns 4 rollups). Single document-level click
+>   listener with event delegation catches every `[data-pill]` click
+>   — keepalive:true + capture-phase so fast navs / stopPropagation
+>   don't lose events. Cmd portal `/pill-usage` page renders
+>   1d/7d/30d/90d window switcher with by-pill / by-drawer /
+>   by-customer rollups so we can prune the unused pill categories
+>   based on actual usage instead of guessing.
 > - **Portal UX pass — Phases E+F (2026-04-27)**: pills layer landed
 >   on every drawer + the screener. Phase E adds a drawer-pills bar
 >   at the top of all four detail drawers (Position/History/Approval/
