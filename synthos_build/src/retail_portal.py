@@ -729,7 +729,8 @@ def check_auth():
         return
     # Monitor-callable endpoints — bearer token handled inside the function
     if request.path in {'/api/logs-audit', '/api/get-keys', '/api/admin-override',
-                        '/api/admin/alert', '/api/behavior-baseline'}:
+                        '/api/admin/alert', '/api/behavior-baseline',
+                        '/api/admin/activity-report'}:
         return
     # Stripe webhook — authenticated by Stripe signature, not session
     if request.path == '/webhook/stripe':
@@ -4760,6 +4761,73 @@ def api_performance_summary():
     except Exception as e:
         return jsonify({'total_pnl': 0, 'win_rate': 0, 'total_trades': 0,
                         'trades': [], 'error': str(e)})
+
+
+@app.route('/api/admin/activity-report', methods=['POST', 'GET'])
+def api_admin_activity_report():
+    """Customer activity report — operator-facing cross-customer view.
+
+    Reads only stored data (no live Alpaca calls) per operator
+    preference 2026-04-28.  Engine lives in tools/customer_activity_report.py.
+
+    Auth: same Bearer MONITOR_TOKEN as /api/behavior-baseline.  Bypasses
+    the customer-session login (consumed by the command portal on pi4b
+    over LAN, not by customer browsers).
+
+    Inputs (POST JSON or GET query string):
+      start:      YYYY-MM-DD inclusive (required)
+      end:        YYYY-MM-DD inclusive (required)
+      customer:   customer ID, or "all" or "owner"; repeatable.
+                  Default ["all"].
+
+    Returns: the full structured report dict.  Render layer (cmd portal
+    page or CLI) is responsible for formatting.
+    """
+    # Bearer-token auth (matches /api/logs-audit, /api/behavior-baseline)
+    auth_header   = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_token or auth_header != f'Bearer {monitor_token}':
+        return jsonify({'error': 'unauthorized'}), 401
+
+    # Parse inputs from JSON body (POST) or query string (GET)
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        start = (body.get('start') or '').strip()
+        end   = (body.get('end')   or '').strip()
+        customers = body.get('customer') or body.get('customers') or ['all']
+        if isinstance(customers, str):
+            customers = [customers]
+    else:
+        start = request.args.get('start', '').strip()
+        end   = request.args.get('end',   '').strip()
+        customers = request.args.getlist('customer') or ['all']
+
+    if not start or not end:
+        return jsonify({'error': 'start and end (YYYY-MM-DD) required'}), 400
+
+    # Validate date format (cheap)
+    try:
+        from datetime import datetime as _dt
+        _dt.strptime(start, '%Y-%m-%d')
+        _dt.strptime(end,   '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'start/end must be YYYY-MM-DD'}), 400
+
+    # Run the engine
+    try:
+        # Late import — keeps the module out of the portal startup path.
+        # tools/ is sibling to src/; need to add it to sys.path.
+        import sys as _sys, os as _os
+        _tools = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                                'tools')
+        if _tools not in _sys.path:
+            _sys.path.insert(0, _tools)
+        from customer_activity_report import run_report
+        report = run_report(start, end, customers, include_aggregate=True)
+        return jsonify(report)
+    except Exception as e:
+        log.error(f"activity-report failed: {e}")
+        return jsonify({'error': f'report generation failed: {e}'}), 500
 
 
 @app.route('/api/behavior-baseline')
