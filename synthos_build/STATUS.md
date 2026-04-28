@@ -19,6 +19,23 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Trader Alpaca-quotes 404 fix + auditor auto-resolve (2026-04-28)**:
+>   operator reported a stack of 40+ auditor issues. Two real
+>   bugs surfaced: (1) `trader.get_latest_quote()` was hitting
+>   `paper-api.alpaca.markets` (trading API) for `/v2/stocks/<T>/
+>   quotes/latest`, which 404s — market data lives on
+>   `data.alpaca.markets`. Pre-fix the call ALWAYS returned
+>   `(None,None,None)` so Gate 5 spread / Gate 6 chase / mid-cycle
+>   stop tightening were silently using stale `candidate['price']`
+>   instead of live tape. Trades didn't crash, just ran on cache.
+>   Fixed by mirroring `get_bars()` (direct request against
+>   ALPACA_DATA_URL + circuit-breaker + telemetry). (2) Auditor
+>   never auto-cleared resolved conditions — transient NEGATIVE_CASH
+>   blips sat flagged forever. Added `_auto_resolve_stale_issues`
+>   sweep with two policies: customer_db conditions cleared on
+>   re-evaluation, and 24h generic log-scan stale rule. Auditor
+>   restart immediately auto-resolved 27 stale issues; one-shot
+>   bulk-ack cleared the remaining 14. **41 → 0 open issues.**
 > - **Phase H agent-status persona reversion + drawer (2026-04-27)**:
 >   reverted the `Synthos is sweeping the wire · the Fed is watching
 >   closely again` flavor strip — operator feedback was that we
