@@ -1120,6 +1120,26 @@ class DB:
             # the next DB open creates the index successfully.
             ("CREATE UNIQUE INDEX IF NOT EXISTS idx_news_feed_dedup "
              "ON news_feed(ticker, raw_headline, date(created_at))"),
+
+            # 2026-04-27 Phase B — ticker logo cache. Logos are universal
+            # (same Apple logo for every customer), so the populate script
+            # only writes to the shared user/signals.db. The CREATE
+            # statement also runs against per-customer DBs because all DBs
+            # share this MIGRATIONS list — the per-customer copies stay
+            # empty, harmless. status: PENDING (queued, not yet fetched) /
+            # OK (fetched, png available) / NOT_FOUND (Clearbit returned
+            # 404, don't retry). logo_png stored as BLOB so we don't have
+            # an external runtime dependency on Clearbit; if Clearbit
+            # disappears tomorrow, every cached logo keeps working.
+            """CREATE TABLE IF NOT EXISTS ticker_logos (
+                ticker      TEXT PRIMARY KEY,
+                domain      TEXT,
+                logo_png    BLOB,
+                status      TEXT NOT NULL DEFAULT 'PENDING',
+                fetched_at  TEXT,
+                updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_ticker_logos_status ON ticker_logos(status)",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -3694,6 +3714,51 @@ class DB:
                 ORDER BY created_at DESC LIMIT 1
             """, (ticker,)).fetchone()
             return dict(row) if row else None
+
+    # ── TICKER LOGOS ───────────────────────────────────────────────────────
+    # Phase B (2026-04-27). Logo cache for the visual-identity layer.
+    # populate_logos.py seeds this table from data/ticker_domains.csv +
+    # Clearbit fetches; portal serves the cached PNG via /api/ticker-logo.
+
+    def get_ticker_logo(self, ticker):
+        """Return (png_bytes, status) for a ticker, or (None, None) if
+        not in the cache. Status is 'OK' (png present), 'NOT_FOUND'
+        (Clearbit 404, don't retry), or 'PENDING' (queued but not
+        fetched yet)."""
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT logo_png, status FROM ticker_logos WHERE ticker=?",
+                (ticker,)
+            ).fetchone()
+            if not row:
+                return None, None
+            return row['logo_png'], row['status']
+
+    def set_ticker_logo(self, ticker, png_bytes, domain=None, status='OK'):
+        """Upsert ticker logo. png_bytes may be None when status is
+        NOT_FOUND or PENDING."""
+        now = self.now()
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO ticker_logos
+                    (ticker, domain, logo_png, status, fetched_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    domain     = COALESCE(excluded.domain, ticker_logos.domain),
+                    logo_png   = excluded.logo_png,
+                    status     = excluded.status,
+                    fetched_at = excluded.fetched_at,
+                    updated_at = excluded.updated_at
+            """, (ticker, domain, png_bytes, status, now, now))
+
+    def get_pending_logo_tickers(self):
+        """Return list of {ticker, domain} dicts with status='PENDING'.
+        Used by populate_logos.py to find what still needs fetching."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT ticker, domain FROM ticker_logos WHERE status='PENDING'"
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     # ── ADMIN ALERTS ───────────────────────────────────────────────────────
     # Anything that means "the system has a problem, not something the

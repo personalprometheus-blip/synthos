@@ -1,0 +1,172 @@
+ticker,domain
+# Hand-curated ticker → domain mapping for Clearbit logo lookup.
+# Phase B (2026-04-27). Covers the screener universe (sector ETFs +
+# top-10 holdings each) plus common politically-traded names.
+# Long-tail tickers fall back to a name-derived guess via populate_logos.py.
+# Lines starting with # are skipped by the loader.
+#
+# ── Mega-cap tech ──
+AAPL,apple.com
+MSFT,microsoft.com
+NVDA,nvidia.com
+AMZN,amazon.com
+META,meta.com
+GOOGL,abc.xyz
+GOOG,abc.xyz
+TSLA,tesla.com
+AVGO,broadcom.com
+ORCL,oracle.com
+ADBE,adobe.com
+CRM,salesforce.com
+NFLX,netflix.com
+CSCO,cisco.com
+AMD,amd.com
+INTC,intel.com
+QCOM,qualcomm.com
+TXN,ti.com
+IBM,ibm.com
+INTU,intuit.com
+NOW,servicenow.com
+PYPL,paypal.com
+SQ,block.xyz
+PANW,paloaltonetworks.com
+SNPS,synopsys.com
+CDNS,cadence.com
+WDAY,workday.com
+ADI,analog.com
+KLAC,kla.com
+LRCX,lamresearch.com
+APH,amphenol.com
+MU,micron.com
+CRWD,crowdstrike.com
+ZS,zscaler.com
+DDOG,datadoghq.com
+NET,cloudflare.com
+MDB,mongodb.com
+SNOW,snowflake.com
+PLTR,palantir.com
+TEAM,atlassian.com
+# ── Financials ──
+JPM,jpmorganchase.com
+V,visa.com
+MA,mastercard.com
+BAC,bankofamerica.com
+WFC,wellsfargo.com
+GS,goldmansachs.com
+MS,morganstanley.com
+SCHW,schwab.com
+BLK,blackrock.com
+AXP,americanexpress.com
+SPGI,spglobal.com
+C,citi.com
+PNC,pnc.com
+TFC,truist.com
+USB,usbank.com
+CB,chubb.com
+ICE,ice.com
+MMC,mmc.com
+# ── Healthcare ──
+LLY,lilly.com
+UNH,unitedhealthgroup.com
+JNJ,jnj.com
+ABBV,abbvie.com
+MRK,merck.com
+TMO,thermofisher.com
+PFE,pfizer.com
+ABT,abbott.com
+DHR,danaher.com
+AMGN,amgen.com
+ELV,elevancehealth.com
+GILD,gilead.com
+MDT,medtronic.com
+SYK,stryker.com
+ISRG,intuitive.com
+ZTS,zoetis.com
+BMY,bms.com
+CI,cigna.com
+# ── Consumer ──
+WMT,walmart.com
+PG,pg.com
+HD,homedepot.com
+KO,coca-cola.com
+PEP,pepsico.com
+COST,costco.com
+NKE,nike.com
+SBUX,starbucks.com
+TJX,tjx.com
+LOW,lowes.com
+TGT,target.com
+DIS,disney.com
+MCD,mcdonalds.com
+PM,pmi.com
+MO,altria.com
+CL,colgate.com
+EL,elcompanies.com
+# ── Energy ──
+XOM,exxonmobil.com
+CVX,chevron.com
+COP,conocophillips.com
+SLB,slb.com
+EOG,eogresources.com
+PSX,phillips66.com
+# ── Industrials ──
+RTX,rtx.com
+HON,honeywell.com
+CAT,caterpillar.com
+DE,deere.com
+LMT,lockheedmartin.com
+GD,gd.com
+NOC,northropgrumman.com
+UPS,ups.com
+UNP,up.com
+GE,ge.com
+ETN,eaton.com
+CSX,csx.com
+EMR,emerson.com
+ITW,itw.com
+FDX,fedex.com
+# ── Communication / Media ──
+T,att.com
+VZ,verizon.com
+CMCSA,corporate.comcast.com
+TMUS,t-mobile.com
+# ── Utilities ──
+NEE,nexteraenergy.com
+SO,southerncompany.com
+DUK,duke-energy.com
+# ── Materials ──
+LIN,linde.com
+SHW,sherwin-williams.com
+APD,airproducts.com
+ECL,ecolab.com
+# ── Real Estate ──
+PLD,prologis.com
+EQIX,equinix.com
+# ── Auto / EV ──
+F,ford.com
+GM,gm.com
+RIVN,rivian.com
+LCID,lucidmotors.com
+# ── Travel / Mobility ──
+UBER,uber.com
+ABNB,airbnb.com
+BKNG,booking.com
+# ── Defensive / ETFs ──
+BIL,ishares.com
+SPY,ssga.com
+QQQ,invesco.com
+XLE,ssga.com
+XLF,ssga.com
+XLK,ssga.com
+XLV,ssga.com
+XLI,ssga.com
+XLY,ssga.com
+XLP,ssga.com
+XLB,ssga.com
+XLU,ssga.com
+XLRE,ssga.com
+XLC,ssga.com
+# ── Frequent political-trade names ──
+JOBY,jobyaviation.com
+ADP,adp.com
+BRK.B,berkshirehathaway.com

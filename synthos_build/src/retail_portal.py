@@ -5156,6 +5156,40 @@ def api_ticker_context():
         return jsonify({'ticker': ticker, 'error': str(e)}), 500
 
 
+@app.route('/api/ticker-logo/<ticker>')
+@login_required
+def api_ticker_logo(ticker):
+    """Phase B (2026-04-27) — serve the cached PNG for a ticker, or
+    404 if not in the cache. Frontend uses an <img> tag whose
+    onerror handler keeps the existing initials-block visible, so a
+    404 silently degrades to the pre-Phase-B look. Cache-Control
+    immutable so the browser never re-fetches once it has a copy.
+
+    Reads from the SHARED user/signals.db (logos are universal —
+    same Apple logo for every customer, populated once by
+    tools/populate_logos.py).
+    """
+    from flask import Response, abort
+    # Sanitize: tickers are short alphanum + . / -. Reject anything else
+    # so an attacker can't try `/../` or query-string tricks.
+    import re as _re
+    if not _re.fullmatch(r'[A-Za-z0-9.\-]{1,12}', ticker or ''):
+        abort(404)
+    ticker = ticker.upper()
+    try:
+        png, status = _shared_db().get_ticker_logo(ticker)
+    except Exception as e:
+        log.warning(f"/api/ticker-logo {ticker} lookup failed: {e}")
+        abort(404)
+    if status != 'OK' or not png:
+        abort(404)
+    resp = Response(png, mimetype='image/png')
+    # 7-day browser cache; logos rarely change. immutable hint lets
+    # the browser skip the conditional GET on every page load.
+    resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
+    return resp
+
+
 @app.route('/api/screening')
 @login_required
 def api_screening():

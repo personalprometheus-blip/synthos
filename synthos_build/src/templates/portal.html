@@ -856,6 +856,20 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   position:relative;overflow:hidden;
 }
 .stock-icon::after{content:'';position:absolute;inset:0;background:linear-gradient(145deg,rgba(255,255,255,0.22) 0%,transparent 55%)}
+/* Phase B (2026-04-27) — ticker logo overlay. mountTickerLogos()
+   lazy-loads a logo via /api/ticker-logo/<ticker>. The img sits
+   absolutely on top of the existing initials block; if the fetch
+   4xx's, onerror removes the img and initials remain visible. White
+   plate behind logos because most company marks are dark-on-light. */
+.ticker-logo-overlay{
+  position:absolute;inset:3px;width:calc(100% - 6px);height:calc(100% - 6px);
+  object-fit:contain;border-radius:6px;background:rgba(255,255,255,0.94);
+  z-index:2;padding:2px;display:block;
+}
+/* When the logo image successfully loads, dim the initials text behind
+   it so two layers don't fight each other. The container's ::after
+   gradient stays — adds a subtle gloss on top of the logo plate. */
+.ticker-logo-loaded{color:transparent !important}
 .sent-badge{
   display:flex;align-items:center;gap:3px;
   padding:3px 8px;border-radius:99px;font-size:9px;font-weight:700;
@@ -3996,7 +4010,8 @@ function openPositionDrawer(p) {
 
   document.getElementById('drawer-icon').textContent = (p.ticker||'?').slice(0,4);
   document.getElementById('drawer-icon').style.cssText =
-    `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:${accent}18;border:1px solid ${accent}40;color:${accent}`;
+    `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:${accent}18;border:1px solid ${accent}40;color:${accent};position:relative;overflow:hidden`;
+  setDrawerTickerIcon('drawer-icon', p.ticker);
   // Drawer header: COMPANY NAME (the icon already shows the ticker symbol).
   // Falls back to ticker if company is missing. Sparkline is rendered into
   // the inline #drawer-spark slot via the existing populateSparklines /
@@ -4073,6 +4088,7 @@ function openPositionDrawer(p) {
   // Fill the inline sparkline in the drawer header. populateSparklines()
   // checks the cache; loadSparklines() top-ups from API if needed.
   try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
 }
 
 function closeDrawer(e) {
@@ -4107,7 +4123,8 @@ function openHistoryDrawer(t) {
   // Header
   const icon = document.getElementById('hd-icon');
   icon.textContent = (t.ticker||'?').slice(0,4);
-  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent};position:relative;overflow:hidden`;
+  setDrawerTickerIcon('hd-icon', t.ticker);
   const titleName = (t.company && t.company !== t.ticker) ? t.company : (t.ticker || '—');
   const titleEl = document.getElementById('hd-title');
   titleEl.textContent = titleName;
@@ -4273,7 +4290,8 @@ function openApprovalDrawer(t) {
   // Header
   const icon = document.getElementById('ad-icon');
   icon.textContent = (t.ticker || '?').slice(0, 4);
-  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent};position:relative;overflow:hidden`;
+  setDrawerTickerIcon('ad-icon', t.ticker);
   const titleName = (t.company && t.company !== t.ticker) ? t.company : (t.ticker || '—');
   const titleEl = document.getElementById('ad-title');
   titleEl.textContent = titleName;
@@ -4433,6 +4451,7 @@ function openApprovalDrawer(t) {
   document.getElementById('appr-drawer').classList.add('open');
   // Sparkline render
   try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
 }
 
 function closeApprovalDrawer(e) {
@@ -4459,7 +4478,8 @@ function openPlanningDrawer(s) {
   // Header
   const icon = document.getElementById('pd-icon');
   icon.textContent = (s.ticker || '?').slice(0, 4);
-  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent}`;
+  icon.style.cssText = `width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;background:rgba(${accentRgb},0.12);border:1px solid rgba(${accentRgb},0.30);color:${accent};position:relative;overflow:hidden`;
+  setDrawerTickerIcon('pd-icon', s.ticker);
   const titleName = (s.company && s.company !== s.ticker) ? s.company : (s.ticker || '—');
   const titleEl = document.getElementById('pd-title');
   titleEl.textContent = titleName;
@@ -4683,6 +4703,7 @@ function openPlanningDrawer(s) {
   document.getElementById('plan-drawer').classList.add('open');
   // Spark + live price refresh
   try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
 }
 
 function closePlanningDrawer(e) {
@@ -5593,8 +5614,8 @@ function renderPositions(positions) {
               onclick="openPositionDrawer(${JSON.stringify(p).replace(/"/g,'&quot;')})"
               onmouseenter="this.style.background='rgba(255,255,255,0.02)'"
               onmouseleave="this.style.background='${isOrphan ? 'rgba(245,166,35,0.03)' : 'transparent'}'">
-      <div class="pc-icon" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
-           font-size:9px;font-weight:800;letter-spacing:0.02em;
+      <div class="pc-icon" data-ticker-logo="${p.ticker||''}" style="width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+           font-size:9px;font-weight:800;letter-spacing:0.02em;position:relative;overflow:hidden;
            background:${accent}18;border:1px solid ${accent}40;color:${accent}">
         ${(p.ticker||'?').slice(0,4)}
       </div>
@@ -5715,6 +5736,7 @@ function renderPositions(positions) {
   // Sparklines (added 2026-04-25): paint from cache immediately, then
   // kick off a fetch to refresh / populate any missing tickers.
   try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
 }
 
 function renderApprovals(approvals) {
@@ -5821,7 +5843,7 @@ function renderApprovals(approvals) {
       // (event.stopPropagation on the buttons prevents the row click).
       return `<div class="trade-item" style="cursor:pointer" onclick="openApprovalDrawer(${tEsc})">
         <div class="trade-header">
-          <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
+          <div class="trade-ticker-icon" data-ticker-logo="${t.ticker||''}">${(t.ticker||'?').slice(0,4)}</div>
           <div class="trade-meta">
             <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>${patBadge} · ${t.politician||'Unknown'}</div>
             ${(t.company && t.company !== t.ticker) ? `<div style="font-size:10px;color:var(--muted);font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${t.company}</div>` : ''}
@@ -5881,6 +5903,7 @@ function renderApprovals(approvals) {
   el.innerHTML = html;
   // Sparklines next to ticker (added 2026-04-25)
   try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
 }
 
 // ── SYSTEM HEALTH ──
@@ -6560,6 +6583,54 @@ function getSparklineSvg(ticker) {
        + `</svg>`;
 }
 
+// Phase B (2026-04-27) — drawer icon helper. Each drawer opener
+// (Position / History / Approval / Planning) resets the same static
+// icon DIV with a fresh ticker. To make logo loading idempotent
+// across re-opens, this helper clears any prior <img>/mounted state,
+// re-tags the data-ticker-logo, and asks mountTickerLogos to re-run.
+function setDrawerTickerIcon(elId, ticker) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  // Tear down any prior logo overlay so a different ticker doesn't
+  // briefly show the old image while the new one loads.
+  el.classList.remove('ticker-logo-loaded');
+  el.removeAttribute('data-logo-mounted');
+  const stale = el.querySelector('.ticker-logo-overlay');
+  if (stale) stale.remove();
+  el.setAttribute('data-ticker-logo', (ticker || '').toUpperCase());
+  // Defer mount one tick so any caller that sets textContent right
+  // after this call still wins on render order.
+  setTimeout(function(){ try { mountTickerLogos(el.parentElement || document); } catch(e) {} }, 0);
+}
+
+// Phase B (2026-04-27) — ticker logo overlay loader.
+// Finds all elements with [data-ticker-logo="<TICKER>"] and tries to
+// overlay the cached PNG from /api/ticker-logo/<TICKER>. On 404 the
+// img onerror handler removes itself and the existing initials block
+// remains visible — pure additive behavior, never breaks the UI.
+//
+// Idempotent — once an element is mounted (data-logo-mounted="1") it
+// is skipped, so re-running mountTickerLogos() after another render
+// pass is safe and cheap. Browser HTTP cache (Cache-Control 7-day
+// immutable from /api/ticker-logo) means repeat fetches cost nothing.
+function mountTickerLogos(rootEl) {
+  const root = rootEl || document;
+  const targets = root.querySelectorAll('[data-ticker-logo]:not([data-logo-mounted])');
+  targets.forEach(function(el) {
+    const ticker = (el.getAttribute('data-ticker-logo') || '').toUpperCase().trim();
+    if (!ticker) return;
+    el.setAttribute('data-logo-mounted', '1');
+    const img = document.createElement('img');
+    img.className = 'ticker-logo-overlay';
+    img.alt = '';                 // decorative — initials carry the meaning
+    img.loading = 'lazy';
+    img.onload  = function() { el.classList.add('ticker-logo-loaded'); };
+    img.onerror = function() { img.remove(); };
+    img.src = '/api/ticker-logo/' + encodeURIComponent(ticker);
+    el.appendChild(img);
+  });
+}
+
 function populateSparklines() {
   const slots = document.querySelectorAll('.spark-slot[data-ticker]');
   slots.forEach(el => {
@@ -6673,7 +6744,7 @@ function renderIntelGrid(signals) {
     const sigEsc = JSON.stringify(s).replace(/"/g,'&quot;');
     return `<div class="charm ${sent}" style="cursor:pointer" onclick="openPlanningDrawer(${sigEsc})">
       <div class="charm-top">
-        <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
+        <div class="stock-icon" data-ticker-logo="${s.ticker||''}" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
         <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
       </div>
       <div class="charm-body">
@@ -6711,7 +6782,7 @@ function renderIntelGrid(signals) {
       return `<div class="charm ${sent}" style="cursor:pointer;position:relative" onclick="openPlanningDrawer(${sigEsc})">
         <div class="hero-badge ${badgeClass}">${badge}</div>
         <div class="charm-top">
-          <div class="stock-icon" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
+          <div class="stock-icon" data-ticker-logo="${s.ticker||''}" style="${col}">${(s.ticker||'?').slice(0,4)}</div>
           <div class="sent-badge ${sentBadge(s)}">${sentLabel(s)}</div>
         </div>
         <div class="charm-body">
@@ -7293,7 +7364,7 @@ async function loadTraderActivity() {
           onmouseenter="showIntelTooltip(event,this)"
           onmouseleave="hideIntelTooltip()"
           onclick="openHistoryDrawer(${tEsc})">
-        <div class="agent-row-icon" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700">${ticker.slice(0,4)}</div>
+        <div class="agent-row-icon" data-ticker-logo="${ticker}" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700;position:relative;overflow:hidden">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
           <div class="agent-row-ticker">${ticker}<span class="spark-slot" data-ticker="${ticker.replace(/[^A-Z0-9.-]/gi,'')}"></span><span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
           ${(t.company && t.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${t.company}</div>` : ''}
@@ -7309,6 +7380,8 @@ async function loadTraderActivity() {
     if (ts) ts.textContent = 'updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
     // Sparklines next to ticker (added 2026-04-25)
     try { populateSparklines(); loadSparklines(); } catch(e) {}
+  try { mountTickerLogos(); } catch(e) {}
+    try { mountTickerLogos(); } catch(e) {}
   } catch(e) { console.log('History error:', e); }
 }
 
@@ -7370,7 +7443,7 @@ async function loadPlanning() {
             onmouseenter="showIntelTooltip(event,this)"
             onmouseleave="hideIntelTooltip()"
             onclick="openPlanningDrawer(${sigEsc})">
-          <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700">${ticker.slice(0,4)}</div>
+          <div class="agent-row-icon" data-ticker-logo="${ticker}" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700;position:relative;overflow:hidden">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}${corrBadge}</div>
             ${(sig.company && sig.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${sig.company}</div>` : ''}
@@ -7392,7 +7465,7 @@ async function loadPlanning() {
             onmouseenter="showIntelTooltip(event,this)"
             onmouseleave="hideIntelTooltip()"
             onclick="openPlanningDrawer(${sigEsc})">
-          <div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted)">${ticker.slice(0,4)}</div>
+          <div class="agent-row-icon" data-ticker-logo="${ticker}" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted);position:relative;overflow:hidden">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--dim);font-weight:400;margin-left:4px">intel${stale}</span></div>
             ${(sig.company && sig.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${sig.company}</div>` : ''}
