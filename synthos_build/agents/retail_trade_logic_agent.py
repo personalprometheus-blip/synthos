@@ -3303,6 +3303,29 @@ def _init_clients(session):
     # ── GATE 1: System Gate
     if not gate1_system(db, alpaca, session, session_log):
         session_log.commit(db)
+        # 2026-04-28 fix — Phase C refactor regression. Pre-refactor,
+        # gate1 halts went through the orchestrator's normal session-end
+        # path (heartbeat + AGENT_COMPLETE). After the run() split into
+        # helpers, gate1 halts sys.exit'd from _init_clients before the
+        # orchestrator could call _send_session_summary. Combined with
+        # the 2026-04-24 pipeline-audit Gap 1 wiring (Gate 1 reading
+        # _VALIDATOR_VERDICT and halting on NO_GO), this created a
+        # self-reinforcing loop:
+        #   gate1 halts → no AGENT_COMPLETE → fault detector flags
+        #     STALE_HEARTBEAT_TRADE_LOGIC (critical) → validator emits
+        #     NO_GO → gate1 reads NO_GO → halts → ...
+        # Trader couldn't recover on its own — once the heartbeat went
+        # stale the validator never saw a GO state again. Fix: write
+        # AGENT_COMPLETE + heartbeat BEFORE exit on gate1 halt so the
+        # fault detector sees the trader did run, even though it
+        # halted. Validator recomputes verdict on next scan and the
+        # loop breaks naturally.
+        try:
+            db.log_heartbeat("trade_logic_agent", "OK_HALTED")
+            db.log_event("AGENT_COMPLETE", agent="Trade Logic",
+                         details=f"session={session} halted_at_gate1")
+        except Exception as _e:
+            log.warning(f"halted-AGENT_COMPLETE write failed: {_e}")
         sys.exit(0)
 
     return db, alpaca, now, session_log
