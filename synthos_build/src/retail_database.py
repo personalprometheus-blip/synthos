@@ -3546,16 +3546,30 @@ class DB:
                     SET sentiment_signal=?, sentiment_score=?, notes=?
                     WHERE run_id=? AND ticker=?
                 """, (signal, score, notes, run_id, ticker))
-            # Recompute combined_score and update status
+            # Recompute combined_score and update status.
+            # 2026-04-28: formula updated from
+            #   0.40 news + 0.40 sentiment + 0.20 etf_weight
+            # to
+            #   0.30 news + 0.30 sentiment + 0.30 momentum + 0.10 etf_weight
+            # to bring the screener-page ranking into agreement with what
+            # the candidate_generator actually trades on.  momentum_score
+            # (per-ticker 0-1 from calc_momentum_score: 3-month return +
+            # SMA + volume trend) was added 2026-04-21 as the primary
+            # filter for the trader's candidate selection but never made
+            # it into the page-facing combined_score.  Result: the
+            # screener page surfaced high-ETF-weight names while the bot
+            # quietly traded high-momentum names — top 10 had 1 ticker
+            # in common (audit 2026-04-28).
             row = c.execute("""
-                SELECT news_score, sentiment_score, etf_weight_pct
+                SELECT news_score, sentiment_score, momentum_score, etf_weight_pct
                 FROM sector_screening WHERE run_id=? AND ticker=?
             """, (run_id, ticker)).fetchone()
             if row:
-                ns = row['news_score'] or 0.0
+                ns = row['news_score']     or 0.0
                 ss = row['sentiment_score'] or 0.0
+                ms = row['momentum_score']  or 0.0
                 wt = min((row['etf_weight_pct'] or 0.0) / 25.0, 1.0)  # normalise weight
-                combined = round(ns * 0.40 + ss * 0.40 + wt * 0.20, 4)
+                combined = round(ns * 0.30 + ss * 0.30 + ms * 0.30 + wt * 0.10, 4)
                 c.execute("""
                     UPDATE sector_screening SET combined_score=?
                     WHERE run_id=? AND ticker=?
