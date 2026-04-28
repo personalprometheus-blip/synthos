@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
-"""Populate ticker_logos table from data/ticker_domains.csv + Clearbit.
+"""Populate ticker_logos table from data/ticker_domains.csv via
+Google's free s2/favicons endpoint.
 
 Phase B (2026-04-27). One-shot tool — run after deploying the schema
 migration. Idempotent: re-running upserts and only re-fetches PENDING /
 NOT_FOUND_RETRY rows.
 
+Provider note: the original plan was Clearbit's logo.clearbit.com,
+which was the canonical free brand-logo CDN for years. HubSpot acquired
+Clearbit in late 2023 and the standalone Logo API was sunset — the DNS
+record for logo.clearbit.com no longer resolves (verified 2026-04-27).
+Switched to Google's s2/favicons endpoint as the primary source: free,
+no auth, has been stable for ~15 years, returns PNGs sized up to 128px.
+Quality is uneven (some companies expose 16-32px favicons, some 128px),
+but the visual is recognizable enough for the dense list-view target
+(32-42px display size) and we can swap providers later by running
+populate_logos --refresh-failed without any portal-side changes.
+
 Usage:
     python3 synthos_build/tools/populate_logos.py
-    python3 synthos_build/tools/populate_logos.py --refresh-failed   # retry NOT_FOUND
+    python3 synthos_build/tools/populate_logos.py --refresh-failed
     python3 synthos_build/tools/populate_logos.py --dry-run
-
-Targets the SHARED user/signals.db (logos are universal; same Apple
-logo for every customer). Skips per-customer DBs.
 """
 
 from __future__ import annotations
@@ -31,10 +40,10 @@ import requests  # noqa: E402
 
 from retail_database import get_shared_db  # noqa: E402
 
-CLEARBIT_URL = "https://logo.clearbit.com/{domain}"
+FAVICON_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=128"
 USER_AGENT = "Synthos-LogoFetch/1.0 (+https://synth-cloud.com; contact@synth-cloud.com)"
 TIMEOUT_SECS = 10
-SLEEP_BETWEEN_FETCHES = 0.5  # be polite — Clearbit is free
+SLEEP_BETWEEN_FETCHES = 0.3  # be polite — free service
 
 CSV_PATH = _ROOT / 'data' / 'ticker_domains.csv'
 
@@ -65,16 +74,24 @@ def load_csv(path: Path) -> list[tuple[str, str]]:
 
 
 def fetch_logo(domain: str) -> tuple[bytes | None, int]:
-    """Fetch PNG bytes from Clearbit. Returns (bytes_or_None, http_status).
-    Treats 4xx as definitive NOT_FOUND; transient errors raise."""
-    url = CLEARBIT_URL.format(domain=domain)
+    """Fetch PNG bytes for a domain. Returns (bytes_or_None, http_status).
+    Follows redirects (Google's s2/favicons 301s to t3.gstatic.com/faviconV2).
+    Treats 4xx as definitive NOT_FOUND; transient errors return (None, 0).
+    Empty content (sometimes Google returns 200 + 0 bytes for a domain it
+    doesn't know) is also treated as NOT_FOUND."""
+    url = FAVICON_URL.format(domain=domain)
     try:
-        r = requests.get(url, headers={'User-Agent': USER_AGENT}, timeout=TIMEOUT_SECS)
+        r = requests.get(url, headers={'User-Agent': USER_AGENT},
+                         timeout=TIMEOUT_SECS, allow_redirects=True)
     except requests.RequestException as e:
         print(f"  [transient] {domain}: {e}")
         return None, 0
-    if r.status_code == 200 and r.content:
+    if r.status_code == 200 and r.content and len(r.content) > 100:
         return r.content, 200
+    if r.status_code == 200:
+        # Google sometimes returns a tiny empty / placeholder for domains
+        # it can't resolve. Treat as NOT_FOUND so we don't retry forever.
+        return None, 404
     return None, r.status_code
 
 

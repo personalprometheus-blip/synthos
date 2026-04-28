@@ -5183,7 +5183,20 @@ def api_ticker_logo(ticker):
         abort(404)
     if status != 'OK' or not png:
         abort(404)
-    resp = Response(png, mimetype='image/png')
+    # Detect the actual image format from magic bytes — Google's
+    # favicon endpoint returns a mix of PNG / JPEG / ICO depending on
+    # what the source site exposes. Browsers handle all three from
+    # an <img> tag, but we want the right Content-Type so we don't
+    # confuse a strict client.
+    if png[:8] == b'\x89PNG\r\n\x1a\n':
+        mime = 'image/png'
+    elif png[:3] == b'\xff\xd8\xff':
+        mime = 'image/jpeg'
+    elif png[:4] == b'\x00\x00\x01\x00':
+        mime = 'image/x-icon'
+    else:
+        mime = 'image/png'  # default — browsers are forgiving
+    resp = Response(png, mimetype=mime)
     # 7-day browser cache; logos rarely change. immutable hint lets
     # the browser skip the conditional GET on every page load.
     resp.headers['Cache-Control'] = 'public, max-age=604800, immutable'
