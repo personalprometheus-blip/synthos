@@ -154,6 +154,44 @@ def ensure_master_schema():
     return db.path
 
 
+def clone_missing_tables_from_owner(owner_path, shared_path, table_names):
+    """For each table in `table_names`, if it exists in owner DB but not
+    in shared DB, copy the CREATE TABLE statement (and any indexes) over.
+    Lets the migration handle tables that are created lazily by their
+    writers (live_prices by price_poller, sparkline_bars by portal,
+    behavior_baselines by Database.set_behavior_baseline,
+    system_health_daily by daily_health_aggregator) and don't appear in
+    the canonical Database schema setup."""
+    owner  = sqlite3.connect(owner_path,  timeout=30)
+    shared = sqlite3.connect(shared_path, timeout=30)
+    cloned = []
+    for name in table_names:
+        owner_sql = owner.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+            (name,)
+        ).fetchone()
+        shared_has = shared.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (name,)
+        ).fetchone()
+        if owner_sql and not shared_has and owner_sql[0]:
+            shared.execute(owner_sql[0])
+            # Also clone any indexes
+            for ix in owner.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",
+                (name,)
+            ).fetchall():
+                try:
+                    shared.execute(ix[0])
+                except sqlite3.OperationalError:
+                    pass  # index name conflict is fine
+            shared.commit()
+            cloned.append(name)
+    owner.close()
+    shared.close()
+    return cloned
+
+
 def backup_shared(path):
     os.makedirs(BACKUP_DIR, exist_ok=True)
     ts  = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
@@ -189,13 +227,19 @@ def main():
 
     # Ensure master schema exists
     master_path = ensure_master_schema()
-    if master_path != SHARED_DB:
+    actual_shared = os.path.realpath(master_path)
+    expected     = os.path.realpath(SHARED_DB)
+    if actual_shared != expected:
         print(f"WARNING: get_shared_db() returned {master_path} but expected "
               f"{SHARED_DB} — proceeding with the resolved path.")
-        # Re-bind so we operate on what get_shared_db() actually returns.
-        actual_shared = master_path
-    else:
-        actual_shared = SHARED_DB
+
+    # Clone any tables that owner has but master is missing (live_prices,
+    # sparkline_bars, behavior_baselines, system_health_daily — these are
+    # created lazily by their writers, not by Database.__init__).
+    cloned = clone_missing_tables_from_owner(OWNER_DB, actual_shared, SHARED_TABLES)
+    if cloned:
+        print(f"  cloned schema for: {', '.join(cloned)}")
+        print()
 
     # Backup master before we touch it
     if args.confirm and not args.no_backup:
