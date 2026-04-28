@@ -32,6 +32,11 @@ EDGAR_8K_ENABLED=false
 EDGAR_13D_ENABLED=false
 EDGAR_FORM144_ENABLED=false
 EDGAR_13G_ENABLED=false
+
+# Stage 4 E — cross-source dedup (cluster SEC + Benzinga coverage of
+# same event). Default OFF; flip ON alongside any EDGAR_*_ENABLED.
+# With Alpaca-only ingestion this is pure overhead (singletons everything).
+CROSS_SOURCE_DEDUP_ENABLED=false
 ```
 
 Optional tuning vars:
@@ -47,6 +52,10 @@ EDGAR_8K_ITEMS=1.03,2.02,5.02,8.01
 
 # Min USD value for a Form 144 (proposed sale) to surface (default 50000).
 EDGAR_FORM144_MIN_USD=50000
+
+# Cross-source dedup tuning (Stage 4 E)
+CROSS_SOURCE_DEDUP_WINDOW_MIN=60   # cluster window (default 60 minutes)
+CROSS_SOURCE_JACCARD=0.40          # min headline similarity to cluster
 
 # Override path to the activist registry JSON (default
 # synthos_build/data/activists.json).  Used by 13D and 13G classifiers.
@@ -115,10 +124,11 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
 7. After 1-2 weeks with 13D running cleanly, optionally enable `EDGAR_FORM144_ENABLED=true` and/or `EDGAR_13G_ENABLED=true`. Volume notes:
    - **Form 144** is higher-volume than Form 4 (proposal vs action). Expect 5-15 signals/day post-filter at the default $50K threshold. If it floods, raise `EDGAR_FORM144_MIN_USD` to 100000 or 250000.
    - **13G** is much higher-volume than 13D (~100x), but the registry filter cuts that to whatever subset of your activist list happens to file 13G in the window. Expect 0-2 signals/week. A known-activist 13G is itself an interesting signal — accumulating before public activist declaration.
+8. Once ≥2 EDGAR sources are running cleanly, enable `CROSS_SOURCE_DEDUP_ENABLED=true` to cluster same-event coverage from SEC + Alpaca. Watch the [X-DEDUP] log lines — every merge is logged with primary source, secondary count, and ticker. If you see clusters that look wrong (different events being merged), tighten `CROSS_SOURCE_JACCARD` from 0.40 to 0.50 or 0.55.
 
 ## What's tested vs what's not
 
-**Tested on Mac (70 unit tests, all green):**
+**Tested on Mac (98 unit tests, all green):**
 - EDGAR client User-Agent enforcement (3)
 - Token-bucket rate limiter (2)
 - Full-text search hit normalization (3)
@@ -136,6 +146,10 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
 - Form 144 relationship normalization (1)
 - 13G fetcher: empty-registry short-circuit, known/unknown filer (incl Vanguard/BlackRock noise filter), amendment, no-ticker, search-form correctness, metadata, tier-2 vs 13D's tier-1 (7)
 - 13G headline construction with-principal, amended (2)
+- Form 4 documentType-based amendment detection (2 — Fix A 2026-04-28)
+- Form 4 M+S option-exercise tax-cover skip (3 — Fix B 2026-04-28)
+- 13D/13G form-type query fallback (5 — Fix D 2026-04-28)
+- Cross-source dedup: pass-through, cluster matching, tier/source preference, ticker boundaries, time window, Jaccard threshold, metadata preservation, env overrides (18 — Stage 4 E 2026-04-28)
 
 **Not tested on Mac (defer to pi5 staged rollout):**
 - Real EDGAR HTTP responses (their full-text-search payload shape may drift; we use a fixture)
@@ -163,6 +177,7 @@ If anything breaks after enabling:
 - `synthos_build/agents/news/edgar_form144.py` — Form 144 parser + ingestion (Stage 3)
 - `synthos_build/agents/news/edgar_13g.py` — 13G activist filer ingestion (Stage 3)
 - `synthos_build/agents/news/activist_registry.py` — known-activist CIK lookup (shared by 13D + 13G)
+- `synthos_build/agents/news/cross_source_dedup.py` — cluster cross-source coverage (Stage 4 E)
 - `synthos_build/data/activists.json` — operator-curated CIK list (empty by default; populate before enabling 13D/13G)
 - `synthos_build/agents/retail_news_agent.py` — wiring point in `run()` (look for `EDGAR sources` block)
 - `synthos_build/tests/edgar/` — unit tests + fixtures

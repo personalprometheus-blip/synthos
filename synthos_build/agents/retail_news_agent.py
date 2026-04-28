@@ -3092,6 +3092,31 @@ def run(session="market"):
         except Exception as _e:
             log.warning(f"[EDGAR] ingestion failed (continuing without): {_e}")
 
+    # ── Cross-source dedup (Stage 4 E, 2026-04-28) ──────────────────────────
+    # When EDGAR sources are enabled alongside Alpaca news, the same event
+    # often arrives from multiple sources (8-K + Benzinga earnings recap,
+    # Form 4 + insider-sale article, etc.). Without a dedup pass, each
+    # runs through the gate pipeline independently and inflates downstream
+    # counters.
+    #
+    # cluster_and_pick_primary() groups items by (ticker, time-window,
+    # Jaccard ≥ 0.40) and keeps one primary per cluster, with secondaries
+    # merged into metadata.corroborating_sources. Same-source dups are
+    # left alone (gate 8 NOVELTY handles them).
+    #
+    # Default OFF — flip on alongside any EDGAR_*_ENABLED so the cross-
+    # source benefit kicks in only when there are multiple sources to
+    # cluster. With Alpaca-only ingestion this would singleton everything
+    # (correct but pure overhead).
+    if os.environ.get("CROSS_SOURCE_DEDUP_ENABLED", "false").lower() == "true":
+        try:
+            from news.cross_source_dedup import cluster_and_pick_primary
+            before = len(all_raw)
+            all_raw = cluster_and_pick_primary(all_raw)
+            log.info(f"[X-DEDUP] {before} → {len(all_raw)} items after cross-source dedup")
+        except Exception as _e:
+            log.warning(f"[X-DEDUP] failed (continuing without): {_e}")
+
     log.info(f"Fetched {len(all_raw)} raw items across all sources")
 
     # ── Process each item through 22-gate spine ───────────────────────────
