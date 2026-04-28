@@ -1,9 +1,9 @@
 # EDGAR Ingestion — Operator Guide
 
-**Status:** code landed 2026-04-27 on `patch/2026-04-27-news-edgar-expansion`.
-Stages 1 + 2 + 3 done; Stage 4 (polish) in progress. All flags **default OFF**. No behavior change until enabled.
+**Status:** code landed 2026-04-27/28 on `patch/2026-04-27-news-edgar-expansion`.
+Stages 1 + 2 + 3 + 4 done. All flags **default OFF**. No behavior change until enabled.
 
-This guide covers Stages 1 (Form 4 + 8-K), 2 (13D activist), and 3 (Form 144 + 13G). Stage 4 (polish) extends this doc when it lands.
+This guide covers Stages 1 (Form 4 + 8-K), 2 (13D activist), 3 (Form 144 + 13G), and 4 (cross-source dedup, 8-K body fetch, umbrella flag, source-tier doc).
 
 ## What this adds
 
@@ -37,6 +37,21 @@ EDGAR_13G_ENABLED=false
 # same event). Default OFF; flip ON alongside any EDGAR_*_ENABLED.
 # With Alpaca-only ingestion this is pure overhead (singletons everything).
 CROSS_SOURCE_DEDUP_ENABLED=false
+
+# Stage 4 G — umbrella flag.  When "true", treats every per-source flag
+# above as on UNLESS one is explicitly set to "false".  Useful once the
+# operator has stabilized the per-source rollout. Explicit per-source
+# "false" still takes precedence (so e.g. you can flip umbrella on with
+# EDGAR_13G_ENABLED=false to keep just 13G off).
+EDGAR_ALL_ENABLED=false
+
+# Stage 4 C — 8-K body fetch.  When "true", each 8-K hit triggers an
+# additional HTTP fetch to the filing's primary doc URL; we extract a
+# brief excerpt of the actual disclosure text and use it as the
+# headline (with synthetic-header fallback on extraction failure).
+# Doubles EDGAR HTTP volume per 8-K — verify rate-limit budget before
+# enabling under heavy load.
+EDGAR_8K_BODY_FETCH=false
 ```
 
 Optional tuning vars:
@@ -128,7 +143,7 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
 
 ## What's tested vs what's not
 
-**Tested on Mac (98 unit tests, all green):**
+**Tested on Mac (111 unit tests, all green):**
 - EDGAR client User-Agent enforcement (3)
 - Token-bucket rate limiter (2)
 - Full-text search hit normalization (3)
@@ -150,6 +165,9 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
 - Form 4 M+S option-exercise tax-cover skip (3 — Fix B 2026-04-28)
 - 13D/13G form-type query fallback (5 — Fix D 2026-04-28)
 - Cross-source dedup: pass-through, cluster matching, tier/source preference, ticker boundaries, time window, Jaccard threshold, metadata preservation, env overrides (18 — Stage 4 E 2026-04-28)
+- 8-K HTML strip: tag stripping, script/style removal, entity decoding, whitespace normalization, empty-input (5 — Stage 4 C 2026-04-28)
+- 8-K excerpt extraction: item-header anchor, lead-paragraph fallback, empty HTML, max-chars cap (4 — Stage 4 C)
+- 8-K body-fetch wiring: excerpt replaces synthetic, fetch failure falls back, default no-fetch, per-filing fetch count (4 — Stage 4 C)
 
 **Not tested on Mac (defer to pi5 staged rollout):**
 - Real EDGAR HTTP responses (their full-text-search payload shape may drift; we use a fixture)
@@ -167,6 +185,34 @@ If anything breaks after enabling:
 2. Restart `synthos-portal` (no full revert needed — flags gate the entire feature)
 3. The next news-agent run will skip EDGAR entirely; no data corruption to clean up
 4. Existing `edgar_form4` / `edgar_8k` rows in `signals` and `news_feed` are inert (they'll expire under the existing tier-based expiry policy)
+
+## Source tier rationale (Stage 4 H)
+
+Each EDGAR source emits items at a fixed `source_tier` that the news-
+agent's gate pipeline uses for confidence weighting and member-weight
+calibration. Tier 1 is "Official" (SEC primary documents reporting
+**actual** insider conviction); tier 2 is "Wire" (SEC filings reporting
+**intent** or **passive events** that need interpretation).
+
+| Source | Tier | Why this tier |
+|---|---|---|
+| `edgar_form4` | **1** | Direct insider transaction, filed within 2 business days of trade. The insider personally signed the filing. Open-market buys/sells (codes P/S) are the highest-signal public-disclosure insider data. Excludes M (option exercise) and tax-cover S patterns (Fix B). |
+| `edgar_13d` | **1** | Activist crossing 5% **with stated intent to influence**. Filer is in operator's curated activist registry. Combination of (a) SEC primary doc + (b) registry-verified known activist + (c) explicit non-passive intent puts this at top tier. |
+| `edgar_8k` | **2** | Corporate disclosure of a material event. SEC primary, but interpretation needed — "Item 5.02" could mean a board chair retirement (tier-2 noise) or the CEO being fired (tier-1 catalyst). The item code is a category, not an event severity. With body fetch (Stage 4 C) the headline carries actual filing text; without it, gate-7 sentiment defaults to NEUTRAL. |
+| `edgar_form144` | **2** | INTENT to sell, not action. ~70% of modern Form 144s are 10b5-1 plan executions where the trade decision was made months ago — the timing is mechanical, not current information. Some 144s never result in actual sales. Tier-2 captures "this is informational but not insider conviction." |
+| `edgar_13g` | **2** | Passive ≥5% crossing. By definition NOT activism, even when filed by a known activist. A known-activist 13G is interesting (quiet accumulation before possible 13D conversion) but the form itself signals "I'm not (currently) here to push for change." |
+| Alpaca news (existing) | 2-3 | Wire/aggregator coverage. Tier varies by sub-source (Bloomberg/Reuters tier 2; Benzinga/PR Newswire tier 3 or 4). EDGAR primary docs at the same tier rank above news coverage of the same event via `SOURCE_PREFERENCE` in cross_source_dedup. |
+
+**Why tier matters in the gate pipeline:**
+- **Gate 12 (confirmation)** — tier-1 + has_primary_source → confirmation_score 1.0
+- **Gate 18 (risk discounts)** — tier-3-with-no-primary triggers misinformation discount; tier-1 sources sidestep it entirely
+- **Member-weight scoring** — uses source tier as input weight; bigger swings on tier-1 hits
+
+**Why we don't use tier-1 for everything**
+The gate pipeline was designed for a world of tier-2-3 wire/aggregator news, where occasional tier-1 STOCK Act filings stood out. Promoting all SEC sources to tier 1 would erode that signal — every 8-K (3-5k/business day across the market) would arrive at the same priority as a CEO Form 4 buy. The 1 vs 2 split distinguishes "insider acted with conviction" from "company filed a routine disclosure."
+
+**If you disagree with a tier**
+Edit `agents/news/edgar_<source>.py` — `source_tier` is set in one place per fetcher.  Update the rationale row above when you change it.
 
 ## Files
 

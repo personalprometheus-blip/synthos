@@ -3042,11 +3042,30 @@ def run(session="market"):
     # populated; empty registry = no signals (safe default).
     # All require SEC_EDGAR_UA_NAME and SEC_EDGAR_UA_EMAIL env vars
     # (SEC enforces a 'real user-agent with contact info' policy).
-    _form4_on   = os.environ.get("EDGAR_FORM4_ENABLED",   "false").lower() == "true"
-    _8k_on      = os.environ.get("EDGAR_8K_ENABLED",      "false").lower() == "true"
-    _13d_on     = os.environ.get("EDGAR_13D_ENABLED",     "false").lower() == "true"
-    _form144_on = os.environ.get("EDGAR_FORM144_ENABLED", "false").lower() == "true"
-    _13g_on     = os.environ.get("EDGAR_13G_ENABLED",     "false").lower() == "true"
+    #
+    # Umbrella flag (Stage 4 G, 2026-04-28):
+    #   EDGAR_ALL_ENABLED — when "true", treat all individual EDGAR_*_ENABLED
+    #   flags as on UNLESS one is explicitly set to "false".  Useful once
+    #   the operator has stabilized the per-source rollout and wants
+    #   simpler env management.  Doesn't override explicit per-source
+    #   "false" — operator can still disable a single source under the
+    #   umbrella by setting EDGAR_<X>_ENABLED=false.
+    _edgar_all = os.environ.get("EDGAR_ALL_ENABLED", "false").lower() == "true"
+
+    def _flag(name: str) -> bool:
+        v = os.environ.get(name, "").strip().lower()
+        if v == "true":
+            return True
+        if v == "false":
+            return False
+        # Unset → defer to umbrella
+        return _edgar_all
+
+    _form4_on   = _flag("EDGAR_FORM4_ENABLED")
+    _8k_on      = _flag("EDGAR_8K_ENABLED")
+    _13d_on     = _flag("EDGAR_13D_ENABLED")
+    _form144_on = _flag("EDGAR_FORM144_ENABLED")
+    _13g_on     = _flag("EDGAR_13G_ENABLED")
     if _form4_on or _8k_on or _13d_on or _form144_on or _13g_on:
         try:
             from news.edgar_client import EdgarClient, EdgarUserAgentMissing
@@ -3064,9 +3083,19 @@ def run(session="market"):
                 log.info(f"EDGAR Form 4: {len(f4)} signal items added")
             if _8k_on:
                 from news.edgar_8k import fetch_8k_signals
-                eight_k = fetch_8k_signals(edgar, since_days=2, max_filings=200)
+                # Stage 4 C — opt-in body fetch for richer 8-K headlines.
+                # Independent of the umbrella because it doubles HTTP volume
+                # per 8-K and the operator may want it off even when EDGAR
+                # is fully on. Falls back to synthetic headlines if fetch
+                # or extraction fails.
+                _8k_body = os.environ.get("EDGAR_8K_BODY_FETCH",
+                                          "false").lower() == "true"
+                eight_k = fetch_8k_signals(edgar, since_days=2,
+                                           max_filings=200,
+                                           fetch_body=_8k_body)
                 all_raw.extend(eight_k)
-                log.info(f"EDGAR 8-K: {len(eight_k)} signal items added")
+                log.info(f"EDGAR 8-K: {len(eight_k)} signal items added "
+                         f"(body_fetch={_8k_body})")
             if _13d_on:
                 from news.edgar_13d import fetch_13d_signals
                 thirteen_d = fetch_13d_signals(edgar, registry,
@@ -3108,7 +3137,9 @@ def run(session="market"):
     # source benefit kicks in only when there are multiple sources to
     # cluster. With Alpaca-only ingestion this would singleton everything
     # (correct but pure overhead).
-    if os.environ.get("CROSS_SOURCE_DEDUP_ENABLED", "false").lower() == "true":
+    # Cross-source dedup also rolls under the EDGAR_ALL_ENABLED umbrella —
+    # if the operator turns the whole stack on, dedup turns on too.
+    if _flag("CROSS_SOURCE_DEDUP_ENABLED"):
         try:
             from news.cross_source_dedup import cluster_and_pick_primary
             before = len(all_raw)
