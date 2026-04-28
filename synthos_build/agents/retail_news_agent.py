@@ -3033,25 +3033,39 @@ def run(session="market"):
     # Added 2026-04-27 for the EDGAR ingestion expansion.  Flags are read
     # at run() time so they can be toggled by editing user/.env without
     # restarting any service that imports this module.
-    #   EDGAR_FORM4_ENABLED — corporate insider Form 4 filings (Phase 1.1)
-    #   EDGAR_8K_ENABLED    — 8-K filtered by item code (Phase 2.1)
-    # Both require SEC_EDGAR_UA_NAME and SEC_EDGAR_UA_EMAIL env vars
+    #   EDGAR_FORM4_ENABLED — corporate insider Form 4 filings (Stage 1)
+    #   EDGAR_8K_ENABLED    — 8-K filtered by item code (Stage 1)
+    #   EDGAR_13D_ENABLED   — activist 13D + 13D/A filings (Stage 2)
+    #                         requires synthos_build/data/activists.json
+    #                         to be populated; empty registry = no signals.
+    # All require SEC_EDGAR_UA_NAME and SEC_EDGAR_UA_EMAIL env vars
     # (SEC enforces a 'real user-agent with contact info' policy).
-    if os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true" or \
-       os.environ.get("EDGAR_8K_ENABLED",    "false").lower() == "true":
+    _form4_on = os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true"
+    _8k_on    = os.environ.get("EDGAR_8K_ENABLED",    "false").lower() == "true"
+    _13d_on   = os.environ.get("EDGAR_13D_ENABLED",   "false").lower() == "true"
+    if _form4_on or _8k_on or _13d_on:
         try:
             from news.edgar_client import EdgarClient, EdgarUserAgentMissing
             edgar = EdgarClient(external_fetch=fetch_with_retry)
-            if os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true":
+            if _form4_on:
                 from news.edgar_form4 import fetch_form4_signals
                 f4 = fetch_form4_signals(edgar, since_days=2, max_filings=100)
                 all_raw.extend(f4)
                 log.info(f"EDGAR Form 4: {len(f4)} signal items added")
-            if os.environ.get("EDGAR_8K_ENABLED", "false").lower() == "true":
+            if _8k_on:
                 from news.edgar_8k import fetch_8k_signals
                 eight_k = fetch_8k_signals(edgar, since_days=2, max_filings=200)
                 all_raw.extend(eight_k)
                 log.info(f"EDGAR 8-K: {len(eight_k)} signal items added")
+            if _13d_on:
+                from news.activist_registry import ActivistRegistry
+                from news.edgar_13d import fetch_13d_signals
+                registry = ActivistRegistry().load()
+                thirteen_d = fetch_13d_signals(edgar, registry,
+                                               since_days=7, max_filings=50)
+                all_raw.extend(thirteen_d)
+                log.info(f"EDGAR 13D: {len(thirteen_d)} signal items added "
+                         f"(registry size: {len(registry)})")
         except EdgarUserAgentMissing as _e:
             log.warning(f"[EDGAR] disabled — {_e}")
         except Exception as _e:

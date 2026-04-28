@@ -1,0 +1,31 @@
+{
+  "_doc": [
+    "Known-activist CIK registry — read by agents/news/activist_registry.py.",
+    "13D classifier matches EDGAR filer CIKs against this list.  Filings",
+    "from filers NOT in this list are skipped — that's the design.",
+    "",
+    "BEFORE ENABLING EDGAR_13D_ENABLED ON PRODUCTION:",
+    "",
+    "  1. Open https://www.sec.gov/cgi-bin/browse-edgar in a browser.",
+    "  2. Search by filer name for each activist below.",
+    "  3. Copy the 10-digit CIK from the result page (zero-padded).",
+    "  4. Replace the placeholder CIKs and remove this _doc block.",
+    "  5. Add your verification date in the 'updated' field.",
+    "  6. Add a 'notes' string per entry confirming the verification.",
+    "",
+    "Tier convention:",
+    "  1 — Top-tier, proven track record, large positions, market-moving",
+    "      (Icahn, Ackman, Loeb, Singer/Elliott, ValueAct, Starboard, ...)",
+    "  2 — Mid-tier or sector-focused activists",
+    "  3 — Niche / occasional activists",
+    "",
+    "Adding a CIK to this file is a deployment-relevant change.  Treat",
+    "it like any other config — commit, push, restart news_agent.",
+    "",
+    "PLACEHOLDER ENTRIES BELOW are NOT verified.  Replace before use."
+  ],
+
+  "version": 1,
+  "updated": "2026-04-28",
+  "activists": []
+}
