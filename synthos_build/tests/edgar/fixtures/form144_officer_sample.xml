@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<edgarSubmission>
+  <headerData>
+    <submissionType>144</submissionType>
+    <filerInfo>
+      <filerName>SMITH JANE</filerName>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <issuerInfo>
+      <issuerCik>0000320193</issuerCik>
+      <issuerName>Apple Inc.</issuerName>
+      <issuerTradingSymbol>AAPL</issuerTradingSymbol>
+    </issuerInfo>
+    <securitiesInformation>
+      <securitiesClassTitle>Common Stock</securitiesClassTitle>
+      <securitiesAmount>5000</securitiesAmount>
+      <aggregateMarketValue>875000</aggregateMarketValue>
+      <approximateDateOfSale>2026-04-30</approximateDateOfSale>
+      <relationshipToIssuer>Officer</relationshipToIssuer>
+    </securitiesInformation>
+  </formData>
+</edgarSubmission>

@@ -1,19 +1,21 @@
 # EDGAR Ingestion — Operator Guide
 
 **Status:** code landed 2026-04-27 on `patch/2026-04-27-news-edgar-expansion`.
-Stages 1 + 2 done; Stages 3 + 4 in progress. All flags **default OFF**. No behavior change until enabled.
+Stages 1 + 2 + 3 done; Stage 4 (polish) in progress. All flags **default OFF**. No behavior change until enabled.
 
-This guide covers Stages 1 (Form 4 + 8-K) and 2 (13D activist filings). Stages 3 (Form 144, 13G) and 4 (polish) will extend this doc as they land.
+This guide covers Stages 1 (Form 4 + 8-K), 2 (13D activist), and 3 (Form 144 + 13G). Stage 4 (polish) extends this doc when it lands.
 
 ## What this adds
 
-Three new SEC EDGAR ingestion paths in `retail_news_agent.py`:
+Five new SEC EDGAR ingestion paths in `retail_news_agent.py`:
 
 | Source | Form | Tier | Trigger | Flag |
 |---|---|---|---|---|
 | `edgar_form4` | Form 4 | 1 | Insider transactions ≥ $50K (P/S codes) | `EDGAR_FORM4_ENABLED` |
 | `edgar_8k` | 8-K | 2 | Items 1.03 / 2.02 / 5.02 / 8.01 | `EDGAR_8K_ENABLED` |
 | `edgar_13d` | SC 13D + 13D/A | 1 | Filer in `data/activists.json` registry | `EDGAR_13D_ENABLED` |
+| `edgar_form144` | Form 144 | 2 | Proposed sale ≥ $50K, Officer/Director/10% | `EDGAR_FORM144_ENABLED` |
+| `edgar_13g` | SC 13G + 13G/A | 2 | Filer in `data/activists.json` registry | `EDGAR_13G_ENABLED` |
 
 Both feed the existing 22-gate news pipeline — same dedup, novelty, sentiment, gate-12 confirmation, gate-21 routing as Alpaca news. No new tables, no schema migrations.
 
@@ -28,6 +30,8 @@ SEC_EDGAR_UA_EMAIL=<your contact email>
 EDGAR_FORM4_ENABLED=false
 EDGAR_8K_ENABLED=false
 EDGAR_13D_ENABLED=false
+EDGAR_FORM144_ENABLED=false
+EDGAR_13G_ENABLED=false
 ```
 
 Optional tuning vars:
@@ -41,8 +45,11 @@ EDGAR_FORM4_MIN_USD=50000
 # Codes available: 1.01 1.03 2.02 2.05 5.02 7.01 8.01.
 EDGAR_8K_ITEMS=1.03,2.02,5.02,8.01
 
+# Min USD value for a Form 144 (proposed sale) to surface (default 50000).
+EDGAR_FORM144_MIN_USD=50000
+
 # Override path to the activist registry JSON (default
-# synthos_build/data/activists.json).  Used by 13D classifier.
+# synthos_build/data/activists.json).  Used by 13D and 13G classifiers.
 ACTIVISTS_CONFIG=/path/to/activists.json
 ```
 
@@ -105,10 +112,13 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
    - Trader signal pool — verify `source='edgar_form4'` rows appearing in `signals` table on pi5 master DB
 5. After 1-2 days clean, flip `EDGAR_8K_ENABLED=true`. Watch dedup carefully — 8-K headlines may overlap Benzinga reports. Gate 8 (NOVELTY) should catch them but verify.
 6. After Form 4 + 8-K have run cleanly for 2+ weeks, populate `data/activists.json` (see "13D activist registry" section below) then flip `EDGAR_13D_ENABLED=true`. 13D volume is much lower than Form 4/8-K — expect 0-5 signals/week post-classifier. If you see zero for several weeks, recheck the registry against recent EDGAR 13D filings (a known activist may have filed under an entity name whose CIK isn't in your list).
+7. After 1-2 weeks with 13D running cleanly, optionally enable `EDGAR_FORM144_ENABLED=true` and/or `EDGAR_13G_ENABLED=true`. Volume notes:
+   - **Form 144** is higher-volume than Form 4 (proposal vs action). Expect 5-15 signals/day post-filter at the default $50K threshold. If it floods, raise `EDGAR_FORM144_MIN_USD` to 100000 or 250000.
+   - **13G** is much higher-volume than 13D (~100x), but the registry filter cuts that to whatever subset of your activist list happens to file 13G in the window. Expect 0-2 signals/week. A known-activist 13G is itself an interesting signal — accumulating before public activist declaration.
 
 ## What's tested vs what's not
 
-**Tested on Mac (53 unit tests, all green):**
+**Tested on Mac (70 unit tests, all green):**
 - EDGAR client User-Agent enforcement (3)
 - Token-bucket rate limiter (2)
 - Full-text search hit normalization (3)
@@ -122,6 +132,10 @@ The feature is built but DELIBERATELY un-deployed pending the entry conditions i
 - Activist registry: CIK normalization (5), JSON loading + empty / malformed / missing-file fallbacks (5), lookup across cik formats (5), env path override (1)
 - 13D fetcher: empty-registry short-circuit, known/unknown filer routing, amendment tagging, no-ticker skip, metadata carry-through, search-form correctness (6)
 - 13D headline construction with/without principal, amended (3)
+- Form 144 parser: officer-above-threshold, affiliate skipped, below-threshold skipped, env-override, fallback ticker, combined Officer/Director role, empty-XML (7)
+- Form 144 relationship normalization (1)
+- 13G fetcher: empty-registry short-circuit, known/unknown filer (incl Vanguard/BlackRock noise filter), amendment, no-ticker, search-form correctness, metadata, tier-2 vs 13D's tier-1 (7)
+- 13G headline construction with-principal, amended (2)
 
 **Not tested on Mac (defer to pi5 staged rollout):**
 - Real EDGAR HTTP responses (their full-text-search payload shape may drift; we use a fixture)
@@ -146,7 +160,9 @@ If anything breaks after enabling:
 - `synthos_build/agents/news/edgar_form4.py` — Form 4 parser + ingestion (Stage 1)
 - `synthos_build/agents/news/edgar_8k.py` — 8-K item-code filter + ingestion (Stage 1)
 - `synthos_build/agents/news/edgar_13d.py` — 13D activist filer ingestion (Stage 2)
-- `synthos_build/agents/news/activist_registry.py` — known-activist CIK lookup (Stage 2)
-- `synthos_build/data/activists.json` — operator-curated CIK list (empty by default; populate before enabling 13D)
+- `synthos_build/agents/news/edgar_form144.py` — Form 144 parser + ingestion (Stage 3)
+- `synthos_build/agents/news/edgar_13g.py` — 13G activist filer ingestion (Stage 3)
+- `synthos_build/agents/news/activist_registry.py` — known-activist CIK lookup (shared by 13D + 13G)
+- `synthos_build/data/activists.json` — operator-curated CIK list (empty by default; populate before enabling 13D/13G)
 - `synthos_build/agents/retail_news_agent.py` — wiring point in `run()` (look for `EDGAR sources` block)
 - `synthos_build/tests/edgar/` — unit tests + fixtures

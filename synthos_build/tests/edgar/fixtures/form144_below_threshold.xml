@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<edgarSubmission>
+  <headerData>
+    <submissionType>144</submissionType>
+    <filerInfo>
+      <filerName>SMALL VP</filerName>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <issuerInfo>
+      <issuerCik>0009999999</issuerCik>
+      <issuerName>Tiny Corp</issuerName>
+      <issuerTradingSymbol>TINY</issuerTradingSymbol>
+    </issuerInfo>
+    <securitiesInformation>
+      <securitiesClassTitle>Common Stock</securitiesClassTitle>
+      <securitiesAmount>500</securitiesAmount>
+      <aggregateMarketValue>5000</aggregateMarketValue>
+      <approximateDateOfSale>2026-04-30</approximateDateOfSale>
+      <relationshipToIssuer>Officer</relationshipToIssuer>
+    </securitiesInformation>
+  </formData>
+</edgarSubmission>

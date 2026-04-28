@@ -3033,20 +3033,30 @@ def run(session="market"):
     # Added 2026-04-27 for the EDGAR ingestion expansion.  Flags are read
     # at run() time so they can be toggled by editing user/.env without
     # restarting any service that imports this module.
-    #   EDGAR_FORM4_ENABLED — corporate insider Form 4 filings (Stage 1)
-    #   EDGAR_8K_ENABLED    — 8-K filtered by item code (Stage 1)
-    #   EDGAR_13D_ENABLED   — activist 13D + 13D/A filings (Stage 2)
-    #                         requires synthos_build/data/activists.json
-    #                         to be populated; empty registry = no signals.
+    #   EDGAR_FORM4_ENABLED   — corporate insider Form 4 filings (Stage 1)
+    #   EDGAR_8K_ENABLED      — 8-K filtered by item code (Stage 1)
+    #   EDGAR_13D_ENABLED     — activist 13D + 13D/A filings (Stage 2)
+    #   EDGAR_FORM144_ENABLED — Form 144 (proposed insider sale) (Stage 3)
+    #   EDGAR_13G_ENABLED     — passive ≥5% by known activist (Stage 3)
+    # 13D and 13G both require synthos_build/data/activists.json to be
+    # populated; empty registry = no signals (safe default).
     # All require SEC_EDGAR_UA_NAME and SEC_EDGAR_UA_EMAIL env vars
     # (SEC enforces a 'real user-agent with contact info' policy).
-    _form4_on = os.environ.get("EDGAR_FORM4_ENABLED", "false").lower() == "true"
-    _8k_on    = os.environ.get("EDGAR_8K_ENABLED",    "false").lower() == "true"
-    _13d_on   = os.environ.get("EDGAR_13D_ENABLED",   "false").lower() == "true"
-    if _form4_on or _8k_on or _13d_on:
+    _form4_on   = os.environ.get("EDGAR_FORM4_ENABLED",   "false").lower() == "true"
+    _8k_on      = os.environ.get("EDGAR_8K_ENABLED",      "false").lower() == "true"
+    _13d_on     = os.environ.get("EDGAR_13D_ENABLED",     "false").lower() == "true"
+    _form144_on = os.environ.get("EDGAR_FORM144_ENABLED", "false").lower() == "true"
+    _13g_on     = os.environ.get("EDGAR_13G_ENABLED",     "false").lower() == "true"
+    if _form4_on or _8k_on or _13d_on or _form144_on or _13g_on:
         try:
             from news.edgar_client import EdgarClient, EdgarUserAgentMissing
             edgar = EdgarClient(external_fetch=fetch_with_retry)
+            # Activist registry is shared by 13D + 13G; load once if either
+            # is enabled.
+            registry = None
+            if _13d_on or _13g_on:
+                from news.activist_registry import ActivistRegistry
+                registry = ActivistRegistry().load()
             if _form4_on:
                 from news.edgar_form4 import fetch_form4_signals
                 f4 = fetch_form4_signals(edgar, since_days=2, max_filings=100)
@@ -3058,13 +3068,24 @@ def run(session="market"):
                 all_raw.extend(eight_k)
                 log.info(f"EDGAR 8-K: {len(eight_k)} signal items added")
             if _13d_on:
-                from news.activist_registry import ActivistRegistry
                 from news.edgar_13d import fetch_13d_signals
-                registry = ActivistRegistry().load()
                 thirteen_d = fetch_13d_signals(edgar, registry,
                                                since_days=7, max_filings=50)
                 all_raw.extend(thirteen_d)
                 log.info(f"EDGAR 13D: {len(thirteen_d)} signal items added "
+                         f"(registry size: {len(registry)})")
+            if _form144_on:
+                from news.edgar_form144 import fetch_form144_signals
+                f144 = fetch_form144_signals(edgar, since_days=2,
+                                             max_filings=100)
+                all_raw.extend(f144)
+                log.info(f"EDGAR Form 144: {len(f144)} signal items added")
+            if _13g_on:
+                from news.edgar_13g import fetch_13g_signals
+                thirteen_g = fetch_13g_signals(edgar, registry,
+                                               since_days=7, max_filings=100)
+                all_raw.extend(thirteen_g)
+                log.info(f"EDGAR 13G: {len(thirteen_g)} signal items added "
                          f"(registry size: {len(registry)})")
         except EdgarUserAgentMissing as _e:
             log.warning(f"[EDGAR] disabled — {_e}")

@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<edgarSubmission>
+  <headerData>
+    <submissionType>144</submissionType>
+    <filerInfo>
+      <filerName>FAMILY TRUST OF JOHN DOE</filerName>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <issuerInfo>
+      <issuerCik>0001234567</issuerCik>
+      <issuerName>Target Corp</issuerName>
+      <issuerTradingSymbol>TGT</issuerTradingSymbol>
+    </issuerInfo>
+    <securitiesInformation>
+      <securitiesClassTitle>Common Stock</securitiesClassTitle>
+      <securitiesAmount>10000</securitiesAmount>
+      <aggregateMarketValue>1500000</aggregateMarketValue>
+      <approximateDateOfSale>2026-04-30</approximateDateOfSale>
+      <relationshipToIssuer>Other</relationshipToIssuer>
+    </securitiesInformation>
+  </formData>
+</edgarSubmission>
