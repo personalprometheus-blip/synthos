@@ -29,8 +29,7 @@ sys.path.insert(0, str(_ROOT / 'src'))
 
 import requests  # noqa: E402
 
-from retail_database import RetailDB  # noqa: E402
-from retail_shared import get_active_customers  # noqa: E402
+from retail_database import get_shared_db  # noqa: E402
 
 CLEARBIT_URL = "https://logo.clearbit.com/{domain}"
 USER_AGENT = "Synthos-LogoFetch/1.0 (+https://synth-cloud.com; contact@synth-cloud.com)"
@@ -40,24 +39,10 @@ SLEEP_BETWEEN_FETCHES = 0.5  # be polite — Clearbit is free
 CSV_PATH = _ROOT / 'data' / 'ticker_domains.csv'
 
 
-def shared_db_path() -> Path:
-    """Return path to the shared user/signals.db (master customer DB).
-
-    All customers share one signals.db for cross-cutting data (news,
-    sentiment, screener, and now logos). The "master" tag is the first
-    ACTIVE customer; if none, falls back to any customer dir.
-    """
-    customers = get_active_customers()
-    if customers:
-        owner = customers[0]
-        p = _ROOT / 'user' / 'customers' / owner / 'signals.db'
-        if p.exists():
-            return p
-    # Last-ditch — find any signals.db under user/customers/
-    candidates = list((_ROOT / 'user' / 'customers').glob('*/signals.db'))
-    if candidates:
-        return candidates[0]
-    raise SystemExit("Could not locate any customer signals.db")
+def shared_db():
+    """Return the shared market-intel DB (user/signals.db). Same
+    instance the portal and every agent uses via get_shared_db()."""
+    return get_shared_db()
 
 
 def load_csv(path: Path) -> list[tuple[str, str]]:
@@ -101,8 +86,8 @@ def main():
                     help="Don't write to DB or hit network")
     args = ap.parse_args()
 
-    db_path = shared_db_path()
-    print(f"Target DB: {db_path}")
+    db = shared_db()
+    print(f"Target DB: {db.path}")
 
     csv_rows = load_csv(CSV_PATH)
     print(f"CSV rows : {len(csv_rows)}")
@@ -113,9 +98,6 @@ def main():
         if len(csv_rows) > 10:
             print(f"  ... and {len(csv_rows)-10} more")
         return
-
-    # Reach into the DB by patching DEFAULT_DB_PATH on the class
-    db = RetailDB(str(db_path))
 
     # Seed PENDING rows for any (ticker, domain) not yet in the table.
     # Status PENDING is the "queued, will fetch in this run" marker.
@@ -171,7 +153,7 @@ def main():
           f"({sum_logo_bytes(db)/1024:.1f} KB)")
 
 
-def sum_logo_bytes(db: RetailDB) -> int:
+def sum_logo_bytes(db) -> int:
     with db.conn() as c:
         row = c.execute(
             "SELECT SUM(LENGTH(logo_png)) AS n FROM ticker_logos WHERE status='OK'"
