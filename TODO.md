@@ -128,6 +128,71 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 - [ ] **pi5-expansion prep**: `ASSIGNED_NODE` customer setting for multi-node routing — verified NOT implemented (no references in codebase)
 - [ ] **pi5-expansion decision**: enrichment master pattern vs PostgreSQL-first (Phase 8)
 
+## 🧱 Architectural cleanup (deferred)
+
+- [ ] **Patch D-full — split shared/customer DB schema**
+
+  **Status:** D-rows landed 2026-04-27 (deleted ~58k orphaned rows from
+  customer DBs). Tables themselves still get created on every customer
+  DB open via `CREATE TABLE IF NOT EXISTS` in the canonical SCHEMA, so
+  every customer DB still has 19 always-empty shared tables.
+
+  **What D-full does:**
+  Split `retail_database.SCHEMA` into `_SCHEMA_BASE` (tables present in
+  both contexts — telemetry: `scan_log`, `system_log`, `api_calls`, plus
+  customer-specific tables) and `_SCHEMA_SHARED_ONLY` (the 19 tables
+  cleaned in D-rows: `signals`, `news_feed`, `news_flags`, etc.).
+  Same split for the `MIGRATIONS` list. Add `is_customer: bool = False`
+  to `DB.__init__`; route `get_customer_db()` with `is_customer=True`
+  and `get_shared_db()` with the default. Conditionally apply the
+  shared-only schema. One-time DROP migration for is_customer=True
+  removes the legacy empty tables on existing customer DBs.
+
+  **Why deferred (not done at the same time as D-rows):**
+  Touches `DB.__init__` which runs on every customer-DB open (every
+  portal API call, every trader cycle, every fault-detection scan).
+  A misclassified table — categorizing something shared that turns out
+  to need per-customer rows, or vice versa — silently breaks the wrong
+  half of the system. The benefit of D-full is mostly cosmetic
+  (cleaner DB browser, slightly less disk per customer) so it doesn't
+  justify deploying the change late at night with a trader run firing
+  09:25 ET the next morning. Land it on a Sunday with attention.
+
+  **Entry conditions:**
+  1. ≥7 days post-Patch-A with the `news_dedup_scanner` showing 0
+     hard-dups every hour. Confirms no missed code path is still
+     writing to any customer-DB shared table — if it were, the data
+     would be silently dropped on D-rows cleanup runs.
+  2. Tier readout / system-health-daily aggregation confirmed running
+     against `user/signals.db` for ≥1 week.
+  3. Test-customer creation flow exercised post-Patch-A — confirms
+     `get_customer_db(<new_uuid>)` produces a working DB without
+     touching shared tables. Today this is enforced by `_db()` routing,
+     but D-full would enforce it at the schema level.
+
+  **Scope:**
+  - `synthos_build/src/retail_database.py` — split SCHEMA + MIGRATIONS,
+    add `is_customer` flag (~80 lines net)
+  - `get_customer_db()` passes `is_customer=True`
+  - One-time DROP migration: `_drop_legacy_shared_tables_if_customer()`
+    fires once per customer DB, idempotent
+  - Smoke test: test-customer signup, trader dispatch on existing
+    customer, news_agent on shared DB — all work
+
+  **Risk:**
+  - HIGH if rolled out without watching: trader's `_db()` call resolves
+    via per-customer DB; if its schema is missing a table the trader
+    expected, exception cascade.
+  - MEDIUM with smoke + staged rollout: the schema split is mechanical
+    but classification errors are subtle.
+
+  **Mitigation if pursued:**
+  - Land in a worktree first, dry-run against a copy of pi5's data dir
+  - Run trader + news_agent + portal against the new schema split in dry
+    mode for ≥1 hour before enabling in production
+  - Keep the un-split SCHEMA constant under a feature flag for fast
+    revert
+
 ## 📦 Deferred / Next Phase
 
 - [ ] Backup pipeline hardening — encrypt-on-source + 3-stream split + retail_backup schedule. Plan: `synthos-company/documentation/specs/BACKUP_ENCRYPT_AND_SPLIT_PLAN.md`
