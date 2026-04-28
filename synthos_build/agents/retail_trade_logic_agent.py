@@ -2983,15 +2983,33 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
         if not held:
             return rotations
 
-        # Only consider losing positions for rotation
-        losers = [h for h in held if h['pnl_pct'] < 0]
-        if not losers:
-            log.info("[ROTATION] All positions in profit — no rotation candidates")
+        # 2026-04-28: rotation policy reversed.
+        # Previous behaviour: rotate LOSERS — cut a losing position to free
+        # capital for a stronger signal.  In practice this locked in
+        # realized losses to chase ranking deltas (e.g., CSCO at -$358
+        # ROTATED_OUT for SCHD on 2026-04-28).  Trail stops are the
+        # right mechanism for cutting losers — rotation should NEVER
+        # convert an unrealized loss into a realized one.
+        #
+        # New rule: rotation only considers profitable positions.
+        # Picks the lowest-scored WINNER and only rotates if a candidate
+        # signal beats its entry_score by ROTATION_THRESHOLD — so we
+        # take profit on the weakest winner and redeploy into the
+        # better-scored signal.  When every position is at a loss the
+        # function returns without rotating; trail stops handle exits.
+        winners = [h for h in held if h['pnl_pct'] > 0]
+        if not winners:
+            log.info("[ROTATION] No profitable positions — rotation requires "
+                     "the position being sold to be in the green. "
+                     "Holding; trail stops manage losers.")
             return rotations
 
-        losers.sort(key=lambda x: x['entry_score'])
-        weakest = losers[0]
-        # rotations initialized at function top for early-return safety
+        winners.sort(key=lambda x: x['entry_score'])
+        weakest = winners[0]
+        # `weakest` here = lowest-scored winner.  Naming preserved so the
+        # downstream code (score-gap compare, sell, notification) is
+        # unchanged.  rotations initialized at function top for
+        # early-return safety
 
         for signal in signals[:20]:
             if rotations >= MAX_ROTATIONS:
@@ -3261,6 +3279,45 @@ def _run_gate0_account_health(db, alpaca, session_log):
         if ap:
             shares = float(ap.get('qty', 0))
             entry = float(ap.get('avg_entry_price', 0))
+
+            # Settlement-lag guard (2026-04-28).  When the bot's own sell
+            # order is submitted to Alpaca, the position can stay on the
+            # Alpaca side for tens of seconds before the order settles.
+            # During that window:
+            #   * DB has no row for the ticker (bot's close ran)
+            #   * Alpaca still shows the position
+            # Without this guard, reconciliation flags it as an orphan and
+            # adopts it as USER-managed — which is wrong, double-counts the
+            # P&L, and creates two confusing notifications for one bot
+            # sale.  Same race covers BIL sync_bil_reserve writes.
+            #
+            # Skip adoption if ANY position for this ticker was closed by
+            # the bot in the last 5 minutes.  5 min is generous — typical
+            # paper-account settlement is seconds, but this absorbs
+            # network blips and slow-fill edge cases without losing the
+            # ability to detect a genuine user-bought-outside-the-bot
+            # position (those don't follow a recent bot-close).
+            try:
+                with db.conn() as _c:
+                    _recent = _c.execute(
+                        """SELECT id, closed_at, exit_reason FROM positions
+                           WHERE ticker = ? AND status = 'CLOSED'
+                             AND COALESCE(managed_by, 'bot') = 'bot'
+                             AND closed_at > datetime('now', '-5 minutes')
+                           ORDER BY closed_at DESC LIMIT 1""",
+                        (t,)
+                    ).fetchone()
+            except Exception as _e:
+                log.debug(f"[GATE 0] orphan recently-closed check failed for {t}: {_e}")
+                _recent = None
+            if _recent:
+                log.info(
+                    f"[GATE 0] ORPHAN: {t} skip-adopt — bot just closed at "
+                    f"{_recent['closed_at']} ({_recent['exit_reason']}); "
+                    f"Alpaca settlement lag, will reconcile next cycle"
+                )
+                continue
+
             # Resolve sector via the map → ticker_sectors → screener cascade.
             # retail_sector_backfill_agent fills gaps via FMP on its own schedule.
             _orphan_sector = ''
