@@ -19,6 +19,25 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **CRITICAL: 4-day trader halt loop fixed (2026-04-28)**: operator
+>   asked "screener signals in the 80s, why no trades all day?"
+>   Diagnosis surfaced a self-reinforcing loop active since
+>   2026-04-24 that was halting every Gate 1 evaluation. Chain:
+>   Phase C trader refactor (2026-04-20) made gate1 halts sys.exit
+>   from `_init_clients` before the orchestrator wrote
+>   AGENT_COMPLETE; pipeline-audit Gap 1 (2026-04-24) wired Gate 1
+>   to consume `_VALIDATOR_VERDICT` and halt on NO_GO; shared-DB
+>   architecture refactor (2026-04-27) moved fault_detection's
+>   `_master_db()` to the shared DB but trader has always written
+>   heartbeat per-customer. Result: fault detector saw "Trade Logic
+>   never ran today" → CRITICAL → validator emitted NO_GO → Gate 1
+>   halted → trader sys.exit'd → loop reinforced. **8 pent-up
+>   stop-losses fired within 8 seconds of the fix landing** (Gate 1
+>   halt was blocking ALL trade activity, not just new entries) +
+>   3 new positions opened. Fix is two-part: trader writes
+>   AGENT_COMPLETE before exit on gate1 halt; fault_detection
+>   aggregates trader heartbeat across customer DBs via new
+>   `_scan_per_customer_for_event` helper.
 > - **Trader Alpaca-quotes 404 fix + auditor auto-resolve (2026-04-28)**:
 >   operator reported a stack of 40+ auditor issues. Two real
 >   bugs surfaced: (1) `trader.get_latest_quote()` was hitting
