@@ -2130,16 +2130,9 @@ function _apDrawWave() {
     }
   }
 
-  // Persona label on canvas (raw agent names are hidden; strip below shows activity)
-  ctx.font = '700 10px "Inter", sans-serif';
-  ctx.textAlign = 'center';
-  if (active) {
-    ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',0.7)';
-    ctx.fillText('SYNTHOS  •  SCANNING', w/2, h - 8);
-  } else {
-    ctx.fillStyle = 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + (0.15 + heartbeat * 0.1) + ')';
-    ctx.fillText('SYNTHOS  •  STANDBY', w/2, h - 8);
-  }
+  // Phase H+ (revision): canvas-baked "SYNTHOS · SCANNING / STANDBY"
+  // label removed — was duplicating the strip below the canvas.
+  // Wave color + heartbeat already communicate active-vs-standby.
 
   _apFrame++;
   _apWaveId = requestAnimationFrame(_apDrawWave);
