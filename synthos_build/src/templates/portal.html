@@ -7020,7 +7020,37 @@ async function loadScreening() {
       // In all-sectors mode, show a sector badge on each card so users can
       // see which sector a candidate belongs to without drilling in.
       const sectorBadge = !selectedSector ? '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--teal);background:rgba(0,245,212,0.08);padding:2px 6px;border-radius:4px;margin-left:6px">'+_esc(cd.sector||'')+'</span>' : '';
-      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 70px;gap:14px;align-items:start">'
+      // 2026-04-28: wire the planning drawer (slide-out from the dashboard
+      // Planning card) to screener rows so users can drill from a sector
+      // candidate into the same Recent News + live snapshot view. Map the
+      // screener-shaped row into the signal-shaped object the drawer
+      // expects — drawer fields it doesn't find degrade gracefully.
+      const drawerObj = {
+        ticker:           cd.ticker,
+        company:          cd.company || cd.ticker,
+        sector:           cd.sector || '',
+        headline:         cd.news_headline || (cd.ticker + ' — sector screener candidate'),
+        sentiment_score:  cd.sentiment_score,
+        // Map combined_score → entry_signal_score so the drawer's Signal
+        // Trust strip has something to anchor on. computeSignalTrust()
+        // tolerates partial data; missing fields default to neutral.
+        entry_signal_score: cd.combined_score,
+        // Carry screener-specific bits in metadata so future drawer
+        // additions can surface them without another refactor here.
+        screener_meta: {
+          news_signal:        cd.news_signal,
+          news_score:         cd.news_score,
+          sentiment_signal:   cd.sentiment_signal,
+          combined_score:     cd.combined_score,
+          etf:                cd.etf,
+          etf_weight_pct:     cd.etf_weight_pct,
+          etf_5yr_return:     cd.etf_5yr_return,
+          congressional_flag: cd.congressional_flag,
+          run_id:             cd.run_id,
+        },
+      };
+      const drawerEsc = JSON.stringify(drawerObj).replace(/"/g,'&quot;');
+      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 70px;gap:14px;align-items:start;cursor:pointer;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\';this.style.borderColor=\'rgba(0,245,212,0.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
         +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
