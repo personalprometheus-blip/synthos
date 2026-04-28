@@ -4793,8 +4793,19 @@ async function loadPerformance() {
 
     const stEl = document.getElementById('tax-st');
     const ltEl = document.getElementById('tax-lt');
-    if (stEl) stEl.textContent = (d.tax_st >= 0 ? '+' : '') + '$' + Math.abs(d.tax_st || 0).toFixed(2);
-    if (ltEl) ltEl.textContent = (d.tax_lt >= 0 ? '+' : '') + '$' + Math.abs(d.tax_lt || 0).toFixed(2);
+    // 2026-04-28: was `(d.tax_st >= 0 ? '+' : '')` — combined with
+    // Math.abs() this stripped the sign entirely on negative values
+    // (-$50 rendered as "$50.00").  Use '-' on the negative branch.
+    if (stEl) {
+      const v = d.tax_st || 0;
+      stEl.textContent = (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2);
+      stEl.style.color = v >= 0 ? 'var(--amber)' : 'var(--pink)';
+    }
+    if (ltEl) {
+      const v = d.tax_lt || 0;
+      ltEl.textContent = (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2);
+      ltEl.style.color = v >= 0 ? 'var(--teal)' : 'var(--pink)';
+    }
 
     const sp = d.sector_pnl || {};
     const allVals = Object.values(sp).map(v => Math.abs(v));
