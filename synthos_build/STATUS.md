@@ -19,6 +19,20 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Portal UX pass — Phases E+F (2026-04-27)**: pills layer landed
+>   on every drawer + the screener. Phase E adds a drawer-pills bar
+>   at the top of all four detail drawers (Position/History/Approval/
+>   Planning) with three pill categories: pipeline stage (HOLDING /
+>   QUEUED / WATCHING / VALIDATED / TRACKED / CLOSED — one per drawer
+>   kind), multi-signal corroboration (ALL BULLISH / ALL BEARISH /
+>   DIVERGENT — fires when news+sent+momentum scores all present),
+>   and freshness (FRESH / AGING / STALE — off existing staleness
+>   field). Pure visibility, no API/schema changes. Phase F adds
+>   gold `.spill` hero pills inline with screener column headers
+>   tagging the row that wins each metric (TOP NEWS / TOP SENT /
+>   TOP MOM / RANK #1). Telemetry on pill clicks (Phase G) is the
+>   next planned step so we can prune the catalogue based on actual
+>   usage rather than guessing.
 > - **Portal UX pass — Phases A+B (2026-04-27)**: addressed long-standing
 >   ticker-identity legibility complaints. Phase A: company name now
 >   visible on all six list-view ticker surfaces (dashboard, history,
