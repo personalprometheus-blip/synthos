@@ -4830,6 +4830,83 @@ def api_admin_activity_report():
         return jsonify({'error': f'report generation failed: {e}'}), 500
 
 
+@app.route('/api/pill-interaction', methods=['POST'])
+@login_required
+def api_pill_interaction():
+    """Phase G (2026-04-27) — log a pill click for usage telemetry.
+
+    Best-effort write: any error is swallowed and the response always
+    indicates ok=True (or ok=False on validation rejection) so a flaky
+    DB write never breaks the user-facing UI. JS caller doesn't await
+    or surface errors either.
+
+    Body (JSON):
+        pill_type     str  required  — short token, e.g. 'stage-holding',
+                                       'corr-bull', 'spill-news'
+        pill_label    str  optional  — human-readable text, e.g. 'HOLDING'
+        ticker        str  optional  — which ticker the pill was on
+        drawer_kind   str  optional  — position|history|approval|planning|screener
+        action        str  optional  — defaults 'click'
+        page          str  optional  — window.location.pathname
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        pill_type   = (data.get('pill_type')   or '')[:64].strip()
+        if not pill_type:
+            return jsonify({'ok': False, 'error': 'pill_type required'}), 400
+        pill_label  = (data.get('pill_label')  or '')[:64].strip() or None
+        ticker      = (data.get('ticker')      or '')[:12].strip() or None
+        drawer_kind = (data.get('drawer_kind') or '')[:32].strip() or None
+        action      = (data.get('action')      or 'click')[:16].strip()
+        page        = (data.get('page')        or '')[:64].strip() or None
+        customer_id = session.get('customer_id')
+
+        _shared_db().log_pill_interaction(
+            customer_id=customer_id,
+            pill_type=pill_type,
+            pill_label=pill_label,
+            ticker=ticker,
+            drawer_kind=drawer_kind,
+            action=action,
+            page=page,
+        )
+        return jsonify({'ok': True})
+    except Exception as e:
+        log.warning(f"/api/pill-interaction error: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/pill-usage')
+def api_admin_pill_usage():
+    """Phase G — aggregate pill telemetry for the cmd portal panel.
+
+    Returns four rollups computed off pill_interactions for a configurable
+    time window: by_pill_type, by_drawer, by_customer, plus totals.
+
+    Auth: same Bearer MONITOR_TOKEN as the activity-report endpoint —
+    consumed by the cmd portal proxy on pi4b over LAN.
+
+    Query string:
+        days    int     optional  defaults 7. Capped 1..90.
+    """
+    auth_header   = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_token or auth_header != f'Bearer {monitor_token}':
+        return jsonify({'error': 'unauthorized'}), 401
+
+    try:
+        days = int(request.args.get('days', 7))
+    except ValueError:
+        days = 7
+    days = max(1, min(90, days))
+
+    try:
+        return jsonify(_shared_db().aggregate_pill_usage(days=days))
+    except Exception as e:
+        log.error(f"pill-usage aggregate failed: {e}")
+        return jsonify({'error': f'aggregate failed: {e}'}), 500
+
+
 @app.route('/api/behavior-baseline')
 def api_behavior_baseline():
     """Trader-behavior baseline + days-since counter.

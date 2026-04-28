@@ -1140,6 +1140,32 @@ class DB:
                 updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""",
             "CREATE INDEX IF NOT EXISTS idx_ticker_logos_status ON ticker_logos(status)",
+
+            # 2026-04-27 Phase G — pill-interaction telemetry. Logs every
+            # click on a drawer pill or screener hero pill so we can rank
+            # pill types by actual usage and prune the unused ones rather
+            # than guessing. Lives on the shared user/signals.db so we
+            # can aggregate cross-customer in one query. customer_id is
+            # nullable (admin / unauthenticated edge cases). Auto-prune
+            # at 30 days handled below.
+            """CREATE TABLE IF NOT EXISTS pill_interactions (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_id  TEXT,
+                pill_type    TEXT NOT NULL,
+                pill_label   TEXT,
+                ticker       TEXT,
+                drawer_kind  TEXT,
+                action       TEXT NOT NULL DEFAULT 'click',
+                page         TEXT,
+                created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_pill_int_type    ON pill_interactions(pill_type, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_pill_int_cust    ON pill_interactions(customer_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_pill_int_created ON pill_interactions(created_at)",
+            # Retention sweep — keep the table bounded. At expected
+            # ~50-200 clicks/day across all customers, 30 days holds
+            # ~6k rows max — trivial.
+            "DELETE FROM pill_interactions WHERE created_at < datetime('now','-30 days')",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -3759,6 +3785,79 @@ class DB:
                 "SELECT ticker, domain FROM ticker_logos WHERE status='PENDING'"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ── PILL INTERACTIONS ──────────────────────────────────────────────────
+    # Phase G (2026-04-27). Telemetry table for ranking drawer/screener
+    # pills by actual usage. Cmd portal /pill-usage panel reads from
+    # aggregate queries on this table to drive prune decisions.
+
+    def log_pill_interaction(self, customer_id, pill_type, pill_label=None,
+                             ticker=None, drawer_kind=None, action='click',
+                             page=None):
+        """Insert a single pill-interaction event. Best-effort — any
+        DB error is swallowed by the caller so telemetry never breaks
+        the user-facing path."""
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO pill_interactions
+                    (customer_id, pill_type, pill_label, ticker,
+                     drawer_kind, action, page, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (customer_id, pill_type, pill_label, ticker,
+                  drawer_kind, action, page, self.now()))
+
+    def aggregate_pill_usage(self, days=7):
+        """Return three rollups for the cmd portal /pill-usage panel:
+        by_pill_type / by_drawer_kind / by_customer. Time window
+        defaults to 7 days. SQLite's datetime('now', '-7 days') is UTC
+        so this matches the unified UTC timestamp convention."""
+        cutoff = f'-{int(days)} days'
+        with self.conn() as c:
+            type_rows = c.execute("""
+                SELECT pill_type,
+                       COALESCE(MAX(pill_label), pill_type) AS pill_label,
+                       COUNT(*)                              AS clicks,
+                       COUNT(DISTINCT customer_id)           AS distinct_users,
+                       COUNT(DISTINCT ticker)                AS distinct_tickers
+                FROM pill_interactions
+                WHERE created_at >= datetime('now', ?)
+                GROUP BY pill_type
+                ORDER BY clicks DESC
+            """, (cutoff,)).fetchall()
+            drawer_rows = c.execute("""
+                SELECT drawer_kind, COUNT(*) AS clicks,
+                       COUNT(DISTINCT customer_id) AS distinct_users
+                FROM pill_interactions
+                WHERE created_at >= datetime('now', ?)
+                  AND drawer_kind IS NOT NULL AND drawer_kind != ''
+                GROUP BY drawer_kind
+                ORDER BY clicks DESC
+            """, (cutoff,)).fetchall()
+            cust_rows = c.execute("""
+                SELECT customer_id,
+                       COUNT(*) AS clicks,
+                       COUNT(DISTINCT pill_type) AS distinct_pills
+                FROM pill_interactions
+                WHERE created_at >= datetime('now', ?)
+                  AND customer_id IS NOT NULL AND customer_id != ''
+                GROUP BY customer_id
+                ORDER BY clicks DESC
+                LIMIT 50
+            """, (cutoff,)).fetchall()
+            total_row = c.execute("""
+                SELECT COUNT(*) AS n,
+                       COUNT(DISTINCT customer_id) AS users,
+                       COUNT(DISTINCT pill_type)   AS pill_types
+                FROM pill_interactions
+                WHERE created_at >= datetime('now', ?)
+            """, (cutoff,)).fetchone()
+        return {
+            'days':         days,
+            'total':        dict(total_row) if total_row else {'n': 0, 'users': 0, 'pill_types': 0},
+            'by_pill_type': [dict(r) for r in type_rows],
+            'by_drawer':    [dict(r) for r in drawer_rows],
+            'by_customer':  [dict(r) for r in cust_rows],
+        }
 
     # ── ADMIN ALERTS ───────────────────────────────────────────────────────
     # Anything that means "the system has a problem, not something the

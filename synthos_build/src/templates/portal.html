@@ -6662,21 +6662,21 @@ function renderDrawerPills(data, kind) {
   // the bot is already holding; approval means it's queued for human
   // decision; planning depends on the signal's lifecycle field.
   if (kind === 'position') {
-    pills.push('<span class="dpill stage-holding" title="Bot is currently holding this position">HOLDING</span>');
+    pills.push('<span class="dpill stage-holding" data-pill="stage-holding" title="Bot is currently holding this position">HOLDING</span>');
   } else if (kind === 'approval') {
-    pills.push('<span class="dpill stage-queued" title="Awaiting your approval — bot will not enter until you decide">QUEUED</span>');
+    pills.push('<span class="dpill stage-queued" data-pill="stage-queued" title="Awaiting your approval — bot will not enter until you decide">QUEUED</span>');
   } else if (kind === 'history') {
-    pills.push('<span class="dpill stage-closed" title="Position closed">CLOSED</span>');
+    pills.push('<span class="dpill stage-closed" data-pill="stage-closed" title="Position closed">CLOSED</span>');
   } else if (kind === 'planning') {
     const status = String(data.status || '').toUpperCase();
     if (status === 'VALIDATED') {
-      pills.push('<span class="dpill stage-validated" title="Validated by all enrichment agents — eligible for trader Gate 5">VALIDATED</span>');
+      pills.push('<span class="dpill stage-validated" data-pill="stage-validated" title="Validated by all enrichment agents — eligible for trader Gate 5">VALIDATED</span>');
     } else if (status === 'QUEUED') {
-      pills.push('<span class="dpill stage-queued" title="Queued for trader review">QUEUED</span>');
+      pills.push('<span class="dpill stage-queued" data-pill="stage-queued" title="Queued for trader review">QUEUED</span>');
     } else if (status === 'WATCHING') {
-      pills.push('<span class="dpill stage-watching" title="Bot watchlist — emitted by candidate generator, not yet validated">WATCHING</span>');
+      pills.push('<span class="dpill stage-watching" data-pill="stage-watching" title="Bot watchlist — emitted by candidate generator, not yet validated">WATCHING</span>');
     } else if (data.tracker || data.is_tracked) {
-      pills.push('<span class="dpill stage-tracked" title="On your watchlist">TRACKED</span>');
+      pills.push('<span class="dpill stage-tracked" data-pill="stage-tracked" title="On your watchlist">TRACKED</span>');
     }
   }
 
@@ -6695,22 +6695,22 @@ function renderDrawerPills(data, kind) {
       else if (v < BEAR) bear++;
     });
     if (bull >= 3) {
-      pills.push('<span class="dpill corr-bull" title="News + sentiment + momentum all bullish">ALL BULLISH</span>');
+      pills.push('<span class="dpill corr-bull" data-pill="corr-bull" title="News + sentiment + momentum all bullish">ALL BULLISH</span>');
     } else if (bear >= 3) {
-      pills.push('<span class="dpill corr-bear" title="News + sentiment + momentum all bearish">ALL BEARISH</span>');
+      pills.push('<span class="dpill corr-bear" data-pill="corr-bear" title="News + sentiment + momentum all bearish">ALL BEARISH</span>');
     } else if (bull >= 1 && bear >= 1) {
-      pills.push('<span class="dpill corr-div" title="Mixed signals — components disagree">DIVERGENT</span>');
+      pills.push('<span class="dpill corr-div" data-pill="corr-div" title="Mixed signals — components disagree">DIVERGENT</span>');
     }
   }
 
   // ── Freshness pill ──
   const stale = String(data.staleness || '').trim();
   if (stale === 'Fresh') {
-    pills.push('<span class="dpill fresh-fresh" title="Signal data is current">FRESH</span>');
+    pills.push('<span class="dpill fresh-fresh" data-pill="fresh-fresh" title="Signal data is current">FRESH</span>');
   } else if (stale === 'Aging') {
-    pills.push('<span class="dpill fresh-aging" title="Signal is older — context may have shifted">AGING</span>');
+    pills.push('<span class="dpill fresh-aging" data-pill="fresh-aging" title="Signal is older — context may have shifted">AGING</span>');
   } else if (stale === 'Stale' || stale === 'Expired') {
-    pills.push('<span class="dpill fresh-stale" title="Signal is past its useful window">STALE</span>');
+    pills.push('<span class="dpill fresh-stale" data-pill="fresh-stale" title="Signal is past its useful window">STALE</span>');
   }
 
   if (!pills.length) return '';
@@ -6764,6 +6764,65 @@ function mountTickerLogos(rootEl) {
     el.appendChild(img);
   });
 }
+
+// Phase G (2026-04-27) — pill-usage telemetry. One global click
+// listener using event delegation; fires a fire-and-forget POST to
+// /api/pill-interaction with the pill-type token, the human label,
+// the surrounding ticker (if discoverable), and the drawer/page
+// context. Best-effort: failures are swallowed so telemetry never
+// breaks the user-facing UI.
+//
+// Why event delegation: we generate pills via innerHTML strings in
+// many code paths. Attaching listeners individually after every render
+// would mean threading a mountPillTelemetry() call through every
+// renderer (and remembering to do so for new ones). One document-level
+// listener handles all of them, present and future.
+(function _initPillTelemetry() {
+  if (window.__pillTelemetryInit) return;
+  window.__pillTelemetryInit = true;
+  document.addEventListener('click', function(ev) {
+    var el = ev.target && ev.target.closest && ev.target.closest('[data-pill]');
+    if (!el) return;
+    var pillType  = el.getAttribute('data-pill') || '';
+    if (!pillType) return;
+    var pillLabel = (el.textContent || '').trim().slice(0, 32);
+
+    // Walk ancestors to find which drawer / page surface this lives on.
+    var drawerKind = '';
+    if      (el.closest('#pos-drawer'))      drawerKind = 'position';
+    else if (el.closest('#hist-drawer'))     drawerKind = 'history';
+    else if (el.closest('#appr-drawer'))     drawerKind = 'approval';
+    else if (el.closest('#plan-drawer'))     drawerKind = 'planning';
+    else if (el.closest('#screening-grid')) drawerKind = 'screener';
+
+    // Find the nearest ticker context. The drawer headers and screener
+    // rows already mark their root with data-ticker-logo; fall back to
+    // the legacy data-ticker attribute used for sparklines.
+    var ticker = '';
+    var tEl = el.closest('[data-ticker-logo]') || el.closest('[data-ticker]');
+    if (tEl) {
+      ticker = (tEl.getAttribute('data-ticker-logo') ||
+                tEl.getAttribute('data-ticker') || '').toUpperCase();
+    }
+
+    try {
+      fetch('/api/pill-interaction', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          pill_type:   pillType,
+          pill_label:  pillLabel,
+          ticker:      ticker,
+          drawer_kind: drawerKind,
+          action:      'click',
+          page:        window.location.pathname || '',
+        }),
+        keepalive: true,                  // survive a fast page nav
+      }).catch(function(){ /* swallow */ });
+    } catch(e) { /* swallow */ }
+  }, true);  // capture phase so other handlers can stopPropagation without losing the event
+})();
 
 function populateSparklines() {
   const slots = document.querySelectorAll('.spark-slot[data-ticker]');
@@ -7308,10 +7367,10 @@ async function loadScreening() {
       // Phase F (2026-04-27) — hero pills inline with the column the
       // row leads. We always tag #1 by combined; the per-component pills
       // only render when this row is the cardinal max for that column.
-      const _topNews = (i === _leaders.news    && cd.news_score      != null) ? '<span class="spill" title="Highest news score in this view">TOP NEWS</span>' : '';
-      const _topSent = (i === _leaders.sent    && cd.sentiment_score != null) ? '<span class="spill" title="Highest sentiment score in this view">TOP SENT</span>' : '';
-      const _topMom  = (i === _leaders.momentum&& cd.momentum_score  != null) ? '<span class="spill" title="Highest momentum score in this view">TOP MOM</span>'   : '';
-      const _topComb = (i === _leaders.combined&& cd.combined_score  != null) ? '<span class="spill" title="Highest combined score — overall leader">RANK #1</span>' : '';
+      const _topNews = (i === _leaders.news    && cd.news_score      != null) ? '<span class="spill" data-pill="spill-news" title="Highest news score in this view">TOP NEWS</span>' : '';
+      const _topSent = (i === _leaders.sent    && cd.sentiment_score != null) ? '<span class="spill" data-pill="spill-sent" title="Highest sentiment score in this view">TOP SENT</span>' : '';
+      const _topMom  = (i === _leaders.momentum&& cd.momentum_score  != null) ? '<span class="spill" data-pill="spill-mom"  title="Highest momentum score in this view">TOP MOM</span>'   : '';
+      const _topComb = (i === _leaders.combined&& cd.combined_score  != null) ? '<span class="spill" data-pill="spill-rank" title="Highest combined score — overall leader">RANK #1</span>' : '';
       return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 1fr 70px;gap:14px;align-items:start;cursor:pointer;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\';this.style.borderColor=\'rgba(0,245,212,0.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
         +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_topComb+'</div>'
