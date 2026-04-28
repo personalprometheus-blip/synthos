@@ -2344,11 +2344,22 @@ setInterval(loadAgentPulse, 10000);
   </div>
 
   <!-- SUMMARY STATS -->
+  <!-- 2026-04-28: split account-level vs realized-trades P&L. Account
+       Value comes from Alpaca's /v2/account + portfolio_history (current
+       equity vs base since the customer started). Realized P&L is the
+       running sum from closed positions only — useful for tax estimation
+       and execution review, but doesn't reflect the account's current
+       value when winners are still open. -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
     <div class="stat-card teal">
-      <div class="stat-label">Total Return</div>
+      <div class="stat-label">Account Value</div>
+      <div class="stat-val" id="perf-account-equity">—</div>
+      <div class="stat-sub" id="perf-account-return">vs starting balance</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Realized P&L</div>
       <div class="stat-val" id="perf-total-return">—</div>
-      <div class="stat-sub" id="perf-total-sub">All time</div>
+      <div class="stat-sub" id="perf-total-sub">closed trades only</div>
     </div>
     <div class="stat-card purple">
       <div class="stat-label">Win Rate</div>
@@ -2364,11 +2375,6 @@ setInterval(loadAgentPulse, 10000);
       <div class="stat-label">Best Trade</div>
       <div class="stat-val" id="perf-best" style="color:var(--teal)">—</div>
       <div class="stat-sub" id="perf-best-sub">top P&L</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Max Drawdown</div>
-      <div class="stat-val" id="perf-max-dd">—</div>
-      <div class="stat-sub">from ATH</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Worst Trade</div>
@@ -4756,14 +4762,41 @@ async function loadPerformance() {
     const r = await fetch('/api/performance-summary');
     const d = await r.json();
 
-    const sign = d.total_pnl >= 0 ? '+' : '';
+    // Account Value card — pulled from Alpaca's /v2/account.  When
+    // creds aren't available or Alpaca is unreachable, fall back to
+    // showing 'N/A' so the card never silently lies.
+    const acct  = d.account || {};
+    const aEqEl = document.getElementById('perf-account-equity');
+    const aRetEl = document.getElementById('perf-account-return');
+    if (aEqEl) {
+      if (acct.available) {
+        aEqEl.textContent = '$' + (acct.equity || 0).toFixed(2);
+        aEqEl.style.color = acct.total_return >= 0 ? 'var(--teal)' : 'var(--pink)';
+      } else {
+        aEqEl.textContent = 'N/A';
+        aEqEl.style.color = 'var(--muted)';
+      }
+    }
+    if (aRetEl) {
+      if (acct.available) {
+        const aSign = acct.total_return >= 0 ? '+' : '-';
+        aRetEl.textContent = aSign + '$' + Math.abs(acct.total_return || 0).toFixed(2)
+                           + ' (' + (acct.total_return_pct >= 0 ? '+' : '') + (acct.total_return_pct || 0).toFixed(2) + '%)';
+      } else {
+        aRetEl.textContent = 'connect Alpaca to see';
+      }
+    }
+
+    // Realized P&L — sum of CLOSED-trade pnl (renamed from "Total Return"
+    // 2026-04-28 to disambiguate from the new Account Value card above).
+    const sign = d.total_pnl >= 0 ? '+' : '-';
     const retEl = document.getElementById('perf-total-return');
     if (retEl) {
       retEl.textContent = sign + '$' + Math.abs(d.total_pnl || 0).toFixed(2);
       retEl.style.color = d.total_pnl >= 0 ? 'var(--teal)' : 'var(--pink)';
     }
     const retSubEl = document.getElementById('perf-total-sub');
-    if (retSubEl) retSubEl.textContent = (d.total_ret_pct >= 0 ? '+' : '') + (d.total_ret_pct || 0).toFixed(2) + '% all time';
+    if (retSubEl) retSubEl.textContent = (d.total_trades || 0) + ' closed trades';
 
     const wrEl = document.getElementById('perf-win-rate');
     if (wrEl) {

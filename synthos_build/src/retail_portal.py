@@ -4551,6 +4551,79 @@ def api_portfolio_history():
         return jsonify({'history': [], 'days': days, 'error': str(e)})
 
 
+def _fetch_alpaca_account_view(customer_id: str) -> dict:
+    """Pull account-level P&L from Alpaca's /v2/account and
+    /v2/account/portfolio/history.  Returns:
+        {
+            "available":     bool,           # creds present + reachable
+            "equity":         float,         # current equity
+            "base_value":     float,         # starting equity for the period
+            "total_return":   float,         # equity - base_value
+            "total_return_pct": float,       # %
+            "period":         "1A" / "all" / etc.,
+        }
+    Failure modes (no creds, Alpaca 4xx/5xx, parse error) return
+    available=False with the rest zeroed.  Caller renders 'N/A' on
+    available=False.
+
+    Added 2026-04-28 for Performance tab Item 1 (B): account-level
+    P&L card distinct from the closed-trade Realized P&L.
+    """
+    out = {"available": False, "equity": 0.0, "base_value": 0.0,
+           "total_return": 0.0, "total_return_pct": 0.0, "period": "all"}
+    try:
+        ak, sk = auth.get_alpaca_credentials(customer_id) if customer_id else (None, None)
+    except Exception as _e:
+        log.debug(f"alpaca_account_view: cred lookup failed: {_e}")
+        return out
+    if not ak or not sk:
+        return out
+    try:
+        import requests as _req
+        base_url = os.environ.get('ALPACA_BASE_URL',
+                                  'https://paper-api.alpaca.markets')
+        headers = {'APCA-API-KEY-ID': ak, 'APCA-API-SECRET-KEY': sk}
+        # Current account
+        r1 = _req.get(f"{base_url}/v2/account", headers=headers, timeout=8)
+        r1.raise_for_status()
+        acct = r1.json()
+        equity = float(acct.get('equity', 0) or 0)
+        # Historical equity series — period=all gives account-creation-to-now.
+        # Alpaca returns base_value as the starting equity for that period.
+        r2 = _req.get(
+            f"{base_url}/v2/account/portfolio/history",
+            params={"period": "all", "timeframe": "1D"},
+            headers=headers, timeout=8,
+        )
+        r2.raise_for_status()
+        hist = r2.json()
+        base_value = float(hist.get('base_value', 0) or 0)
+        # Some legacy paper accounts have base_value=0 (Alpaca didn't
+        # backfill for older accounts). Fall back to first non-null
+        # equity datapoint in the series.
+        if not base_value:
+            eq_series = hist.get('equity') or []
+            for v in eq_series:
+                if v is not None and v > 0:
+                    base_value = float(v)
+                    break
+        if not base_value:
+            base_value = equity  # nothing useful — total_return = 0
+        total_return     = equity - base_value
+        total_return_pct = (total_return / base_value * 100.0) if base_value else 0.0
+        return {
+            "available":         True,
+            "equity":             round(equity, 2),
+            "base_value":         round(base_value, 2),
+            "total_return":       round(total_return, 2),
+            "total_return_pct":   round(total_return_pct, 2),
+            "period":             "all",
+        }
+    except Exception as e:
+        log.debug(f"alpaca_account_view: API call failed: {e}")
+        return out
+
+
 @app.route('/api/performance-summary')
 @login_required
 def api_performance_summary():
@@ -4666,6 +4739,12 @@ def api_performance_summary():
         best_trade = max(rows, key=lambda x: x['pnl']) if rows else None
         worst_trade = min(rows, key=lambda x: x['pnl']) if rows else None
 
+        # Account-level P&L (Alpaca equity vs starting balance).
+        # Distinct from closed-trade total_pnl — reflects open positions
+        # too, so when winners are still open and losers cut, account is
+        # positive even if realized P&L is negative.
+        account_view = _fetch_alpaca_account_view(session.get('customer_id'))
+
         return jsonify({
             'total_pnl':      round(total_pnl, 2),
             'total_ret_pct':  total_ret_pct,
@@ -4679,6 +4758,7 @@ def api_performance_summary():
             'trades':          rows,
             'best_trade':      best_trade,
             'worst_trade':     worst_trade,
+            'account':         account_view,
         })
     except Exception as e:
         return jsonify({'total_pnl': 0, 'win_rate': 0, 'total_trades': 0,
