@@ -119,6 +119,18 @@ def fetch_with_retry(url, params=None, headers=None, max_retries=MAX_RETRIES):
 
 # ── DATA FETCHERS ─────────────────────────────────────────────────────────
 
+# Per-run cache for the market-wide put/call ratio.  CBOE only provides
+# the aggregate equity ratio on the free tier (per-ticker requires a
+# paid feed), so the same ratio applies to every ticker we score in a
+# given screener run.  Without caching we hit CBOE 300+ times per
+# screener pass — Cloudflare blocks that pattern, every call returns
+# None, and every screener-sentiment fulfillment falls into the
+# error-handler path (score=0.5).  Caching to 1 fetch/run fixes the
+# reliability + the data-quality at once.  Reset at run() start in
+# parallel with _EDGAR_CACHE / _FINVIZ_CACHE / _VOLUME_CACHE.
+_PUT_CALL_CACHE: dict = {}
+
+
 def fetch_put_call_ratio(ticker):
     """
     Fetch put/call ratio from CBOE public data.
@@ -127,7 +139,15 @@ def fetch_put_call_ratio(ticker):
     Note: CBOE provides aggregate market put/call. Per-ticker options
     data requires a paid feed. On free tier we use market-wide ratio
     as a proxy and note this limitation in the analysis.
+
+    The `ticker` arg is ignored on the free tier (CBOE only provides the
+    market-wide aggregate); we cache the result for the run so 330
+    sentiment fulfilments share one HTTP call.
     """
+    cached = _PUT_CALL_CACHE.get("_market")
+    if cached is not None:
+        return cached
+
     url = "https://www.cboe.com/us/options/market_statistics/daily/"
     r = fetch_with_retry(url)
     try:
@@ -135,6 +155,7 @@ def fetch_put_call_ratio(ticker):
     except Exception as _e:
         log.debug(f"suppressed exception: {_e}")
     if not r:
+        _PUT_CALL_CACHE["_market"] = (None, None)
         return None, None
 
     # CBOE returns HTML — parse the equity put/call ratio
@@ -148,6 +169,7 @@ def fetch_put_call_ratio(ticker):
             # Approximate 30d avg (CBOE historical avg ~0.60-0.65)
             avg30d = 0.62
             log.info(f"CBOE put/call ratio: {ratio:.2f} (30d avg ~{avg30d:.2f})")
+            _PUT_CALL_CACHE["_market"] = (ratio, avg30d)
             return ratio, avg30d
     except Exception as e:
         log.warning(f"CBOE parse error: {e}")
@@ -155,6 +177,7 @@ def fetch_put_call_ratio(ticker):
     # No fallback — Finviz doesn't expose per-ticker put/call in free HTML.
     # Previously we hit Finviz anyway and parsed it just to return (None, None);
     # that was a wasted HTTP call per CBOE failure. Now we bail cleanly.
+    _PUT_CALL_CACHE["_market"] = (None, None)
     return None, None
 
 
@@ -2674,9 +2697,19 @@ def _handle_screening_requests(db):
             else:
                 signal = 'bullish'
 
+            # 2026-04-28: notes formatting is None-safe.  When CBOE is
+            # unreachable (which has been every screener run lately —
+            # likely Cloudflare blocking), put_call/put_call_avg come back
+            # as None.  Earlier code did f"{put_call:.2f}" unconditionally,
+            # which throws `unsupported format string passed to NoneType`
+            # and tipped EVERY screener-sentiment fulfilment into the
+            # error-fallback (score=0.5).  detect_cascade itself handles
+            # None inputs correctly — the bug was downstream of it.
+            pc_str  = f"{put_call:.2f}"     if put_call     is not None else "N/A"
+            pca_str = f"{put_call_avg:.2f}" if put_call_avg is not None else "N/A"
             notes = (
                 f"Tier {tier} ({tier_label}). {summary}. "
-                f"Put/call={put_call:.2f} vs 30d avg={put_call_avg:.2f}. "
+                f"Put/call={pc_str} vs 30d avg={pca_str}. "
                 f"Insider net={insider.get('net_dollar', 'N/A')}. "
                 f"Volume vs avg={volume.get('today_vs_avg', 'N/A')}."
             )
@@ -2700,7 +2733,7 @@ def _handle_screening_requests(db):
             audit_lines += [
                 f"  {ticker}",
                 f"    Signal     : {signal.upper()}  (score {score:.2f}  |  tier {tier} — {tier_label})",
-                f"    Put/Call   : {put_call:.2f} (30d avg {put_call_avg:.2f})",
+                f"    Put/Call   : {pc_str} (30d avg {pca_str})",
                 f"    Insider    : net {insider.get('net_dollar', 'unavailable')}",
                 f"    Volume     : {volume.get('today_vs_avg', 'unavailable')} vs average",
                 f"    Summary    : {summary}",
@@ -2737,6 +2770,7 @@ def run():
     # dict is safe.
     _EDGAR_CACHE.clear()
     _FINVIZ_CACHE.clear()
+    _PUT_CALL_CACHE.clear()
 
     db.log_event("AGENT_START", agent="The Pulse")
     db.log_heartbeat("market_sentiment_agent", "RUNNING")
