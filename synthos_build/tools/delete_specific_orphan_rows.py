@@ -55,16 +55,18 @@ BACKUP_DIR    = os.path.join(_DATA, "migrations")
 # Each entry is a single specific row that has been independently
 # confirmed as spurious (e.g., via audit + Alpaca-order verification).
 # Format: list of tuples (customer_id, position_id, audit_note).
+#
+# Already-applied entries are commented-out for audit history.
 TARGETS = [
-    (
-        "30eff008-c27a-4c71-a788-05f883e4e3a0",
-        "pos_CSCO_20260428133124",
-        "spurious user-managed double-count of bot's ROTATED_OUT close. "
-        "Verified 2026-04-28: same shares (166.9263), opened 39s after "
-        "bot's close at 13:30:45. Inflates owner's realized P&L by "
-        "-$420.66. Deleting collapses the closed-pair to the single "
-        "bot-managed row at -$358.89.",
-    ),
+    # 2026-04-28 — applied in commit 8dd5924 + cleanup run.  Removed
+    # the spurious user-managed double-count of CSCO's ROTATED_OUT
+    # close at 30eff008.  Backup: data/migrations/
+    # orphan_targeted_delete_20260428_144046.csv
+    # (
+    #     "30eff008-c27a-4c71-a788-05f883e4e3a0",
+    #     "pos_CSCO_20260428133124",
+    #     "spurious double-count of bot's ROTATED_OUT close — applied",
+    # ),
 ]
 
 
@@ -252,8 +254,10 @@ def main() -> int:
                 retag_backup_rows.append({"_customer_id": cid, **row})
                 set_clause = ", ".join(f"{k}=?" for k in updates)
                 params = list(updates.values()) + [pid]
+                # positions table has no updated_at column; just SET the
+                # explicit fields.  Schema check 2026-04-28.
                 cur = db.execute(
-                    f"UPDATE positions SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+                    f"UPDATE positions SET {set_clause} WHERE id=?",
                     params,
                 )
                 if cur.rowcount == 1:
