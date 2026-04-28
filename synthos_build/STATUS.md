@@ -19,6 +19,23 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Phase H agent-status persona reversion + drawer (2026-04-27)**:
+>   reverted the `Synthos is sweeping the wire · the Fed is watching
+>   closely again` flavor strip — operator feedback was that we
+>   over-obfuscated and it told them nothing about which agent was
+>   running. Lexicon stripped of all `lines` arrays + sticky-rotation
+>   logic; replaced with a factual `raw_filename → display_name +
+>   blurb` map (10 agents covered, was 4). `/api/agent-pulse` now
+>   returns real `running.display_name + blurb + agent_raw + age`
+>   plus a NEW `agent_summary[]` per-agent today rollup merged from
+>   both customer + shared DBs. Frontend strip is now `{Trade Logic} ·
+>   {blurb} · {12s}` plain format. The 6-metric grid that was
+>   crammed at the bottom of the panel moved into a new slide-out
+>   drawer (whole-card click-target) with four sections: currently
+>   running / today's counters (the 6 metrics with proper space) /
+>   per-agent status (cycles + ago + last detail per agent) / recent
+>   activity (last 20 events). Drawer re-renders in place every 10s
+>   while open so it shows live data.
 > - **Phase G pill-usage telemetry (2026-04-27)**: closes the loop
 >   on Phases E+F. New `pill_interactions` table on shared
 >   user/signals.db captures every drawer/screener pill click
