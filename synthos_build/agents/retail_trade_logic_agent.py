@@ -3583,6 +3583,18 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
         # dashboard shows correct P&L. See AUTO/USER tagging spec.
         if (pos.get('managed_by') or 'bot') == 'user':
             continue
+        # 2026-04-28: skip BIL from gate-10 active management.
+        # BIL is the cash reserve; sync_bil_reserve owns its full lifecycle
+        # (open / rebalance / close).  Letting gate 10 also touch BIL
+        # produces the phantom-close pattern observed pre-fix:
+        #   - trail ratchets upward on tiny BIL ticks
+        #   - eventually trail = entry_price exactly
+        #   - 1-cent dip triggers STOP_LOSS, closes at $0 P&L
+        #   - DB row removed, but Alpaca position lingers briefly
+        #   - next reconciler adopts as USER-managed orphan
+        # Rotation logic already skips BIL (line ~2967); this matches.
+        if pos['ticker'] == C.BIL_TICKER:
+            continue
         _set_phase('gate_10_position_review', f"ticker={pos['ticker']}")
         pos_log = TradeDecisionLog(session=session, ticker=pos['ticker'],
                                    signal_id=pos.get('signal_id'))
