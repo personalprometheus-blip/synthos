@@ -19,6 +19,21 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Portal UX pass — Phases A+B (2026-04-27)**: addressed long-standing
+>   ticker-identity legibility complaints. Phase A: company name now
+>   visible on all six list-view ticker surfaces (dashboard, history,
+>   planning queue+intel, approval queue, intel charms) — drawer
+>   headers already had it since Phase 7L. Phase B: per-ticker
+>   company logos overlay every initials block. New ticker_logos
+>   table caches PNG bytes in shared user/signals.db (180KB for 146
+>   seed tickers), `/api/ticker-logo/<ticker>` serves with 7-day
+>   immutable Cache-Control, mountTickerLogos() lazy-loads via
+>   onload/onerror with naturally-graceful 404→initials fallback.
+>   Provider pivot mid-build: original plan was Clearbit but
+>   logo.clearbit.com was sunset post-HubSpot acquisition (DNS dead);
+>   switched to Google's s2/favicons endpoint. tools/populate_logos.py
+>   is idempotent + provider-agnostic — re-runnable with
+>   --refresh-failed if we swap providers later.
 > - **Trader-visibility audit (2026-04-27)**: verified Gate 5 actually
 >   consumes every screener input wired into the chain. Three landings:
 >   (1) sector_screener.combined_score re-weighted 40/40/0/20 → 30/30/30/10
