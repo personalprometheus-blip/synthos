@@ -2307,6 +2307,30 @@ function renderAgentDrawer(d) {
   }
   document.getElementById('agent-dr-running').innerHTML = runHtml;
 
+  // Validator strip — always rendered. When verdict is NO_GO, surface
+  // the restrictions inline so operator immediately sees WHY trades
+  // are halted. Sits between "Currently running" and "Today's counters"
+  // because the verdict directly affects whether the trader can act.
+  var vd = d.validator || {verdict: 'UNKNOWN', restrictions: [], updated_at: null};
+  var vColor = vd.verdict === 'GO'      ? 'var(--teal)'
+             : vd.verdict === 'CAUTION' ? 'var(--amber)'
+             : vd.verdict === 'NO_GO'   ? 'var(--pink)'
+                                        : 'var(--muted)';
+  var vAge = _apFmtAgo(vd.updated_at).replace(/^·\s*/, '') || 'never';
+  var vRestrictions = (vd.restrictions || []).slice(0, 4).map(function(r){
+    return '<span style="display:inline-block;margin:2px 4px 0 0;padding:2px 7px;border-radius:99px;font-size:9px;font-weight:700;background:rgba(255,75,110,0.10);border:1px solid rgba(255,75,110,0.28);color:var(--pink);letter-spacing:0.04em">' + _esc(r) + '</span>';
+  }).join('');
+  var validatorHtml =
+    '<div style="margin-top:10px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">'
+    +   '<div style="display:flex;align-items:baseline;gap:10px">'
+    +     '<div style="font-size:9px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;color:var(--dim);min-width:62px">Validator</div>'
+    +     '<div style="font-size:13px;font-weight:700;color:' + vColor + ';font-family:var(--mono)">' + _esc(vd.verdict) + '</div>'
+    +     '<div style="font-size:10px;color:var(--muted);margin-left:auto">' + vAge + '</div>'
+    +   '</div>'
+    + (vRestrictions ? '<div style="margin-top:4px">' + vRestrictions + '</div>' : '')
+    + '</div>';
+  document.getElementById('agent-dr-running').insertAdjacentHTML('beforeend', validatorHtml);
+
   // --- Today's counters (the 6 metrics evicted from the panel) ---
   var rawRegime = d.regime || 'unknown';
   var regimeMap = {
@@ -2329,8 +2353,18 @@ function renderAgentDrawer(d) {
     + _statTile('Decisions Today', String(d.decisions_today || 0))
     + _statTile('Market', reg.short, reg.color)
     + _statTile('Watching', String(d.watching || 0))
-    + _statTile('Validator',
-                d.idle_status && d.idle_status.last_agent === 'Validator' ? 'CHECKED' : '—')
+    + (function(){
+        // Real validator verdict tile — color-coded by GO / CAUTION / NO_GO.
+        // (Phase H originally shipped a placeholder "CHECKED" string here;
+        // operator caught it because the tile stayed at "—" with the
+        // market closed even though _VALIDATOR_VERDICT had been written.)
+        var v = (d.validator && d.validator.verdict) || 'UNKNOWN';
+        var color = v === 'GO'      ? 'var(--teal)'
+                  : v === 'CAUTION' ? 'var(--amber)'
+                  : v === 'NO_GO'   ? 'var(--pink)'
+                                    : 'var(--muted)';
+        return _statTile('Validator', v, color);
+      })()
     + _statTile('Last decision',
                 (function(){
                   // Find most recent TRADE_DECISION in events

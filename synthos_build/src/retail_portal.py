@@ -4595,6 +4595,36 @@ def api_agent_pulse():
                 'details':       ev.get('details') or '',
             })
 
+        # Validator verdict — surface it on /api/agent-pulse so the agent-
+        # detail drawer can show a real GO/CAUTION/NO_GO tile (instead of
+        # the placeholder "CHECKED" we shipped in Phase H). Reads the
+        # per-customer _VALIDATOR_VERDICT — that's where validator_stack
+        # writes its decision (and it's what trader's Gate 1 reads).
+        validator_verdict = 'UNKNOWN'
+        validator_updated = None
+        validator_restrictions = []
+        try:
+            with db.conn() as c:
+                v_row = c.execute(
+                    "SELECT value, updated_at FROM customer_settings "
+                    "WHERE key='_VALIDATOR_VERDICT'"
+                ).fetchone()
+                r_row = c.execute(
+                    "SELECT value FROM customer_settings "
+                    "WHERE key='_VALIDATOR_RESTRICTIONS'"
+                ).fetchone()
+            if v_row:
+                validator_verdict = (v_row['value'] or 'UNKNOWN').upper()
+                validator_updated = v_row['updated_at']
+            if r_row and r_row['value']:
+                try:
+                    import json as _json
+                    validator_restrictions = _json.loads(r_row['value'])
+                except Exception:
+                    validator_restrictions = []
+        except Exception as e:
+            log.debug(f"validator verdict read failed: {e}")
+
         return jsonify({
             'running':         running,
             'idle_status':     idle_status,
@@ -4604,6 +4634,11 @@ def api_agent_pulse():
             'regime':          regime,
             'events':          translated_events,
             'agent_summary':   agent_summary,
+            'validator': {
+                'verdict':      validator_verdict,
+                'restrictions': validator_restrictions,
+                'updated_at':   validator_updated,
+            },
         })
     except Exception as e:
         return jsonify({'running': None, 'idle_status': None, 'queued_signals': 0, 'watching': 0,
