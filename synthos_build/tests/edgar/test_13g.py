@@ -118,7 +118,52 @@ class TestFiltering(unittest.TestCase):
     def test_searches_for_sc_13g(self):
         client = FakeClient([])
         edgar_13g.fetch_13g_signals(client, self.reg)
-        self.assertEqual(client.last_form, "SC 13G")
+        # last_form is final attempt; with both queries empty the fallback
+        # query type was attempted last
+        self.assertEqual(client.last_form, "13G")
+
+
+class TestFormTypeFallback(unittest.TestCase):
+    """Fix D (2026-04-28) — same pattern as 13D's fallback."""
+
+    def setUp(self):
+        self.reg, self.path = _build_registry([
+            {"cik": "1336528", "name": "Pershing", "principals": [], "tier": 1},
+        ])
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def test_fallback_used_when_canonical_empty(self):
+        attempted_forms: list[str] = []
+
+        class FallbackClient:
+            def search_filings(self, form_type, since_days=2,
+                               max_results=200, ciks=None):
+                attempted_forms.append(form_type)
+                if form_type == "13G":
+                    return [_hit("13G", "1336528", "Pershing", "MSFT")]
+                return []
+
+        items = edgar_13g.fetch_13g_signals(FallbackClient(), self.reg)
+        self.assertEqual(attempted_forms, ["SC 13G", "13G"])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["ticker"], "MSFT")
+
+    def test_no_fallback_when_canonical_populated(self):
+        attempted_forms: list[str] = []
+
+        class CanonicalClient:
+            def search_filings(self, form_type, since_days=2,
+                               max_results=200, ciks=None):
+                attempted_forms.append(form_type)
+                if form_type == "SC 13G":
+                    return [_hit("SC 13G", "1336528", "Pershing", "AAPL")]
+                return []
+
+        items = edgar_13g.fetch_13g_signals(CanonicalClient(), self.reg)
+        self.assertEqual(attempted_forms, ["SC 13G"])
+        self.assertEqual(len(items), 1)
 
     def test_metadata_carries_activist_info(self):
         client = FakeClient([_hit("SC 13G", "1336528", "Pershing", "AAPL")])

@@ -74,10 +74,17 @@ def fetch_13g_signals(client, registry, since_days: int = 7,
                  "Populate synthos_build/data/activists.json before enabling.")
         return []
 
+    # Fix D (2026-04-28): try fallback '13G' if 'SC 13G' returns 0 — some
+    # EDGAR query paths normalize differently.  See edgar_13d.py for the
+    # parallel pattern.
     hits = client.search_filings(form_type="SC 13G", since_days=since_days,
                                  max_results=max_filings)
     if not hits:
-        log.info("13G search returned 0 hits")
+        log.info("13G 'SC 13G' search returned 0 — trying fallback '13G'")
+        hits = client.search_filings(form_type="13G", since_days=since_days,
+                                     max_results=max_filings)
+    if not hits:
+        log.info("13G search (both query forms) returned 0 hits")
         return []
 
     items_out: list[dict] = []

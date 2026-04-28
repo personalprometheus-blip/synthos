@@ -90,10 +90,18 @@ def fetch_13d_signals(
         return []
 
     # EDGAR search supports 'SC 13D' which returns 13D + 13D/A.
+    # Fix D (2026-04-28): some EDGAR query paths return zero for
+    # 'SC 13D' but find results under the bare '13D' form type.  Fall
+    # back if the canonical query is empty.  Either form is benign; the
+    # search-hit normalization downstream is form-string agnostic.
     hits = client.search_filings(form_type="SC 13D", since_days=since_days,
                                  max_results=max_filings)
     if not hits:
-        log.info("13D search returned 0 hits")
+        log.info("13D 'SC 13D' search returned 0 — trying fallback '13D'")
+        hits = client.search_filings(form_type="13D", since_days=since_days,
+                                     max_results=max_filings)
+    if not hits:
+        log.info("13D search (both query forms) returned 0 hits")
         return []
 
     items_out: list[dict] = []

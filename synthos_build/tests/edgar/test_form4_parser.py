@@ -86,6 +86,53 @@ class TestForm4Parser(unittest.TestCase):
         self.assertEqual(edgar_form4.parse_form4("", filed_date=""), [])
         self.assertEqual(edgar_form4.parse_form4("not xml", filed_date=""), [])
 
+    def test_amended_filing_tagged(self):
+        """documentType=4/A → is_amended True. Earlier heuristic missed
+        this because it relied on schemaVersion + name matching."""
+        items = edgar_form4.parse_form4(load("form4_amended.xml"),
+                                        filed_date="2026-04-26")
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["is_amended"],
+                        "documentType=4/A should set is_amended=True")
+
+    def test_initial_filing_not_tagged(self):
+        """Sanity: documentType=4 → is_amended False."""
+        items = edgar_form4.parse_form4(load("form4_buy_sample.xml"),
+                                        filed_date="2026-04-26")
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]["is_amended"],
+                         "documentType=4 should set is_amended=False")
+
+    def test_tax_cover_skipped(self):
+        """M=10000 + same-day S=4500 → skip (tax-cover pattern). Without
+        Fix B this would emit a 'CFO sold $810K' signal that's actually
+        just the automated tax-withholding sell on an option exercise."""
+        items = edgar_form4.parse_form4(load("form4_tax_cover.xml"),
+                                        filed_date="2026-04-26")
+        self.assertEqual(len(items), 0,
+            "M=10000 / S=4500 same-day should be skipped as tax-cover")
+
+    def test_exercise_and_sell_more_emits(self):
+        """M=10000 + same-day S=15000 → emit. Insider sold MORE than they
+        exercised — net disposition, not just tax-cover. Metadata should
+        carry the same_day_option_exercise_shares so downstream gates can
+        derate if they want."""
+        items = edgar_form4.parse_form4(load("form4_exercise_and_sell_more.xml"),
+                                        filed_date="2026-04-26")
+        self.assertEqual(len(items), 1)
+        it = items[0]
+        self.assertEqual(it["ticker"], "MSFT")
+        self.assertEqual(it["metadata"]["tx_code"], "S")
+        self.assertEqual(it["metadata"]["same_day_option_exercise_shares"], 10000.0,
+            "Metadata should record that there was a same-day option exercise")
+
+    def test_normal_sale_no_option_metadata(self):
+        """Sanity: a plain sample without a derivative table → metadata
+        records same_day_option_exercise_shares=0."""
+        items = edgar_form4.parse_form4(load("form4_buy_sample.xml"),
+                                        filed_date="2026-04-26")
+        self.assertEqual(items[0]["metadata"]["same_day_option_exercise_shares"], 0.0)
+
     def test_no_ticker_skipped(self):
         xml_no_ticker = """<?xml version="1.0"?>
 <ownershipDocument>

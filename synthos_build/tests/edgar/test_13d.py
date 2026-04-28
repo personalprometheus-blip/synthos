@@ -141,12 +141,81 @@ class TestFilteringByActivist(unittest.TestCase):
         self.assertIn("verified", md["activist_notes"])
 
     def test_searches_for_sc_13d_form(self):
+        """When EDGAR is reached at all, the canonical 'SC 13D' query is
+        the primary attempt.  With Fix D, an empty FakeClient causes a
+        fallback to '13D'; we verify the SAME args propagate to the
+        fallback (since_days, max_results)."""
         client = FakeClient([])
         edgar_13d.fetch_13d_signals(client, self.reg, since_days=10,
                                     max_filings=99)
-        self.assertEqual(client.last_form, "SC 13D")
+        # Fallback was attempted last; both queries get the same kwargs
+        self.assertEqual(client.last_form, "13D")
         self.assertEqual(client.last_kwargs["since_days"], 10)
         self.assertEqual(client.last_kwargs["max_results"], 99)
+
+
+class TestFormTypeFallback(unittest.TestCase):
+    """Fix D (2026-04-28) — fall back from 'SC 13D' to '13D' when EDGAR
+    returns nothing for the canonical form-type query."""
+
+    def setUp(self):
+        self.reg, self.path = _build_registry([
+            {"cik": "1336528", "name": "Pershing Square",
+             "principals": ["Bill Ackman"], "tier": 1},
+        ])
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def test_fallback_used_when_canonical_empty(self):
+        """First call ('SC 13D') returns empty; second call ('13D') has
+        the actual hit. Fetcher should use the second result."""
+        attempted_forms: list[str] = []
+
+        class FallbackClient:
+            def search_filings(self, form_type, since_days=2,
+                               max_results=200, ciks=None):
+                attempted_forms.append(form_type)
+                if form_type == "13D":
+                    return [_hit("13D", "1336528", "Pershing", "AAPL")]
+                return []  # 'SC 13D' returns nothing
+
+        items = edgar_13d.fetch_13d_signals(FallbackClient(), self.reg)
+        self.assertEqual(attempted_forms, ["SC 13D", "13D"])
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["ticker"], "AAPL")
+
+    def test_no_fallback_when_canonical_populated(self):
+        """If 'SC 13D' returns hits, we shouldn't waste a second EDGAR
+        call. Token-bucket rate-limit margin matters."""
+        attempted_forms: list[str] = []
+
+        class CanonicalClient:
+            def search_filings(self, form_type, since_days=2,
+                               max_results=200, ciks=None):
+                attempted_forms.append(form_type)
+                if form_type == "SC 13D":
+                    return [_hit("SC 13D", "1336528", "Pershing", "AAPL")]
+                return []
+
+        items = edgar_13d.fetch_13d_signals(CanonicalClient(), self.reg)
+        self.assertEqual(attempted_forms, ["SC 13D"],
+                         "Should not fall back when canonical succeeded")
+        self.assertEqual(len(items), 1)
+
+    def test_both_empty_returns_empty(self):
+        """Both query forms empty → empty list (not crash, not retry)."""
+        attempted_forms: list[str] = []
+
+        class EmptyClient:
+            def search_filings(self, form_type, since_days=2,
+                               max_results=200, ciks=None):
+                attempted_forms.append(form_type)
+                return []
+
+        items = edgar_13d.fetch_13d_signals(EmptyClient(), self.reg)
+        self.assertEqual(attempted_forms, ["SC 13D", "13D"])
+        self.assertEqual(items, [])
 
 
 class TestHeadlineConstruction(unittest.TestCase):

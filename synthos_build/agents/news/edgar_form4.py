@@ -164,6 +164,12 @@ def parse_form4(xml_text: str, filed_date: str = "") -> list[dict]:
     if not issuer_ticker:
         return []  # No ticker — can't attribute a signal
 
+    # Detect amendment via the canonical SEC marker (documentType).
+    # 4/A is an amended Form 4. The earlier heuristic (schemaVersion +
+    # name match) was unreliable; this is the actual schema field.
+    doc_type    = _text(root, "documentType")
+    is_amended  = doc_type.upper() in ("4/A", "4-A") or doc_type.endswith("/A")
+
     # Reporting owner — usually one, occasionally multiple
     owners = root.findall("reportingOwner")
     if not owners:
@@ -193,6 +199,31 @@ def parse_form4(xml_text: str, filed_date: str = "") -> list[dict]:
     # Period of report (the actual transaction date, often = filed - 1d)
     period = _text(root, "periodOfReport")
 
+    # First pass: harvest option-exercise transactions from the derivative
+    # table. M = option/SAR exercise (acquired shares from option grant).
+    # We use this to detect "exercise + tax-cover sell" patterns: when a
+    # non-derivative S transaction on the SAME DATE has share count
+    # <= matching M shares, that S is overwhelmingly likely the
+    # tax-withholding sale that follows automated option-exercise plans
+    # — NOT discretionary insider conviction. Skipping those reduces the
+    # false-positive rate of "CEO sold!" headlines that are really
+    # "CEO's automated 10b5-1 plan exercised options and sold to cover
+    # taxes."
+    option_exercises_by_date: dict[str, float] = {}
+    deriv_table = root.find("derivativeTable")
+    if deriv_table is not None:
+        for dx in deriv_table.findall("derivativeTransaction"):
+            d_code = _text(dx, "transactionCoding/transactionCode")
+            if d_code != "M":
+                continue
+            d_shares = _to_float(_value_text(dx, "transactionAmounts/transactionShares"))
+            d_date   = _value_text(dx, "transactionDate")
+            if d_shares is None or d_shares <= 0 or not d_date:
+                continue
+            option_exercises_by_date[d_date] = (
+                option_exercises_by_date.get(d_date, 0.0) + d_shares
+            )
+
     # Walk non-derivative transactions
     out: list[dict] = []
     nd_table = root.find("nonDerivativeTable")
@@ -216,6 +247,22 @@ def parse_form4(xml_text: str, filed_date: str = "") -> list[dict]:
         if value_usd < MIN_TX_VALUE_USD:
             continue
 
+        # Tax-cover detection (Fix B 2026-04-28). If this is an open-market
+        # sell AND the same filing reports an option exercise on the same
+        # date with shares >= our sale shares, treat as automated tax-
+        # cover and skip emission.  We err conservative: even when M
+        # shares match S shares exactly (split-evenly tax-cover), we
+        # skip — the net signal of "exec exercised + sold proceeds for
+        # taxes" is not the same as discretionary conviction.
+        if code == "S":
+            same_day_m = option_exercises_by_date.get(tx_date, 0.0)
+            if same_day_m > 0 and same_day_m >= shares:
+                log.debug(
+                    f"form4 skip tax-cover: {issuer_ticker} on {tx_date} — "
+                    f"M={same_day_m:.0f} >= S={shares:.0f}"
+                )
+                continue
+
         # Sanity: A (acquired) should pair with code P (buy);
         # D (disposed) with S (sell).  Mismatches happen for amended
         # filings — we trust the code field.
@@ -233,8 +280,7 @@ def parse_form4(xml_text: str, filed_date: str = "") -> list[dict]:
             "disc_date":    filed_date or period,
             "amount_range": _format_amount(value_usd),
             "all_symbols":  [issuer_ticker.upper()],
-            "is_amended":   "/A" in (root.attrib.get("schemaVersion") or "")
-                            or "amended" in (issuer_name or "").lower(),
+            "is_amended":   is_amended,
             "is_spousal":   False,
             "metadata": {
                 "issuer_name":   issuer_name,
@@ -247,6 +293,14 @@ def parse_form4(xml_text: str, filed_date: str = "") -> list[dict]:
                 "tx_price":      ppx,
                 "tx_value_usd":  round(value_usd, 2),
                 "acquired_disposed": ad,
+                "doc_type":      doc_type,
+                # Option-exercise context — non-zero when this filing also
+                # reports a same-date option exercise.  For S codes this
+                # transaction has already passed the tax-cover skip
+                # (option_exercise_shares < sale_shares); the field is
+                # carried so downstream gates can still derate "exercise
+                # + sell-more" patterns if they want.
+                "same_day_option_exercise_shares": option_exercises_by_date.get(tx_date, 0.0),
                 "image_url":     "",
             },
         })
