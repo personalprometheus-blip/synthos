@@ -1914,9 +1914,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div style="position:relative;height:100px;overflow:hidden">
       <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
     </div>
-    <!-- AGENT STRIP — factual: friendly agent name + blurb + age -->
+    <!-- AGENT STRIP — minimal. Operator wants the dashboard quiet:
+         which agent is running + what it's doing lives ENTIRELY in the
+         slide-out drawer. The strip is a single calm line so the panel
+         doesn't fight for attention when the cylinder is dormant. -->
     <div class="ap-status-strip">
-      <span class="ap-agent-name" id="ap-agent-name">Idle</span><span id="ap-agent-blurb-wrap" style="display:none"> · <span class="ap-agent-blurb" id="ap-agent-blurb"></span></span><span class="ap-agent-age" id="ap-agent-age"></span>
+      <span class="ap-agent-name">Synthos scanning</span>
     </div>
     <!-- DETAIL CUE — invites click into the drawer -->
     <div class="ap-detail-cue">Tap for details ›</div>
@@ -2213,33 +2216,12 @@ async function loadAgentPulse() {
     _apRunning = d.running;
     _apLastData = d;  // cache so the drawer renderer doesn't need to re-fetch
 
-    // Phase H — factual agent strip: name + blurb + age (or idle context)
-    var nameEl  = document.getElementById('ap-agent-name');
-    var blurbEl = document.getElementById('ap-agent-blurb');
-    var blurbWrap = document.getElementById('ap-agent-blurb-wrap');
-    var ageEl   = document.getElementById('ap-agent-age');
-    if (d.running) {
-      if (nameEl)  nameEl.textContent  = d.running.display_name || 'Activity';
-      if (blurbEl) blurbEl.textContent = d.running.blurb || '';
-      if (blurbWrap) blurbWrap.style.display = (d.running.blurb ? 'inline' : 'none');
-      if (ageEl) {
-        var age = d.running.age_secs || 0;
-        ageEl.textContent = '· ' + (age < 60 ? age + 's' : Math.floor(age/60) + 'm');
-      }
-    } else if (d.idle_status) {
-      if (nameEl)  nameEl.textContent  = 'Idle';
-      if (blurbEl) blurbEl.textContent = 'Last: ' + (d.idle_status.last_agent || '—')
-                                        + (d.idle_status.last_event === 'AGENT_COMPLETE' ? ' done' : '');
-      if (blurbWrap) blurbWrap.style.display = 'inline';
-      if (ageEl) {
-        // Compute "Xm ago" from last_ts
-        ageEl.textContent = _apFmtAgo(d.idle_status.last_ts);
-      }
-    } else {
-      if (nameEl)  nameEl.textContent  = 'Idle';
-      if (blurbWrap) blurbWrap.style.display = 'none';
-      if (ageEl) ageEl.textContent = '';
-    }
+    // Phase H+ (revision): the strip on the dashboard is now the static
+    // "Synthos scanning" line — no per-poll updates needed. All the
+    // live data (running agent, blurb, age, idle context) is rendered
+    // inside the slide-out drawer instead, where it has room to
+    // breathe and doesn't compete with the wave / cylinder for the
+    // operator's attention on the main dashboard.
 
     // If the drawer is currently open, re-render its body off the new data.
     if (document.getElementById('agent-drawer') &&
