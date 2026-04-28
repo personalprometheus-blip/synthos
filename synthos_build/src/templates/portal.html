@@ -5620,6 +5620,7 @@ function renderPositions(positions) {
           })()}
           ${isOrphan ? '<span style="padding:1px 5px;border-radius:99px;font-size:8px;font-weight:700;background:rgba(245,166,35,0.12);border:1px solid rgba(245,166,35,0.3);color:#f5a623">ORPHAN</span>' : ''}
         </div>
+        ${(p.company && p.company !== p.ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px">${p.company}</div>` : ''}
         <div style="font-size:10px;color:var(--muted)">${(p.shares||0).toFixed(p.shares>=1?2:4)} sh · avg $${avgEntry.toFixed(2)}</div>
         <div style="font-size:9px;color:var(--dim);display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap">
           ${(function(){
@@ -5823,6 +5824,7 @@ function renderApprovals(approvals) {
           <div class="trade-ticker-icon">${(t.ticker||'?').slice(0,4)}</div>
           <div class="trade-meta">
             <div class="trade-headline">${t.ticker||'?'}<span class="spark-slot" data-ticker="${(t.ticker||'').replace(/[^A-Z0-9.-]/gi,'')}"></span>${patBadge} · ${t.politician||'Unknown'}</div>
+            ${(t.company && t.company !== t.ticker) ? `<div style="font-size:10px;color:var(--muted);font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px">${t.company}</div>` : ''}
             <div class="trade-sub">${(t.queued_at||'').slice(0,16)}${shares ? ' · '+shares : ''}${cost ? ' '+cost : ''}</div>
           </div>
           <div class="conf-chip ${confCls}">${conf}</div>
@@ -6676,6 +6678,7 @@ function renderIntelGrid(signals) {
       </div>
       <div class="charm-body">
         ${tkrChip ? '<div style="margin-bottom:6px">' + tkrChip + '</div>' : ''}
+        <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.ticker||'?'}${(s.company && s.company !== s.ticker) ? ` <span style="color:var(--muted);font-weight:400">· ${s.company}</span>` : ''}</div>
         <div class="charm-source">${s.politician||'Unknown'} · ${(s.disc_date||s.created_at||'').slice(0,10)}</div>
         <div class="charm-headline">${s.headline||s.ticker+' — Congressional disclosure'}</div>
         <div class="charm-snippet">${s.amount_range||'Amount not disclosed'} · ${s.staleness||'Unknown age'} · ${s.sector||'Unknown sector'}</div>
@@ -6713,6 +6716,7 @@ function renderIntelGrid(signals) {
         </div>
         <div class="charm-body">
           ${tkrChip ? '<div style="margin-bottom:6px">' + tkrChip + '</div>' : ''}
+          <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.ticker||'?'}${(s.company && s.company !== s.ticker) ? ` <span style="color:var(--muted);font-weight:400">· ${s.company}</span>` : ''}</div>
           <div class="charm-source">${s.politician||'Unknown'} · ${(s.disc_date||s.created_at||'').slice(0,10)}</div>
           <div class="charm-headline">${s.headline||s.ticker+' — Congressional disclosure'}</div>
           <div class="charm-snippet">${s.amount_range||'Amount not disclosed'} · ${s.staleness||'Unknown age'} · ${s.sector||'Unknown sector'}</div>
@@ -7292,6 +7296,7 @@ async function loadTraderActivity() {
         <div class="agent-row-icon" style="background:rgba(${c.rgb},0.12);border:1px solid rgba(${c.rgb},0.3);color:${c.color};font-weight:700">${ticker.slice(0,4)}</div>
         <div class="agent-row-body">
           <div class="agent-row-ticker">${ticker}<span class="spark-slot" data-ticker="${ticker.replace(/[^A-Z0-9.-]/gi,'')}"></span><span style="font-size:8px;font-weight:700;color:${c.color};margin-left:6px;letter-spacing:0.05em">${c.outcome}</span>${label ? `<span style="font-size:8px;color:var(--dim);margin-left:5px">\u00b7 ${label}</span>` : ''}</div>
+          ${(t.company && t.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${t.company}</div>` : ''}
           <div class="agent-row-sub">${summary}</div>
         </div>
         <div class="agent-row-right">
@@ -7368,6 +7373,7 @@ async function loadPlanning() {
           <div class="agent-row-icon" style="background:linear-gradient(135deg,rgba(0,245,212,0.15),rgba(0,245,212,0.05));border:1px solid rgba(0,245,212,0.2);color:var(--teal);font-weight:700">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}${corrBadge}</div>
+            ${(sig.company && sig.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${sig.company}</div>` : ''}
             <div class="agent-row-sub">${summary}</div>
             <div style="margin-top:3px;display:flex;align-items:center;gap:6px">
               <span style="font-size:8px;color:${staleColor}">${staleness}</span>
@@ -7389,6 +7395,7 @@ async function loadPlanning() {
           <div class="agent-row-icon" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);color:var(--muted)">${ticker.slice(0,4)}</div>
           <div class="agent-row-body">
             <div class="agent-row-ticker">${ticker}<span style="font-size:9px;color:var(--dim);font-weight:400;margin-left:4px">intel${stale}</span></div>
+            ${(sig.company && sig.company !== ticker) ? `<div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px;margin-top:1px">${sig.company}</div>` : ''}
             <div class="agent-row-sub">${summary}</div>
           </div>
           <div class="agent-row-right"><div class="conf-chip ${confCls}">${conf}</div></div>
