@@ -4551,77 +4551,73 @@ def api_portfolio_history():
         return jsonify({'history': [], 'days': days, 'error': str(e)})
 
 
-def _fetch_alpaca_account_view(customer_id: str) -> dict:
-    """Pull account-level P&L from Alpaca's /v2/account and
-    /v2/account/portfolio/history.  Returns:
-        {
-            "available":     bool,           # creds present + reachable
-            "equity":         float,         # current equity
-            "base_value":     float,         # starting equity for the period
-            "total_return":   float,         # equity - base_value
-            "total_return_pct": float,       # %
-            "period":         "1A" / "all" / etc.,
-        }
-    Failure modes (no creds, Alpaca 4xx/5xx, parse error) return
-    available=False with the rest zeroed.  Caller renders 'N/A' on
-    available=False.
+def _fetch_account_view_from_stored(db) -> dict:
+    """Account-level P&L from STORED data only — no live Alpaca calls.
 
-    Added 2026-04-28 for Performance tab Item 1 (B): account-level
-    P&L card distinct from the closed-trade Realized P&L.
+    Trader writes a portfolio_value snapshot via log_heartbeat() at the
+    end of every cycle (~30s during market hours).  We use:
+      * latest portfolio_value      → current equity
+      * earliest portfolio_value    → starting reference
+
+    Returns:
+        {
+            "available":     bool,
+            "equity":         float,
+            "base_value":     float,
+            "base_at":        ISO timestamp of the first snapshot,
+            "total_return":   float,
+            "total_return_pct": float,
+            "period":         "since first snapshot",
+        }
+    available=False when there are no portfolio_value snapshots yet
+    (new customer who hasn't had a trader run, or a customer who only
+    has the no-portfolio-value heartbeats from before the field was
+    added).  Caller renders 'N/A' on available=False.
+
+    Added 2026-04-28 (revision of the Alpaca-live version per operator
+    preference for stored data only).
     """
     out = {"available": False, "equity": 0.0, "base_value": 0.0,
-           "total_return": 0.0, "total_return_pct": 0.0, "period": "all"}
+           "base_at": "", "total_return": 0.0,
+           "total_return_pct": 0.0, "period": "since first snapshot"}
     try:
-        ak, sk = auth.get_alpaca_credentials(customer_id) if customer_id else (None, None)
-    except Exception as _e:
-        log.debug(f"alpaca_account_view: cred lookup failed: {_e}")
-        return out
-    if not ak or not sk:
-        return out
-    try:
-        import requests as _req
-        base_url = os.environ.get('ALPACA_BASE_URL',
-                                  'https://paper-api.alpaca.markets')
-        headers = {'APCA-API-KEY-ID': ak, 'APCA-API-SECRET-KEY': sk}
-        # Current account
-        r1 = _req.get(f"{base_url}/v2/account", headers=headers, timeout=8)
-        r1.raise_for_status()
-        acct = r1.json()
-        equity = float(acct.get('equity', 0) or 0)
-        # Historical equity series — period=all gives account-creation-to-now.
-        # Alpaca returns base_value as the starting equity for that period.
-        r2 = _req.get(
-            f"{base_url}/v2/account/portfolio/history",
-            params={"period": "all", "timeframe": "1D"},
-            headers=headers, timeout=8,
-        )
-        r2.raise_for_status()
-        hist = r2.json()
-        base_value = float(hist.get('base_value', 0) or 0)
-        # Some legacy paper accounts have base_value=0 (Alpaca didn't
-        # backfill for older accounts). Fall back to first non-null
-        # equity datapoint in the series.
-        if not base_value:
-            eq_series = hist.get('equity') or []
-            for v in eq_series:
-                if v is not None and v > 0:
-                    base_value = float(v)
-                    break
-        if not base_value:
-            base_value = equity  # nothing useful — total_return = 0
-        total_return     = equity - base_value
-        total_return_pct = (total_return / base_value * 100.0) if base_value else 0.0
-        return {
-            "available":         True,
-            "equity":             round(equity, 2),
-            "base_value":         round(base_value, 2),
-            "total_return":       round(total_return, 2),
-            "total_return_pct":   round(total_return_pct, 2),
-            "period":             "all",
-        }
+        with db.conn() as c:
+            row = c.execute("""
+                SELECT
+                    (SELECT portfolio_value FROM system_log
+                     WHERE portfolio_value IS NOT NULL AND portfolio_value > 0
+                     ORDER BY timestamp DESC LIMIT 1)  AS latest_value,
+                    (SELECT portfolio_value FROM system_log
+                     WHERE portfolio_value IS NOT NULL AND portfolio_value > 0
+                     ORDER BY timestamp ASC  LIMIT 1)  AS earliest_value,
+                    (SELECT timestamp FROM system_log
+                     WHERE portfolio_value IS NOT NULL AND portfolio_value > 0
+                     ORDER BY timestamp ASC  LIMIT 1)  AS earliest_at
+            """).fetchone()
     except Exception as e:
-        log.debug(f"alpaca_account_view: API call failed: {e}")
+        log.debug(f"account_view_from_stored: DB lookup failed: {e}")
         return out
+
+    if not row or row['latest_value'] is None:
+        return out
+
+    equity     = float(row['latest_value']  or 0)
+    base_value = float(row['earliest_value'] or equity)
+    base_at    = row['earliest_at'] or ''
+    if not base_value:
+        return out
+
+    total_return     = equity - base_value
+    total_return_pct = (total_return / base_value * 100.0) if base_value else 0.0
+    return {
+        "available":         True,
+        "equity":             round(equity, 2),
+        "base_value":         round(base_value, 2),
+        "base_at":            base_at,
+        "total_return":       round(total_return, 2),
+        "total_return_pct":   round(total_return_pct, 2),
+        "period":             "since first snapshot",
+    }
 
 
 @app.route('/api/performance-summary')
@@ -4739,11 +4735,12 @@ def api_performance_summary():
         best_trade = max(rows, key=lambda x: x['pnl']) if rows else None
         worst_trade = min(rows, key=lambda x: x['pnl']) if rows else None
 
-        # Account-level P&L (Alpaca equity vs starting balance).
+        # Account-level P&L from stored portfolio_value snapshots
+        # (trader writes one per cycle ~30s during market hours).
         # Distinct from closed-trade total_pnl — reflects open positions
         # too, so when winners are still open and losers cut, account is
-        # positive even if realized P&L is negative.
-        account_view = _fetch_alpaca_account_view(session.get('customer_id'))
+        # positive even if realized P&L is negative.  No live Alpaca call.
+        account_view = _fetch_account_view_from_stored(db)
 
         return jsonify({
             'total_pnl':      round(total_pnl, 2),
