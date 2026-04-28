@@ -32,7 +32,7 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 	- [ ] `entry_pattern` populates on next-opened position (Phase 5 lazy ALTER triggers)
 	- [ ] `entry_thesis` populates on next-opened position (Phase 7L)
 	- [ ] Planning drawer Live Snapshot loads ADR + sector ETF on real position
-	- [ ] News tracker chip appears on ticker-attached articles after dashboard polls run
+	- [x] News tracker chip appears on ticker-attached articles after dashboard polls run — verified 2026-04-28 (`trackerChip()` at portal.html:6413, wired into News page line 7597, positions/planning panels lines 6618/6656, watchlist line 7555). Per-article chip in planning drawer's "Recent news" section deliberately not added — drawer is ticker-specific, chip would be redundant on every card.
 - [ ] **Phase 7e deferred bucket** (~3-5h total when scheduled):
 	- [ ] Continuous trade-arc chart on History drawer (replaces 2-dot arc; needs Alpaca daily-bar fetch on drawer-open)
 	- [ ] User memos surviving close into `closed_positions` (schema add `user_memo TEXT`)

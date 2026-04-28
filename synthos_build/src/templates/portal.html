@@ -5583,7 +5583,13 @@ function renderPositions(positions) {
             const bits = [];
             const tsp = parseFloat(p.trail_stop_pct);
             if (!Number.isNaN(tsp) && tsp > 0) {
-              bits.push('<span title="Trailing stop distance">stop -' + (tsp*100).toFixed(1) + '%</span>');
+              // 2026-04-28: trail_stop_pct is stored as a percentage value
+              // (calculate_trail_stop in trader returns (amt/price)*100,
+              // and the schema comment confirms "percentage for display").
+              // Earlier render multiplied by 100 a SECOND time, producing
+              // "stop -243%" / "stop -491%" etc. across all positions.
+              // Display the stored value directly.
+              bits.push('<span title="Trailing stop distance">stop -' + tsp.toFixed(1) + '%</span>');
             }
             if (p.opened_at) {
               try {
