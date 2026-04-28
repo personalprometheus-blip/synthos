@@ -2702,7 +2702,7 @@ def index():
     # Grace period banner — shown when customer is past_due but within the 7-day window
     grace_warning = (session.get('access_reason') == 'grace_period')
 
-    return render_template(
+    rendered = render_template(
         'portal.html',
         status=skeleton_status,
         approvals=[],
@@ -2719,6 +2719,19 @@ def index():
         ea_enabled=EARLY_ACCESS_TOS_ENABLED,
         ea_tos_html=_EA_TOS_HTML,
     )
+    # 2026-04-28 — explicit no-cache on the dashboard HTML. Without this,
+    # browsers will serve a stale portal.html for hours after a deploy
+    # (today's symptom: drawer Validator tile rendering with old JS code
+    # path because the cached HTML predated the validator wiring).
+    # The /api/* endpoints always respond fresh, but if the HTML+JS is
+    # stale the new fields go unread. Static assets (logos, favicons,
+    # /api/ticker-logo) keep their long cache because those rarely
+    # change and are safe to reuse.
+    from flask import make_response as _mkresp
+    resp = _mkresp(rendered)
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
 
 
 @app.route('/api/set-mode', methods=['POST'])
@@ -4641,9 +4654,15 @@ def api_agent_pulse():
             },
         })
     except Exception as e:
+        # Include validator shape in the fallback so the drawer doesn't
+        # silently fall through to "UNKNOWN" / "—" rendering on any
+        # transient endpoint failure.
         return jsonify({'running': None, 'idle_status': None, 'queued_signals': 0, 'watching': 0,
                         'decisions_today': 0, 'regime': 'unknown', 'events': [],
-                        'agent_summary': [], 'error': str(e)})
+                        'agent_summary': [],
+                        'validator': {'verdict': 'UNKNOWN', 'restrictions': [],
+                                      'updated_at': None, 'fetch_error': str(e)[:80]},
+                        'error': str(e)})
 
 
 @app.route('/api/portfolio-history')
