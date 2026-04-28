@@ -602,6 +602,9 @@ CREATE INDEX IF NOT EXISTS idx_approvals_status      ON pending_approvals(status
 CREATE INDEX IF NOT EXISTS idx_approvals_queued      ON pending_approvals(queued_at);
 CREATE INDEX IF NOT EXISTS idx_news_feed_created     ON news_feed(created_at);
 CREATE INDEX IF NOT EXISTS idx_news_feed_ticker      ON news_feed(ticker);
+-- Note: the UNIQUE dedup index is created in _run_migrations() so it can
+-- soft-fail if a DB still has historical dupes (one-time cleanup script
+-- handles those, but failing schema setup on an old DB is too brittle).
 CREATE INDEX IF NOT EXISTS idx_screening_run         ON sector_screening(run_id);
 CREATE INDEX IF NOT EXISTS idx_screening_ticker      ON sector_screening(ticker);
 CREATE INDEX IF NOT EXISTS idx_screen_req_status     ON screening_requests(status);
@@ -1100,6 +1103,15 @@ class DB:
             # time a DB is opened. At the expected ~30-40 flags/day the
             # table stays under ~4k rows at steady state.
             "DELETE FROM signal_attribution_flags WHERE created_at < datetime('now','-90 days')",
+
+            # 2026-04-27 Patch B: hard backstop against duplicate news_feed
+            # rows. Day-bucketed so the same article on a NEW day still
+            # goes through. If the migration fails (DB still has historical
+            # dupes), the OperationalError handler below logs and continues
+            # — cleanup_news_feed_dupes.py addresses the legacy data, then
+            # the next DB open creates the index successfully.
+            ("CREATE UNIQUE INDEX IF NOT EXISTS idx_news_feed_dedup "
+             "ON news_feed(ticker, raw_headline, date(created_at))"),
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -1120,6 +1132,12 @@ class DB:
                     pass  # column already exists — skip silently
                 else:
                     log.warning(f"Migration skipped ({sql[:40]}): {e}")
+            except sqlite3.IntegrityError as e:
+                # CREATE UNIQUE INDEX raises this when existing rows already
+                # violate uniqueness. We intentionally let this slide so the
+                # rest of the schema migration can complete; the dup-cleanup
+                # script + next DB open handle it.
+                log.warning(f"Migration skipped ({sql[:40]}): {e}")
         c.close()
 
     def now(self):
@@ -2619,23 +2637,74 @@ class DB:
     # ── NEWS FEED ──────────────────────────────────────────────────────────
 
     def write_news_feed_entry(self, congress_member, ticker, signal_score,
-                               sentiment_score, raw_headline, metadata, source):
+                               sentiment_score, raw_headline, metadata, source,
+                               dedup_window_hours: int = 24):
         """
         Write a signal to the news_feed table for portal display.
         Called by Scout for every signal processed — QUEUE, WATCH, and DISCARD alike.
+
+        Dedup: on (ticker, raw_headline) within `dedup_window_hours`. If a
+        matching row exists in that window, the INSERT is suppressed and
+        we log the suppression at INFO. Pass dedup_window_hours=0 to bypass
+        (e.g. for forced re-write / replay).
+
+        Returns (inserted: bool, row_id: int | None).
+          inserted=True, row_id=<new row id>           — fresh insert
+          inserted=False, row_id=<existing row id>     — dup suppressed
+          inserted=False, row_id=None                  — dedup lookup failed (still inserted)
+
+        Added 2026-04-27 to fix the 50% dup leak observed in the audit
+        (Patch B). Three of the four callers in retail_news_agent.py
+        previously had no dedup at all. Centralizing here means every
+        caller benefits without each having to repeat the lookup logic.
         """
-        with self.conn() as c:
-            c.execute("""
-                INSERT INTO news_feed
-                    (timestamp, congress_member, ticker, signal_score, sentiment_score,
-                     raw_headline, metadata, source, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
-            """, (
-                self.now(), congress_member, ticker, signal_score, sentiment_score,
-                raw_headline,
-                json.dumps(metadata) if metadata else None,
-                source, self.now()
-            ))
+        existing_id = None
+        if dedup_window_hours and dedup_window_hours > 0 and raw_headline:
+            try:
+                with self.conn() as c:
+                    row = c.execute(
+                        f"""SELECT id FROM news_feed
+                            WHERE ticker = ?
+                              AND raw_headline = ?
+                              AND created_at >= datetime('now', '-{int(dedup_window_hours)} hours')
+                            ORDER BY created_at DESC LIMIT 1""",
+                        (ticker, raw_headline)
+                    ).fetchone()
+                    if row:
+                        existing_id = row[0]
+            except Exception as _e:
+                log.debug(f"news_feed dedup lookup failed (will allow insert): {_e}")
+
+        if existing_id is not None:
+            log.info(
+                f"[NEWS-DEDUP] suppressed insert: ticker={ticker} "
+                f"existing_id={existing_id} headline={(raw_headline or '')[:60]!r}"
+            )
+            return False, existing_id
+
+        try:
+            with self.conn() as c:
+                cur = c.execute("""
+                    INSERT INTO news_feed
+                        (timestamp, congress_member, ticker, signal_score, sentiment_score,
+                         raw_headline, metadata, source, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """, (
+                    self.now(), congress_member, ticker, signal_score, sentiment_score,
+                    raw_headline,
+                    json.dumps(metadata) if metadata else None,
+                    source, self.now()
+                ))
+                return True, cur.lastrowid
+        except sqlite3.IntegrityError as _e:
+            # Hit the UNIQUE INDEX backstop — the app-level window above
+            # missed but the SQLite day-bucket caught it. Return as
+            # dup-suppressed; the existing row is fine to live with.
+            log.info(
+                f"[NEWS-DEDUP] index backstop tripped: ticker={ticker} "
+                f"headline={(raw_headline or '')[:60]!r} ({_e})"
+            )
+            return False, None
 
     def get_news_feed(self, limit=50):
         """Return recent news feed entries for portal display, newest first."""
