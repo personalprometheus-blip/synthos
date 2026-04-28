@@ -207,6 +207,55 @@ EXPECTED_AGENTS = [
 ]
 
 
+# Phase H+ (2026-04-28) — agents whose state lives in per-customer DBs
+# rather than the shared market-intel DB. The 2026-04-27 architectural
+# change moved fault_detection's _master_db() to get_shared_db(), but
+# the trader has always written its heartbeat / AGENT_COMPLETE per
+# customer (one row per customer-DB, never to shared). Result: gate1
+# and gate7 read 0 trader activity from the shared DB and flagged
+# CRITICAL even when the trader was running normally. That validator
+# NO_GO was the root cause of the 4-day "no trades" loop. Aggregate
+# across all active customer DBs for these agents.
+PER_CUSTOMER_AGENTS = frozenset({"trade_logic_agent"})
+
+
+def _scan_per_customer_for_event(event: str, agent_name: str,
+                                 since_iso: str | None = None) -> tuple[str | None, int]:
+    """Find the most recent (timestamp) and count of system_log events
+    matching `event` + `agent_name` across ALL active customer DBs.
+    Returns (latest_timestamp_iso_or_None, total_count). Used by
+    gate1_liveness + gate7_schedule for the per-customer agents."""
+    latest_ts = None
+    total = 0
+    try:
+        for cid in _get_active_customer_ids():
+            try:
+                cdb = get_customer_db(cid)
+                with cdb.conn() as c:
+                    if since_iso:
+                        rows = c.execute(
+                            "SELECT timestamp FROM system_log "
+                            "WHERE event=? AND agent=? AND timestamp >= ?",
+                            (event, agent_name, since_iso)
+                        ).fetchall()
+                    else:
+                        rows = c.execute(
+                            "SELECT timestamp FROM system_log "
+                            "WHERE event=? AND agent=?",
+                            (event, agent_name)
+                        ).fetchall()
+                for r in rows:
+                    total += 1
+                    ts = r['timestamp'] if hasattr(r, 'keys') else r[0]
+                    if not latest_ts or ts > latest_ts:
+                        latest_ts = ts
+            except Exception as e:
+                log.debug(f"per-customer scan {cid} {event}/{agent_name}: {e}")
+    except Exception as e:
+        log.warning(f"_scan_per_customer_for_event({event},{agent_name}): {e}")
+    return latest_ts, total
+
+
 def gate1_agent_liveness(report: FaultReport, db):
     """Check last heartbeat timestamp for each known agent."""
     log.info("[GATE 1] Agent liveness check")
@@ -220,14 +269,19 @@ def gate1_agent_liveness(report: FaultReport, db):
         else:
             hb_name, complete_name, agent_label = entry
             stale_threshold = HEARTBEAT_STALE_MINUTES
-        with db.conn() as c:
-            # Match exact heartbeat agent name
-            row = c.execute(
-                "SELECT timestamp, details FROM system_log "
-                "WHERE event='HEARTBEAT' AND agent=? "
-                "ORDER BY timestamp DESC LIMIT 1",
-                (hb_name,)
-            ).fetchone()
+        if hb_name in PER_CUSTOMER_AGENTS:
+            latest_ts, _ = _scan_per_customer_for_event(
+                event='HEARTBEAT', agent_name=hb_name
+            )
+            row = {'timestamp': latest_ts, 'details': ''} if latest_ts else None
+        else:
+            with db.conn() as c:
+                row = c.execute(
+                    "SELECT timestamp, details FROM system_log "
+                    "WHERE event='HEARTBEAT' AND agent=? "
+                    "ORDER BY timestamp DESC LIMIT 1",
+                    (hb_name,)
+                ).fetchone()
 
         code_key = hb_name.upper().replace(' ', '_')
 
@@ -777,15 +831,26 @@ def gate7_schedule_compliance(report: FaultReport, db):
 
     today_str = now_et.strftime('%Y-%m-%d')
 
-    for complete_name, display_label in EXPECTED_DAILY_COMPLETIONS:
-        with db.conn() as c:
-            row = c.execute(
-                "SELECT COUNT(*) as cnt FROM system_log "
-                "WHERE event='AGENT_COMPLETE' AND agent=? AND timestamp LIKE ?",
-                (complete_name, f"{today_str}%")
-            ).fetchone()
+    # Phase H+ map: which AGENT_COMPLETE names live in per-customer DBs.
+    # The trader writes its AGENT_COMPLETE to each customer's DB, never
+    # the shared one — so we have to aggregate across all customer DBs.
+    PER_CUSTOMER_COMPLETION = {"Trade Logic"}
 
-        completions = row['cnt'] if row else 0
+    for complete_name, display_label in EXPECTED_DAILY_COMPLETIONS:
+        if complete_name in PER_CUSTOMER_COMPLETION:
+            _, completions = _scan_per_customer_for_event(
+                event='AGENT_COMPLETE',
+                agent_name=complete_name,
+                since_iso=today_str,
+            )
+        else:
+            with db.conn() as c:
+                row = c.execute(
+                    "SELECT COUNT(*) as cnt FROM system_log "
+                    "WHERE event='AGENT_COMPLETE' AND agent=? AND timestamp LIKE ?",
+                    (complete_name, f"{today_str}%")
+                ).fetchone()
+            completions = row['cnt'] if row else 0
 
         if completions == 0:
             severity = Severity.WARNING if now_et.hour < 12 else Severity.CRITICAL
