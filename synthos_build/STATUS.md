@@ -5,7 +5,7 @@
 > blockers that existed then. Everything below is preserved for
 > audit trail; none of it is the live state of the system.
 >
-> **Current state (2026-04-25):** The retail Pi 5 is deployed and
+> **Current state (2026-04-27):** The retail Pi 5 is deployed and
 > running on NVMe storage; the trading stack is in Phase 6 paper mode
 > with Phase C refactor, full sentiment-chain wiring audit, and
 > pre-launch security audit complete. The single source of truth for
@@ -19,6 +19,29 @@
 > - `docs/security_review.md` (pre-launch security roadmap)
 >
 > **Recent landmark changes not reflected below:**
+> - **Trader-visibility audit (2026-04-27)**: verified Gate 5 actually
+>   consumes every screener input wired into the chain. Three landings:
+>   (1) sector_screener.combined_score re-weighted 40/40/0/20 → 30/30/30/10
+>   so momentum is included in candidate ranking; (2) ret_3m raw 3-month
+>   return now persisted on sector_screening + surfaced on portal screener
+>   page + planning drawer (lazy ALTER + calc_momentum_score returning
+>   tuple + write_screening_run threading it through); (3) trader
+>   gate5_signal_score emits a single consolidated decision_log entry per
+>   evaluation containing sector, combined, news, sentiment, momentum,
+>   ret_3m, congressional_flag, screener_adj, screener_stamp_adj —
+>   after-the-fact audit can verify exactly what the trader saw at
+>   decision time. Plus: intentional sentiment dual-write
+>   (sector_screening.sentiment_score per-ticker for display vs
+>   signals.sentiment_score per-signal for Gate 5) documented inline at
+>   the call site. Earlier same day: MRVL trail-stop -491% display bug
+>   fix (drop *100 in render path), settlement-lag race in Gate 0 orphan
+>   adoption (5-min recently-closed window guard), rotation-at-loss
+>   reversed (winners-only per user directive), BIL excluded from Gate 10
+>   (sync_bil_reserve owns its lifecycle), CBOE put_call_ratio caching +
+>   None-safe formatting (had been pinning every screener-sentiment
+>   fulfilment to 0.5 since CBOE Cloudflare block), customer-activity
+>   report engine on cmd portal /customer-activity, P&L report polish
+>   (total-from-zero, sign rendering, long-term, cross-account).
 > - pi5 16GB deployed to NVMe (2026-04-18)
 > - pi2w_monitor re-enabled as external watchdog (2026-04-24)
 > - Phase C (D1-D6) refactor: trader `run()` 897→15 lines, portal

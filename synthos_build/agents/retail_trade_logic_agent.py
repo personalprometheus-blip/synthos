@@ -1892,12 +1892,18 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     else:
         rel_str = None
 
-    # Sector screener boost — if this ticker was screened and scored well, nudge the score
+    # Sector screener boost — if this ticker was screened and scored well, nudge the score.
+    # 2026-04-28: capture the full screener row so the consolidated decision-log
+    # entry below shows every screener-derived input the trader considered for
+    # this signal (combined_score, news_signal, sentiment_signal, momentum_score,
+    # ret_3m, congressional_flag).  Visibility only; no scoring change.
     screening_adj = 0.0
     screening_info = "not screened"
+    scr_row: dict = {}
     try:
         scr = _shared_db().get_screening_score(ticker)
         if scr:
+            scr_row = scr  # captured for decision-log
             cs = scr.get('combined_score') or 0.5
             cong = scr.get('congressional_flag', 'none')
             if cs >= 0.7:
@@ -1931,6 +1937,7 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
     # a null-safe fallback to the legacy +0.02 boolean bonus if the
     # column hasn't been populated yet (first run after migration).
     scr_score = signal.get('screener_score')
+    screener_stamp_adj = 0.0
     if scr_score is not None:
         try:
             # (score - 0.5) × 0.06 →  range is roughly -0.03 .. +0.03
@@ -2004,16 +2011,48 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
 
     passes = final_score >= C.MIN_CONFIDENCE_SCORE
 
+    # 2026-04-28: consolidated decision-log entry.  Captures every input
+    # gate5 considered for this signal — signal-row fields, screener
+    # lookup result, screener-score stamp, news_flags modifier,
+    # market_state modifier, all weighted components, and the final
+    # score.  No behavior change; this gives the operator a single
+    # auditable record per signal review.
+    #
+    # Entries are persisted to signal_decisions on commit and visible
+    # via the operator portal's signal-decisions view (when wired up).
+    def _fmt(v, fmt='{:.2f}'):
+        return fmt.format(v) if isinstance(v, (int, float)) else (v if v is not None else '—')
+    scr_combined = scr_row.get('combined_score')
+    scr_news_sig = scr_row.get('news_signal')
+    scr_news_sc  = scr_row.get('news_score')
+    scr_sent_sig = scr_row.get('sentiment_signal')
+    scr_sent_sc  = scr_row.get('sentiment_score')
+    scr_mom      = scr_row.get('momentum_score')
+    scr_ret3m    = scr_row.get('ret_3m')
+    scr_cong     = scr_row.get('congressional_flag', 'none')
+    scr_sector   = scr_row.get('sector')
     decision_log.gate("5_SIGNAL_SCORE", f"{final_score:.4f}", {
         "ticker":             ticker,
+        # ── Component scores from the signal row ──
         "tier_score":         f"{tier_score:.2f} × {W['source_tier']}",
         "politician_weight":  f"{pol_weight:.2f} × {W['politician_weight']}",
         "staleness_score":    f"{stale_score:.2f} × {W['staleness']}",
         "interrogation_score":f"{interr_score:.2f} × {W['interrogation']}",
         "sentiment_score":    f"{sentiment_score:.2f} × {W['sentiment']}",
-        "screening_adj":      f"{screening_adj:+.2f} ({screening_info})",
+        # ── Screener lookup (per-ticker, latest run) ──
+        "screener_sector":    scr_sector or "—",
+        "screener_combined":  _fmt(scr_combined),
+        "screener_news":      f"{scr_news_sig or '—'} ({_fmt(scr_news_sc)})",
+        "screener_sent":      f"{scr_sent_sig or '—'} ({_fmt(scr_sent_sc)})",
+        "screener_momentum":  _fmt(scr_mom),
+        "screener_3m_return": (f"{scr_ret3m*100:+.1f}%" if scr_ret3m is not None else "—"),
+        "screener_congress":  scr_cong,
+        "screener_adj":       f"{screening_adj:+.2f} ({screening_info})",
+        # ── Stamp adjustments ──
+        "screener_stamp_adj": f"{screener_stamp_adj:+.4f}",
         "news_flags_mod":     f"{news_modifier:+.3f} ({news_modifier_info})",
         "market_state_mod":   f"{market_state_mod:+.3f} ({market_state_info})",
+        # ── Final ──
         "composite_score":    f"{final_score:.4f}",
         "rel_strength_5d":    f"{rel_str*100:.2f}%" if rel_str is not None else "N/A",
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",

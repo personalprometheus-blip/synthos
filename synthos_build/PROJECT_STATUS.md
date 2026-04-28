@@ -13,8 +13,25 @@
 > `docs/trade_lifecycle.md`, `docs/backlog.md`.
 >
 > **Live phase pointer:** `data/project_status.json` (v2.3,
-> 2026-04-25). 11 phases tracked there — phases 1-7L complete,
+> 2026-04-27). 11 phases tracked there — phases 1-7L complete,
 > phase 8 (Paper Trading Review) up next.
+>
+> **2026-04-27 — Trader-visibility audit:** verified Gate 5 actually
+> consumes every screener input that was wired in. Re-weighted
+> combined_score 40/40/0/20 → 30/30/30/10 so momentum_score finally
+> contributes to candidate ranking. ret_3m raw 3-month return now
+> persisted + surfaced on screener page + planning drawer. Gate 5
+> decision_log emits a single consolidated entry with every
+> screener field considered (visibility-only, zero behavior change).
+> Documented intentional sentiment dual-write
+> (sector_screening.sentiment_score per-ticker vs
+> signals.sentiment_score per-signal — same detect_cascade
+> computation, two cardinalities). Same day earlier: MRVL trail-stop
+> display bug, settlement-lag race in Gate 0, rotation-at-loss
+> reversed (winners-only), BIL excluded from Gate 10, CBOE caching +
+> None-safe formatting fix (had been pinning every screener-sentiment
+> fulfilment to 0.5 since CBOE Cloudflare block), customer-activity
+> report engine on cmd portal /customer-activity, P&L report polish.
 
 ---
 

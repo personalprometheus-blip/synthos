@@ -1,7 +1,7 @@
 {
   "meta": {
     "project": "Synthos",
-    "last_updated": "2026-04-25",
+    "last_updated": "2026-04-27",
     "current_phase": 7,
     "total_phases": 11,
     "version": "2.3",
@@ -14,6 +14,8 @@
       "ssh2.synth-cloud.com": "Pi 5 port 22 \u2014 Cloudflare Access"
     },
     "recent_milestones": [
+      "2026-04-27 \u2014 Trader-visibility audit: verified Gate 5 actually consumes every screener-derived input. Three changes landed. (1) sector_screener.combined_score re-weighted 40/40/0/20 \u2192 30/30/30/10 so momentum is included in candidate ranking (was being computed but never reaching the rank). (2) ret_3m raw 3-month return now persisted on sector_screening + surfaced on portal screener page + planning drawer. (3) Trader Gate 5 emits a single consolidated decision_log entry per evaluation containing every screener field considered (sector, combined, news, sentiment, momentum, ret_3m, congressional, screener_adj, screener_stamp_adj) \u2014 visibility-only, zero behavior change. Bonus: documented intentional sentiment dual-write in retail_market_sentiment_agent.py (sector_screening.sentiment_score per-ticker for screener display + signals.sentiment_score per-signal for trader Gate 5 \u2014 same detect_cascade output, two cardinalities).",
+      "2026-04-27 \u2014 Earlier same day: MRVL trail-stop -491% display bug, settlement-lag race in Gate 0 orphan adoption, rotation-at-loss reversed (winners-only), BIL excluded from Gate 10, CBOE put_call_ratio caching + None-safe formatting (had been pinning every screener-sentiment fulfilment to 0.5 since CBOE Cloudflare block), customer-activity report engine on cmd portal /customer-activity, P&L report polish (total-from-zero, sign rendering, long-term, cross-account).",
       "2026-04-24/25 \u2014 Pre-launch security audit closed 2 CRITICAL + 2 HIGH customer\u2192admin escalation paths; added /reset-password handler; persistent login rate limiter (login_attempts table); two-step verify-new-email flow; Phase 4.5 file-upload audit 21/21 pass.",
       "2026-04-25 \u2014 Attribution patch enforcement: TICKER_REMAP + TICKER_REJECT flipped True after 4.5-day shadow review. News-agent shadow data: 41% no_match noise, 33% wrong-ticker remaps, 13% of remaps reaching VALIDATED+.",
       "2026-04-25 \u2014 Customer Dashboard UX overhaul (~20 commits, Phase 5\u201e7L). Sparklines, four specialized slide-out drawers (Position / History / Approval / Planning), Signal Trust widget replacing internal-score leak, lock chip + bot status light, news + watchlist page redesigns, /api/ticker-news + /api/ticker-context endpoints, watchlist wiring fix (was reading news_feed instead of signals table). Net diff across 11 phase commits: ~2,700 lines changed, 4 dead-code paths removed, 8 punch-list cleanups."

@@ -2722,9 +2722,25 @@ def _handle_screening_requests(db):
                 score=score,
                 notes=notes,
             )
-            # Also stamp any QUEUED signals for this ticker with the sentiment
-            # score — gives the trader a scoring boost at Gate 5 for signals
-            # that have been sentiment-evaluated.
+            # Intentional dual-write — same `score` lands in two tables, each
+            # serving a different consumer:
+            #
+            #   sector_screening.sentiment_score  (written above by
+            #     fulfill_screening_request)        — per-ticker, screener
+            #     display + composite-score aggregation. Covers every
+            #     screener candidate, regardless of whether a tradable
+            #     signal exists.
+            #
+            #   signals.sentiment_score           (written here by
+            #     stamp_signals_sentiment)         — per-signal, consumed
+            #     by the trader at Gate 5 (signal_score). Only stamps rows
+            #     that have a QUEUED/active signal for this ticker.
+            #
+            # Both come from the same detect_cascade() computation, so
+            # they're always in sync — never genuinely diverging values.
+            # The split exists because the two tables live on different
+            # cardinalities (per-ticker vs per-signal) and feed different
+            # downstream code paths.
             try:
                 db.stamp_signals_sentiment(ticker, score)
             except Exception as _e:

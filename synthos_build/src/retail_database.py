@@ -3676,10 +3676,18 @@ class DB:
             return summary
 
     def get_screening_score(self, ticker):
-        """Return the most recent screening data for a ticker, or None."""
+        """Return the most recent screening data for a ticker, or None.
+
+        2026-04-28: extended to include news_score, sentiment_score,
+        momentum_score, and ret_3m so gate5_signal_score can log a
+        consolidated view of every screener-derived input it considered
+        (decision-log enrichment — visibility only, no behavior change).
+        """
         with self.conn() as c:
             row = c.execute("""
-                SELECT combined_score, news_signal, sentiment_signal,
+                SELECT combined_score, news_signal, news_score,
+                       sentiment_signal, sentiment_score,
+                       momentum_score, ret_3m,
                        congressional_flag, sector
                 FROM sector_screening
                 WHERE ticker = ?
