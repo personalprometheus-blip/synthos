@@ -43,13 +43,11 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db
+from retail_database import get_db, get_customer_db, get_shared_db
 
 def _master_db():
-    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
-    if owner_id:
-        return get_customer_db(owner_id)
-    return get_db()
+    """2026-04-27: returns the shared market-intel DB. See get_shared_db()."""
+    return get_shared_db()
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
 ALPACA_API_KEY  = os.environ.get('ALPACA_API_KEY', '')

@@ -43,7 +43,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, get_shared_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 # ANTHROPIC_API_KEY removed — News agent uses no LLM in classification decisions.
@@ -56,18 +56,18 @@ ALPACA_DATA_URL      = "https://data.alpaca.markets"
 _CUSTOMER_ID: 'str | None' = None
 
 def _db():
-    """Return per-customer signals.db if --customer-id was given, else the master customer DB.
-    Shared agents (news/sentiment/screener) write to the master customer's DB
-    so all customers can read from a single intelligence source."""
+    """Return per-customer signals.db if --customer-id was given (backfill /
+    test mode), else the shared market-intelligence DB.
+
+    2026-04-27: switched the default path from get_customer_db(OWNER_CUSTOMER_ID)
+    to get_shared_db().  Shared intelligence (news/sentiment/screener output)
+    is no longer written into a specific customer's DB — every agent and
+    every customer reads from a single shared file.  See get_shared_db()
+    docstring for the architectural rationale."""
     if _CUSTOMER_ID:
         from retail_database import get_customer_db
         return get_customer_db(_CUSTOMER_ID)
-    # Default to master customer DB (OWNER_CUSTOMER_ID) for shared intelligence
-    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
-    if owner_id:
-        from retail_database import get_customer_db
-        return get_customer_db(owner_id)
-    return get_db()
+    return get_shared_db()
 ET                   = ZoneInfo("America/New_York")
 MAX_RETRIES          = 3
 REQUEST_TIMEOUT      = 10

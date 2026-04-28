@@ -4481,6 +4481,28 @@ def get_customer_db(customer_id: str) -> 'DB':
     return DB(path=os.path.join(customer_dir, 'signals.db'))
 
 
+def get_shared_db() -> 'DB':
+    """
+    Return the shared market-intelligence DB.
+
+    Used by every agent that produces non-customer-specific data:
+      news, sentiment, macro regime, sector screener, market state,
+      validator, bias detection, fault detection, candidate generator,
+      sector backfill, price poller.
+
+    Backed by user/signals.db (same file get_db() returns).  Introduced
+    2026-04-27 to replace the prior pattern of routing shared writes
+    through get_customer_db(OWNER_CUSTOMER_ID), which:
+      - coupled market intelligence retention to the owner customer's lifecycle
+      - made every other customer read across a customer-DB boundary for news
+      - made the news_feed dedup window per-owner-DB instead of per-system
+
+    Renaming the underlying file path (e.g. data/market_intel.db) is a
+    follow-up patch — change here, agents stay untouched.
+    """
+    return get_db()
+
+
 # ── SELF-TEST ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
     print("Running database self-test...")

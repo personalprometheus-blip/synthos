@@ -40,12 +40,19 @@ logging.basicConfig(
 log = logging.getLogger('price_poller')
 
 ET = ZoneInfo("America/New_York")
+# OWNER_CUSTOMER_ID is retained as the customer identity for owner-scoped
+# Alpaca creds (see _get_alpaca_creds_for_customer below) — it no longer
+# determines where shared market-intel data is stored.
 MASTER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
 CUSTOMERS_DIR = os.path.join(_DATA, 'customers')
+# 2026-04-27: shared DB path moved off the owner customer's signals.db
+# onto the system-wide user/signals.db (same file get_shared_db() returns).
+# Live prices, screener output, and signals all live here now.
+_SHARED_DB_PATH = os.path.join(os.path.dirname(_DIR), 'user', 'signals.db')
 
 
 def _shared_db_path():
-    return os.path.join(CUSTOMERS_DIR, MASTER_CID, 'signals.db')
+    return _SHARED_DB_PATH
 
 
 def _ensure_table(db):
@@ -323,17 +330,12 @@ def run():
 
     # Post a heartbeat so fault detection's GATE1_LIVENESS check can see us.
     # Price poller runs every 60s from the daemon, so the default
-    # HEARTBEAT_STALE_MINUTES (45) is comfortable. Fault detection reads
-    # heartbeats from the OWNER customer DB (not master signals.db) — write
-    # to both in case the env is set up differently in dev vs prod.
+    # HEARTBEAT_STALE_MINUTES (45) is comfortable.
+    # 2026-04-27: heartbeats now go to the shared DB (same place fault
+    # detection reads from after the get_shared_db() routing change).
     try:
-        import os as _os
-        from retail_database import get_db, get_customer_db
-        owner_id = _os.environ.get('OWNER_CUSTOMER_ID', '')
-        if owner_id:
-            get_customer_db(owner_id).log_heartbeat("price_poller", "OK")
-        else:
-            get_db().log_heartbeat("price_poller", "OK")
+        from retail_database import get_shared_db
+        get_shared_db().log_heartbeat("price_poller", "OK")
     except Exception as _e:
         log.debug(f"price_poller heartbeat write failed: {_e}")
 

@@ -201,9 +201,11 @@ def _db():
 _OWNER_CID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
 
 def _shared_db():
-    """Return the master/owner customer DB for shared data (signals, news, intel)."""
-    from retail_database import get_customer_db
-    return get_customer_db(_OWNER_CID)
+    """Return the shared market-intelligence DB (signals, news, intel).
+    2026-04-27: was previously get_customer_db(_OWNER_CID).  See
+    retail_database.get_shared_db() for the architectural rationale."""
+    from retail_database import get_shared_db
+    return get_shared_db()
 
 
 def _mark_signal_evaluated(signal_id, reason: str = ''):

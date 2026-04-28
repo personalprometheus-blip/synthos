@@ -35,10 +35,9 @@ MASTER_CUSTOMER_ID = os.environ.get("OWNER_CUSTOMER_ID", "")
 
 
 def _shared_db_path() -> Path:
-    if MASTER_CUSTOMER_ID:
-        p = SYNTHOS_HOME / "data" / "customers" / MASTER_CUSTOMER_ID / "signals.db"
-        if p.exists():
-            return p
+    """Path to the shared market-intelligence DB.
+    2026-04-27: was previously routing through OWNER_CUSTOMER_ID's customer
+    DB.  See retail_database.get_shared_db() for the rationale."""
     return SYNTHOS_HOME / "user" / "signals.db"
 
 

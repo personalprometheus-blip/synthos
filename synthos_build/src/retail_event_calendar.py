@@ -279,7 +279,7 @@ if __name__ == '__main__':
     from pathlib import Path
     _ROOT_DIR = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(_ROOT_DIR / 'src'))
-    from retail_database import get_customer_db  # noqa: E402
-    owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
-    summary = refresh_earnings_calendar(get_customer_db(owner))
+    # 2026-04-27: earnings_cache lives in the shared DB now.
+    from retail_database import get_shared_db  # noqa: E402
+    summary = refresh_earnings_calendar(get_shared_db())
     print(summary)

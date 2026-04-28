@@ -46,7 +46,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET = ZoneInfo("America/New_York")
@@ -149,10 +149,11 @@ class FaultReport:
 # ── DB HELPERS ────────────────────────────────────────────────────────────
 
 def _master_db():
-    """Shared intelligence DB (owner customer)."""
-    if OWNER_CUSTOMER_ID:
-        return get_customer_db(OWNER_CUSTOMER_ID)
-    return get_db()
+    """Shared market-intelligence DB.
+    2026-04-27: was previously get_customer_db(OWNER_CUSTOMER_ID).  See
+    retail_database.get_shared_db() for the architectural rationale.
+    Per-customer findings still go to _customer_db() below."""
+    return get_shared_db()
 
 
 def _customer_db(customer_id=None):

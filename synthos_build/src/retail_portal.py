@@ -1796,15 +1796,18 @@ def sso_login():
 
 
 
-# Master customer ID — shared agents write here; all customers read market data from this DB
+# OWNER_CUSTOMER_ID retained for owner-identity uses (admin alerts, owner notifications);
+# it no longer routes shared market data — see _shared_db() below.
 _MASTER_CUSTOMER_ID = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
 
 def _shared_db():
-    """Return the master customer's signals.db for shared market data (news, signals, screening).
-    All customers read intelligence from this single source."""
+    """Return the shared market-intelligence DB (news, signals, screening, prices).
+    2026-04-27: was previously get_customer_db(_MASTER_CUSTOMER_ID).  See
+    retail_database.get_shared_db() for the architectural rationale.
+    All customers read shared intelligence from this single source."""
     sys.path.insert(0, PROJECT_DIR)
-    from retail_database import get_customer_db
-    return get_customer_db(_MASTER_CUSTOMER_ID)
+    from retail_database import get_shared_db
+    return get_shared_db()
 
 def _customer_db():
     """Return the signals.db instance for the currently logged-in customer."""

@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
 from retail_sector_map import HARDCODED_MAP, CASH_RESERVE
 
 
@@ -61,7 +61,9 @@ log = logging.getLogger('sector_backfill')
 
 
 def _shared_db():
-    return get_customer_db(OWNER_CID)
+    """2026-04-27: returns the shared market-intel DB instead of routing
+    through OWNER_CID's customer DB.  See retail_database.get_shared_db()."""
+    return get_shared_db()
 
 
 def _seed_hardcoded_map(db):

@@ -113,15 +113,14 @@ _ack_history = defaultdict(list)   # ticker → [timestamp, ...]
 
 # ── HEARTBEAT WRITER ──────────────────────────────────────────────────────
 def _post_heartbeat(accepted: int, rejected: int) -> None:
-    """Write a HEARTBEAT row to the owner customer DB (where fault detection
-    reads from). Silent on failure — heartbeat is a diagnostic signal, not
-    a business rule, so a brief DB hiccup shouldn't crash the listener."""
+    """Write a HEARTBEAT row to the shared DB (where fault detection reads
+    from after the 2026-04-27 routing change). Silent on failure —
+    heartbeat is a diagnostic signal, not a business rule, so a brief DB
+    hiccup shouldn't crash the listener."""
     try:
         sys.path.insert(0, str(BASE_DIR))
-        from retail_database import get_db, get_customer_db
-        owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
-        target = get_customer_db(owner_id) if owner_id else get_db()
-        target.log_heartbeat(
+        from retail_database import get_shared_db
+        get_shared_db().log_heartbeat(
             "interrogation_listener",
             "OK",
             portfolio_value=None,

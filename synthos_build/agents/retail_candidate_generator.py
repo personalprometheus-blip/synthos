@@ -38,7 +38,7 @@ from pathlib import Path
 _ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT_DIR / 'src'))
 
-from retail_database import get_customer_db  # noqa: E402
+from retail_database import get_customer_db, get_shared_db  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
 
@@ -72,8 +72,10 @@ MAX_TOTAL           = 30      # global cap per run
 
 
 def _shared_db():
-    """Master/owner customer DB — same pattern as other agents."""
-    return get_customer_db(_OWNER_CID)
+    """Shared market-intel DB.
+    2026-04-27: was previously get_customer_db(OWNER_CUSTOMER_ID).  See
+    retail_database.get_shared_db() for the architectural rationale."""
+    return get_shared_db()
 
 
 def _latest_screener_run(db) -> str | None:

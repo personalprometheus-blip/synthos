@@ -46,13 +46,13 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
 
 def _master_db():
-    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
-    if owner_id:
-        return get_customer_db(owner_id)
-    return get_db()
+    """2026-04-27: returns the shared market-intel DB. Was previously routing
+    through get_customer_db(OWNER_CUSTOMER_ID) which coupled shared output
+    to the owner customer's DB.  See retail_database.get_shared_db()."""
+    return get_shared_db()
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET                = ZoneInfo("America/New_York")

@@ -218,6 +218,7 @@ if __name__ == '__main__':
     )
     _ROOT_DIR = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(_ROOT_DIR / 'src'))
-    from retail_database import get_customer_db  # noqa: E402
-    summary = refresh(get_customer_db(_OWNER_CID))
+    # 2026-04-27: tradable_assets cache lives in the shared DB now.
+    from retail_database import get_shared_db  # noqa: E402
+    summary = refresh(get_shared_db())
     print(summary)

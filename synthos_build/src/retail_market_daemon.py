@@ -569,9 +569,9 @@ def run_tradable_refresh():
     log.info("[TRADABLE REFRESH] Starting")
     try:
         from retail_tradable_cache import refresh as _tradable_refresh  # noqa: E402
-        from retail_database import get_customer_db  # noqa: E402
-        owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
-        summary = _tradable_refresh(get_customer_db(owner))
+        # 2026-04-27: tradable_assets cache lives in the shared DB now.
+        from retail_database import get_shared_db  # noqa: E402
+        summary = _tradable_refresh(get_shared_db())
         log.info(
             f"[TRADABLE REFRESH] Complete — fetched={summary.get('fetched', 0)} "
             f"tradable={summary.get('tradable', 0)}"
@@ -591,9 +591,9 @@ def run_earnings_refresh():
     log.info("[EARNINGS REFRESH] Starting")
     try:
         from retail_event_calendar import refresh_earnings_calendar  # noqa: E402
-        from retail_database import get_customer_db  # noqa: E402
-        owner = os.environ.get('OWNER_CUSTOMER_ID', '30eff008-c27a-4c71-a788-05f883e4e3a0')
-        summary = refresh_earnings_calendar(get_customer_db(owner))
+        # 2026-04-27: earnings_cache lives in the shared DB now.
+        from retail_database import get_shared_db  # noqa: E402
+        summary = refresh_earnings_calendar(get_shared_db())
         log.info(
             f"[EARNINGS REFRESH] Complete — "
             f"days={summary['days_scanned']} tickers={summary['tickers_seen']} "
@@ -836,11 +836,10 @@ def promote_validated_signals():
     """
     log.info("[PROMOTER] Stamping validator + promoting signals")
     try:
-        from retail_database import get_customer_db
-        if not OWNER_CUSTOMER_ID:
-            log.error("[PROMOTER] OWNER_CUSTOMER_ID not set — skipping")
-            return 0
-        master = get_customer_db(OWNER_CUSTOMER_ID)
+        # 2026-04-27: signals live in the shared market-intel DB now,
+        # not the owner customer's DB. See retail_database.get_shared_db().
+        from retail_database import get_shared_db
+        master = get_shared_db()
         stamped = master.stamp_signals_validator('OK')
         promoted, stuck = master.promote_validated_signals()
         log.info(f"[PROMOTER] validator-stamped {stamped}, "
@@ -1426,11 +1425,10 @@ def _post_attribution_digest():
     customers = get_active_customers()
     if not customers:
         return
-    owner_id = os.environ.get('OWNER_CUSTOMER_ID', '')
-    if not owner_id:
-        return
-    owner_db = get_customer_db(owner_id)
-    counts = owner_db.get_attribution_flag_counts(since_hours=24)
+    # 2026-04-27: attribution flags live in the shared market-intel DB.
+    from retail_database import get_shared_db
+    shared_db = get_shared_db()
+    counts = shared_db.get_attribution_flag_counts(since_hours=24)
     if not counts:
         # Nothing flagged today — write a tiny heartbeat so the user can
         # see the feature is live and just quiet.

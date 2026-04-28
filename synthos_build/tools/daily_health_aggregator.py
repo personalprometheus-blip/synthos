@@ -75,12 +75,9 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _get_shared_db_path() -> Path:
-    """Master customer's signals.db — the portal's _shared_db()."""
-    if MASTER_CUSTOMER_ID:
-        candidate = SYNTHOS_HOME / "data" / "customers" / MASTER_CUSTOMER_ID / "signals.db"
-        if candidate.exists():
-            return candidate
-    # Fallback — user/signals.db (admin DB)
+    """Path to the shared market-intelligence DB.
+    2026-04-27: was previously routing through OWNER_CUSTOMER_ID's customer
+    DB.  See retail_database.get_shared_db() for the rationale."""
     return SYNTHOS_HOME / "user" / "signals.db"
 
 

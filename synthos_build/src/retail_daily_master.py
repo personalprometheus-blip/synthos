@@ -173,9 +173,10 @@ def _fmt_table(headers: list[str], rows: list[list[str]]) -> str:
 def render_report(day_iso: str) -> str:
     """Build the full Markdown report as a string."""
     sys.path.insert(0, str(_ROOT_DIR / 'src'))
-    from retail_database import get_customer_db  # noqa: E402
+    from retail_database import get_customer_db, get_shared_db  # noqa: E402
 
-    shared_db = get_customer_db(_OWNER_CID)
+    # 2026-04-27: shared market data lives in the shared DB now.
+    shared_db = get_shared_db()
     customers = _get_active_customers()
 
     # Aggregate per-customer data
