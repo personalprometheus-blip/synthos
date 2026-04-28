@@ -1212,13 +1212,51 @@ class AlpacaClient:
         return self._request("get", f"/v2/positions/{ticker}")
 
     def get_latest_quote(self, ticker):
-        """Return (bid, ask, mid) or (None, None, None)."""
-        r = self._request("get", f"/v2/stocks/{ticker}/quotes/latest")
-        if r and "quote" in r:
-            bid = float(r["quote"].get("bp", 0) or 0)
-            ask = float(r["quote"].get("ap", 0) or 0)
-            mid = (bid + ask) / 2 if bid and ask else (bid or ask)
-            return bid, ask, mid
+        """Return (bid, ask, mid) or (None, None, None).
+
+        Bug fix 2026-04-28: was hitting `paper-api.alpaca.markets/v2/
+        stocks/{T}/quotes/latest` via self._request(), which 404s
+        because the trading API host doesn't expose market-data
+        endpoints. Market data lives on `data.alpaca.markets`. We
+        already do this correctly for bars (lines 1257 + 1117); the
+        quotes path was missed when the trader was first wired.
+        Auditor caught it after 6 customers logged ERROR
+        TradeLogic Alpaca GET /v2/stocks/X/quotes/latest failed: 404
+        across NVDA / MU / SCHD / PCG on the 09:30 ET cycle.
+        """
+        if not self._circuit_check():
+            return None, None, None
+        headers = {
+            "APCA-API-KEY-ID":     ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+        }
+        try:
+            r = requests.get(
+                f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/quotes/latest",
+                params={"feed": "iex"},
+                headers=headers, timeout=(3, 10),
+            )
+            try:
+                _shared_db().log_api_call(
+                    agent='trade_logic',
+                    endpoint=f'/v2/stocks/{ticker}/quotes/latest',
+                    method='GET', service='alpaca_data',
+                    customer_id=_CUSTOMER_ID, status_code=r.status_code)
+            except Exception as _e:
+                log.debug(f"suppressed exception: {_e}")
+            if r.status_code == 200:
+                self._circuit_record(True)
+                data = r.json()
+                q = data.get("quote") or {}
+                bid = float(q.get("bp", 0) or 0)
+                ask = float(q.get("ap", 0) or 0)
+                mid = (bid + ask) / 2 if bid and ask else (bid or ask)
+                return bid, ask, mid
+            else:
+                self._circuit_record(False)
+        except Exception as e:
+            log.warning(f"get_latest_quote({ticker}): {e}")
+            self._circuit_record(False)
         return None, None, None
 
     def get_latest_price(self, ticker):
