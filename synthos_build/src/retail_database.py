@@ -1033,6 +1033,14 @@ class DB:
             # historical rows; filled in on all new screener runs.
             "ALTER TABLE sector_screening ADD COLUMN momentum_score REAL",
 
+            # 2026-04-28 — persist the raw 3-month return alongside the
+            # momentum_score composite so the screener page can show the
+            # actual percentage (e.g. "+12.4% 3mo") instead of just the
+            # 0-1 composite.  Composite is still the primary ranking
+            # input for candidate_generator; ret_3m is display-only.
+            # Null for rows from runs prior to this column landing.
+            "ALTER TABLE sector_screening ADD COLUMN ret_3m REAL",
+
             # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
             # daily by retail_tradable_cache.refresh() from Alpaca's
             # /v2/assets endpoint. Candidate Generator reads via
@@ -3494,8 +3502,9 @@ class DB:
                     INSERT INTO sector_screening
                         (run_id, sector, etf, etf_5yr_return, ticker, company,
                          etf_weight_pct, news_signal, sentiment_signal,
-                         congressional_flag, momentum_score, status, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         congressional_flag, momentum_score, ret_3m,
+                         status, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     run_id, sector, etf, etf_5yr_return,
                     cd['ticker'], cd.get('company', ''),
@@ -3505,6 +3514,11 @@ class DB:
                     # per-ticker 0-1 score from calc_momentum_score.
                     # Primary filter column for candidate_generator.
                     cd.get('momentum_score'),
+                    # ret_3m persisted 2026-04-28 — raw 3-month price
+                    # return (e.g. 0.124 = +12.4%) so the screener page
+                    # can show actual % change alongside the composite.
+                    # Display-only; ranking still uses combined_score.
+                    cd.get('ret_3m'),
                     'considering', now,
                 ))
             # Issue screening requests for Scout and Pulse

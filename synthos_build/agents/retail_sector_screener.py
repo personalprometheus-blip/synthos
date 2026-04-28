@@ -455,14 +455,18 @@ def calc_momentum_score(bars):
       - 20-day vs 50-day SMA relationship (weight 30%)
       - Recent volume trend (weight 20%)
 
-    Returns (score, reasoning_text).
+    Returns (score, ret_3m, reasoning_text).  ret_3m is the raw
+    3-month price return as a decimal (e.g. 0.124 = +12.4%) — caller
+    persists it to sector_screening.ret_3m so the screener page can
+    show actual % change instead of just the composite score.  None
+    when fewer than 63 bars are available.
     """
     closes = [b["c"] for b in bars if "c" in b]
     volumes = [b["v"] for b in bars if "v" in b]
     reasoning = []
 
     if len(closes) < 60:
-        return 0.5, "Insufficient price history — defaulting to neutral score."
+        return 0.5, None, "Insufficient price history — defaulting to neutral score."
 
     # 3-month return
     ret_3m = (closes[-1] - closes[-63]) / closes[-63] if len(closes) >= 63 else 0.0
@@ -518,7 +522,7 @@ def calc_momentum_score(bars):
             reasoning.append(f"Volume below average (fading interest)")
 
     score = round(ret_score * 0.50 + sma_score * 0.30 + vol_score * 0.20, 4)
-    return score, " | ".join(reasoning)
+    return score, round(ret_3m, 4), " | ".join(reasoning)
 
 
 # ── CONGRESSIONAL SIGNAL CHECK ────────────────────────────────────────────────
@@ -729,10 +733,13 @@ def run_single(sector, run_id=None):
     for holding in holdings:
         ticker = holding['ticker']
         bars   = fetch_bars(ticker, days=260)  # ~1 year of trading days
-        score, reasoning = calc_momentum_score(bars)
-        momentum_details[ticker] = {"score": score, "reasoning": reasoning}
-        scored_candidates.append({**holding, "momentum_score": score})
-        log.info(f"  {ticker}: momentum score {score:.2f}")
+        score, ret_3m, reasoning = calc_momentum_score(bars)
+        momentum_details[ticker] = {"score": score, "ret_3m": ret_3m, "reasoning": reasoning}
+        scored_candidates.append({**holding, "momentum_score": score, "ret_3m": ret_3m})
+        if ret_3m is not None:
+            log.info(f"  {ticker}: momentum score {score:.2f}  (3m: {ret_3m*100:+.1f}%)")
+        else:
+            log.info(f"  {ticker}: momentum score {score:.2f}  (insufficient history)")
 
     # Sort by momentum score descending
     scored_candidates.sort(key=lambda x: x['momentum_score'], reverse=True)

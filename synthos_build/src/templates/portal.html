@@ -7042,6 +7042,8 @@ async function loadScreening() {
           news_score:         cd.news_score,
           sentiment_signal:   cd.sentiment_signal,
           combined_score:     cd.combined_score,
+          momentum_score:     cd.momentum_score,
+          ret_3m:             cd.ret_3m,
           etf:                cd.etf,
           etf_weight_pct:     cd.etf_weight_pct,
           etf_5yr_return:     cd.etf_5yr_return,
@@ -7050,7 +7052,30 @@ async function loadScreening() {
         },
       };
       const drawerEsc = JSON.stringify(drawerObj).replace(/"/g,'&quot;');
-      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 70px;gap:14px;align-items:start;cursor:pointer;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\';this.style.borderColor=\'rgba(0,245,212,0.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'" onclick="openPlanningDrawer('+drawerEsc+')">'
+      // 2026-04-28: Momentum column.  ret_3m comes from sector_screener's
+      // calc_momentum_score (raw 3-month price return); momentum_score
+      // is the composite (3m + SMA + volume).  Show the % return as the
+      // headline number (most operator-readable) and the composite as
+      // the bar underneath.  ret_3m may be null on rows from runs prior
+      // to 2026-04-28 — render "—" in that case.
+      const ms      = cd.momentum_score;
+      const r3      = cd.ret_3m;
+      const momLabel = ms == null ? '—'
+                     : ms >= 0.8 ? 'Strong'
+                     : ms >= 0.6 ? 'Healthy'
+                     : ms >= 0.4 ? 'Mild'
+                     : 'Weak';
+      const momColor = ms == null ? '#a0a0b0'
+                     : ms >= 0.6 ? '#00f5d4'
+                     : ms >= 0.4 ? '#f5a623'
+                     : '#ff4b6e';
+      const r3Color = r3 == null ? '#a0a0b0'
+                    : r3 >  0    ? '#00f5d4'
+                    : r3 <  0    ? '#ff4b6e'
+                    :              '#a0a0b0';
+      const r3Display = r3 == null ? '—'
+                      : (r3 >= 0 ? '+' : '') + (r3 * 100).toFixed(1) + '%';
+      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 1fr 70px;gap:14px;align-items:start;cursor:pointer;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\';this.style.borderColor=\'rgba(0,245,212,0.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
         +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
@@ -7064,6 +7089,10 @@ async function loadScreening() {
         +'<div style="font-size:13px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
         +bar(cd.sentiment_score,sc)
         +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(cd.sentiment_score!=null?'Score: '+pct(cd.sentiment_score)+'/100':'')+'</div></div>'
+        +'<div title="3-month price return + SMA trend + volume"><div style="font-size:10px;color:var(--muted)">MOMENTUM</div>'
+        +'<div style="font-size:13px;font-weight:600;color:'+r3Color+'">'+r3Display+'</div>'
+        +bar(ms,momColor)
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+momLabel+(ms!=null?' · '+pct(ms)+'/100':'')+'</div></div>'
         +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
         +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">/100</div></div></div>';
