@@ -1844,58 +1844,63 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <!-- market-chart moved to visible panel below -->
 
   <!-- AGENT STATUS -->
+  <!-- Phase H (2026-04-27): persona obfuscation reverted. The strip
+       below now shows the actual agent name + factual blurb instead of
+       'Synthos is sweeping the wire · the Fed is watching closely again'.
+       The 6-metric grid that was crammed at the bottom of this panel
+       has moved into the slide-out agent-detail drawer (click the panel
+       to open). Sine wave + last-activity cylinder retained verbatim —
+       those work and don't leak internals. -->
   <style>
-    /* Synthos persona strip — view layer only, swaps raw agent names for persona lines */
     .ap-status-strip {
-      padding: 2px 14px 10px;
+      padding: 4px 14px 10px;
       font-family: var(--mono);
       font-size: 11px;
       line-height: 1.5;
       text-align: center;
       min-height: 22px;
     }
-    .ap-persona {
+    .ap-agent-name {
       color: var(--text);
       font-weight: 700;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.04em;
     }
-    .ap-action-prefix, .ap-sep, .ap-action { color: var(--text); }
-    .ap-aside {
+    .ap-agent-blurb {
+      color: var(--muted);
+      font-style: normal;
+    }
+    .ap-agent-age {
       color: var(--teal);
-      font-style: italic;
-      text-shadow: 0 0 6px rgba(0,245,212,0.45);
+      font-family: var(--mono);
+      font-size: 10px;
+      margin-left: 4px;
     }
-    /* "Time-traveled-in" chromatic-aberration warp — slower, softer, readable */
-    @keyframes ap-warp-in {
-      0% {
-        opacity: 0;
-        text-shadow:
-          -4px 0 0 rgba(0,245,212,0.85),
-           4px 0 0 rgba(255,75,110,0.7);
-        filter: blur(0.5px);
-      }
-      40% {
-        opacity: 0.9;
-        text-shadow:
-          -2px 0 0 rgba(0,245,212,0.5),
-           2px 0 0 rgba(255,75,110,0.4);
-        filter: blur(0);
-      }
-      75% {
-        opacity: 1;
-        text-shadow: 0 0 10px rgba(0,245,212,0.6);
-      }
-      100% {
-        opacity: 1;
-        text-shadow: 0 0 6px rgba(0,245,212,0.45);
-      }
+    .ap-detail-cue {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 4px 14px 10px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--dim);
     }
-    .ap-aside.ap-warp-in { animation: ap-warp-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-    @media (prefers-reduced-motion: reduce) {
-      .ap-aside.ap-warp-in { animation: none; }
+    .ap-card-clickable {
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .ap-card-clickable:hover {
+      border-color: rgba(0,245,212,0.25) !important;
+    }
+    .ap-card-clickable:hover .ap-detail-cue {
+      color: var(--teal);
     }
   </style>
-  <div class="glass" style="overflow:hidden;margin-bottom:14px">
+  <div class="glass ap-card-clickable" id="ap-card"
+       style="overflow:hidden;margin-bottom:14px"
+       onclick="openAgentDrawer()" title="Tap for full agent activity">
     <div class="dash-panel-head">
       <div class="dash-panel-title">Agent Status</div>
     </div>
@@ -1909,44 +1914,49 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div style="position:relative;height:100px;overflow:hidden">
       <canvas id="ap-wave" style="width:100%;height:100%;display:block"></canvas>
     </div>
-    <!-- SYNTHOS PERSONA STRIP (hides raw agent names from customers) -->
+    <!-- AGENT STRIP — factual: friendly agent name + blurb + age -->
     <div class="ap-status-strip">
-      <span class="ap-persona" id="ap-persona">Synthos</span><span class="ap-action-prefix"> is </span><span class="ap-action" id="ap-action">on watch</span><span class="ap-sep"> · </span><span class="ap-aside" id="ap-aside">the tape is quiet</span>
+      <span class="ap-agent-name" id="ap-agent-name">Idle</span><span id="ap-agent-blurb-wrap" style="display:none"> · <span class="ap-agent-blurb" id="ap-agent-blurb"></span></span><span class="ap-agent-age" id="ap-agent-age"></span>
     </div>
-    <!-- STATUS DETAILS (bottom) — 2 rows × 3 cols.
-         Row 1: existing big-number telemetry. Row 2: SPY% / Validator / Last
-         decision (re-homed from the now-deleted Regime Strip on 2026-04-25). -->
-    <div style="padding:10px 14px 12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 12px;border-top:1px solid var(--border)">
-      <div style="text-align:center">
-        <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-queued">0</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Signals Queued</div>
+    <!-- DETAIL CUE — invites click into the drawer -->
+    <div class="ap-detail-cue">Tap for details ›</div>
+  </div>
+
+  <!-- AGENT-DETAIL DRAWER (Phase H, 2026-04-27) — slide-out with the
+       per-agent rollup, today's counters, and the recent-events
+       timeline. Replaces the inline metrics grid that was stuffed into
+       the bottom of the agent panel. -->
+  <div class="drawer-overlay" id="agent-drawer-overlay" onclick="closeAgentDrawer(event)"></div>
+  <div class="drawer" id="agent-drawer">
+    <div class="drawer-head">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text)">Agent Activity</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="agent-dr-sub">Bot pipeline state + today's run summary</div>
       </div>
-      <div style="text-align:center">
-        <div style="font-size:18px;font-weight:800;color:var(--text);font-family:var(--mono)" id="ap-decisions">0</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Decisions Today</div>
+      <button class="drawer-close" onclick="closeAgentDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <!-- Currently running -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Currently running</div>
+        <div id="agent-dr-running"></div>
       </div>
-      <div style="text-align:center">
-        <div style="font-size:18px;font-weight:800;font-family:var(--mono);color:var(--teal)" id="ap-regime">—</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Market</div>
+      <!-- Today's counters — the 6 metrics that used to clutter the panel -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Today's counters</div>
+        <div id="agent-dr-counters" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"></div>
       </div>
-      <!-- ROW 2 — compact telemetry -->
-      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)">
-        <div style="font-size:11px;font-weight:700;font-family:var(--mono)" id="ap-spy">—</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">SPY today</div>
+      <!-- Per-agent status grid -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Per-agent status (today)</div>
+        <div id="agent-dr-summary"></div>
       </div>
-      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)">
-        <div style="font-size:11px;font-weight:700;font-family:var(--mono)" id="ap-validator">—</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Validator</div>
-      </div>
-      <div style="text-align:center;padding-top:4px;border-top:1px dashed rgba(255,255,255,0.06)" title="Time of bot's most recent decision (any agent)">
-        <div style="font-size:11px;font-weight:700;font-family:var(--mono);color:var(--muted)" id="ap-last-decision">—</div>
-        <div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)">Last decision</div>
+      <!-- Recent events timeline -->
+      <div class="drawer-section">
+        <div class="drawer-section-title">Recent activity</div>
+        <div id="agent-dr-timeline"></div>
       </div>
     </div>
-    <!-- Behavior baseline counter moved to the command portal 2026-04-26 —
-         the trader-behavior baseline is operator-only (decides observation
-         window for live-trading promotion); doesn't help end users.
-         Lives at command.synth-cloud.com instead. -->
   </div>
 
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
@@ -2132,8 +2142,6 @@ function _apDrawWave() {
   _apWaveId = requestAnimationFrame(_apDrawWave);
 }
 
-var _apLastAside = null;
-
 // ── EVENT CYLINDER — slow vertical ticker ─────────────────────────────────
 // New log lines append to the bottom of an offscreen container, then the
 // whole stack translates upward at a gentle constant speed. Once a line has
@@ -2173,7 +2181,9 @@ function _apLogTick() {
 requestAnimationFrame(_apLogTick);
 
 function _apLogAppend(e) {
-  var key = (e.timestamp || '') + '|' + (e.event || '') + '|' + (e.event_label || '');
+  // Phase H: dedupe key now uses display_name (real agent name) instead of
+  // the old persona event_label, since the API no longer returns event_label.
+  var key = (e.timestamp || '') + '|' + (e.event || '') + '|' + (e.display_name || e.agent_raw || '');
   if (_apLogSeen.has(key)) return;
   _apLogSeen.add(key);
   var inner = document.getElementById('ap-events-inner');
@@ -2184,10 +2194,11 @@ function _apLogAppend(e) {
   var icon = isComplete ? '<span style="color:var(--teal)">&#x2713;</span>'
            : isDec      ? '<span style="color:var(--amber)">&#x25C6;</span>'
                         : '<span style="color:var(--purple)">&#x25B6;</span>';
-  var lbl = e.event_label || 'activity';
-  var label = isDec ? 'decision recorded'
-            : isComplete ? lbl + ' complete'
-                         : lbl + ' started';
+  // Friendly agent name + factual verb. No more 'sweeping the wire'.
+  var name = e.display_name || 'Activity';
+  var label = isDec ? 'Trade decision'
+            : isComplete ? name + ' done'
+                         : name + ' started';
   var det = (e.details || '').slice(0, 40);
   var div = document.createElement('div');
   div.innerHTML = time + ' ' + icon + ' ' + label +
@@ -2200,54 +2211,206 @@ async function loadAgentPulse() {
     var r = await fetch('/api/agent-pulse');
     var d = await r.json();
     _apRunning = d.running;
+    _apLastData = d;  // cache so the drawer renderer doesn't need to re-fetch
 
-    // Synthos persona strip — "Synthos is {action} · {aside}"
-    var stat = d.running || d.idle_status || null;
-    var persEl  = document.getElementById('ap-persona');
-    var actEl   = document.getElementById('ap-action');
-    var asideEl = document.getElementById('ap-aside');
-    if (stat) {
-      if (persEl) persEl.textContent = stat.persona || 'Synthos';
-      if (actEl)  actEl.textContent  = stat.action  || '';
-      if (asideEl) {
-        var newAside = stat.aside || '';
-        asideEl.textContent = newAside;
-        // Retrigger chromatic-aberration warp only when the aside changes
-        if (newAside && newAside !== _apLastAside) {
-          asideEl.classList.remove('ap-warp-in');
-          void asideEl.offsetWidth;  // force reflow so animation restarts
-          asideEl.classList.add('ap-warp-in');
-          _apLastAside = newAside;
-        }
+    // Phase H — factual agent strip: name + blurb + age (or idle context)
+    var nameEl  = document.getElementById('ap-agent-name');
+    var blurbEl = document.getElementById('ap-agent-blurb');
+    var blurbWrap = document.getElementById('ap-agent-blurb-wrap');
+    var ageEl   = document.getElementById('ap-agent-age');
+    if (d.running) {
+      if (nameEl)  nameEl.textContent  = d.running.display_name || 'Activity';
+      if (blurbEl) blurbEl.textContent = d.running.blurb || '';
+      if (blurbWrap) blurbWrap.style.display = (d.running.blurb ? 'inline' : 'none');
+      if (ageEl) {
+        var age = d.running.age_secs || 0;
+        ageEl.textContent = '· ' + (age < 60 ? age + 's' : Math.floor(age/60) + 'm');
       }
+    } else if (d.idle_status) {
+      if (nameEl)  nameEl.textContent  = 'Idle';
+      if (blurbEl) blurbEl.textContent = 'Last: ' + (d.idle_status.last_agent || '—')
+                                        + (d.idle_status.last_event === 'AGENT_COMPLETE' ? ' done' : '');
+      if (blurbWrap) blurbWrap.style.display = 'inline';
+      if (ageEl) {
+        // Compute "Xm ago" from last_ts
+        ageEl.textContent = _apFmtAgo(d.idle_status.last_ts);
+      }
+    } else {
+      if (nameEl)  nameEl.textContent  = 'Idle';
+      if (blurbWrap) blurbWrap.style.display = 'none';
+      if (ageEl) ageEl.textContent = '';
     }
 
-    // Stats
-    var sv = function(id, v) { var el = document.getElementById(id); if(el) el.textContent = v; };
-    sv('ap-queued', d.queued_signals || 0);
-    sv('ap-decisions', d.decisions_today || 0);
-    var regEl = document.getElementById('ap-regime');
-    if (regEl) {
-      var rawRegime = d.regime || 'unknown';
-      var regimeMap = {
-        'healthy_risk_on': {short: 'HEALTHY', color: 'var(--teal)'},
-        'defensive_risk_off': {short: 'DEFENSIVE', color: 'var(--amber)'},
-        'neutral': {short: 'NEUTRAL', color: 'var(--muted)'},
-        'unknown': {short: '—', color: 'var(--dim)'}
-      };
-      var reg = regimeMap[rawRegime] || {short: rawRegime.replace(/_/g,' ').toUpperCase(), color: 'var(--muted)'};
-      regEl.textContent = reg.short;
-      regEl.style.color = reg.color;
+    // If the drawer is currently open, re-render its body off the new data.
+    if (document.getElementById('agent-drawer') &&
+        document.getElementById('agent-drawer').classList.contains('open')) {
+      renderAgentDrawer(d);
     }
 
-    // Events — fed into the slow-rotating cylinder ticker. Dedupe prevents
-    // re-appending the same event on each poll (the /api endpoint returns
-    // the latest N events; we only append ones we haven't seen yet).
+    // Cylinder events — same dedup-and-append behavior, new field names.
     if (d.events) {
       // Iterate oldest-first so newer events stack below older ones.
       d.events.slice().reverse().forEach(_apLogAppend);
     }
   } catch(e) { console.error('agentPulse:', e); }
+}
+
+// Phase H: helper — "Xs ago" / "Xm ago" / "Xh ago" from an ISO timestamp
+function _apFmtAgo(ts) {
+  if (!ts) return '';
+  try {
+    var t = new Date(ts.replace(' ', 'T') + (ts.endsWith('Z') ? '' : 'Z')).getTime();
+    var ago = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (ago < 60)    return '· ' + ago + 's ago';
+    if (ago < 3600)  return '· ' + Math.floor(ago/60) + 'm ago';
+    if (ago < 86400) return '· ' + Math.floor(ago/3600) + 'h ago';
+    return '· ' + Math.floor(ago/86400) + 'd ago';
+  } catch (e) { return ''; }
+}
+
+// Phase H — agent-detail drawer.
+var _apLastData = null;
+
+function openAgentDrawer() {
+  var dr = document.getElementById('agent-drawer');
+  var ov = document.getElementById('agent-drawer-overlay');
+  if (!dr || !ov) return;
+  dr.classList.add('open');
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  // Render off cached data; if no cache yet (first paint race) trigger a fetch.
+  if (_apLastData) renderAgentDrawer(_apLastData);
+  else loadAgentPulse();
+}
+
+function closeAgentDrawer(ev) {
+  // Click on overlay or the close button closes; clicks INSIDE the drawer
+  // (e.g. the body) shouldn't.
+  if (ev && ev.target && ev.target.id !== 'agent-drawer-overlay'
+        && (!ev.target.classList || !ev.target.classList.contains('drawer-close'))) {
+    return;
+  }
+  var dr = document.getElementById('agent-drawer');
+  var ov = document.getElementById('agent-drawer-overlay');
+  if (dr) dr.classList.remove('open');
+  if (ov) ov.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function renderAgentDrawer(d) {
+  if (!d) return;
+
+  // --- Currently running block ---
+  var runHtml;
+  if (d.running) {
+    var age = d.running.age_secs || 0;
+    var ageStr = age < 60 ? age + 's' : Math.floor(age/60) + 'm ' + (age%60) + 's';
+    runHtml =
+      '<div style="padding:10px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border)">'
+      +   '<div style="font-size:12px;font-weight:700;color:var(--text)">' + _esc(d.running.display_name) + '</div>'
+      +   '<div style="font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:2px">' + _esc(d.running.agent_raw || '') + '</div>'
+      + (d.running.blurb ? '<div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4">' + _esc(d.running.blurb) + '</div>' : '')
+      +   '<div style="display:flex;gap:14px;margin-top:8px;font-size:10px;color:var(--muted)">'
+      +     '<span><span style="color:var(--dim)">Started </span>' + ageStr + ' ago</span>'
+      + (d.running.session ? '<span><span style="color:var(--dim)">Session </span>' + _esc(d.running.session) + '</span>' : '')
+      + (d.running.is_override ? '<span style="color:var(--amber)">· OVERRIDE</span>' : '')
+      +   '</div>'
+      + '</div>';
+  } else {
+    var idle = d.idle_status || {};
+    runHtml =
+      '<div style="padding:10px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border)">'
+      +   '<div style="font-size:12px;font-weight:700;color:var(--text)">Idle</div>'
+      +   '<div style="font-size:11px;color:var(--muted);margin-top:6px">No agent currently running.</div>'
+      + (idle.last_agent
+          ? '<div style="font-size:10px;color:var(--dim);margin-top:6px">Last: ' + _esc(idle.last_agent)
+            + ' · ' + _esc(idle.last_event === 'AGENT_COMPLETE' ? 'completed' : (idle.last_event || ''))
+            + ' ' + _apFmtAgo(idle.last_ts).replace(/^·\s*/, '')
+            + '</div>'
+          : '')
+      + '</div>';
+  }
+  document.getElementById('agent-dr-running').innerHTML = runHtml;
+
+  // --- Today's counters (the 6 metrics evicted from the panel) ---
+  var rawRegime = d.regime || 'unknown';
+  var regimeMap = {
+    'healthy_risk_on':    {short: 'HEALTHY',   color: 'var(--teal)'},
+    'defensive_risk_off': {short: 'DEFENSIVE', color: 'var(--amber)'},
+    'neutral':            {short: 'NEUTRAL',   color: 'var(--muted)'},
+    'unknown':            {short: '—',         color: 'var(--dim)'}
+  };
+  var reg = regimeMap[rawRegime] || {short: rawRegime.replace(/_/g,' ').toUpperCase(), color: 'var(--muted)'};
+
+  function _statTile(label, val, color) {
+    return '<div style="text-align:center;padding:10px 6px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px">'
+         +   '<div style="font-family:var(--mono);font-size:18px;font-weight:800;color:' + (color || 'var(--text)') + '">' + val + '</div>'
+         +   '<div style="font-size:8px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim);margin-top:4px">' + label + '</div>'
+         + '</div>';
+  }
+
+  document.getElementById('agent-dr-counters').innerHTML =
+      _statTile('Signals Queued', String(d.queued_signals || 0))
+    + _statTile('Decisions Today', String(d.decisions_today || 0))
+    + _statTile('Market', reg.short, reg.color)
+    + _statTile('Watching', String(d.watching || 0))
+    + _statTile('Validator',
+                d.idle_status && d.idle_status.last_agent === 'Validator' ? 'CHECKED' : '—')
+    + _statTile('Last decision',
+                (function(){
+                  // Find most recent TRADE_DECISION in events
+                  var ev = (d.events || []).find(function(e){ return e.event === 'TRADE_DECISION'; });
+                  return ev && ev.timestamp ? ev.timestamp.slice(11,16) : '—';
+                })());
+
+  // --- Per-agent status grid ---
+  var summary = d.agent_summary || [];
+  if (!summary.length) {
+    document.getElementById('agent-dr-summary').innerHTML =
+      '<div style="font-size:11px;color:var(--muted);padding:8px 0">No agent runs recorded today yet.</div>';
+  } else {
+    var html = '<div style="display:flex;flex-direction:column;gap:6px">';
+    summary.forEach(function(a) {
+      var ago = _apFmtAgo(a.last_ts).replace(/^·\s*/, '') || '—';
+      var det = (a.last_details || '').slice(0, 80);
+      html += '<div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">'
+        +   '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">'
+        +     '<div style="font-size:12px;font-weight:700;color:var(--text)">' + _esc(a.display_name) + '</div>'
+        +     '<div style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + a.cycles + ' cycle' + (a.cycles===1?'':'s') + ' · ' + ago + '</div>'
+        +   '</div>'
+        + (det ? '<div style="font-size:10px;color:var(--dim);margin-top:3px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _esc(det) + '</div>' : '')
+        + '</div>';
+    });
+    html += '</div>';
+    document.getElementById('agent-dr-summary').innerHTML = html;
+  }
+
+  // --- Recent activity timeline ---
+  var events = d.events || [];
+  if (!events.length) {
+    document.getElementById('agent-dr-timeline').innerHTML =
+      '<div style="font-size:11px;color:var(--muted);padding:8px 0">No events yet.</div>';
+  } else {
+    var thtml = '<div style="display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px">';
+    events.forEach(function(e) {
+      var t = (e.timestamp || '').slice(11,16);
+      var isC = e.event === 'AGENT_COMPLETE';
+      var isD = e.event === 'TRADE_DECISION';
+      var icon = isC ? '<span style="color:var(--teal)">✓</span>'
+              : isD ? '<span style="color:var(--amber)">◆</span>'
+                    : '<span style="color:var(--purple)">▶</span>';
+      var label = isD ? 'Trade decision'
+                : (e.display_name || 'Activity') + (isC ? ' done' : ' started');
+      thtml += '<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)">'
+            +   '<span style="color:var(--dim);min-width:42px">' + t + '</span>'
+            +   icon
+            +   '<span style="flex:1;color:var(--text)">' + _esc(label) + '</span>'
+            + (e.details ? '<span style="color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">' + _esc(e.details) + '</span>' : '')
+            + '</div>';
+    });
+    thtml += '</div>';
+    document.getElementById('agent-dr-timeline').innerHTML = thtml;
+  }
 }
 
 // Start wave animation after layout computes

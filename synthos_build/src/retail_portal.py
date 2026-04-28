@@ -1889,12 +1889,8 @@ _lexicon_cache = {'mtime': 0.0, 'data': None}
 _lexicon_pick_cache = {}  # {key: (action, aside, picked_at_epoch)}
 
 _LEXICON_FALLBACK = {
-    'persona': 'Synthos',
-    'sticky_seconds': 25,
     'agents': {},
     'aliases': {},
-    'idle':     {'event_label': 'idle',     'lines': [['on watch', 'the tape is quiet']]},
-    'fallback': {'event_label': 'activity', 'lines': [['on the grid', 'doing the work']]},
 }
 
 
@@ -1925,59 +1921,57 @@ def _resolve_agent_key(raw_name, lex):
     return None
 
 
-def interpret_agent_status(raw_agent):
-    """
-    View-layer mapping: raw agent name -> {persona, action, aside}.
-    Accepts None (idle), a dict from get_wave_status(), or a bare string.
-    Sticky rotation prevents per-poll churn.
-    """
-    import random
-    import time as _time
+def get_agent_display_info(raw_agent):
+    """Phase H (2026-04-27) — replaces interpret_agent_status().
 
+    Returns the friendly display name + factual blurb for a raw agent
+    identifier. No more random flavor rotation, no more 'Synthos is
+    sweeping the wire' obfuscation; the portal shows what's actually
+    running.
+
+    Accepts None (idle), a dict from get_wave_status(), or a bare string.
+    Returns dict shape:
+        {
+          'agent_raw':     raw filename (or None),
+          'display_name':  'News Agent' / 'Trade Logic' / 'Idle',
+          'blurb':         one-line factual description (or '' for idle),
+          'is_idle':       bool,
+        }
+    """
     lex = _load_lexicon()
-    persona = lex.get('persona', 'Synthos')
-    sticky = int(lex.get('sticky_seconds', 25) or 25)
 
     if raw_agent is None or (isinstance(raw_agent, dict) and not raw_agent.get('agent')):
-        key = '__idle__'
-        bucket = lex.get('idle') or _LEXICON_FALLBACK['idle']
-    else:
-        raw_name = raw_agent.get('agent') if isinstance(raw_agent, dict) else raw_agent
-        canonical = _resolve_agent_key(raw_name, lex)
-        if canonical is None:
-            key = '__fallback__'
-            bucket = lex.get('fallback') or _LEXICON_FALLBACK['fallback']
-        else:
-            key = canonical
-            bucket = lex['agents'][canonical]
+        return {
+            'agent_raw':    None,
+            'display_name': 'Idle',
+            'blurb':        '',
+            'is_idle':      True,
+        }
 
-    pool = bucket.get('lines') or [['on the grid', 'doing the work']]
-    now = _time.time()
-    cached = _lexicon_pick_cache.get(key)
-    if cached and (now - cached[2]) < sticky:
-        action, aside = cached[0], cached[1]
-    else:
-        choice = random.choice(pool)
-        action = choice[0] if len(choice) > 0 else ''
-        aside  = choice[1] if len(choice) > 1 else ''
-        _lexicon_pick_cache[key] = (action, aside, now)
+    raw_name = raw_agent.get('agent') if isinstance(raw_agent, dict) else raw_agent
+    canonical = _resolve_agent_key(raw_name, lex)
+    if canonical is None:
+        # Unknown agent — show the raw name verbatim. Better to surface
+        # something we don't recognize than to hide it as "activity".
+        return {
+            'agent_raw':    raw_name,
+            'display_name': raw_name,
+            'blurb':        '',
+            'is_idle':      False,
+        }
 
+    bucket = lex['agents'][canonical]
     return {
-        'persona': persona,
-        'action':  action,
-        'aside':   aside,
+        'agent_raw':    canonical,
+        'display_name': bucket.get('display_name') or canonical,
+        'blurb':        bucket.get('blurb') or '',
+        'is_idle':      False,
     }
 
 
-def interpret_event_label(raw_agent):
-    """Return the short event label for an agent (stable, not rotated)."""
-    lex = _load_lexicon()
-    if not raw_agent:
-        return (lex.get('idle') or _LEXICON_FALLBACK['idle']).get('event_label', 'activity')
-    canonical = _resolve_agent_key(raw_agent, lex)
-    if canonical is None:
-        return (lex.get('fallback') or _LEXICON_FALLBACK['fallback']).get('event_label', 'activity')
-    return lex['agents'][canonical].get('event_label', 'activity')
+def get_agent_display_name(raw_agent):
+    """Convenience — returns just the display_name string."""
+    return get_agent_display_info(raw_agent).get('display_name', 'Activity')
 
 
 def _get_customer_alpaca_creds():
@@ -4421,37 +4415,119 @@ def api_set_ticker_preference(ticker: str):
 @app.route('/api/agent-pulse')
 @login_required
 def api_agent_pulse():
-    """Real-time agent status for the dashboard wave card."""
+    """Real-time agent status for the dashboard wave card.
+
+    Phase H (2026-04-27) revisions:
+      - Drops the persona/action/aside flavor lines (operator feedback:
+        useless obfuscation, hid what was actually running).
+      - Returns the running agent's friendly display_name + factual
+        blurb + raw filename + age + session.
+      - Bumps event history from 6 to 20 rows so the slide-out drawer
+        can render a meaningful timeline.
+      - Adds `agent_summary[]` — per-agent rollup of today's cycle
+        count + last_run_ago + last_event for the drawer's status grid.
+    """
     try:
         db = _customer_db()
         shared = _shared_db()
         lock = get_wave_status()
 
         # Signal queue from shared DB (all customers see same intel).
-        # `queued` reported is total in-flight (QUEUED awaiting validation +
-        # VALIDATED awaiting trader action) — matches user expectation of
-        # "signals currently in the pipeline."
         with shared.conn() as c:
             queued = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','VALIDATED')").fetchone()[0]
             watching = c.execute("SELECT COUNT(*) FROM signals WHERE status IN ('QUEUED','VALIDATED','WATCHING')").fetchone()[0]
 
-        # Last 8 agent events from customer DB
+        # Recent agent events — bumped 6 → 20 for the drawer timeline.
+        # Customer DB carries trade decisions; shared DB carries the
+        # multi-customer enrichment chain (news/sentiment/screener/etc.).
+        # Merge both, sort by timestamp, take the latest 20.
+        merged = []
         with db.conn() as c:
-            events = [dict(r) for r in c.execute(
+            for r in c.execute(
                 "SELECT event, agent, details, timestamp FROM system_log "
                 "WHERE event IN ('AGENT_START','AGENT_COMPLETE','TRADE_DECISION') "
-                "ORDER BY timestamp DESC LIMIT 8"
-            ).fetchall()]
+                "ORDER BY timestamp DESC LIMIT 30"
+            ).fetchall():
+                merged.append(dict(r))
+        try:
+            with shared.conn() as c:
+                for r in c.execute(
+                    "SELECT event, agent, details, timestamp FROM system_log "
+                    "WHERE event IN ('AGENT_START','AGENT_COMPLETE') "
+                    "ORDER BY timestamp DESC LIMIT 30"
+                ).fetchall():
+                    merged.append(dict(r))
+        except Exception:
+            pass
+        merged.sort(key=lambda r: r.get('timestamp') or '', reverse=True)
 
-        # Count today's decisions
+        # Decisions today + per-agent today rollup
         with db.conn() as c:
             from datetime import datetime
             today = datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')
             decisions = c.execute(
                 "SELECT COUNT(*) FROM system_log WHERE event='TRADE_DECISION' AND timestamp >= ?",
                 (today,)).fetchone()[0]
+            per_agent_db_rows = c.execute("""
+                SELECT agent,
+                       SUM(CASE WHEN event='AGENT_COMPLETE' THEN 1 ELSE 0 END) AS cycles,
+                       MAX(timestamp) AS last_ts,
+                       (SELECT details FROM system_log s2
+                          WHERE s2.agent = s1.agent AND s2.event='AGENT_COMPLETE'
+                          ORDER BY s2.timestamp DESC LIMIT 1) AS last_details
+                FROM system_log s1
+                WHERE event IN ('AGENT_START','AGENT_COMPLETE')
+                  AND timestamp >= ?
+                GROUP BY agent
+                ORDER BY MAX(timestamp) DESC
+            """, (today,)).fetchall()
+        # Merge in shared-DB agent rollups (news/sentiment/screener/etc. log there)
+        try:
+            with shared.conn() as c:
+                shared_rows = c.execute("""
+                    SELECT agent,
+                           SUM(CASE WHEN event='AGENT_COMPLETE' THEN 1 ELSE 0 END) AS cycles,
+                           MAX(timestamp) AS last_ts,
+                           (SELECT details FROM system_log s2
+                              WHERE s2.agent = s1.agent AND s2.event='AGENT_COMPLETE'
+                              ORDER BY s2.timestamp DESC LIMIT 1) AS last_details
+                    FROM system_log s1
+                    WHERE event IN ('AGENT_START','AGENT_COMPLETE')
+                      AND timestamp >= ?
+                    GROUP BY agent
+                """, (today,)).fetchall()
+        except Exception:
+            shared_rows = []
+        # Combine — same agent name across customer + shared = sum cycles, take latest ts
+        rollup = {}
+        for r in list(per_agent_db_rows) + list(shared_rows):
+            d = dict(r)
+            agent = d.get('agent') or ''
+            if not agent:
+                continue
+            cur = rollup.get(agent)
+            if not cur:
+                rollup[agent] = d
+            else:
+                cur['cycles'] = (cur.get('cycles') or 0) + (d.get('cycles') or 0)
+                if (d.get('last_ts') or '') > (cur.get('last_ts') or ''):
+                    cur['last_ts']      = d.get('last_ts')
+                    cur['last_details'] = d.get('last_details')
 
-        # Agent color mapping
+        # Build agent_summary[] for the drawer — sorted by recency.
+        agent_summary = []
+        for d in sorted(rollup.values(), key=lambda r: r.get('last_ts') or '', reverse=True):
+            info = get_agent_display_info(d.get('agent'))
+            agent_summary.append({
+                'agent_raw':    d.get('agent'),
+                'display_name': info['display_name'],
+                'blurb':        info['blurb'],
+                'cycles':       int(d.get('cycles') or 0),
+                'last_ts':      d.get('last_ts'),
+                'last_details': d.get('last_details'),
+            })
+
+        # Color mapping for the wave canvas
         agent_colors = {
             'Trade Logic': 'teal', 'retail_trade_logic_agent.py': 'teal',
             'News': 'purple', 'retail_news_agent.py': 'purple',
@@ -4459,73 +4535,80 @@ def api_agent_pulse():
             'Screener': 'pink', 'Sector Screener': 'pink', 'retail_sector_screener.py': 'pink',
         }
 
-        # View-layer translation: hide raw agent names from customer UI.
-        # Everything the customer sees is framed as "Synthos is {action} · {aside}".
-        status = interpret_agent_status(lock)
-
+        # Running agent — real friendly name, no flavor.
         running = None
         if lock:
-            agent_name = lock['agent']
+            raw_agent = lock['agent']
+            info = get_agent_display_info(raw_agent)
             running = {
-                'persona':   status['persona'],
-                'action':    status['action'],
-                'aside':     status['aside'],
-                'age_secs':  lock.get('age_secs', 0),
-                'color':     lock.get('color') or agent_colors.get(agent_name, 'teal'),
-                'amplitude': lock.get('amplitude'),
-                'speed':     lock.get('speed'),
-                'frequency': lock.get('frequency'),
-                'direction': lock.get('direction'),
+                'agent_raw':    info['agent_raw'] or raw_agent,
+                'display_name': info['display_name'],
+                'blurb':        info['blurb'],
+                'session':      lock.get('session', ''),
+                'age_secs':     lock.get('age_secs', 0),
+                'color':        lock.get('color') or agent_colors.get(raw_agent, 'teal'),
+                'amplitude':    lock.get('amplitude'),
+                'speed':        lock.get('speed'),
+                'frequency':    lock.get('frequency'),
+                'direction':    lock.get('direction'),
+                'is_override':  bool(lock.get('is_override')),
             }
 
-        # Market regime from shared DB (Pulse is a shared agent)
+        # Idle context — when nothing is running, surface the most-recent
+        # AGENT_COMPLETE event so the strip has something factual to show.
+        idle_status = None
+        if not running:
+            last = merged[0] if merged else None
+            if last:
+                info = get_agent_display_info(last.get('agent'))
+                idle_status = {
+                    'last_agent':   info['display_name'],
+                    'last_event':   last.get('event'),
+                    'last_details': last.get('details') or '',
+                    'last_ts':      last.get('timestamp'),
+                }
+
+        # Market regime from shared DB
         regime = 'unknown'
         try:
-            import sqlite3 as _sql
-            _shared_path = _shared_db().path
-            _rc = _sql.connect(_shared_path, timeout=5)
-            _rc.row_factory = _sql.Row
-            _regime_row = _rc.execute(
-                "SELECT details FROM system_log WHERE agent='The Pulse' AND event='AGENT_COMPLETE' "
-                "ORDER BY timestamp DESC LIMIT 1"
-            ).fetchone()
-            if _regime_row:
-                _det = _regime_row['details'] or ''
-                if 'regime=' in _det:
-                    regime = _det.split('regime=')[1].split(' ')[0].split(',')[0]
-            _rc.close()
+            with shared.conn() as c:
+                _regime_row = c.execute(
+                    "SELECT details FROM system_log WHERE agent='The Pulse' AND event='AGENT_COMPLETE' "
+                    "ORDER BY timestamp DESC LIMIT 1"
+                ).fetchone()
+                if _regime_row:
+                    _det = _regime_row['details'] or ''
+                    if 'regime=' in _det:
+                        regime = _det.split('regime=')[1].split(' ')[0].split(',')[0]
         except Exception:
             pass
 
-        # Translate events to user-facing event labels (hide raw agent names).
+        # Translate events with friendly agent names (no flavor labels).
         translated_events = []
-        for ev in events[:6]:
+        for ev in merged[:20]:
+            info = get_agent_display_info(ev.get('agent'))
             translated_events.append({
-                'event':      ev.get('event'),
-                'timestamp':  ev.get('timestamp'),
-                'event_label': interpret_event_label(ev.get('agent')),
-                'details':    ev.get('details'),
+                'event':         ev.get('event'),
+                'timestamp':     ev.get('timestamp'),
+                'agent_raw':     ev.get('agent'),
+                'display_name':  info['display_name'],
+                'details':       ev.get('details') or '',
             })
 
-        # Idle status (shown when nothing is actively running).
-        idle_status = None if running else {
-            'persona': status['persona'],
-            'action':  status['action'],
-            'aside':   status['aside'],
-        }
-
         return jsonify({
-            'running': running,
-            'idle_status': idle_status,
-            'queued_signals': queued,
-            'watching': watching,
+            'running':         running,
+            'idle_status':     idle_status,
+            'queued_signals':  queued,
+            'watching':        watching,
             'decisions_today': decisions,
-            'regime': regime,
-            'events': translated_events,
+            'regime':          regime,
+            'events':          translated_events,
+            'agent_summary':   agent_summary,
         })
     except Exception as e:
         return jsonify({'running': None, 'idle_status': None, 'queued_signals': 0, 'watching': 0,
-                        'decisions_today': 0, 'regime': 'unknown', 'events': [], 'error': str(e)})
+                        'decisions_today': 0, 'regime': 'unknown', 'events': [],
+                        'agent_summary': [], 'error': str(e)})
 
 
 @app.route('/api/portfolio-history')
