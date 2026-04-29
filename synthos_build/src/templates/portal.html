@@ -802,58 +802,156 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   gap:14px;
 }
 
-/* ── SCREENER ROWS (Phase 2 cleanup, 2026-04-29) ──
-   Class-based replacement for the previous inline-style + onmouseenter/
-   onmouseleave row template. Score-band tints + held/watching left-edge
-   stripes layer cleanly via modifier classes; hover transitions stay
-   correct regardless of which modifiers apply. */
-.screener-row{
-  background:rgba(255,255,255,0.03);
-  border:1px solid rgba(255,255,255,0.08);
-  border-radius:10px;
-  padding:14px 16px;
+/* ────────────────────────────────────────────────────────────────
+   SCREENER v2 — VISUAL FOUNDATION (2026-04-29)
+   ────────────────────────────────────────────────────────────────
+   Re-skin pass driven by an honest read of the v1 page: the visual
+   debt was in the use of information, not the chrome — every section
+   had its own padding/grid/colors so columns drifted, density was
+   too heavy, score bars added noise without adding signal, and
+   decorative gradients made the page feel startup-coded rather than
+   industry-coded.
+
+   Foundation rules:
+   - One shell (.screener-v2) gives every section the same outer
+     padding + max-width so left/right edges align.
+   - One spacing scale (--scrv-sp-*) used consistently.
+   - Three type sizes (display / body / caption) — no in-between.
+   - Single accent (teal). Amber + pink reserved for state direction.
+   - Tight density: ~30% smaller padding/heights than v1.
+   - No decorative gradients, glows, or gold pills. Hierarchy lives
+     in size + weight + position, not chrome.
+   ──────────────────────────────────────────────────────────────── */
+.screener-v2{
+  /* Spacing scale */
+  --scrv-sp-1:4px; --scrv-sp-2:8px; --scrv-sp-3:12px;
+  --scrv-sp-4:16px; --scrv-sp-6:24px; --scrv-sp-8:32px;
+  /* Type scale — display, body, caption, micro */
+  --scrv-t-display:24px;
+  --scrv-t-body:12px;
+  --scrv-t-cap:10px;
+  --scrv-t-micro:9px;
+  /* Radius */
+  --scrv-r-sm:4px; --scrv-r-md:6px; --scrv-r-lg:8px;
+  /* Borders + surfaces */
+  --scrv-border:1px solid rgba(255,255,255,0.08);
+  --scrv-border-faint:1px solid rgba(255,255,255,0.05);
+  --scrv-surface:rgba(255,255,255,0.025);
+  --scrv-surface-hover:rgba(255,255,255,0.05);
+  /* Container */
+  max-width:1240px;
+  margin:0 auto;
+}
+
+/* Section primitive — every visual block on the screener inherits
+   this outer rhythm so the page reads as one composition, not five. */
+.screener-v2 .scrv-section{
+  padding:0 var(--scrv-sp-2);
+  margin-bottom:var(--scrv-sp-6);
+}
+.screener-v2 .scrv-section + .scrv-section{
+  border-top:var(--scrv-border-faint);
+  padding-top:var(--scrv-sp-6);
+}
+.screener-v2 .scrv-section-head{
+  display:flex;align-items:baseline;justify-content:space-between;
+  margin-bottom:var(--scrv-sp-3);gap:var(--scrv-sp-3);
+}
+.screener-v2 .scrv-section-title{
+  font-size:var(--scrv-t-cap);font-weight:700;
+  letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--muted);
+}
+.screener-v2 .scrv-meta{
+  font-size:var(--scrv-t-micro);color:var(--dim);
+  font-family:var(--mono);
+}
+
+/* Editorial header — anchors the page in time + context, replaces
+   the old gradient title. Lives at the very top, no border above. */
+.screener-v2 .scrv-header{
+  border-top:none;padding-top:0;margin-bottom:var(--scrv-sp-6);
+}
+.screener-v2 .scrv-header + .scrv-section{border-top:none;padding-top:0}
+.screener-v2 .scrv-eyebrow{
+  font-size:var(--scrv-t-cap);font-weight:700;
+  letter-spacing:0.10em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:var(--scrv-sp-1);
+}
+.screener-v2 .scrv-anchor{
+  font-size:var(--scrv-t-display);font-weight:600;
+  letter-spacing:-0.01em;color:var(--text);line-height:1.25;
+}
+.screener-v2 .scrv-anchor .scrv-anchor-meta{
+  font-size:var(--scrv-t-body);font-weight:400;
+  color:var(--muted);font-family:var(--mono);
+  margin-top:var(--scrv-sp-1);display:block;letter-spacing:normal;
+}
+
+/* Filter row — sector dropdown, kept to a single restrained input. */
+.screener-v2 .scrv-filter-row{
+  display:flex;align-items:center;gap:var(--scrv-sp-3);
+  margin-bottom:var(--scrv-sp-3);flex-wrap:wrap;
+}
+.screener-v2 .scrv-select{
+  font-size:var(--scrv-t-body);font-family:var(--sans);
+  padding:5px 9px;max-width:240px;
+  background:var(--scrv-surface);border:var(--scrv-border);
+  border-radius:var(--scrv-r-sm);color:var(--text);
+  outline:none;cursor:pointer;
+}
+.screener-v2 .scrv-select:focus{border-color:rgba(0,245,212,0.30)}
+
+/* Pulse stack — one row per sector, single column. */
+.screener-v2 .scrv-pulse-stack{
+  display:grid;grid-template-columns:1fr;
+  gap:1px;
+  margin-bottom:var(--scrv-sp-4);
+}
+
+/* Ranked grid — vertical stack of candidate rows. */
+.screener-v2 .scrv-grid{display:grid;gap:var(--scrv-sp-1)}
+
+/* ── Candidate row — re-tightened ──
+   Half the padding of v1, smaller body text, no score bars in the
+   news/sentiment columns. Tracker stripe + tier tint stay (they
+   carry real meaning) but the teal "wash" on tier-top is now subtle
+   enough to blend, not pop. */
+.screener-v2 .screener-row{
+  background:var(--scrv-surface);
+  border:var(--scrv-border);
+  border-radius:var(--scrv-r-md);
+  padding:9px 14px;
   display:grid;
-  grid-template-columns:40px 1fr 1fr 1fr 1fr 70px;
-  gap:14px;
-  align-items:start;
+  grid-template-columns:32px 1.4fr 1fr 1fr 1fr 64px;
+  gap:var(--scrv-sp-3);
+  align-items:center;
   cursor:pointer;
   transition:background .15s,border-color .15s,opacity .15s;
 }
-.screener-row:hover{
-  background:rgba(255,255,255,0.06);
-  border-color:rgba(0,245,212,0.25);
+.screener-v2 .screener-row:hover{
+  background:var(--scrv-surface-hover);
+  border-color:rgba(0,245,212,0.20);
 }
-/* Score-band tints — driven by combined_score on render. Top tier
-   (>=0.7) gets a faint teal wash so high-conviction rows visually
-   pop; bottom tier (<0.4) is subtly muted so weak rows recede.
-   Middle band stays the default surface. */
-.screener-row.tier-top{
-  background:rgba(0,245,212,0.05);
-  border-color:rgba(0,245,212,0.16);
+.screener-v2 .screener-row.tier-top{
+  background:rgba(0,245,212,0.04);
+  border-color:rgba(0,245,212,0.14);
 }
-.screener-row.tier-top:hover{
-  background:rgba(0,245,212,0.09);
-  border-color:rgba(0,245,212,0.35);
+.screener-v2 .screener-row.tier-top:hover{
+  background:rgba(0,245,212,0.07);
+  border-color:rgba(0,245,212,0.28);
 }
-.screener-row.tier-bottom{
-  background:rgba(255,255,255,0.015);
-  opacity:0.78;
+.screener-v2 .screener-row.tier-bottom{
+  opacity:0.65;
 }
-.screener-row.tier-bottom:hover{
-  background:rgba(255,255,255,0.04);
-  opacity:1;
+.screener-v2 .screener-row.tier-bottom:hover{opacity:1}
+.screener-v2 .screener-row.held{
+  border-left:2px solid var(--teal);
+  padding-left:13px;
 }
-/* Left-edge stripe — held positions get teal, watchlist gets purple
-   (purple already connotes "in the planning pipeline" elsewhere in
-   the portal — corroboration pills, planning drawer). Padding-left
-   matches default so the stripe doesn't shove content sideways. */
-.screener-row.held{
-  border-left:3px solid var(--teal);
-  padding-left:14px;
-}
-.screener-row.watching{
-  border-left:3px solid var(--purple);
-  padding-left:14px;
+.screener-v2 .screener-row.watching{
+  border-left:2px solid var(--purple);
+  padding-left:13px;
 }
 /* Movers delta chip — sits under the COMBINED score on each row to
    signal change since the previous screener run (twice daily). Suppressed
@@ -871,13 +969,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   border:1px solid rgba(245,166,35,0.30);
   color:#f5a623;
 }
-/* Momentum-column sparkline — 30-day closing-price line drawn into a
-   small canvas. Replaces the previous score-bar + "Score: NN/100"
-   sub-line; carries the same momentum information visually. */
+/* Momentum-column sparkline — flexes to its column; height tightened
+   in the foundation pass. */
 .momentum-spark{
   display:block;
-  width:100px;height:24px;
-  margin-top:5px;
+  width:100%;max-width:140px;height:22px;
+  margin-top:3px;
 }
 /* Horizon pills (Phase 1B, 2026-04-29) — small inline tag on each
    screener row indicating what kind of decision the row supports.
@@ -906,104 +1003,106 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   color:var(--purple);
 }
 
-/* ── TODAY'S STANDOUTS STRIP (Phase 1C, 2026-04-29) ──
-   Card grid at the top of the screener. 4 cards across most viewports;
-   collapses to fewer columns on narrow widths via auto-fit. Each card
-   gets its own sparkline canvas drawn after innerHTML mount. */
+/* ── TODAY'S STANDOUTS STRIP — tightened.
+   Smaller cards (200px min vs 240), less padding, smaller type,
+   shorter sparkline. Holds 4 cards on most viewports comfortably
+   without crowding each other. */
 .standouts-strip{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
-  gap:10px;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:8px;
 }
 .standout-card{
-  background:rgba(255,255,255,0.03);
+  background:rgba(255,255,255,0.025);
   border:1px solid rgba(255,255,255,0.08);
-  border-radius:10px;
-  padding:14px 16px;
+  border-radius:6px;
+  padding:10px 12px;
   cursor:pointer;
   transition:background .15s,border-color .15s;
-  display:flex;flex-direction:column;gap:6px;
+  display:flex;flex-direction:column;gap:4px;
 }
 .standout-card:hover{
-  background:rgba(255,255,255,0.05);
-  border-color:rgba(0,245,212,0.25);
+  background:rgba(255,255,255,0.045);
+  border-color:rgba(0,245,212,0.20);
 }
 .standout-card.held{
-  border-left:3px solid var(--teal);
-  padding-left:13px;
+  border-left:2px solid var(--teal);
+  padding-left:11px;
 }
 .standout-card.watching{
-  border-left:3px solid var(--purple);
-  padding-left:13px;
+  border-left:2px solid var(--purple);
+  padding-left:11px;
 }
 .standout-header{
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;
-  font-size:14px;font-weight:700;color:var(--text);
+  font-size:13px;font-weight:700;color:var(--text);
+  font-variant-numeric:tabular-nums;
 }
 .standout-company{
-  font-size:11px;color:var(--muted);
+  font-size:10px;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .standout-spark{
-  display:block;width:100%;height:32px;margin:4px 0;
+  display:block;width:100%;height:26px;margin:3px 0;
 }
 .standout-foot{
   display:flex;align-items:baseline;gap:8px;
 }
 .standout-score{
-  font-size:22px;font-weight:700;font-family:var(--mono);
-  flex-shrink:0;
+  font-size:18px;font-weight:700;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;
+  flex-shrink:0;line-height:1;
 }
 .standout-why{
-  font-size:11px;color:var(--muted);line-height:1.4;
+  font-size:10px;color:var(--muted);line-height:1.4;
   flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 
-/* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
-   Replaces the sector summary cards. Each sector renders as a single
-   horizontal row: name | strength bar | score | ETF · top ticker.
-   Sorted by avg_score (broad sector strength) instead of top_score
-   (single-stock max) — reads as a true sector-rotation snapshot. */
+/* ── SECTOR PULSE BARS — tightened in foundation pass.
+   Half the height (4px), tighter padding, smaller type, subtler
+   selection state (no glow). Reads as a Apple-Stocks-style strength
+   strip rather than a chunky progress-bar grid. */
 .sector-pulse-row{
   display:grid;
-  grid-template-columns:96px 1fr 38px 120px;
-  gap:12px;
+  grid-template-columns:84px 1fr 32px 110px;
+  gap:10px;
   align-items:center;
-  padding:7px 12px;
-  border-radius:6px;
+  padding:4px 10px;
+  border-radius:4px;
   cursor:pointer;
   border:1px solid transparent;
   transition:background .15s,border-color .15s;
 }
 .sector-pulse-row:hover{
-  background:rgba(255,255,255,0.035);
+  background:rgba(255,255,255,0.03);
 }
 .sector-pulse-row.selected{
-  background:rgba(0,245,212,0.06);
-  border-color:rgba(0,245,212,0.40);
-  box-shadow:0 0 12px rgba(0,245,212,0.15);
+  background:rgba(0,245,212,0.05);
+  border-color:rgba(0,245,212,0.28);
 }
 .sector-pulse-name{
-  font-size:10px;font-weight:700;letter-spacing:0.04em;
+  font-size:9px;font-weight:700;letter-spacing:0.06em;
   color:var(--muted);text-transform:uppercase;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .sector-pulse-row.selected .sector-pulse-name{color:var(--teal)}
 .sector-pulse-bar-wrap{
-  height:8px;background:rgba(255,255,255,0.06);
-  border-radius:4px;overflow:hidden;position:relative;
+  height:4px;background:rgba(255,255,255,0.05);
+  border-radius:2px;overflow:hidden;position:relative;
 }
 .sector-pulse-bar{
-  height:100%;border-radius:4px;
+  height:100%;border-radius:2px;
   background:var(--teal);
   transition:width .3s ease;
 }
 .sector-pulse-score{
-  font-size:12px;font-weight:700;color:var(--teal);
+  font-size:11px;font-weight:600;color:var(--teal);
   font-family:var(--mono);text-align:right;
+  font-variant-numeric:tabular-nums;
 }
 .sector-pulse-meta{
-  font-size:10px;color:var(--muted);
+  font-size:9px;color:var(--muted);
   font-family:var(--mono);text-align:right;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
@@ -3587,34 +3686,43 @@ setInterval(loadAgentPulse, 10000);
 </div>
 
 <!-- ══════════════ SCREENING TAB ══════════════ -->
-<div class="page" id="tab-screening" style="display:none">
+<!-- Screener foundation pass (2026-04-29). Single .screener-v2 shell
+     gives every section the same horizontal alignment + max-width.
+     Inside, three section blocks (.scrv-section) inherit the same
+     gutter so columns line up across standouts / pulse bars / ranked
+     list. Density tightened ~30% across the board; decorative chrome
+     (gradients, gold pills, glow shadows, score bars) removed. -->
+<div class="page screener-v2" id="tab-screening" style="display:none">
 
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-    <div style="font-size:24px;font-weight:700;letter-spacing:-0.5px;color:var(--text)">
-      Sector <span style="background:linear-gradient(90deg,var(--amber),var(--teal));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Screening</span>
-    </div>
+  <!-- Editorial header — anchors the page in time + context. -->
+  <div class="scrv-section scrv-header">
+    <div class="scrv-eyebrow">Sector Intelligence</div>
+    <div id="screener-anchor" class="scrv-anchor">—</div>
   </div>
+
   <!-- TODAY'S STANDOUTS — top 4 by combined score across all sectors.
-       Always all-sectors regardless of the sector filter applied to the
-       ranked list below. Acts as the "headline view" of the screener. -->
-  <div style="padding:0 4px 4px">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
-      <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)">Today's Standouts</div>
-      <div id="standouts-meta" style="font-size:10px;color:var(--dim);font-family:var(--mono)"></div>
+       Always all-sectors regardless of the sector filter below. -->
+  <div class="scrv-section">
+    <div class="scrv-section-head">
+      <div class="scrv-section-title">Today's standouts</div>
+      <div id="standouts-meta" class="scrv-meta"></div>
     </div>
     <div id="standouts-strip" class="standouts-strip"></div>
   </div>
-  <div style="padding:0 4px 16px;margin-top:18px;border-top:1px solid var(--border);padding-top:18px">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-      <label style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)">Sector</label>
-      <select id="screening-sector-select" onchange="loadScreening()"
-              class="glass-input" style="font-size:12px;padding:6px 10px;max-width:260px">
+
+  <!-- Sector pulse bars + ranked list — share the same shell. -->
+  <div class="scrv-section">
+    <div class="scrv-section-head">
+      <div class="scrv-section-title">Sector strength</div>
+      <div id="screening-meta" class="scrv-meta"></div>
+    </div>
+    <div class="scrv-filter-row">
+      <select id="screening-sector-select" onchange="loadScreening()" class="scrv-select">
         <option value="">All sectors</option>
       </select>
-      <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-left:auto"></div>
     </div>
-    <div id="screening-sector-summary" style="display:grid;grid-template-columns:1fr;gap:4px;margin-bottom:16px"></div>
-    <div id="screening-grid" style="display:grid;gap:10px"></div>
+    <div id="screening-sector-summary" class="scrv-pulse-stack"></div>
+    <div id="screening-grid" class="scrv-grid"></div>
   </div>
 
 </div>
@@ -9250,6 +9358,55 @@ function buildWhySentence(cd) {
   return reasons.slice(0, 2).join(' · ');
 }
 
+// Foundation pass (2026-04-29) — editorial anchor at the top of the
+// screener. Builds a single line of context (date · last-run · mover
+// count · top sector) so the page reads as a daily intelligence brief
+// instead of an unanchored database dump. Pulled from data already in
+// hand once standouts + sectors load — no new fetch.
+function renderScreenerAnchor(candidates, sectors) {
+  const el = document.getElementById('screener-anchor');
+  if (!el) return;
+  // Date — "Tuesday, April 29"
+  const today = new Date();
+  const dateStr = today.toLocaleDateString('en-US',
+    {weekday:'long', month:'long', day:'numeric'});
+  // Last-run timestamp — derive from candidates[0].run_id (ISO) or
+  // run_id we already cached.
+  let runStr = '';
+  const c0 = (candidates && candidates[0]) || null;
+  if (c0 && c0.run_id) {
+    try {
+      const d = new Date(c0.run_id);
+      const t = d.toLocaleTimeString('en-US',
+        {hour12:false, timeZone:'America/New_York', hour:'2-digit', minute:'2-digit'});
+      runStr = 'Last run ' + t + ' ET';
+    } catch(e) {}
+  }
+  // Movers — count rows whose |Δ vs prev| ≥ 0.05
+  let upN = 0, downN = 0, newN = 0;
+  (candidates || []).forEach(c => {
+    if (c.combined_score == null) return;
+    if (c.prev_combined_score == null) { newN++; return; }
+    const d = c.combined_score - c.prev_combined_score;
+    if (d >=  0.05) upN++;
+    if (d <= -0.05) downN++;
+  });
+  const moverBits = [];
+  if (upN)   moverBits.push(upN + ' up');
+  if (downN) moverBits.push(downN + ' down');
+  if (newN)  moverBits.push(newN + ' new');
+  const moverStr = moverBits.length ? moverBits.join(' · ') + ' since last run' : '';
+  // Top sector — pulse-bar sectors are sorted strongest-first.
+  let topStr = '';
+  if (sectors && sectors[0] && sectors[0].sector) {
+    topStr = 'Top sector: ' + sectors[0].sector;
+  }
+  // Compose the anchor line. Display sits on top, mono meta below.
+  const meta = [runStr, moverStr, topStr].filter(Boolean).join(' · ');
+  el.innerHTML = dateStr +
+    (meta ? '<span class="scrv-anchor-meta">' + meta + '</span>' : '');
+}
+
 // Phase 1C — Today's Standouts loader. Pulls the all-sectors candidate
 // list once per screener-tab activation, picks the top N by combined
 // score, renders cards into #standouts-strip. Runs in parallel with
@@ -9333,6 +9490,10 @@ async function loadStandouts(force) {
       drawSparkline(canvas, prices, color);
     });
     _standoutsLoaded = true;
+    // Stash the full candidate set on window so the editorial anchor
+    // can read it (movers count, etc.) without re-fetching.
+    window._screenerCandidates = candidates;
+    try { renderScreenerAnchor(candidates, window._screenerSectors); } catch(e) {}
   } catch(e) {
     console.warn('loadStandouts', e);
   }
@@ -9383,6 +9544,9 @@ async function loadScreeningSectors() {
         + '<div class="sector-pulse-meta">'+meta+'</div>'
         + '</div>';
     }).join('');
+    // Stash sectors for the editorial anchor (top-sector field).
+    window._screenerSectors = sectors;
+    try { renderScreenerAnchor(window._screenerCandidates, sectors); } catch(e) {}
   } catch(e) { console.warn('loadScreeningSectors', e); }
 }
 
@@ -9509,10 +9673,17 @@ async function loadScreening() {
       // Phase F (2026-04-27) — hero pills inline with the column the
       // row leads. We always tag #1 by combined; the per-component pills
       // only render when this row is the cardinal max for that column.
-      const _topNews = (i === _leaders.news    && cd.news_score      != null) ? '<span class="spill" data-pill="spill-news" title="Highest news score in this view">TOP NEWS</span>' : '';
-      const _topSent = (i === _leaders.sent    && cd.sentiment_score != null) ? '<span class="spill" data-pill="spill-sent" title="Highest sentiment score in this view">TOP SENT</span>' : '';
-      const _topMom  = (i === _leaders.momentum&& cd.momentum_score  != null) ? '<span class="spill" data-pill="spill-mom"  title="Highest momentum score in this view">TOP MOM</span>'   : '';
-      const _topComb = (i === _leaders.combined&& cd.combined_score  != null) ? '<span class="spill" data-pill="spill-rank" title="Highest combined score — overall leader">RANK #1</span>' : '';
+      // Foundation pass (2026-04-29) — gold-gradient "TOP NEWS / TOP
+      // SENT / TOP MOM / RANK #1" pills removed. The leader is already
+      // the top row visually (sorted desc by combined); the pills
+      // added chrome without adding signal once you accept the sort
+      // order. RANK #1 status lives in the rank number itself (the
+      // 32px column on the left). Per-metric leaders are recoverable
+      // from the score numbers in each column.
+      const _topNews = '';
+      const _topSent = '';
+      const _topMom  = '';
+      const _topComb = '';
       // Phase 1B — time-horizon chip per row (catalyst/trend/thesis).
       const _horizonTag = horizonPillHTML(classifyHorizon(cd));
       // Tier tint by combined score (top >=0.7 / bottom <0.4 / default).
@@ -9540,26 +9711,24 @@ async function loadScreening() {
           _delta = '<div class="screener-delta '+cls+'" title="Δ vs. last run">'+arrow+' '+sign+dPts+'</div>';
         }
       }
+      // Foundation pass row template. Tighter typography (no 13/14/22
+       // mix), no per-cell score bars (signal is the score number +
+       // sparkline), no per-cell uppercase column labels (alignment +
+       // headers above the table do that work later). News headline
+       // truncates instead of wrapping so row height stays uniform.
       return '<div class="screener-row'+_tier+_trackClass+'" onclick="openPlanningDrawer('+drawerEsc+')">'
-        +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
-        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_horizonTag+_topComb+'</div>'
-        +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
-        +'<div style="font-size:11px;color:var(--muted)">Weight: '+(cd.etf_weight_pct||0).toFixed(1)+'%</div>'
-        +congBadge(cd.congressional_flag)+'</div>'
-        +'<div><div style="font-size:10px;color:var(--muted)">NEWS'+_topNews+'</div>'
-        +'<div style="font-size:13px;font-weight:600;color:'+nc+'">'+sigLabel(ns)+'</div>'
-        +bar(cd.news_score,nc)
-        +'<div style="font-size:10px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">'+(cd.news_headline||'')+'</div></div>'
-        +'<div><div style="font-size:10px;color:var(--muted)">SENTIMENT'+_topSent+'</div>'
-        +'<div style="font-size:13px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
-        +bar(cd.sentiment_score,sc)
-        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(cd.sentiment_score!=null?'Score: '+pct(cd.sentiment_score)+'/100':'')+'</div></div>'
-        +'<div title="3-month price return + 30-day price sparkline"><div style="font-size:10px;color:var(--muted)">MOMENTUM'+_topMom+'</div>'
-        +'<div style="font-size:13px;font-weight:600;color:'+r3Color+'">'+r3Display+'</div>'
-        +'<canvas class="momentum-spark" data-row="'+i+'" data-color="'+r3Color+'" width="200" height="48"></canvas></div>'
-        +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
-        +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
-        +'<div style="font-size:10px;color:var(--muted)">/100</div>'
+        +'<div style="font-size:14px;font-weight:600;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(i+1)+'</div>'
+        +'<div><div style="font-size:13px;font-weight:600;color:var(--text)">'+cd.ticker+sectorBadge+_horizonTag+'</div>'
+        +'<div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(cd.company||'')+'</div>'
+        +'<div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:2px">'+(cd.etf_weight_pct||0).toFixed(1)+'% wt'+(cd.congressional_flag && cd.congressional_flag !== "none" ? ' · ' + (cd.congressional_flag === "recent_buy" ? "Insider buy" : "Insider sell") : '')+'</div></div>'
+        +'<div><div style="font-size:11px;font-weight:600;color:'+nc+'">'+sigLabel(ns)+'</div>'
+        +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.news_score!=null?pct(cd.news_score):'—')+'</div>'
+        +'<div style="font-size:10px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">'+(cd.news_headline||'')+'</div></div>'
+        +'<div><div style="font-size:11px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
+        +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.sentiment_score!=null?pct(cd.sentiment_score):'—')+'</div></div>'
+        +'<div title="3-month price return + 30-day sparkline"><div style="font-size:11px;font-weight:600;color:'+r3Color+';font-variant-numeric:tabular-nums">'+r3Display+'</div>'
+        +'<canvas class="momentum-spark" data-row="'+i+'" data-color="'+r3Color+'" width="200" height="44"></canvas></div>'
+        +'<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:'+scoreColor(cs)+';font-family:var(--mono);font-variant-numeric:tabular-nums;line-height:1">'+(cs!=null?pct(cs):'—')+'</div>'
         +_delta
         +'</div></div>';
     }).join('');
