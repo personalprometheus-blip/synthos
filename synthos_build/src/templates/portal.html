@@ -1801,15 +1801,27 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <!-- Trading Parameters — preset picker + sizing/risk knobs. Heavier
          section, sits below the lighter mode + cash controls. -->
     <div class="cfg-section" style="margin-top:24px">Trading Parameters</div>
-    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
-      <button class="preset-btn" data-preset="conservative" onclick="applyPreset('conservative',this)"
-        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(0,245,212,0.15);background:rgba(0,245,212,0.06);color:var(--teal);cursor:pointer;font-family:var(--sans);transition:all .15s">Conservative</button>
+    <!-- 2026-04-30 — fleet-wide preset reset to moderate.
+         Conservative/Aggressive/Custom temporarily disabled while the
+         system stabilizes around a single middle-of-the-road preset.
+         Buttons remain visible (so users see what's coming back) but
+         click handlers are no-ops until we re-enable individual
+         tuning. The notice below the row tells the user why. -->
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <button class="preset-btn" data-preset="conservative"
+        title="Temporarily disabled while the system stabilizes around moderate"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:rgba(255,255,255,0.18);cursor:not-allowed;font-family:var(--sans);transition:all .15s" disabled>Conservative</button>
       <button class="preset-btn" data-preset="moderate" onclick="applyPreset('moderate',this)"
         style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(123,97,255,0.15);background:rgba(123,97,255,0.06);color:var(--purple);cursor:pointer;font-family:var(--sans);transition:all .15s">Moderate</button>
-      <button class="preset-btn" data-preset="aggressive" onclick="applyPreset('aggressive',this)"
-        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,75,110,0.15);background:rgba(255,75,110,0.06);color:var(--pink);cursor:pointer;font-family:var(--sans);transition:all .15s">Aggressive</button>
-      <button class="preset-btn" data-preset="custom" onclick="applyPreset('custom',this)"
-        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);color:var(--muted);cursor:pointer;font-family:var(--sans);transition:all .15s">Custom</button>
+      <button class="preset-btn" data-preset="aggressive"
+        title="Temporarily disabled while the system stabilizes around moderate"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:rgba(255,255,255,0.18);cursor:not-allowed;font-family:var(--sans);transition:all .15s" disabled>Aggressive</button>
+      <button class="preset-btn" data-preset="custom"
+        title="Temporarily disabled while the system stabilizes around moderate"
+        style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:rgba(255,255,255,0.18);cursor:not-allowed;font-family:var(--sans);transition:all .15s" disabled>Custom</button>
+    </div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.5;margin-bottom:12px;padding:8px 10px;background:rgba(123,97,255,0.04);border-left:2px solid var(--purple);border-radius:0 4px 4px 0">
+      <strong style="color:var(--purple)">Calibration in progress</strong> — all customers are currently on the moderate preset while the trading system stabilizes. Conservative, aggressive, and custom presets will return once we have enough data on moderate to tune the others.
     </div>
     <div id="cfg-controls-wrap" style="display:flex;flex-direction:column;gap:12px;opacity:0.35;pointer-events:none">
 
