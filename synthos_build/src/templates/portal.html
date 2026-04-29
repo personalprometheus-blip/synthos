@@ -855,6 +855,22 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   border-left:3px solid var(--purple);
   padding-left:14px;
 }
+/* Movers delta chip — sits under the COMBINED score on each row to
+   signal change since the previous screener run (twice daily). Suppressed
+   on shifts < 5 composite points to keep noise down. */
+.screener-delta{
+  font-size:10px;font-weight:700;font-family:var(--mono);
+  letter-spacing:0.04em;margin-top:3px;
+}
+.screener-delta.delta-up{color:var(--teal)}
+.screener-delta.delta-down{color:var(--pink)}
+.screener-delta.delta-new{
+  display:inline-block;font-size:9px;letter-spacing:0.08em;
+  padding:1px 6px;border-radius:99px;
+  background:rgba(245,166,35,0.10);
+  border:1px solid rgba(245,166,35,0.30);
+  color:#f5a623;
+}
 
 /* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
    Replaces the sector summary cards. Each sector renders as a single
@@ -8977,6 +8993,24 @@ async function loadScreening() {
       // index already populated by the dashboard loaders.
       const _track = (typeof getTrackerStatus === 'function') ? getTrackerStatus(cd.ticker) : null;
       const _trackClass = _track === 'position' ? ' held' : _track === 'watching' ? ' watching' : '';
+      // Movers delta vs. the previous screener run. prev_combined_score
+      // is shipped by the API via LEFT JOIN — null when this is the
+      // first run, or when the ticker wasn't in the prev run (newly
+      // screened in → "NEW" chip). Threshold of 0.05 (= 5 composite
+      // points) suppresses noise on tiny shifts.
+      let _delta = '';
+      if (cs != null && cd.prev_combined_score == null) {
+        _delta = '<div class="screener-delta delta-new" title="Newly screened in this run — no prior score">NEW</div>';
+      } else if (cs != null && cd.prev_combined_score != null) {
+        const d = cs - cd.prev_combined_score;
+        const dPts = Math.round(d * 100);
+        if (Math.abs(d) >= 0.05) {
+          const cls = d > 0 ? 'delta-up' : 'delta-down';
+          const arrow = d > 0 ? '↑' : '↓';
+          const sign = dPts > 0 ? '+' : '';
+          _delta = '<div class="screener-delta '+cls+'" title="Δ vs. last run">'+arrow+' '+sign+dPts+'</div>';
+        }
+      }
       return '<div class="screener-row'+_tier+_trackClass+'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
         +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_topComb+'</div>'
@@ -8997,7 +9031,9 @@ async function loadScreening() {
         +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(ms!=null?'Score: '+pct(ms)+'/100':'')+'</div></div>'
         +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
         +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
-        +'<div style="font-size:10px;color:var(--muted)">/100</div></div></div>';
+        +'<div style="font-size:10px;color:var(--muted)">/100</div>'
+        +_delta
+        +'</div></div>';
     }).join('');
   } catch(e) {
     meta.textContent = 'Error loading screening data.';

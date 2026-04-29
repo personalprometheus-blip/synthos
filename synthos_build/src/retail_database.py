@@ -3724,26 +3724,48 @@ class DB:
         If sector is None, returns candidates for ALL sectors in the latest
         run (one row per ticker across all 11 sectors).
         If sector is given, restricts to that sector.
+
+        2026-04-29 — each row also carries `prev_combined_score` from the
+        previous (second-most-recent) run, fetched via LEFT JOIN. NULL
+        when this is the first run, or when the ticker wasn't in the
+        previous run's universe (i.e. newly screened in). Frontend
+        derives the score delta + ↑/↓/NEW indicator from this field.
         """
         with self.conn() as c:
-            row = c.execute("""
-                SELECT run_id FROM sector_screening
-                ORDER BY created_at DESC LIMIT 1
-            """).fetchone()
-            if not row:
+            # Find the two most-recent run_ids in one query so we don't
+            # round-trip twice. The second row (offset 1) is the prev
+            # run; absent on cold-start (only one run exists).
+            run_rows = c.execute("""
+                SELECT DISTINCT run_id FROM sector_screening
+                ORDER BY created_at DESC LIMIT 2
+            """).fetchall()
+            if not run_rows:
                 return []
-            run_id = row['run_id']
+            run_id = run_rows[0]['run_id']
+            prev_run_id = run_rows[1]['run_id'] if len(run_rows) > 1 else None
+            # LEFT JOIN against the prev run on ticker. When prev_run_id
+            # is None (first run), we pass an empty string that will
+            # never match — every prev_combined_score comes back NULL,
+            # which is the "NEW" state on the frontend.
+            join_key = prev_run_id if prev_run_id is not None else ''
             if sector:
                 rows = c.execute("""
-                    SELECT * FROM sector_screening
-                    WHERE run_id=? AND sector=?
-                    ORDER BY combined_score DESC, etf_weight_pct DESC
-                """, (run_id, sector)).fetchall()
+                    SELECT s.*, p.combined_score AS prev_combined_score
+                    FROM sector_screening s
+                    LEFT JOIN sector_screening p
+                      ON p.ticker = s.ticker AND p.run_id = ?
+                    WHERE s.run_id=? AND s.sector=?
+                    ORDER BY s.combined_score DESC, s.etf_weight_pct DESC
+                """, (join_key, run_id, sector)).fetchall()
             else:
                 rows = c.execute("""
-                    SELECT * FROM sector_screening WHERE run_id=?
-                    ORDER BY combined_score DESC, etf_weight_pct DESC
-                """, (run_id,)).fetchall()
+                    SELECT s.*, p.combined_score AS prev_combined_score
+                    FROM sector_screening s
+                    LEFT JOIN sector_screening p
+                      ON p.ticker = s.ticker AND p.run_id = ?
+                    WHERE s.run_id=?
+                    ORDER BY s.combined_score DESC, s.etf_weight_pct DESC
+                """, (join_key, run_id)).fetchall()
             return [dict(r) for r in rows]
 
     def get_sector_screening_summary(self):
