@@ -115,6 +115,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   letter-spacing:0.15em;color:var(--teal);
   text-shadow:0 0 20px rgba(0,245,212,0.22);flex-shrink:0;
 }
+/* 2026-04-28 — header wordmark is now clickable home-button.
+   `cursor:pointer` advertises clickability, brighter glow on hover
+   gives feedback without changing layout. The sidebar wordmark uses
+   the same .wordmark class but is non-interactive (just branding
+   inside the slide-out menu) — we override there with .wordmark-static
+   if we ever want to disambiguate. For now the sidebar wordmark
+   inherits the cursor too; harmless since sidebar already closes
+   when any nav-btn is pressed. */
+.header .wordmark{ cursor:pointer; transition:text-shadow 0.15s,color 0.15s }
+.header .wordmark:hover{ color:#5ffce6; text-shadow:0 0 28px rgba(0,245,212,0.45) }
 .status-pill{
   display:flex;align-items:center;gap:5px;
   padding:3px 12px;border-radius:99px;
@@ -1215,7 +1225,10 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <button class="hdr-hamburger" onclick="toggleSidebar()" aria-label="Open menu">
       <span></span><span></span><span></span>
     </button>
-    <div class="wordmark">SYNTHOS</div>
+    <div class="wordmark" onclick="showTab('dashboard');closeSidebar()"
+         title="Home — return to Dashboard"
+         role="button" tabindex="0"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showTab('dashboard');closeSidebar()}">SYNTHOS</div>
   </div>
 
   <!-- Centre: market status pill -->
