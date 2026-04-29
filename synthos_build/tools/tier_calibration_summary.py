@@ -45,17 +45,17 @@ def fetch_customer(cid: str, customers_dir: str):
         )
         opened = c.execute(
             """SELECT COUNT(*) AS n,
-                      AVG(entry_price * shares)   AS avg_dollars,
-                      AVG(entry_signal_score)     AS avg_score
+                      AVG(entry_price * shares)             AS avg_dollars,
+                      AVG(CAST(entry_signal_score AS REAL)) AS avg_score
                  FROM positions
                 WHERE opened_at >= ? AND opened_at < ?""",
             (W_START, W_END)
         ).fetchone()
         closed = c.execute(
             """SELECT COUNT(*) AS n,
-                      SUM(CASE WHEN realized_pl > 0 THEN 1 ELSE 0 END) AS wins,
-                      SUM(CASE WHEN realized_pl < 0 THEN 1 ELSE 0 END) AS losses,
-                      SUM(realized_pl) AS total_pl
+                      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                      SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                      SUM(pnl) AS total_pl
                  FROM positions
                 WHERE closed_at IS NOT NULL
                   AND closed_at >= ? AND closed_at < ?""",
