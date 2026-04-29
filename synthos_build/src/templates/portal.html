@@ -802,6 +802,60 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   gap:14px;
 }
 
+/* ── SCREENER ROWS (Phase 2 cleanup, 2026-04-29) ──
+   Class-based replacement for the previous inline-style + onmouseenter/
+   onmouseleave row template. Score-band tints + held/watching left-edge
+   stripes layer cleanly via modifier classes; hover transitions stay
+   correct regardless of which modifiers apply. */
+.screener-row{
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:10px;
+  padding:14px 16px;
+  display:grid;
+  grid-template-columns:40px 1fr 1fr 1fr 1fr 70px;
+  gap:14px;
+  align-items:start;
+  cursor:pointer;
+  transition:background .15s,border-color .15s,opacity .15s;
+}
+.screener-row:hover{
+  background:rgba(255,255,255,0.06);
+  border-color:rgba(0,245,212,0.25);
+}
+/* Score-band tints — driven by combined_score on render. Top tier
+   (>=0.7) gets a faint teal wash so high-conviction rows visually
+   pop; bottom tier (<0.4) is subtly muted so weak rows recede.
+   Middle band stays the default surface. */
+.screener-row.tier-top{
+  background:rgba(0,245,212,0.05);
+  border-color:rgba(0,245,212,0.16);
+}
+.screener-row.tier-top:hover{
+  background:rgba(0,245,212,0.09);
+  border-color:rgba(0,245,212,0.35);
+}
+.screener-row.tier-bottom{
+  background:rgba(255,255,255,0.015);
+  opacity:0.78;
+}
+.screener-row.tier-bottom:hover{
+  background:rgba(255,255,255,0.04);
+  opacity:1;
+}
+/* Left-edge stripe — held positions get teal, watchlist gets purple
+   (purple already connotes "in the planning pipeline" elsewhere in
+   the portal — corroboration pills, planning drawer). Padding-left
+   matches default so the stripe doesn't shove content sideways. */
+.screener-row.held{
+  border-left:3px solid var(--teal);
+  padding-left:14px;
+}
+.screener-row.watching{
+  border-left:3px solid var(--purple);
+  padding-left:14px;
+}
+
 /* ── HERO BADGE (overlaid on .charm cards) ── */
 .hero-badge{position:absolute;top:42px;right:8px;font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px;z-index:1}
 .hero-badge.hb-cyan,.hero-badge.hb-violet{background:linear-gradient(135deg,#d4a017,#f5d442,#d4a017);border:1px solid rgba(245,212,66,0.5);color:#1a1400;text-shadow:0 1px 0 rgba(245,212,66,0.4);box-shadow:0 0 8px rgba(245,212,66,0.3)}
@@ -8876,7 +8930,14 @@ async function loadScreening() {
       const _topSent = (i === _leaders.sent    && cd.sentiment_score != null) ? '<span class="spill" data-pill="spill-sent" title="Highest sentiment score in this view">TOP SENT</span>' : '';
       const _topMom  = (i === _leaders.momentum&& cd.momentum_score  != null) ? '<span class="spill" data-pill="spill-mom"  title="Highest momentum score in this view">TOP MOM</span>'   : '';
       const _topComb = (i === _leaders.combined&& cd.combined_score  != null) ? '<span class="spill" data-pill="spill-rank" title="Highest combined score — overall leader">RANK #1</span>' : '';
-      return '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:40px 1fr 1fr 1fr 1fr 70px;gap:14px;align-items:start;cursor:pointer;transition:background 0.15s,border-color 0.15s" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\';this.style.borderColor=\'rgba(0,245,212,0.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'" onclick="openPlanningDrawer('+drawerEsc+')">'
+      // Tier tint by combined score (top >=0.7 / bottom <0.4 / default).
+      const _tier = cs == null ? '' : cs >= 0.7 ? ' tier-top' : cs < 0.4 ? ' tier-bottom' : '';
+      // Left-edge stripe when this candidate is held in the portfolio
+      // or sitting on the watchlist. Reuses the global _trackedTickers
+      // index already populated by the dashboard loaders.
+      const _track = (typeof getTrackerStatus === 'function') ? getTrackerStatus(cd.ticker) : null;
+      const _trackClass = _track === 'position' ? ' held' : _track === 'watching' ? ' watching' : '';
+      return '<div class="screener-row'+_tier+_trackClass+'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
         +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_topComb+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
