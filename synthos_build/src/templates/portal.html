@@ -3434,12 +3434,12 @@ setInterval(loadAgentPulse, 10000);
   <div class="glass" style="margin-bottom:16px">
     <div class="settings-section">
       <div class="setting-row">
-        <div><div class="setting-label">Trade Executed</div><div class="setting-desc">Email when the algo enters or exits a position</div></div>
-        <label class="toggle"><input type="checkbox" checked><div class="toggle-slider"></div></label>
+        <div><div class="setting-label">Trade Executed</div><div class="setting-desc">Email when the algo enters or exits a position. The bell shows these regardless — this controls email only.</div></div>
+        <label class="toggle"><input type="checkbox" id="cfg-notify-trade"><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
-        <div><div class="setting-label">Kill Switch Triggered</div><div class="setting-desc">Immediate alert when trading is halted</div></div>
-        <label class="toggle"><input type="checkbox" checked><div class="toggle-slider"></div></label>
+        <div><div class="setting-label">Kill Switch Triggered</div><div class="setting-desc">Email when trading is halted. The bell shows these regardless — this controls email only.</div></div>
+        <label class="toggle"><input type="checkbox" id="cfg-notify-kill"><div class="toggle-slider"></div></label>
       </div>
       <div class="setting-row">
         <div><div class="setting-label">Daily Digest</div><div class="setting-desc">Morning summary of signals and planned activity</div></div>
@@ -4137,6 +4137,11 @@ async function loadCfgPanel() {
     if (g('cfg-bil-reserve'))   g('cfg-bil-reserve').value = d.IDLE_RESERVE_PCT || '20';
     if (g('cfg-bil-label'))     g('cfg-bil-label').textContent = (d.ENABLE_BIL_RESERVE !== '0') ? 'Enabled' : 'Disabled';
     if (g('cfg-notif-pref'))    g('cfg-notif-pref').value = d.NOTIFICATION_PREFERENCE || 'off';
+    // 2026-04-28 — opt-in scoop email toggles. Default '0' (off) for both
+    // so a fresh customer doesn't receive emails until they explicitly
+    // turn them on. Bell notifications are independent and unaffected.
+    if (g('cfg-notify-trade')) g('cfg-notify-trade').checked = d.NOTIFY_TRADE_EXECUTED === '1';
+    if (g('cfg-notify-kill'))  g('cfg-notify-kill').checked  = d.NOTIFY_KILL_SWITCH === '1';
     // Restore saved preset from DB (not guessed from values)
     var wrap = document.getElementById('cfg-controls-wrap');
     var matched = d.PRESET_NAME || 'custom';
@@ -5654,9 +5659,31 @@ function loadRisk() {
   }).catch(function(){});
 }
 
-// ── ALERT PREFS (stub save) ──
-function saveAlertPrefs() {
-  toast('Alert preferences saved', 'ok');
+// ── ALERT PREFS — bell stays default ON, scoop email is opt-in per-event ──
+// 2026-04-28. Toggling either checkbox flips the per-customer
+// NOTIFY_TRADE_EXECUTED / NOTIFY_KILL_SWITCH setting in customer_settings.
+// Bell notifications fire regardless — these toggles ONLY gate whether
+// the trader/portal also enqueues an email to scoop.
+async function saveAlertPrefs() {
+  try {
+    var body = {
+      notify_trade_executed: document.getElementById('cfg-notify-trade').checked ? '1' : '0',
+      notify_kill_switch:    document.getElementById('cfg-notify-kill').checked  ? '1' : '0',
+    };
+    var r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    var d = await r.json();
+    if (d.ok) {
+      toast('Alert preferences saved', 'ok');
+    } else {
+      toast('Save failed: ' + (d.error || 'unknown'), 'err');
+    }
+  } catch (e) {
+    toast('Save failed: ' + e.message, 'err');
+  }
 }
 
 // ── TOAST ──

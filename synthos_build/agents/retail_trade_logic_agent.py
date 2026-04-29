@@ -931,6 +931,44 @@ def _queue_overnight_order(ticker: str, qty, side: str,
     return None
 
 
+# 2026-04-28 — opt-in scoop email layer for trade-execution events.
+# Bell notifications (db.add_notification) are independent and ALWAYS
+# fire. This helper is the optional second hop: if the customer has
+# NOTIFY_TRADE_EXECUTED='1' in their settings, also enqueue an email
+# via scoop. Best-effort — never raises, never blocks the trade flow.
+def _maybe_email_trade(db, subject, body, ticker, side,
+                       customer_id, payload_extra=None):
+    try:
+        if db.get_setting('NOTIFY_TRADE_EXECUTED') != '1':
+            return
+        recipient = None
+        try:
+            _src_dir = os.path.join(_ROOT_DIR, 'src')
+            if _src_dir not in sys.path:
+                sys.path.insert(0, _src_dir)
+            import auth as _auth
+            cust = _auth.get_customer_by_id(customer_id)
+            if cust:
+                recipient = _auth.get_email(cust)
+        except Exception as _e:
+            log.debug(f"_maybe_email_trade auth lookup failed: {_e}")
+        if not recipient:
+            log.debug(f"_maybe_email_trade: no recipient email for cid={customer_id}")
+            return
+        payload = {'ticker': ticker, 'side': side}
+        if payload_extra:
+            payload.update(payload_extra)
+        db.enqueue_scoop_email(
+            event_type='TRADE_EXECUTED',
+            subject=subject, body=body,
+            recipient_email=recipient, customer_id=customer_id,
+            audience='customer', priority=2,
+            source_agent='trade_logic', payload=payload,
+        )
+    except Exception as _e:
+        log.debug(f"_maybe_email_trade swallowed: {_e}")
+
+
 def _resolve_fill_price(order, alpaca, fallback_price: float,
                         max_polls: int = 4, poll_delay: float = 0.5) -> float:
     """Return the real Alpaca fill price for a just-submitted market order,
@@ -3145,6 +3183,13 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
             db.add_notification('trade', f'Sold {weakest["ticker"]}',
                 f'Rotated out for stronger signal — P&L {_rp_sign}${_rot_pnl:.2f}',
                 meta={'ticker': weakest['ticker'], 'side': 'sell', 'pnl': round(_rot_pnl, 2), 'reason': 'ROTATED_OUT', 'replaced_by': signal['ticker']})
+            _maybe_email_trade(db,
+                subject=f'Sold {weakest["ticker"]} (rotated)',
+                body=f'Rotated out for stronger signal — P&L {_rp_sign}${_rot_pnl:.2f}',
+                ticker=weakest['ticker'], side='sell',
+                customer_id=_CUSTOMER_ID,
+                payload_extra={'pnl': round(_rot_pnl, 2), 'reason': 'ROTATED_OUT',
+                               'replaced_by': signal['ticker']})
             # Sell counted as part of the rotation; caller increments
             # trade_events once per complete rotation (see return value).
 
@@ -3242,6 +3287,14 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         db.add_notification('trade', f'Bought {signal["ticker"]}',
                             f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested (rotated from {weakest["ticker"]})',
                             meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(real_entry, 2), 'rotation_from': weakest['ticker']})
+                        _maybe_email_trade(db,
+                            subject=f'Bought {signal["ticker"]} (rotated)',
+                            body=f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested '
+                                 f'(rotated from {weakest["ticker"]})',
+                            ticker=signal['ticker'], side='buy',
+                            customer_id=_CUSTOMER_ID,
+                            payload_extra={'shares': round(size, 4), 'price': round(real_entry, 2),
+                                           'cost': _cost, 'rotation_from': weakest['ticker']})
                         rotations += 1
                         sig_log.decide("ROTATE", f"Replaced {weakest['ticker']} (gap {score_gap:.3f})")
                         sig_log.commit(db)
@@ -3943,6 +3996,13 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                 db.add_notification('trade', f'Sold {pos["ticker"]}',
                     f'Exit @ ${current_price:.2f} — P&L {_exit_sign}${pnl:.2f} ({exit_reason.replace("_"," ").lower()})',
                     meta={'ticker': pos['ticker'], 'side': 'sell', 'pnl': round(pnl, 2), 'reason': exit_reason})
+                _maybe_email_trade(db,
+                    subject=f'Sold {pos["ticker"]} ({exit_reason.replace("_"," ").lower()})',
+                    body=f'Exit @ ${current_price:.2f} — P&L {_exit_sign}${pnl:.2f}',
+                    ticker=pos['ticker'], side='sell',
+                    customer_id=_CUSTOMER_ID,
+                    payload_extra={'pnl': round(pnl, 2), 'reason': exit_reason,
+                                   'exit_price': round(current_price, 2)})
                 trade_events += 1
             pos_log.commit(db)
 
@@ -3998,6 +4058,13 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                     db.add_notification('trade', f'Bought {ticker}',
                         f'{shares:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
                         meta={'ticker': ticker, 'side': 'buy', 'shares': round(shares, 4), 'price': round(real_entry, 2)})
+                    _maybe_email_trade(db,
+                        subject=f'Bought {ticker} (approved)',
+                        body=f'{shares:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
+                        ticker=ticker, side='buy',
+                        customer_id=_CUSTOMER_ID,
+                        payload_extra={'shares': round(shares, 4),
+                                       'price': round(real_entry, 2), 'cost': _cost})
                     trade_events += 1
                 else:
                     log.error(f"[MANAGED] Order failed: {ticker}")
@@ -4272,6 +4339,13 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                     db.add_notification('trade', f'Bought {signal["ticker"]}',
                         f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
                         meta={'ticker': signal['ticker'], 'side': 'buy', 'shares': round(size, 4), 'price': round(real_entry, 2)})
+                    _maybe_email_trade(db,
+                        subject=f'Bought {signal["ticker"]}',
+                        body=f'{size:.2f} shares @ ${real_entry:.2f} — ${_cost:.2f} invested',
+                        ticker=signal['ticker'], side='buy',
+                        customer_id=_CUSTOMER_ID,
+                        payload_extra={'shares': round(size, 4),
+                                       'price': round(real_entry, 2), 'cost': _cost})
                     trade_events += 1
                 else:
                     log.error(f"Order failed: {signal['ticker']}")

@@ -1821,6 +1821,44 @@ def _customer_db():
 def now_et():
     return datetime.now(ET).strftime('%Y-%m-%d %H:%M:%S ET')
 
+
+def _maybe_email_kill(db, customer_id, engaged: bool):
+    """Phase I+ (2026-04-28). Bell notification always fires above this
+    call; this helper is the OPT-IN scoop email path. Sends only if the
+    customer has NOTIFY_KILL_SWITCH='1' in their settings.
+
+    Best-effort: any error swallowed so a flaky network/auth never blocks
+    the kill-switch toggle itself."""
+    try:
+        if db.get_setting('NOTIFY_KILL_SWITCH') != '1':
+            return
+        recipient = None
+        try:
+            cust = auth.get_customer_by_id(customer_id)
+            if cust:
+                recipient = auth.get_email(cust)
+        except Exception as _e:
+            log.debug(f"_maybe_email_kill auth lookup failed: {_e}")
+        if not recipient:
+            return
+        verb = 'engaged' if engaged else 'cleared'
+        subject = f'Kill switch {verb}'
+        body = (
+            'Trading is halted. No new positions or closes until you clear '
+            'the switch.' if engaged else
+            'Trading resumed. The bot will pick up signals on the next cycle.'
+        )
+        db.enqueue_scoop_email(
+            event_type=('KILL_SWITCH_ENGAGED' if engaged else 'KILL_SWITCH_CLEARED'),
+            subject=subject, body=body,
+            recipient_email=recipient, customer_id=customer_id,
+            audience='customer', priority=1,
+            source_agent='portal',
+            payload={'engaged': engaged},
+        )
+    except Exception as _e:
+        log.debug(f"_maybe_email_kill swallowed: {_e}")
+
 # kill_switch_active: imported from retail_shared above
 
 def _read_agent_running():
@@ -2886,14 +2924,28 @@ def api_kill_switch():
     try:
         db = _customer_db()
         db.set_setting('KILL_SWITCH', '1' if engage else '0')
+        cid = session.get('customer_id', '?')
         if engage:
-            log.warning(f"KILL SWITCH ENGAGED for customer {session.get('customer_id','?')}")
+            log.warning(f"KILL SWITCH ENGAGED for customer {cid}")
             db.log_event("KILL_SWITCH_ENGAGED", agent="portal",
                          details=f"Per-customer kill switch engaged at {now_et()}")
+            # Bell notification — always fires, customer always sees it
+            db.add_notification('alert', 'Kill switch engaged',
+                'Trading is halted. The bot will not open new positions or '
+                'close existing ones until you clear the switch from your '
+                'dashboard.',
+                meta={'kind': 'kill_switch', 'engaged': True})
+            # Opt-in email — only if customer toggled NOTIFY_KILL_SWITCH on
+            _maybe_email_kill(db, cid, engaged=True)
         else:
-            log.info(f"Kill switch cleared for customer {session.get('customer_id','?')}")
+            log.info(f"Kill switch cleared for customer {cid}")
             db.log_event("KILL_SWITCH_CLEARED", agent="portal",
                          details=f"Per-customer kill switch cleared at {now_et()}")
+            db.add_notification('alert', 'Kill switch cleared',
+                'Trading resumed. The bot will pick up signals on the next '
+                'cycle.',
+                meta={'kind': 'kill_switch', 'engaged': False})
+            _maybe_email_kill(db, cid, engaged=False)
         return jsonify({"ok": True})
     except Exception as e:
         log.error(f"Kill switch error: {e}")
@@ -3440,6 +3492,10 @@ def api_settings():
         'operating_mode':     'OPERATING_MODE',
         'preset_name':        'PRESET_NAME',
         'notification_preference': 'NOTIFICATION_PREFERENCE',
+        # 2026-04-28 — per-event scoop email opt-ins. Default '0'.
+        # Bell notifications fire regardless; these gate the email-only path.
+        'notify_trade_executed': 'NOTIFY_TRADE_EXECUTED',
+        'notify_kill_switch':    'NOTIFY_KILL_SWITCH',
     }
     try:
         db = _customer_db()
@@ -3657,6 +3713,10 @@ def api_customer_settings():
             'SETUP_COMPLETE':     '0',
             'IDLE_RESERVE_PCT':   os.environ.get('IDLE_RESERVE_PCT', '20'),
             'KILL_SWITCH':        '1' if kill_switch_active() else '0',
+            # Per-event scoop email opt-ins (default off — bell stays default ON,
+            # email is the customer-controlled upgrade)
+            'NOTIFY_TRADE_EXECUTED': '0',
+            'NOTIFY_KILL_SWITCH':    '0',
         }
 
         # Merge: customer overrides global

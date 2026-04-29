@@ -3791,6 +3791,58 @@ class DB:
             """, (ticker,)).fetchone()
             return dict(row) if row else None
 
+    # ── SCOOP EMAIL ENQUEUE ────────────────────────────────────────────────
+    # 2026-04-28. The bell-notification path (db.add_notification) is
+    # ALWAYS-ON — every customer always gets bell entries for everything.
+    # This helper is the SECOND, opt-in path: enqueue an email via scoop's
+    # /api/enqueue endpoint on pi4b. Caller must check the per-customer
+    # NOTIFY_* setting before calling — this method does NOT gate.
+    #
+    # The recipient_email is included in payload so scoop can dispatch
+    # without needing pi4b's customers table to know about every retail
+    # customer. Best-effort: any error is swallowed and logged so a
+    # network blip never blocks the customer-facing trade flow.
+
+    def enqueue_scoop_email(self, event_type, subject, body,
+                            recipient_email=None, customer_id=None,
+                            audience='customer', priority=2,
+                            source_agent='trade_logic', payload=None):
+        """Best-effort POST to MONITOR_URL/api/enqueue. Returns bool ok."""
+        import os as _os, json as _json
+        monitor_url   = _os.environ.get('MONITOR_URL', '').rstrip('/')
+        monitor_token = _os.environ.get('MONITOR_TOKEN', '')
+        if not monitor_url or not monitor_token:
+            log.debug("enqueue_scoop_email: MONITOR_URL/MONITOR_TOKEN unset — skipping")
+            return False
+        merged_payload = dict(payload or {})
+        if recipient_email:
+            merged_payload['recipient_email'] = recipient_email
+        if customer_id:
+            merged_payload['customer_id'] = customer_id
+        try:
+            import requests as _req
+            r = _req.post(
+                f"{monitor_url}/api/enqueue",
+                json={
+                    "event_type":   event_type,
+                    "priority":     priority,
+                    "subject":      subject,
+                    "body":         body,
+                    "source_agent": source_agent,
+                    "pi_id":        _os.environ.get('PI_ID', 'synthos-pi-retail'),
+                    "audience":     audience,
+                    "payload":      _json.dumps(merged_payload),
+                },
+                headers={"X-Token": monitor_token, "Content-Type": "application/json"},
+                timeout=5,
+            )
+            if r.status_code == 200:
+                return True
+            log.warning(f"enqueue_scoop_email HTTP {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            log.warning(f"enqueue_scoop_email failed: {e}")
+        return False
+
     # ── RECENT BOT ORDERS ──────────────────────────────────────────────────
     # 2026-04-28. Settlement-lag observability — track the bot's submitted
     # orders so Gate 0 reconciliation can distinguish "user bought outside
