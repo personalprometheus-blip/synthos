@@ -1041,6 +1041,16 @@ class DB:
             # Null for rows from runs prior to this column landing.
             "ALTER TABLE sector_screening ADD COLUMN ret_3m REAL",
 
+            # 2026-04-29 — persist the last 30 daily closing prices per
+            # candidate as a JSON-encoded array (e.g. "[145.2,146.1,...]")
+            # so the screener page can render a sparkline per row without
+            # any view-time price fetching. Bars are already pulled by
+            # the screener at run time for momentum scoring; this just
+            # piggybacks on that fetch instead of re-requesting at view
+            # time. ~30 floats × ~110 tickers × 2 runs/day ≈ 27 KB/day
+            # storage cost. Display-only; never read by the trader.
+            "ALTER TABLE sector_screening ADD COLUMN price_history TEXT",
+
             # Audit Round 5 (2026-04-20) — tradable-asset cache. Populated
             # daily by retail_tradable_cache.refresh() from Alpaca's
             # /v2/assets endpoint. Candidate Generator reads via
@@ -3610,8 +3620,8 @@ class DB:
                         (run_id, sector, etf, etf_5yr_return, ticker, company,
                          etf_weight_pct, news_signal, sentiment_signal,
                          congressional_flag, momentum_score, ret_3m,
-                         status, created_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         price_history, status, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     run_id, sector, etf, etf_5yr_return,
                     cd['ticker'], cd.get('company', ''),
@@ -3626,6 +3636,12 @@ class DB:
                     # can show actual % change alongside the composite.
                     # Display-only; ranking still uses combined_score.
                     cd.get('ret_3m'),
+                    # price_history persisted 2026-04-29 — JSON-encoded
+                    # array of last-30 daily closes so the screener page
+                    # can render a sparkline per row. Display-only;
+                    # written by the screener using bars it already
+                    # fetched for momentum scoring.
+                    cd.get('price_history'),
                     'considering', now,
                 ))
             # Issue screening requests for Scout and Pulse

@@ -30,6 +30,7 @@ Logic audit log: logs/logic_audits/YYYY-MM-DD_sector_screener.log
 
 import os
 import sys
+import json
 import time
 import logging
 import requests
@@ -735,7 +736,23 @@ def run_single(sector, run_id=None):
         bars   = fetch_bars(ticker, days=260)  # ~1 year of trading days
         score, ret_3m, reasoning = calc_momentum_score(bars)
         momentum_details[ticker] = {"score": score, "ret_3m": ret_3m, "reasoning": reasoning}
-        scored_candidates.append({**holding, "momentum_score": score, "ret_3m": ret_3m})
+        # 2026-04-29 — capture the last 30 daily closes for the screener
+        # page sparkline. Bars are already in hand from the momentum
+        # fetch above; pulling closes is free. Round to 2dp to keep the
+        # JSON payload tight (~30 floats × ~110 tickers).
+        recent_closes = []
+        try:
+            closes_all = [b["c"] for b in (bars or []) if "c" in b]
+            recent_closes = [round(c, 2) for c in closes_all[-30:]]
+        except Exception:
+            recent_closes = []
+        price_history_json = json.dumps(recent_closes) if recent_closes else None
+        scored_candidates.append({
+            **holding,
+            "momentum_score":  score,
+            "ret_3m":          ret_3m,
+            "price_history":   price_history_json,
+        })
         if ret_3m is not None:
             log.info(f"  {ticker}: momentum score {score:.2f}  (3m: {ret_3m*100:+.1f}%)")
         else:

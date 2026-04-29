@@ -871,6 +871,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   border:1px solid rgba(245,166,35,0.30);
   color:#f5a623;
 }
+/* Momentum-column sparkline — 30-day closing-price line drawn into a
+   small canvas. Replaces the previous score-bar + "Score: NN/100"
+   sub-line; carries the same momentum information visually. */
+.momentum-spark{
+  display:block;
+  width:100px;height:24px;
+  margin-top:5px;
+}
 
 /* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
    Replaces the sector summary cards. Each sector renders as a single
@@ -8815,6 +8823,40 @@ async function loadAudit() {
 // -- SCREENING --
 let _screeningSectorsLoaded = false;
 
+// Draw a single sparkline onto a canvas. `prices` is a numeric array
+// of closing prices (oldest → newest); `color` is any CSS color string.
+// Renders a simple polyline with no axes, fill, or labels — purely a
+// "shape" indicator. Hi-DPI awareness: width/height attributes on the
+// canvas are 2x the CSS dimensions (set in HTML), then we scale the
+// drawing context 2x to match. Result stays sharp on retina without a
+// per-call DPR computation.
+function drawSparkline(canvas, prices, color) {
+  if (!canvas || !prices || prices.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const W = canvas.width;   // native pixel width  (HTML attr)
+  const H = canvas.height;  // native pixel height (HTML attr)
+  ctx.clearRect(0, 0, W, H);
+  // Compute min/max for vertical scaling. Pad 6% so the line never
+  // hugs the edges.
+  let min = Infinity, max = -Infinity;
+  for (const p of prices) { if (p < min) min = p; if (p > max) max = p; }
+  const range = (max - min) || 1;
+  const padTop = H * 0.10, padBot = H * 0.10;
+  const drawH = H - padTop - padBot;
+  ctx.strokeStyle = color || 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  prices.forEach((p, i) => {
+    const x = (i / (prices.length - 1)) * (W - 4) + 2;
+    const y = padTop + (1 - (p - min) / range) * drawH;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
 async function loadScreeningSectors() {
   // Populate the dropdown + sector summary cards (run once, or on refresh).
   const select = document.getElementById('screening-sector-select');
@@ -9025,16 +9067,27 @@ async function loadScreening() {
         +'<div style="font-size:13px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
         +bar(cd.sentiment_score,sc)
         +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(cd.sentiment_score!=null?'Score: '+pct(cd.sentiment_score)+'/100':'')+'</div></div>'
-        +'<div title="3-month price return + SMA trend + volume"><div style="font-size:10px;color:var(--muted)">MOMENTUM'+_topMom+'</div>'
+        +'<div title="3-month price return + 30-day price sparkline"><div style="font-size:10px;color:var(--muted)">MOMENTUM'+_topMom+'</div>'
         +'<div style="font-size:13px;font-weight:600;color:'+r3Color+'">'+r3Display+'</div>'
-        +bar(ms,momColor)
-        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(ms!=null?'Score: '+pct(ms)+'/100':'')+'</div></div>'
+        +'<canvas class="momentum-spark" data-row="'+i+'" data-color="'+r3Color+'" width="200" height="48"></canvas></div>'
         +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
         +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">/100</div>'
         +_delta
         +'</div></div>';
     }).join('');
+    // Draw sparklines into each row's canvas. Done after innerHTML
+    // assignment so the canvases exist in the DOM. Skips rows with no
+    // price_history (e.g. new tickers from a partial screener run).
+    candidates.forEach((cd, i) => {
+      if (!cd.price_history) return;
+      let prices = null;
+      try { prices = JSON.parse(cd.price_history); } catch(e) { return; }
+      if (!Array.isArray(prices) || prices.length < 2) return;
+      const canvas = grid.querySelector('canvas.momentum-spark[data-row="'+i+'"]');
+      if (!canvas) return;
+      drawSparkline(canvas, prices, canvas.dataset.color || 'rgba(255,255,255,0.45)');
+    });
   } catch(e) {
     meta.textContent = 'Error loading screening data.';
   }
