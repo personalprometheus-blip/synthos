@@ -3747,10 +3747,15 @@ class DB:
             return [dict(r) for r in rows]
 
     def get_sector_screening_summary(self):
-        """Per-sector summary of the latest screener run. Used by the dashboard
-        dropdown — each row has (sector, etf, etf_5yr_return, top_ticker,
-        top_score, candidate_count). Sorted so the highest-scoring sector's
-        top candidate surfaces first (dashboard default selection)."""
+        """Per-sector summary of the latest screener run. Each row has
+        (sector, etf, etf_5yr_return, top_ticker, top_score, avg_score,
+        candidate_count). Sorted by avg_score DESC so sectors with broad
+        strength surface first (matches the v2 sector-pulse-bar UI;
+        previously sorted by MAX which over-rewarded single outliers).
+
+        2026-04-29 — added AVG(combined_score) AS avg_score for the pulse
+        bar's fill width; switched sort from top_score to avg_score.
+        """
         with self.conn() as c:
             row = c.execute("""
                 SELECT run_id FROM sector_screening
@@ -3762,11 +3767,12 @@ class DB:
             rows = c.execute("""
                 SELECT sector, etf, etf_5yr_return,
                        COUNT(*) AS candidate_count,
-                       MAX(combined_score) AS top_score
+                       MAX(combined_score) AS top_score,
+                       AVG(combined_score) AS avg_score
                 FROM sector_screening
                 WHERE run_id=?
                 GROUP BY sector, etf, etf_5yr_return
-                ORDER BY top_score DESC
+                ORDER BY avg_score DESC
             """, (run_id,)).fetchall()
             summary = []
             for r in rows:

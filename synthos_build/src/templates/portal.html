@@ -856,6 +856,55 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   padding-left:14px;
 }
 
+/* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
+   Replaces the sector summary cards. Each sector renders as a single
+   horizontal row: name | strength bar | score | ETF · top ticker.
+   Sorted by avg_score (broad sector strength) instead of top_score
+   (single-stock max) — reads as a true sector-rotation snapshot. */
+.sector-pulse-row{
+  display:grid;
+  grid-template-columns:96px 1fr 38px 120px;
+  gap:12px;
+  align-items:center;
+  padding:7px 12px;
+  border-radius:6px;
+  cursor:pointer;
+  border:1px solid transparent;
+  transition:background .15s,border-color .15s;
+}
+.sector-pulse-row:hover{
+  background:rgba(255,255,255,0.035);
+}
+.sector-pulse-row.selected{
+  background:rgba(0,245,212,0.06);
+  border-color:rgba(0,245,212,0.40);
+  box-shadow:0 0 12px rgba(0,245,212,0.15);
+}
+.sector-pulse-name{
+  font-size:10px;font-weight:700;letter-spacing:0.04em;
+  color:var(--muted);text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sector-pulse-row.selected .sector-pulse-name{color:var(--teal)}
+.sector-pulse-bar-wrap{
+  height:8px;background:rgba(255,255,255,0.06);
+  border-radius:4px;overflow:hidden;position:relative;
+}
+.sector-pulse-bar{
+  height:100%;border-radius:4px;
+  background:var(--teal);
+  transition:width .3s ease;
+}
+.sector-pulse-score{
+  font-size:12px;font-weight:700;color:var(--teal);
+  font-family:var(--mono);text-align:right;
+}
+.sector-pulse-meta{
+  font-size:10px;color:var(--muted);
+  font-family:var(--mono);text-align:right;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
 /* ── HERO BADGE (overlaid on .charm cards) ── */
 .hero-badge{position:absolute;top:42px;right:8px;font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px;z-index:1}
 .hero-badge.hb-cyan,.hero-badge.hb-violet{background:linear-gradient(135deg,#d4a017,#f5d442,#d4a017);border:1px solid rgba(245,212,66,0.5);color:#1a1400;text-shadow:0 1px 0 rgba(245,212,66,0.4);box-shadow:0 0 8px rgba(245,212,66,0.3)}
@@ -3308,7 +3357,7 @@ setInterval(loadAgentPulse, 10000);
       </select>
       <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-left:auto"></div>
     </div>
-    <div id="screening-sector-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px"></div>
+    <div id="screening-sector-summary" style="display:grid;grid-template-columns:1fr;gap:4px;margin-bottom:16px"></div>
     <div id="screening-grid" style="display:grid;gap:10px"></div>
   </div>
 
@@ -8774,34 +8823,25 @@ async function loadScreeningSectors() {
     } else if (currentSel) {
       select.value = currentSel;
     }
-    // Summary cards — clickable shortcut to select a sector.
-    const pct = v => v != null ? (v*100).toFixed(0)+'%' : '--';
-    // 2026-04-28 fix — highlight the currently-SELECTED sector (follows
-    // the dropdown / card-click), not the strongest-by-score one. The
-    // previous `isTop = i === 0` was a render-time-only highlight that
-    // never updated when the user changed selection — Energy stayed
-    // bordered teal even after picking another sector. Read select.value
-    // AFTER the default-on-first-load logic above so we get the
-    // user's actual current pick. Empty value (= "All sectors") = no
-    // card highlighted, which matches the "show everything" intent.
+    // Sector pulse bars — one horizontal row per sector, sorted by avg
+    // composite score (broad strength). Selection state matches the
+    // dropdown / row-click so refreshes don't snap the highlight off
+    // a user-chosen sector. Empty selection ("All sectors" in dropdown)
+    // = no row highlighted.
     const _selectedSector = select.value || '';
-    // 2026-04-29 cleanup — dropped the "ETF 5yr return" footer line.
-    // Long-horizon ETF returns aren't relevant to the short-term
-    // screening question this card answers ("which sector is hot
-    // right now?"). Card now shows: sector name (header), top ticker
-    // + top score (body), ETF symbol (footer for context). Tighter,
-    // less mixed-horizon noise.
     summary.innerHTML = sectors.map((s,i) => {
       const isSelected = (_selectedSector && s.sector === _selectedSector);
-      return '<div onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
-        + 'style="background:'+(isSelected?'rgba(0,245,212,0.06)':'rgba(255,255,255,0.03)')+';border:1px solid '+(isSelected?'rgba(0,245,212,0.4)':'rgba(255,255,255,0.08)')+';'
-        + 'border-radius:8px;padding:10px 12px;cursor:pointer;transition:all 0.15s'+(isSelected?';box-shadow:0 0 12px rgba(0,245,212,0.15)':'')+'">'
-        + '<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:'+(isSelected?'var(--teal)':'var(--muted)')+';text-transform:uppercase">'+_esc(s.sector)+'</div>'
-        + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px">'
-        + '<div style="font-size:14px;font-weight:700">'+_esc(s.top_ticker||'—')+'</div>'
-        + '<div style="font-size:12px;color:var(--teal);font-weight:600">'+pct(s.top_score)+'</div>'
-        + '</div>'
-        + '<div style="font-size:9px;color:var(--muted);margin-top:2px;font-family:var(--mono)">'+_esc(s.etf||'')+'</div>'
+      const avg = (s.avg_score != null) ? s.avg_score : 0;
+      const fillPct = Math.max(0, Math.min(100, avg * 100));
+      const scoreDisplay = (s.avg_score != null) ? Math.round(avg * 100) : '—';
+      const meta = _esc(s.etf || '') + (s.top_ticker ? ' · ' + _esc(s.top_ticker) : '');
+      return '<div class="sector-pulse-row'+(isSelected?' selected':'')+'" '
+        + 'onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
+        + 'title="' + _esc(s.sector) + ' — avg composite ' + scoreDisplay + '/100 across ' + (s.candidate_count||0) + ' candidates">'
+        + '<div class="sector-pulse-name">'+_esc(s.sector)+'</div>'
+        + '<div class="sector-pulse-bar-wrap"><div class="sector-pulse-bar" style="width:'+fillPct.toFixed(1)+'%"></div></div>'
+        + '<div class="sector-pulse-score">'+scoreDisplay+'</div>'
+        + '<div class="sector-pulse-meta">'+meta+'</div>'
         + '</div>';
     }).join('');
   } catch(e) { console.warn('loadScreeningSectors', e); }
