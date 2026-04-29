@@ -8722,8 +8722,6 @@ async function loadScreeningSectors() {
     }
     // Summary cards — clickable shortcut to select a sector.
     const pct = v => v != null ? (v*100).toFixed(0)+'%' : '--';
-    const retFmt = v => v != null ? ((v>=0?'+':'')+(v*100).toFixed(1)+'%') : 'n/a';
-    const retColor = v => v > 0 ? 'var(--teal)' : v < 0 ? 'var(--pink)' : 'var(--muted)';
     // 2026-04-28 fix — highlight the currently-SELECTED sector (follows
     // the dropdown / card-click), not the strongest-by-score one. The
     // previous `isTop = i === 0` was a render-time-only highlight that
@@ -8733,6 +8731,12 @@ async function loadScreeningSectors() {
     // user's actual current pick. Empty value (= "All sectors") = no
     // card highlighted, which matches the "show everything" intent.
     const _selectedSector = select.value || '';
+    // 2026-04-29 cleanup — dropped the "ETF 5yr return" footer line.
+    // Long-horizon ETF returns aren't relevant to the short-term
+    // screening question this card answers ("which sector is hot
+    // right now?"). Card now shows: sector name (header), top ticker
+    // + top score (body), ETF symbol (footer for context). Tighter,
+    // less mixed-horizon noise.
     summary.innerHTML = sectors.map((s,i) => {
       const isSelected = (_selectedSector && s.sector === _selectedSector);
       return '<div onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
@@ -8743,7 +8747,7 @@ async function loadScreeningSectors() {
         + '<div style="font-size:14px;font-weight:700">'+_esc(s.top_ticker||'—')+'</div>'
         + '<div style="font-size:12px;color:var(--teal);font-weight:600">'+pct(s.top_score)+'</div>'
         + '</div>'
-        + '<div style="font-size:9px;color:'+retColor(s.etf_5yr_return)+';margin-top:2px;font-family:var(--mono)">'+s.etf+' 5yr '+retFmt(s.etf_5yr_return)+'</div>'
+        + '<div style="font-size:9px;color:var(--muted);margin-top:2px;font-family:var(--mono)">'+_esc(s.etf||'')+'</div>'
         + '</div>';
     }).join('');
   } catch(e) { console.warn('loadScreeningSectors', e); }
@@ -8768,9 +8772,12 @@ async function loadScreening() {
       return;
     }
     const c0 = candidates[0];
-    const ret5 = c0.etf_5yr_return != null ? ((c0.etf_5yr_return*100).toFixed(1)+'%') : 'N/A';
-    const retSign = c0.etf_5yr_return > 0 ? '+' : '';
-    const sectorLabel = selectedSector ? ('Sector: '+(c0.sector||selectedSector)+' | ETF: '+(c0.etf||'')+' | 5-Year Return: '+retSign+ret5)
+    // 2026-04-29 cleanup — dropped 5-Year Return from the meta header
+    // line for the same reason it was dropped from the sector cards:
+    // long-horizon ETF return is irrelevant to the short-term
+    // screening question. Header now reads:
+    //   "Sector: Energy | ETF: XLE | Run: abc123"
+    const sectorLabel = selectedSector ? ('Sector: '+(c0.sector||selectedSector)+' | ETF: '+(c0.etf||''))
                                         : ('All sectors | '+candidates.length+' candidates across '+(new Set(candidates.map(c=>c.sector)).size)+' sectors');
     meta.textContent = sectorLabel + ' | Run: '+(c0.run_id||'').slice(0,16);
     const sigColor = s => s==='bullish'?'#00f5d4':s==='bearish'?'#ff4b6e':'#a0a0b0';
@@ -8832,7 +8839,9 @@ async function loadScreening() {
           ret_3m:             cd.ret_3m,
           etf:                cd.etf,
           etf_weight_pct:     cd.etf_weight_pct,
-          etf_5yr_return:     cd.etf_5yr_return,
+          // etf_5yr_return removed 2026-04-29 — was only consumed by the
+          // sector cards + meta header (both dropped); no drawer site
+          // reads it from screener_meta. Dead plumbing.
           congressional_flag: cd.congressional_flag,
           run_id:             cd.run_id,
         },
@@ -8846,11 +8855,10 @@ async function loadScreening() {
       // to 2026-04-28 — render "—" in that case.
       const ms      = cd.momentum_score;
       const r3      = cd.ret_3m;
-      const momLabel = ms == null ? '—'
-                     : ms >= 0.8 ? 'Strong'
-                     : ms >= 0.6 ? 'Healthy'
-                     : ms >= 0.4 ? 'Mild'
-                     : 'Weak';
+      // 2026-04-29 cleanup — dropped the "Strong / Healthy / Mild / Weak"
+      // text label. The score bar already conveys magnitude visually;
+      // the verbal label was pure redundancy. Sub-line below now mirrors
+      // the sentiment column's "Score: NN/100" format.
       const momColor = ms == null ? '#a0a0b0'
                      : ms >= 0.6 ? '#00f5d4'
                      : ms >= 0.4 ? '#f5a623'
@@ -8885,7 +8893,7 @@ async function loadScreening() {
         +'<div title="3-month price return + SMA trend + volume"><div style="font-size:10px;color:var(--muted)">MOMENTUM'+_topMom+'</div>'
         +'<div style="font-size:13px;font-weight:600;color:'+r3Color+'">'+r3Display+'</div>'
         +bar(ms,momColor)
-        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+momLabel+(ms!=null?' · '+pct(ms)+'/100':'')+'</div></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+(ms!=null?'Score: '+pct(ms)+'/100':'')+'</div></div>'
         +'<div style="text-align:right"><div style="font-size:10px;color:var(--muted)">COMBINED</div>'
         +'<div style="font-size:22px;font-weight:700;color:'+scoreColor(cs)+'">'+' '+(cs!=null?pct(cs):'--')+'</div>'
         +'<div style="font-size:10px;color:var(--muted)">/100</div></div></div>';
