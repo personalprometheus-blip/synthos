@@ -530,9 +530,23 @@ def calc_momentum_score(bars):
 
 def check_congressional_signals(db, tickers):
     """
-    Look for recent congressional buy/sell signals in the existing signals table
-    for any of our screened tickers.
+    Look for recent congressional buy/sell disclosures in the signals
+    table for any of our screened tickers.
+
     Returns dict: {ticker: 'recent_buy' | 'recent_sell' | 'none'}
+
+    2026-04-30 — bug fix. The previous query had no `source` filter and
+    no politician check, so it matched ANY recent signal with a buy/sell
+    transaction_type, including news rows whose transaction_type happened
+    to contain those substrings. Result: tickers got `recent_buy` /
+    `recent_sell` flags with no underlying politician/amount data, then
+    Gate 5 boosted scores based on a flag whose backing was empty.
+
+    Fix: require `source='CONGRESS'` (canonical marker for STOCK Act
+    disclosures) AND `politician IS NOT NULL` (defense-in-depth — a
+    real disclosure always has an attributed politician). News rows
+    can no longer trigger the congressional flag regardless of how
+    their transaction_type field happens to be populated.
     """
     cutoff = (datetime.now(ET) - timedelta(days=90)).strftime('%Y-%m-%d')
     results = {}
@@ -540,7 +554,10 @@ def check_congressional_signals(db, tickers):
         for ticker in tickers:
             row = c.execute("""
                 SELECT transaction_type, disc_date FROM signals
-                WHERE ticker=? AND disc_date >= ?
+                WHERE ticker=?
+                  AND disc_date >= ?
+                  AND source = 'CONGRESS'
+                  AND politician IS NOT NULL
                 ORDER BY disc_date DESC LIMIT 1
             """, (ticker, cutoff)).fetchone()
             if row:
