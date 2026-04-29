@@ -3204,6 +3204,15 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         atr, candidate['price'], signal.get('sector', ''))
                     order = alpaca.submit_order(signal['ticker'], size, "buy")
                     if order:
+                        # 2026-04-28 — record SUBMITTED row BEFORE the rest
+                        # of the buy flow. Gate 0 orphan adoption checks
+                        # this to skip tickers we just bought (settlement
+                        # lag guard).
+                        _aoid = order.get('id') if isinstance(order, dict) else None
+                        db.record_submitted_order(
+                            ticker=signal['ticker'], side='buy', qty=size,
+                            alpaca_order_id=_aoid, notes='rotation entry',
+                        )
                         # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
                         real_entry = _resolve_fill_price(order, alpaca, candidate['price'])
                         # signal_id=None for non-owner customers (FK references local signals table,
@@ -3221,6 +3230,9 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                             entry_pattern=candidate.get('type'),
                             entry_thesis=signal.get('headline'),
                         )
+                        # Mark the submitted row RECORDED — open_position
+                        # succeeded, settlement lag window can close.
+                        db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
                         alpaca.submit_order(signal['ticker'], size, "sell",
                                             order_type="trailing_stop", trail_price=trail_amt)
                         _shared_db().acknowledge_signal(signal['id'])
@@ -3415,6 +3427,41 @@ def _run_gate0_account_health(db, alpaca, session_log):
                     f"[GATE 0] ORPHAN: {t} skip-adopt — bot just closed at "
                     f"{_recent['closed_at']} ({_recent['exit_reason']}); "
                     f"Alpaca settlement lag, will reconcile next cycle"
+                )
+                continue
+
+            # 2026-04-28 — symmetric settlement-lag guard for fresh BUYS.
+            # Operator caught the symptom: trader buys CLF + OPEN at
+            # 19:57 ET, ORPHAN_ADOPTED events fire same second claiming
+            # USER-managed adoption (DB row eventually shows
+            # managed_by=bot but the spurious notification + brief
+            # user-managed flicker are real defects).
+            #
+            # Race: open_position() write commits AFTER alpaca returns
+            # fill, so for a few hundred ms there's a window where
+            # Alpaca shows the position but the DB doesn't. If Gate 0
+            # runs in that window (or the parallel-customer subprocess
+            # pool contention slows the DB write), the orphan adoption
+            # path runs.
+            #
+            # Guard: skip adoption if the bot logged a SUBMITTED order
+            # for this ticker in the last 5 min (matches the closed-
+            # recently window above for symmetry). RECORDED orders
+            # don't extend the skip — by definition the matching
+            # open_position has already run and Gate 0's set-difference
+            # wouldn't have flagged this ticker as orphan.
+            try:
+                _recent_buy = db.get_recent_bot_order(t, side='buy', within_minutes=5)
+            except Exception as _e:
+                log.debug(f"[GATE 0] orphan recent-buy check failed for {t}: {_e}")
+                _recent_buy = None
+            if _recent_buy:
+                log.info(
+                    f"[GATE 0] ORPHAN: {t} skip-adopt — bot submitted BUY "
+                    f"at {_recent_buy['submitted_at']} "
+                    f"(order={_recent_buy.get('alpaca_order_id') or '?'}); "
+                    f"open_position write may be in flight. Will reconcile "
+                    f"next cycle."
                 )
                 continue
 
@@ -3853,6 +3900,16 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
             # Gate 0 already verified account health at this cycle's start.
             order = alpaca.close_position(pos['ticker'])
             if order is not None:
+                # 2026-04-28 — symmetric SUBMITTED tracking for sells.
+                # The existing closed-recently guard works off the
+                # positions table; this gives an INDEPENDENT trail in
+                # case close_position write itself fails.
+                _aoid = order.get('id') if isinstance(order, dict) else None
+                db.record_submitted_order(
+                    ticker=pos['ticker'], side='sell', qty=pos.get('shares'),
+                    alpaca_order_id=_aoid,
+                    notes=f'gate10 exit: {exit_reason}',
+                )
                 _ac = {
                     'atr_trail_multiplier': C.ATR_TRAIL_MULTIPLIER,
                     'late_day_tighten_pct': C.LATE_DAY_TIGHTEN_PCT,
@@ -3861,6 +3918,7 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                     'max_holding_days': C.MAX_HOLDING_DAYS,
                 }
                 pnl = db.close_position(pos['id'], current_price, exit_reason=exit_reason, active_controls=_ac)
+                db.mark_order_recorded(pos['ticker'], alpaca_order_id=_aoid)
                 if exit_reason == "PULSE_EXIT":
                     flag_info = next((f for f in urgent_flags
                                       if f['ticker'] == pos['ticker']), {})
@@ -3909,6 +3967,13 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                 sig_id    = approval['id']
                 order = alpaca.submit_order(ticker=ticker, qty=shares, side="buy")
                 if order:
+                    # 2026-04-28 — record SUBMITTED before further work.
+                    # Gate 0 orphan adoption (next cycle) checks this.
+                    _aoid = order.get('id') if isinstance(order, dict) else None
+                    db.record_submitted_order(
+                        ticker=ticker, side='buy', qty=shares,
+                        alpaca_order_id=_aoid, notes='managed approval',
+                    )
                     # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
                     real_entry = _resolve_fill_price(order, alpaca, price)
                     _appr_sig = db.get_signal_by_id(sig_id) or {}
@@ -3923,6 +3988,7 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                      interrogation_status=_appr_sig.get('interrogation_status'),
                                      entry_pattern=approval.get('entry_pattern'),
                                      entry_thesis=approval.get('headline'))
+                    db.mark_order_recorded(ticker, alpaca_order_id=_aoid)
                     alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
@@ -3935,6 +4001,7 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                     trade_events += 1
                 else:
                     log.error(f"[MANAGED] Order failed: {ticker}")
+                    db.mark_order_failed(ticker, reason='alpaca submit returned None')
             except Exception as e:
                 log.error(f"[MANAGED] Execution error: {e}")
 
@@ -4174,6 +4241,13 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
                 order = alpaca.submit_order(signal['ticker'], size, "buy")
                 if order:
+                    # 2026-04-28 — record SUBMITTED before further work.
+                    # Gate 0 orphan adoption (next cycle) checks this.
+                    _aoid = order.get('id') if isinstance(order, dict) else None
+                    db.record_submitted_order(
+                        ticker=signal['ticker'], side='buy', qty=size,
+                        alpaca_order_id=_aoid, notes='automatic signal eval',
+                    )
                     # Resolve real fill price (Gap 3 — pipeline audit 2026-04-24)
                     real_entry = _resolve_fill_price(order, alpaca, candidate['price'])
                     db.open_position(
@@ -4188,6 +4262,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                         entry_pattern=candidate.get('type'),
                         entry_thesis=signal.get('headline'),
                     )
+                    db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
                     alpaca.submit_order(signal['ticker'], size, "sell",
                                         order_type="trailing_stop", trail_price=trail_amt)
                     _shared_db().acknowledge_signal(signal['id'])

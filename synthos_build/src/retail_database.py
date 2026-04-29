@@ -1166,6 +1166,56 @@ class DB:
             # ~50-200 clicks/day across all customers, 30 days holds
             # ~6k rows max — trivial.
             "DELETE FROM pill_interactions WHERE created_at < datetime('now','-30 days')",
+
+            # 2026-04-28 — recent_bot_orders. Closes the spurious-orphan
+            # window: trader submits a BUY → Alpaca fills → before
+            # open_position writes the DB row, Gate 0 reconciliation in
+            # the next cycle sees Alpaca position with no DB match and
+            # adopts as USER-managed orphan. Operator caught today on
+            # CLF + OPEN buys at 19:57 ET. Existing closed-recently
+            # guard handled the sell side; this is the symmetric
+            # buy-side guard, plus general order observability.
+            #
+            # Status state machine:
+            #   SUBMITTED — order accepted by Alpaca (or queued
+            #               overnight); open/close_position not yet
+            #               called.
+            #   RECORDED  — open_position or close_position wrote the
+            #               positions row successfully; happy path
+            #               complete.
+            #   FAILED    — Alpaca rejected, network error, or trader
+            #               crashed before recording. Kept 24h for
+            #               post-mortem.
+            #   EXPIRED   — SUBMITTED rows that aged out without a
+            #               recorded_at. Indicates a missed write —
+            #               surface to operator.
+            """CREATE TABLE IF NOT EXISTS recent_bot_orders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker          TEXT NOT NULL,
+                side            TEXT NOT NULL CHECK (side IN ('buy','sell')),
+                qty             REAL,
+                notional_usd    REAL,
+                alpaca_order_id TEXT,
+                status          TEXT NOT NULL DEFAULT 'SUBMITTED'
+                                CHECK (status IN ('SUBMITTED','RECORDED','FAILED','EXPIRED')),
+                submitted_at    TEXT NOT NULL,
+                recorded_at     TEXT,
+                notes           TEXT
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_rbo_ticker_status ON recent_bot_orders(ticker, status)",
+            "CREATE INDEX IF NOT EXISTS idx_rbo_submitted     ON recent_bot_orders(submitted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_rbo_status        ON recent_bot_orders(status)",
+            # Retention: SUBMITTED + RECORDED rows clear at 30 min
+            # (their job is finished — Gate 0 settlement-lag window
+            # is 5 min so 30 is generous). FAILED stays 24h so post-
+            # mortem queries have something to look at. EXPIRED
+            # promoted from SUBMITTED stays 24h too.
+            "UPDATE recent_bot_orders SET status='EXPIRED' "
+            "WHERE status='SUBMITTED' AND submitted_at < datetime('now','-30 minutes')",
+            "DELETE FROM recent_bot_orders "
+            "WHERE status IN ('RECORDED') AND submitted_at < datetime('now','-30 minutes')",
+            "DELETE FROM recent_bot_orders "
+            "WHERE status IN ('FAILED','EXPIRED') AND submitted_at < datetime('now','-1 day')",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
@@ -3740,6 +3790,121 @@ class DB:
                 ORDER BY created_at DESC LIMIT 1
             """, (ticker,)).fetchone()
             return dict(row) if row else None
+
+    # ── RECENT BOT ORDERS ──────────────────────────────────────────────────
+    # 2026-04-28. Settlement-lag observability — track the bot's submitted
+    # orders so Gate 0 reconciliation can distinguish "user bought outside
+    # the bot" from "bot submitted but open_position write hasn't landed
+    # yet". Also gives operator a debuggable trail when an order doesn't
+    # turn into a position row (network blip, trader crash mid-buy, etc.).
+
+    def record_submitted_order(self, ticker, side, qty=None,
+                               notional_usd=None, alpaca_order_id=None,
+                               notes=None):
+        """Insert SUBMITTED row right after submit_order() returns.
+
+        The matching open_position()/close_position() call should later
+        invoke mark_order_recorded() with the same alpaca_order_id to
+        transition SUBMITTED → RECORDED.
+
+        Best-effort: any DB error is swallowed and logged at WARNING
+        so a flaky write never blocks the trade itself."""
+        try:
+            with self.conn() as c:
+                cur = c.execute("""
+                    INSERT INTO recent_bot_orders
+                        (ticker, side, qty, notional_usd, alpaca_order_id,
+                         status, submitted_at, notes)
+                    VALUES (?, ?, ?, ?, ?, 'SUBMITTED', ?, ?)
+                """, (ticker, side, qty, notional_usd, alpaca_order_id,
+                      self.now(), notes))
+                return cur.lastrowid
+        except Exception as e:
+            log.warning(f"record_submitted_order({ticker}, {side}) failed: {e}")
+            return None
+
+    def mark_order_recorded(self, ticker, alpaca_order_id=None):
+        """Mark the most recent SUBMITTED order for ticker as RECORDED.
+
+        Match by alpaca_order_id when available — handles the rare
+        multi-buy-same-ticker-same-cycle case without ambiguity. Falls
+        back to most-recent SUBMITTED for the ticker if no order id."""
+        try:
+            with self.conn() as c:
+                if alpaca_order_id:
+                    c.execute("""
+                        UPDATE recent_bot_orders
+                        SET status='RECORDED', recorded_at=?
+                        WHERE alpaca_order_id=? AND status='SUBMITTED'
+                    """, (self.now(), alpaca_order_id))
+                else:
+                    c.execute("""
+                        UPDATE recent_bot_orders
+                        SET status='RECORDED', recorded_at=?
+                        WHERE id = (
+                            SELECT id FROM recent_bot_orders
+                            WHERE ticker=? AND status='SUBMITTED'
+                            ORDER BY submitted_at DESC LIMIT 1
+                        )
+                    """, (self.now(), ticker))
+        except Exception as e:
+            log.warning(f"mark_order_recorded({ticker}, {alpaca_order_id}) failed: {e}")
+
+    def mark_order_failed(self, ticker, alpaca_order_id=None, reason=None):
+        """Mark a SUBMITTED order as FAILED — caller didn't reach the
+        recording step (rejected, exception, etc.). Kept 24h for
+        post-mortem visibility."""
+        try:
+            with self.conn() as c:
+                note_suffix = f" failed: {reason}" if reason else " failed"
+                if alpaca_order_id:
+                    c.execute("""
+                        UPDATE recent_bot_orders
+                        SET status='FAILED', recorded_at=?,
+                            notes=COALESCE(notes,'') || ?
+                        WHERE alpaca_order_id=? AND status='SUBMITTED'
+                    """, (self.now(), note_suffix, alpaca_order_id))
+                else:
+                    c.execute("""
+                        UPDATE recent_bot_orders
+                        SET status='FAILED', recorded_at=?,
+                            notes=COALESCE(notes,'') || ?
+                        WHERE id = (
+                            SELECT id FROM recent_bot_orders
+                            WHERE ticker=? AND status='SUBMITTED'
+                            ORDER BY submitted_at DESC LIMIT 1
+                        )
+                    """, (self.now(), note_suffix, ticker))
+        except Exception as e:
+            log.warning(f"mark_order_failed({ticker}) failed: {e}")
+
+    def get_recent_bot_order(self, ticker, side, within_minutes=5):
+        """Return the most recent SUBMITTED row for (ticker, side)
+        within the window, or None. Used by Gate 0 orphan adoption to
+        skip tickers the bot just bought (settlement-lag guard).
+
+        Only matches SUBMITTED — RECORDED rows are by definition no
+        longer in flight, FAILED/EXPIRED rows shouldn't extend the
+        skip-adopt window."""
+        try:
+            from datetime import datetime, timezone, timedelta
+            cutoff_iso = (datetime.now(timezone.utc)
+                          - timedelta(minutes=int(within_minutes))
+                          ).strftime('%Y-%m-%d %H:%M:%S')
+            with self.conn() as c:
+                row = c.execute("""
+                    SELECT id, ticker, side, qty, alpaca_order_id,
+                           status, submitted_at
+                    FROM recent_bot_orders
+                    WHERE ticker=? AND side=?
+                      AND status='SUBMITTED'
+                      AND submitted_at >= ?
+                    ORDER BY submitted_at DESC LIMIT 1
+                """, (ticker, side, cutoff_iso)).fetchone()
+            return dict(row) if row else None
+        except Exception as e:
+            log.warning(f"get_recent_bot_order({ticker}, {side}) failed: {e}")
+            return None
 
     # ── TICKER LOGOS ───────────────────────────────────────────────────────
     # Phase B (2026-04-27). Logo cache for the visual-identity layer.
