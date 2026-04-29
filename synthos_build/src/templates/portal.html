@@ -1962,73 +1962,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
-  <!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28) — shared across pages.
-       Triggered by .about-link clicks (e.g. "About this page ›" on the
-       intel filter row). Content is keyed by page name from a JS map
-       (_aboutContent). Distinct from the dashboard's #agent-drawer
-       which holds bot/agent runtime details. -->
-  <style>
-    .about-link {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      color: var(--muted);
-      text-transform: uppercase;
-      transition: color 0.15s;
-      user-select: none;
-    }
-    .about-link:hover { color: var(--teal); }
-    .about-section { margin-bottom: 14px; }
-    .about-section-title {
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      color: var(--dim);
-      margin-bottom: 6px;
-    }
-    .about-body p { font-size: 12px; line-height: 1.55; color: var(--muted); margin: 0 0 8px; }
-    .about-body strong { color: var(--text); font-weight: 600; }
-    .about-body code {
-      font-family: var(--mono);
-      font-size: 11px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 4px;
-      padding: 1px 5px;
-      color: var(--teal);
-    }
-    .about-pill-demo {
-      display: inline-block;
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.07em;
-      padding: 3px 8px;
-      border-radius: 99px;
-      border: 1px solid;
-      margin-right: 4px;
-    }
-    .about-trust-bar {
-      display: inline-block;
-      width: 6px;
-      height: 12px;
-      margin-right: 2px;
-      border-radius: 1px;
-      vertical-align: middle;
-    }
-  </style>
-  <div class="drawer-overlay" id="about-drawer-overlay" onclick="closeAboutDrawer(event)"></div>
-  <div class="drawer" id="about-drawer">
-    <div class="drawer-head">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:14px;font-weight:700;color:var(--text)" id="about-dr-title">About this page</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="about-dr-sub">What you're looking at and how to read it</div>
-      </div>
-      <button class="drawer-close" onclick="closeAboutDrawer()">✕</button>
-    </div>
-    <div class="drawer-body" id="about-dr-body"></div>
-  </div>
-
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
   <div id="user-warnings-banner"></div>
 
@@ -3567,6 +3500,76 @@ setInterval(loadAgentPulse, 10000);
      @admin_required server-side. #}
 
 
+</div>
+
+<!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28) — shared across pages.
+     Triggered by .about-link clicks (e.g. "About this page ›" on the
+     intel/news/screener filter rows). Content is keyed by page name
+     from a JS map (_aboutContent). Distinct from the dashboard's
+     #agent-drawer which holds bot/agent runtime details.
+     Lives at top-level OUTSIDE all tab-page containers — earlier
+     placement was inside #tab-dashboard, which made the drawer
+     invisible whenever the user wasn't on the dashboard tab. -->
+<style>
+  .about-link {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-transform: uppercase;
+    transition: color 0.15s;
+    user-select: none;
+  }
+  .about-link:hover { color: var(--teal); }
+  .about-section { margin-bottom: 14px; }
+  .about-section-title {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+  .about-body p { font-size: 12px; line-height: 1.55; color: var(--muted); margin: 0 0 8px; }
+  .about-body strong { color: var(--text); font-weight: 600; }
+  .about-body code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--teal);
+  }
+  .about-pill-demo {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    padding: 3px 8px;
+    border-radius: 99px;
+    border: 1px solid;
+    margin-right: 4px;
+  }
+  .about-trust-bar {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    margin-right: 2px;
+    border-radius: 1px;
+    vertical-align: middle;
+  }
+</style>
+<div class="drawer-overlay" id="about-drawer-overlay" onclick="closeAboutDrawer(event)"></div>
+<div class="drawer" id="about-drawer">
+  <div class="drawer-head">
+    <div style="flex:1;min-width:0">
+      <div style="font-size:14px;font-weight:700;color:var(--text)" id="about-dr-title">About this page</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px" id="about-dr-sub">What you're looking at and how to read it</div>
+    </div>
+    <button class="drawer-close" onclick="closeAboutDrawer()">✕</button>
+  </div>
+  <div class="drawer-body" id="about-dr-body"></div>
 </div>
 
 <!-- PLANNING DRAWER (Phase 7g, 2026-04-25) — watchlist deep-dive for
