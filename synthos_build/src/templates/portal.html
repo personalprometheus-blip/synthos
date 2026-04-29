@@ -1664,10 +1664,19 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <button class="sidebar-close" onclick="closeSidebar()">&#x2715;</button>
   </div>
   <div class="sidebar-nav">
+    <!-- 2026-04-29 — sidebar reorder + rename pass:
+         * "Screening" → "Research", promoted to second slot under
+           Dashboard. Tab key 'screening' stays the same; only the
+           label users see has changed.
+         * "Intelligence" → "Watchlist". Same key 'intel' (renaming
+           the underlying id would require touching every reference
+           across the codebase + breaking saved state). Watchlist is
+           what the page actually IS (signals the bot is currently
+           tracking) and matches finance-app convention (one word). -->
     <button class="sidebar-nav-btn active" id="snb-dashboard" onclick="showTab('dashboard');closeSidebar()">Dashboard</button>
-    <button class="sidebar-nav-btn" id="snb-intel"       onclick="showTab('intel');closeSidebar()">Intelligence</button>
+    <button class="sidebar-nav-btn" id="snb-screening"   onclick="showTab('screening');closeSidebar()">Research</button>
+    <button class="sidebar-nav-btn" id="snb-intel"       onclick="showTab('intel');closeSidebar()">Watchlist</button>
     <button class="sidebar-nav-btn" id="snb-news"        onclick="showTab('news');closeSidebar()">News</button>
-    <button class="sidebar-nav-btn" id="snb-screening"   onclick="showTab('screening');closeSidebar()">Screening</button>
     <button class="sidebar-nav-btn" id="snb-performance" onclick="showTab('performance');closeSidebar()">Performance</button>
     <button class="sidebar-nav-btn" id="snb-risk"        onclick="showTab('risk');closeSidebar()">Risk</button>
     <div class="sidebar-nav-sep"></div>
