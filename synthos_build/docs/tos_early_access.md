@@ -1,8 +1,8 @@
 # Synthos Early-Access Terms of Service
 
-**Effective:** [EFFECTIVE_DATE]
+**Effective:** 2026-04-28
 **Version:** 1.0
-**Contact:** [CONTACT_EMAIL]
+**Contact:** personal_prometheus@icloud.com
 
 ---
 
