@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-04-28T16:00:00-04:00",
-    "version": "3.21"
+    "last_updated": "2026-04-28T22:30:00-04:00",
+    "version": "3.22"
   },
   "nodes": [
     {
@@ -17,7 +17,7 @@
         {"name": "company_server.py", "desc": "Legacy event queue API — file retained, service removed 2026-04-20. Role absorbed into synthos_monitor.py. Candidate for deletion once no callers remain.", "how": "not running (dead unit file removed from /etc/systemd/system/)", "status": "archived"},
         {"name": "company_auditor.py", "desc": "Cross-node log scanner (SSH to pi5, pi2w)", "how": "daemon", "status": "live"},
         {"name": "company_archivist.py", "desc": "DB row archival to compressed JSON", "how": "daemon", "status": "live"},
-        {"name": "company_scoop.py", "desc": "Email queue drain, Resend dispatch. 2026-04-23 ground-truth audit: process not running, no systemd unit, cron comment says 'replaces cron-based company_scoop.py' — the replacement daemon never started. scoop.log empty since 2026-04-18. Needs decision: revive as systemd service or formally retire.", "how": "not running (orphaned)", "status": "broken"},
+        {"name": "company_scoop.py", "desc": "Email queue drain, Resend dispatch. Polls scoop_queue every 30s, dispatches via Resend API to OPERATOR_EMAIL (admin alerts) or per-customer email (customer notifications). 2026-04-28 revived as systemd unit synthos-scoop.service (enabled at boot, Restart=on-failure RestartSec=10) after operator confirmed fall-back path was working but explicit email dispatch was needed for customer actions. Pre-revive cleanup expired 11 stale pending events from the Apr 18-28 dead-daemon window (system was healthy / customers active / blips self-resolved — kept for audit, never emailed). Test email through --test verified end-to-end Resend path. PORTAL_TOKEN intentionally unset for now — only affects the customer in-app notification path, time-critical user flows (signup verify, password reset, email change verify) still go through retail_portal directly via Resend.", "how": "systemd (synthos-scoop.service, polls 30s)", "status": "live"},
         {"name": "company_sentinel.py", "desc": "Heartbeat receiver, silence alerts", "how": "cron */15 9-16 * * 1-5 (market hours only)", "status": "cron"},
         {"name": "company_vault.py", "desc": "License keys, compliance, secrets. 2026-04-23 arch-drift fix: actual cron is daily 01:45 with --backup-now flag, not hourly.", "how": "cron 1:45 daily", "status": "cron"},
         {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
