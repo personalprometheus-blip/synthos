@@ -9751,14 +9751,16 @@ async function loadScreening() {
     // Bi-directional spark line (2026-04-30). Score 0-1, signal one of
     // 'bullish' / 'bearish' / 'neutral' / 'pending'. Renders a thin
     // bar with center reference line; fill grows left (pink) for
-    // bearish or right (teal) for bullish, width = distance from 0.5
-    // doubled so the bar visually reaches its half-fill at the
-    // extremes (0.0 / 1.0). Empty bar (just the center tick) for
-    // neutral / pending / null score.
+    // bearish or right (teal) for bullish, width = distance from 0.5.
+    // Width caps at 50% of the bar's total width since the fill
+    // occupies only one half from the center anchor (left:50% for
+    // bull, right:50% for bear) — going wider than 50% overflows
+    // into the next grid column.
     const biBar = (score, signal) => {
       if (score == null) return '<div class="scrv-bibar"></div>';
       const dist     = Math.abs(score - 0.5);
-      const widthPct = (Math.min(dist, 0.5) * 2 * 100).toFixed(1);
+      // dist is 0-0.5; multiply by 100 directly to get a 0-50% cap.
+      const widthPct = (Math.min(dist, 0.5) * 100).toFixed(1);
       let cls = '';
       if (signal === 'bullish')      cls = 'bull';
       else if (signal === 'bearish') cls = 'bear';
