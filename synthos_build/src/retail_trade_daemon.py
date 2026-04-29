@@ -18,7 +18,7 @@ WHAT CHANGES from v1:
 - Halt check runs per cycle, not only per enrichment tick
 
 WHAT STAYS THE SAME (Phase 1 is a pure refactor):
-- 14 gates and their logic
+- 13 gates and their logic
 - 0.75 Gate 5 composite threshold
 - Signal source (VALIDATED signals from market_daemon's enrichment)
 - Stop placement, sizing, entry criteria
