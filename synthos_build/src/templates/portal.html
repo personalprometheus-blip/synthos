@@ -912,6 +912,24 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 /* Ranked grid — vertical stack of candidate rows. */
 .screener-v2 .scrv-grid{display:grid;gap:var(--scrv-sp-1)}
 
+/* Column-header row — same grid template as .screener-row, lighter
+   weight + uppercase eyebrows. Sits directly above the rows so the
+   user always knows which column is which (was ambiguous when row
+   cells just said "Bullish 85" twice). */
+.screener-v2 .scrv-table-head{
+  display:grid;
+  grid-template-columns:32px 1.4fr 1fr 1fr 1fr 64px;
+  gap:var(--scrv-sp-3);
+  padding:5px 14px;
+  font-size:var(--scrv-t-micro);
+  font-weight:700;
+  letter-spacing:0.08em;
+  text-transform:uppercase;
+  color:var(--dim);
+  border-bottom:var(--scrv-border-faint);
+  margin-bottom:var(--scrv-sp-1);
+}
+
 /* ── Candidate row — re-tightened ──
    Half the padding of v1, smaller body text, no score bars in the
    news/sentiment columns. Tracker stripe + tier tint stay (they
@@ -925,10 +943,14 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   display:grid;
   grid-template-columns:32px 1.4fr 1fr 1fr 1fr 64px;
   gap:var(--scrv-sp-3);
-  align-items:center;
+  align-items:start;
   cursor:pointer;
   transition:background .15s,border-color .15s,opacity .15s;
 }
+/* Make sure each column's first line starts at the same vertical
+   position. Wrapper divs inside cells get reset so signal labels in
+   news / sentiment / momentum columns share a baseline. */
+.screener-v2 .screener-row > div{margin:0;padding:0}
 .screener-v2 .screener-row:hover{
   background:var(--scrv-surface-hover);
   border-color:rgba(0,245,212,0.20);
@@ -1003,23 +1025,24 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   color:var(--purple);
 }
 
-/* ── TODAY'S STANDOUTS STRIP — tightened.
-   Smaller cards (200px min vs 240), less padding, smaller type,
-   shorter sparkline. Holds 4 cards on most viewports comfortably
-   without crowding each other. */
+/* ── TODAY'S STANDOUTS STRIP — second tightening pass (2026-04-29).
+   Cards down ~20% more from foundation: 7×9 padding, 11px header,
+   16px score, 20px sparkline. Tighter than the candidate row but
+   still readable. Trades visual prominence for density — they're
+   anchors, not the whole story. */
 .standouts-strip{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:8px;
+  grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:6px;
 }
 .standout-card{
   background:rgba(255,255,255,0.025);
   border:1px solid rgba(255,255,255,0.08);
   border-radius:6px;
-  padding:10px 12px;
+  padding:7px 9px;
   cursor:pointer;
   transition:background .15s,border-color .15s;
-  display:flex;flex-direction:column;gap:4px;
+  display:flex;flex-direction:column;gap:3px;
 }
 .standout-card:hover{
   background:rgba(255,255,255,0.045);
@@ -1027,15 +1050,15 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 }
 .standout-card.held{
   border-left:2px solid var(--teal);
-  padding-left:11px;
+  padding-left:8px;
 }
 .standout-card.watching{
   border-left:2px solid var(--purple);
-  padding-left:11px;
+  padding-left:8px;
 }
 .standout-header{
   display:flex;align-items:center;gap:4px;flex-wrap:wrap;
-  font-size:13px;font-weight:700;color:var(--text);
+  font-size:11px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;
 }
 .standout-company{
@@ -1043,13 +1066,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .standout-spark{
-  display:block;width:100%;height:26px;margin:3px 0;
+  display:block;width:100%;height:20px;margin:2px 0;
 }
 .standout-foot{
-  display:flex;align-items:baseline;gap:8px;
+  display:flex;align-items:baseline;gap:6px;
 }
 .standout-score{
-  font-size:18px;font-weight:700;font-family:var(--mono);
+  font-size:16px;font-weight:700;font-family:var(--mono);
   font-variant-numeric:tabular-nums;
   flex-shrink:0;line-height:1;
 }
@@ -1059,53 +1082,70 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 
-/* ── SECTOR PULSE BARS — tightened in foundation pass.
-   Half the height (4px), tighter padding, smaller type, subtler
-   selection state (no glow). Reads as a Apple-Stocks-style strength
-   strip rather than a chunky progress-bar grid. */
-.sector-pulse-row{
+/* ── SECTOR HEATMAP TILES (replaces pulse bars, 2026-04-29) ──
+   Sector strength as a horizontal grid of small tiles, not bars.
+   The bars were broken in practice: sector scores cluster in 0.40-
+   0.65 so visually all bars looked similar, the bar communicated
+   nothing the score number didn't. Tiles convey rank position
+   (sorted left→right strongest first), absolute strength (score),
+   movement (delta vs last run, where data permits), and the
+   sector's leader (top ticker) — four things the bar version
+   couldn't.
+
+   Background intensity is rank-driven (top tile darker teal, weakest
+   tile near-transparent) so the user reads the row left-to-right
+   the way they'd read a heatmap. */
+.scrv-sector-heatmap{
   display:grid;
-  grid-template-columns:84px 1fr 32px 110px;
-  gap:10px;
-  align-items:center;
-  padding:4px 10px;
+  grid-template-columns:repeat(auto-fit,minmax(94px,1fr));
+  gap:4px;
+  margin-bottom:var(--scrv-sp-4);
+}
+.scrv-sector-tile{
+  background:rgba(0,245,212,0.03);
+  border:1px solid rgba(255,255,255,0.06);
   border-radius:4px;
+  padding:6px 8px;
   cursor:pointer;
-  border:1px solid transparent;
-  transition:background .15s,border-color .15s;
+  transition:background .15s,border-color .15s,transform .15s;
+  display:flex;flex-direction:column;gap:2px;
+  position:relative;
 }
-.sector-pulse-row:hover{
-  background:rgba(255,255,255,0.03);
+.scrv-sector-tile:hover{
+  background:rgba(0,245,212,0.08);
+  border-color:rgba(0,245,212,0.30);
+  transform:translateY(-1px);
 }
-.sector-pulse-row.selected{
-  background:rgba(0,245,212,0.05);
-  border-color:rgba(0,245,212,0.28);
+.scrv-sector-tile.selected{
+  background:rgba(0,245,212,0.10);
+  border-color:rgba(0,245,212,0.50);
 }
-.sector-pulse-name{
+.scrv-sector-name{
   font-size:9px;font-weight:700;letter-spacing:0.06em;
-  color:var(--muted);text-transform:uppercase;
+  text-transform:uppercase;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.sector-pulse-row.selected .sector-pulse-name{color:var(--teal)}
-.sector-pulse-bar-wrap{
-  height:4px;background:rgba(255,255,255,0.05);
-  border-radius:2px;overflow:hidden;position:relative;
+.scrv-sector-tile.selected .scrv-sector-name{color:var(--teal)}
+.scrv-sector-score{
+  font-size:18px;font-weight:700;color:var(--text);
+  font-family:var(--mono);font-variant-numeric:tabular-nums;
+  line-height:1.05;
 }
-.sector-pulse-bar{
-  height:100%;border-radius:2px;
-  background:var(--teal);
-  transition:width .3s ease;
+.scrv-sector-foot{
+  display:flex;align-items:baseline;gap:5px;
+  font-size:9px;color:var(--dim);font-family:var(--mono);
 }
-.sector-pulse-score{
-  font-size:11px;font-weight:600;color:var(--teal);
-  font-family:var(--mono);text-align:right;
-  font-variant-numeric:tabular-nums;
-}
-.sector-pulse-meta{
-  font-size:9px;color:var(--muted);
-  font-family:var(--mono);text-align:right;
+.scrv-sector-leader{
+  flex:1;min-width:0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--muted);
 }
+.scrv-sector-delta{
+  font-weight:700;font-variant-numeric:tabular-nums;
+  flex-shrink:0;
+}
+.scrv-sector-delta.up{color:var(--teal)}
+.scrv-sector-delta.down{color:var(--pink)}
 
 /* ── HERO BADGE (overlaid on .charm cards) ── */
 .hero-badge{position:absolute;top:42px;right:8px;font-size:7px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;padding:2px 7px;border-radius:99px;z-index:1}
@@ -3721,7 +3761,19 @@ setInterval(loadAgentPulse, 10000);
         <option value="">All sectors</option>
       </select>
     </div>
-    <div id="screening-sector-summary" class="scrv-pulse-stack"></div>
+    <div id="screening-sector-summary" class="scrv-sector-heatmap"></div>
+    <!-- Column header row — same grid template as .screener-row so
+         the labels align over their respective columns. Solves the
+         "is that Bullish news or Bullish sentiment?" ambiguity from
+         the foundation pass. -->
+    <div class="scrv-table-head" id="screening-grid-head" style="display:none">
+      <div>#</div>
+      <div>Ticker</div>
+      <div>News</div>
+      <div>Sentiment</div>
+      <div>Momentum</div>
+      <div style="text-align:right">Score</div>
+    </div>
     <div id="screening-grid" class="scrv-grid"></div>
   </div>
 
@@ -9523,25 +9575,67 @@ async function loadScreeningSectors() {
     } else if (currentSel) {
       select.value = currentSel;
     }
-    // Sector pulse bars — one horizontal row per sector, sorted by avg
-    // composite score (broad strength). Selection state matches the
-    // dropdown / row-click so refreshes don't snap the highlight off
-    // a user-chosen sector. Empty selection ("All sectors" in dropdown)
-    // = no row highlighted.
+    // Sector heatmap tiles — one tile per sector, sorted strongest
+    // first. Replaces the pulse-bar version: bars couldn't visually
+    // distinguish sectors clustered in the 0.40-0.65 band. Tile
+    // background intensity scales with rank position so the eye
+    // reads strength across the row before reading any number.
     const _selectedSector = select.value || '';
+    // Compute sector-level delta from the candidate list (already in
+    // hand via window._screenerCandidates from the standouts loader).
+    // For each sector, average the per-candidate (combined - prev_combined)
+    // delta — gives a sector "movement" indicator without a backend
+    // change. Skipped silently when prev data isn't available.
+    const sectorDelta = {};
+    const candidates = window._screenerCandidates || [];
+    if (candidates.length) {
+      const buckets = {};
+      candidates.forEach(c => {
+        if (c.prev_combined_score == null || c.combined_score == null) return;
+        const sec = c.sector;
+        if (!sec) return;
+        const d = c.combined_score - c.prev_combined_score;
+        if (!buckets[sec]) buckets[sec] = [];
+        buckets[sec].push(d);
+      });
+      Object.keys(buckets).forEach(sec => {
+        const arr = buckets[sec];
+        if (!arr.length) return;
+        const avg = arr.reduce((a,b)=>a+b, 0) / arr.length;
+        sectorDelta[sec] = avg;
+      });
+    }
     summary.innerHTML = sectors.map((s,i) => {
       const isSelected = (_selectedSector && s.sector === _selectedSector);
       const avg = (s.avg_score != null) ? s.avg_score : 0;
-      const fillPct = Math.max(0, Math.min(100, avg * 100));
       const scoreDisplay = (s.avg_score != null) ? Math.round(avg * 100) : '—';
-      const meta = _esc(s.etf || '') + (s.top_ticker ? ' · ' + _esc(s.top_ticker) : '');
-      return '<div class="sector-pulse-row'+(isSelected?' selected':'')+'" '
+      // Rank-driven background intensity (top tile darkest teal,
+      // weakest tile near-default). 0.025 → 0.10 alpha range across
+      // the visible sectors so the gradient is felt but not loud.
+      const rankPct = sectors.length > 1 ? (1 - i / (sectors.length - 1)) : 1;
+      const bgAlpha = (0.025 + rankPct * 0.075).toFixed(3);
+      const styleAttr = isSelected
+        ? ''  // selected uses class-driven background
+        : ' style="background:rgba(0,245,212,'+bgAlpha+')"';
+      // Sector delta from the per-candidate movement averages.
+      const dRaw = sectorDelta[s.sector];
+      let deltaHTML = '';
+      if (dRaw != null && Math.abs(dRaw) >= 0.02) {
+        const dPts = Math.round(dRaw * 100);
+        const cls  = dRaw > 0 ? 'up' : 'down';
+        const arr  = dRaw > 0 ? '↑' : '↓';
+        deltaHTML = '<span class="scrv-sector-delta '+cls+'">'+arr+(dPts>0?'+':'')+dPts+'</span>';
+      }
+      const leader = s.top_ticker ? _esc(s.top_ticker) : (_esc(s.etf || ''));
+      return '<div class="scrv-sector-tile'+(isSelected?' selected':'')+'"'+styleAttr+' '
         + 'onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
         + 'title="' + _esc(s.sector) + ' — avg composite ' + scoreDisplay + '/100 across ' + (s.candidate_count||0) + ' candidates">'
-        + '<div class="sector-pulse-name">'+_esc(s.sector)+'</div>'
-        + '<div class="sector-pulse-bar-wrap"><div class="sector-pulse-bar" style="width:'+fillPct.toFixed(1)+'%"></div></div>'
-        + '<div class="sector-pulse-score">'+scoreDisplay+'</div>'
-        + '<div class="sector-pulse-meta">'+meta+'</div>'
+        + '<div class="scrv-sector-name">'+_esc(s.sector)+'</div>'
+        + '<div class="scrv-sector-score">'+scoreDisplay+'</div>'
+        + '<div class="scrv-sector-foot">'
+        +   '<span class="scrv-sector-leader">'+leader+'</span>'
+        +   deltaHTML
+        + '</div>'
         + '</div>';
     }).join('');
     // Stash sectors for the editorial anchor (top-sector field).
@@ -9564,10 +9658,13 @@ async function loadScreening() {
     const r = await fetch('/api/screening' + qs);
     const d = await r.json();
     const candidates = d.candidates || [];
+    const headEl = document.getElementById('screening-grid-head');
     if (!candidates.length) {
       meta.textContent = 'No screening data yet. Run retail_sector_screener.py to populate.';
+      if (headEl) headEl.style.display = 'none';
       return;
     }
+    if (headEl) headEl.style.display = 'grid';
     const c0 = candidates[0];
     // 2026-04-29 cleanup — dropped 5-Year Return from the meta header
     // line for the same reason it was dropped from the sector cards:
