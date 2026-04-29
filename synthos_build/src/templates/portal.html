@@ -3093,6 +3093,42 @@ var _aboutContent = {
       + '</div>'
 
       + '<div class="about-section">'
+      +   '<div class="about-section-title">What you get when you click a row</div>'
+      +   '<div class="about-body">'
+      +     '<p>Click any standout card or row in the ranked list to '
+      +     'open the deep-dive drawer for that ticker. The drawer is '
+      +     'where Synthos shows its work — not just scores, but the '
+      +     'underlying receipts behind them:</p>'
+      +     '<p><strong>Why we\'re watching</strong> — the single '
+      +     'highest-scoring news article for this ticker, with source '
+      +     'and tier (Official / Wire / Press) so you can judge the '
+      +     'quality.</p>'
+      +     '<p><strong>Live snapshot</strong> — current price, '
+      +     'today\'s range, average daily range (volatility context), '
+      +     'and how the ticker is moving relative to its sector ETF.</p>'
+      +     '<p><strong>Sentiment signals</strong> — when the latest '
+      +     'screener run flagged something positioning-related on this '
+      +     'ticker, the cascade reasoning is shown verbatim. '
+      +     'Includes put/call ratio vs. 30-day average, insider net '
+      +     'dollar flow, and volume vs. the historical average. Hidden '
+      +     'when nothing\'s lit up.</p>'
+      +     '<p><strong>Insider / Congressional activity</strong> — '
+      +     'recent disclosed trades from the same data feed that '
+      +     'drives the row\'s congressional flag. Each entry shows '
+      +     'who, what (bought/sold), how much (amount range), the '
+      +     'transaction date, and the disclosure date. Hidden when '
+      +     'no insider rows exist for this ticker.</p>'
+      +     '<p><strong>If you took this</strong> — sizing calculator '
+      +     'at 2% / 5% / 10% of your portfolio. Calculator only — the '
+      +     'screener doesn\'t make sizing decisions for you.</p>'
+      +     '<p><strong>Recent news</strong> — the last week of '
+      +     'articles for this ticker (top 10), with source name, '
+      +     'sentiment direction, and timestamp. Click any headline to '
+      +     'open the full article.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
       +   '<div class="about-section-title">Refresh cadence</div>'
       +   '<div class="about-body">'
       +     '<p>Screener runs <strong>twice daily</strong> — pre-market '
@@ -4774,6 +4810,23 @@ setInterval(loadAgentPulse, 10000);
       <div class="drawer-section-title">Live snapshot</div>
       <div id="pd-snapshot"></div>
     </div>
+    <!-- Sentiment cascade reasoning (Phase 1D, 2026-04-29).
+         Populated when the screener row carries a sentiment notes
+         field (e.g. "Tier 2 (Caution). Put/call=1.23 vs 30d avg=0.95.
+         Insider net=+$2.4M. Volume vs avg=1.8x."). Hidden when the
+         row has no cascade reasoning attached. -->
+    <div class="drawer-section" id="pd-cascade-section" style="display:none">
+      <div class="drawer-section-title">Sentiment signals</div>
+      <div id="pd-cascade"></div>
+    </div>
+    <!-- Insider / congressional activity (Phase 1D, 2026-04-29).
+         Async fetched from /api/ticker-insider on drawer open. Hidden
+         when the ticker has no politician/insider rows in the
+         signals table. -->
+    <div class="drawer-section" id="pd-insider-section" style="display:none">
+      <div class="drawer-section-title">Insider / Congressional activity</div>
+      <div id="pd-insider"></div>
+    </div>
     <div class="drawer-section">
       <div class="drawer-section-title">If you took this</div>
       <div id="pd-sizing"></div>
@@ -6443,6 +6496,77 @@ function openPlanningDrawer(s) {
         snapEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Snapshot unavailable</div>';
       }
     });
+
+  // Phase 1D — Sentiment cascade reasoning. Pulled directly from the
+  // screener row's notes field (no fetch needed; drawerObj plumbs it
+  // through screener_meta). Hides the section when no cascade text is
+  // present so the drawer stays clean for non-screener-sourced opens.
+  const cascadeEl      = document.getElementById('pd-cascade');
+  const cascadeSection = document.getElementById('pd-cascade-section');
+  if (cascadeEl && cascadeSection) {
+    const sm = s.screener_meta || {};
+    const notes = (sm.notes || s.notes || '').trim();
+    if (notes) {
+      cascadeEl.innerHTML =
+        '<div style="font-size:11px;line-height:1.6;color:var(--text);'
+      + 'background:rgba(255,255,255,0.02);border:1px solid var(--border);'
+      + 'border-radius:7px;padding:10px 12px;font-family:var(--mono)">'
+      + escHtml(notes)
+      + '</div>'
+      + '<div style="font-size:9px;color:var(--dim);margin-top:5px;font-style:italic">'
+      + 'Output of the 27-gate sentiment cascade — what positioning '
+      + 'signals lit up for this ticker on the latest screener run.</div>';
+      cascadeSection.style.display = '';
+    } else {
+      cascadeSection.style.display = 'none';
+    }
+  }
+
+  // Phase 1D — Insider / Congressional activity panel. Async fetch
+  // from /api/ticker-insider; hides itself if the ticker has no
+  // politician/insider rows. Each row shows politician + verb (bought/
+  // sold/traded) + amount range + tx and disclosure dates.
+  const insiderEl      = document.getElementById('pd-insider');
+  const insiderSection = document.getElementById('pd-insider-section');
+  if (insiderEl && insiderSection) {
+    insiderEl.innerHTML = '<div style="font-size:10px;color:var(--dim);font-style:italic">Loading…</div>';
+    insiderSection.style.display = '';
+    fetch('/api/ticker-insider?ticker=' + encodeURIComponent(s.ticker || ''))
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => {
+        const rows = (d && d.rows) || [];
+        if (!rows.length) {
+          insiderSection.style.display = 'none';
+          return;
+        }
+        insiderEl.innerHTML = rows.map(r => {
+          const tx     = (r.transaction_type || '').toLowerCase();
+          const isBuy  = tx.includes('buy')  || tx.includes('purchase');
+          const isSell = tx.includes('sell') || tx.includes('sale');
+          const color  = isBuy ? 'var(--teal)' : isSell ? 'var(--pink)' : 'var(--muted)';
+          const verb   = isBuy ? 'bought' : isSell ? 'sold' : 'traded';
+          const who    = escHtml(r.politician || 'Unknown');
+          const amt    = escHtml(r.amount_range || 'amount n/a');
+          const txDate = escHtml(r.tx_date || '?');
+          const dDate  = escHtml(r.disc_date || '?');
+          const src    = escHtml(r.source || '');
+          return ''
+            + '<div style="padding:9px 11px;margin-bottom:5px;border-radius:7px;'
+            + 'background:rgba(255,255,255,0.02);border:1px solid var(--border)">'
+            +   '<div style="font-size:11px;font-weight:600;color:var(--text)">'
+            +     '<span style="color:' + color + '">' + who + '</span> ' + verb
+            +     ' <span style="color:var(--muted);font-weight:400">' + amt + '</span>'
+            +   '</div>'
+            +   '<div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:3px">'
+            +     'Trade ' + txDate + ' · Disclosed ' + dDate + (src ? ' · ' + src : '')
+            +   '</div>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(() => {
+        insiderSection.style.display = 'none';
+      });
+  }
 
   // "If you took this" — sizing calculator at three sample weights.
   // No "buy zone / stop / target" because those would be made-up
@@ -9175,7 +9299,9 @@ async function loadStandouts(force) {
           sentiment_signal: cd.sentiment_signal, combined_score: cd.combined_score,
           momentum_score: cd.momentum_score, ret_3m: cd.ret_3m,
           etf: cd.etf, etf_weight_pct: cd.etf_weight_pct,
-          congressional_flag: cd.congressional_flag, run_id: cd.run_id,
+          congressional_flag: cd.congressional_flag,
+          notes: cd.notes,  // Phase 1D — sentiment cascade reasoning
+          run_id: cd.run_id,
         },
       };
       const drawerEsc = JSON.stringify(drawerObj).replace(/"/g,'&quot;');
@@ -9350,6 +9476,10 @@ async function loadScreening() {
           // sector cards + meta header (both dropped); no drawer site
           // reads it from screener_meta. Dead plumbing.
           congressional_flag: cd.congressional_flag,
+          // notes carries the sentiment-cascade reasoning text written
+          // by the sentiment agent — surfaced in the drawer's new
+          // "Sentiment signals" panel (Phase 1D).
+          notes:              cd.notes,
           run_id:             cd.run_id,
         },
       };

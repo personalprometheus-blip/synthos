@@ -5312,6 +5312,64 @@ def api_ticker_news():
         return jsonify({'ticker': ticker, 'articles': [], 'error': str(e)})
 
 
+@app.route('/api/ticker-insider')
+@login_required
+def api_ticker_insider():
+    """Insider / congressional trade rows for a single ticker — powers
+    the 'Insider activity' panel in the planning drawer (Phase 1D,
+    2026-04-29).
+
+    Reads from the shared signals table (same source the screener uses
+    for its 'recent_buy' / 'recent_sell' flag, but with the actual
+    politician + amount + date detail surfaced). Limited to rows that
+    have a politician AND a tx_date so we don't render anonymous /
+    incomplete records. Sorted by disclosure date desc; top 10.
+
+    Query params:
+      ticker — required, normalized to uppercase
+      limit  — default 10, max 25
+    """
+    ticker = (request.args.get('ticker') or '').strip().upper()
+    if not ticker or not ticker.replace('.', '').replace('-', '').isalnum() or len(ticker) > 8:
+        return jsonify({'rows': [], 'error': 'invalid ticker'}), 400
+    try:
+        limit = max(1, min(25, int(request.args.get('limit') or 10)))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        rows = []
+        db = _shared_db()
+        with db.conn() as c:
+            cur = c.execute(
+                "SELECT politician, tx_date, disc_date, amount_range, "
+                "       transaction_type, source, headline, confidence "
+                "FROM signals "
+                "WHERE UPPER(ticker)=? "
+                "  AND politician IS NOT NULL "
+                "  AND tx_date    IS NOT NULL "
+                "ORDER BY disc_date DESC "
+                "LIMIT ?",
+                (ticker, limit)
+            ).fetchall()
+            for r in cur:
+                rows.append({
+                    'politician':       r['politician'],
+                    'tx_date':          r['tx_date'],
+                    'disc_date':        r['disc_date'],
+                    'amount_range':     r['amount_range'],
+                    'transaction_type': r['transaction_type'],
+                    'source':           r['source'],
+                    'headline':         r['headline'],
+                    'confidence':       r['confidence'],
+                })
+        return jsonify({
+            'ticker': ticker, 'rows': rows, 'count': len(rows), 'limit': limit,
+        })
+    except Exception as e:
+        log.warning(f"/api/ticker-insider error: {e}")
+        return jsonify({'ticker': ticker, 'rows': [], 'error': str(e)})
+
+
 # ── /api/ticker-context support: in-process cache + sector→ETF map ──
 # Cache is an LRU-ish dict keyed by ticker, valid for 60 seconds. No
 # eviction beyond TTL because the cache is tiny in practice (one entry
