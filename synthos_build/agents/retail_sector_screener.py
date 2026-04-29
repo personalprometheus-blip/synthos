@@ -449,78 +449,153 @@ def calc_return(bars):
     return round((closes[-1] - closes[0]) / closes[0], 4)
 
 
+def check_liquidity_floor(bars, min_avg_dollar_volume: float = 1_000_000.0):
+    """
+    G2 — liquidity floor (added 2026-04-30).
+
+    Rejects tickers whose 30-day average daily dollar volume falls below
+    `min_avg_dollar_volume`. Returns (passed: bool, avg_dollar_vol: float,
+    reason: str). Defensive — at the current hand-curated universe of
+    top-10 SPDR sector ETF holdings, every name is large-cap and clears
+    this floor by orders of magnitude. The check matters whenever the
+    universe expands (small-cap inclusion, new sectors, FMP-driven
+    auto-refresh, etc.) so an illiquid name doesn't silently get
+    momentum-scored.
+
+    Default floor is $1M/day — set deliberately low so the current
+    universe never trips it, while still excluding genuinely illiquid
+    names. Override via env MIN_DOLLAR_VOLUME if you want a stricter
+    floor. Floor of $0 disables the gate (escape hatch for testing).
+    """
+    if min_avg_dollar_volume <= 0:
+        return True, 0.0, "liquidity gate disabled"
+    closes  = [b["c"] for b in bars if "c" in b]
+    volumes = [b["v"] for b in bars if "v" in b]
+    if len(closes) < 30 or len(volumes) < 30:
+        # Insufficient history — fail loud rather than silently passing.
+        return False, 0.0, "insufficient history (<30 days) for liquidity check"
+    # Average daily dollar volume = avg(close * volume) over last 30 days.
+    dollar_vols = [closes[i] * volumes[i] for i in range(len(closes) - 30, len(closes))
+                   if i < len(volumes)]
+    avg = sum(dollar_vols) / max(len(dollar_vols), 1)
+    if avg < min_avg_dollar_volume:
+        return False, avg, f"avg daily dollar volume ${avg:,.0f} < ${min_avg_dollar_volume:,.0f} floor"
+    return True, avg, f"avg daily dollar volume ${avg:,.0f}"
+
+
+def _sigmoid(x: float, k: float = 1.0) -> float:
+    """Numerically stable logistic. Centers at 0.5 when x=0; saturates
+    smoothly at 0/1 as |x*k| grows. k controls steepness."""
+    import math
+    z = max(min(k * x, 50.0), -50.0)  # avoid overflow
+    return 1.0 / (1.0 + math.exp(-z))
+
+
 def calc_momentum_score(bars):
     """
-    Simple momentum score 0.0-1.0 based on:
-      - 3-month price return (weight 50%)
-      - 20-day vs 50-day SMA relationship (weight 30%)
-      - Recent volume trend (weight 20%)
+    Momentum score 0.0-1.0 based on:
+      - 3-month price return            (weight 50%)
+      - SMA structure (price/20d/50d)   (weight 30%)
+      - Recent volume trend             (weight 20%)
 
-    Returns (score, ret_3m, reasoning_text).  ret_3m is the raw
+    Returns (score, ret_3m, reasoning_text). ret_3m is the raw
     3-month price return as a decimal (e.g. 0.124 = +12.4%) — caller
     persists it to sector_screening.ret_3m so the screener page can
-    show actual % change instead of just the composite score.  None
+    show actual % change instead of just the composite score. None
     when fewer than 63 bars are available.
+
+    2026-04-30 — G3 smoothing pass. The previous implementation used
+    step-function bucketing (0.1 / 0.3 / 0.5 / 0.7 / 1.0) which made a
+    1.99% return score 0.5 while a 2.01% return scored 0.7 — same
+    economic signal, ~40 percentile-points apart. Replaced with
+    continuous sigmoid mappings so similar inputs produce similar
+    scores, and ranking gradients track underlying signal magnitude.
+
+    Reasoning text still uses bucket-based human language ("strong
+    positive momentum", etc.) since prose buckets read better than
+    "score = 0.62". The score and the prose are now independent paths.
     """
-    closes = [b["c"] for b in bars if "c" in b]
+    closes  = [b["c"] for b in bars if "c" in b]
     volumes = [b["v"] for b in bars if "v" in b]
     reasoning = []
 
     if len(closes) < 60:
         return 0.5, None, "Insufficient price history — defaulting to neutral score."
 
-    # 3-month return
-    ret_3m = (closes[-1] - closes[-63]) / closes[-63] if len(closes) >= 63 else 0.0
+    # ── Component 1: 3-month return ────────────────────────────────────
+    # Smooth sigmoid centered at 0% return. k=10 gives:
+    #   ret=-0.30 → 0.05    (severe decline)
+    #   ret=-0.10 → 0.27
+    #   ret=-0.02 → 0.45
+    #   ret= 0.00 → 0.50    (neutral)
+    #   ret=+0.02 → 0.55
+    #   ret=+0.10 → 0.73
+    #   ret=+0.20 → 0.88
+    #   ret=+0.30 → 0.95    (strong)
+    # Smoother than the old 5-bucket function while preserving the
+    # rough magnitude relationship.
+    ret_3m    = (closes[-1] - closes[-63]) / closes[-63] if len(closes) >= 63 else 0.0
+    ret_score = _sigmoid(ret_3m, k=10.0)
     if ret_3m > 0.10:
-        ret_score = 1.0
         reasoning.append(f"3-month return +{ret_3m:.1%} (strong positive momentum)")
     elif ret_3m > 0.02:
-        ret_score = 0.7
         reasoning.append(f"3-month return +{ret_3m:.1%} (mild positive momentum)")
     elif ret_3m > -0.02:
-        ret_score = 0.5
         reasoning.append(f"3-month return {ret_3m:.1%} (flat)")
     elif ret_3m > -0.10:
-        ret_score = 0.3
         reasoning.append(f"3-month return {ret_3m:.1%} (mild negative momentum)")
     else:
-        ret_score = 0.1
         reasoning.append(f"3-month return {ret_3m:.1%} (weak — significant price decline)")
 
-    # SMA relationship
+    # ── Component 2: SMA structure ─────────────────────────────────────
+    # Combine three continuous distance-from-baseline measurements:
+    #   d20    = (price - sma20) / sma20   (price above/below short MA)
+    #   d50    = (price - sma50) / sma50   (price above/below long MA)
+    #   trend  = (sma20 - sma50) / sma50   (short MA above/below long MA)
+    # Each fed through sigmoid; weighted blend is the SMA component.
+    # Old discrete logic (close > sma20 > sma50 → 1.0, etc.) is still
+    # the framework for prose reasoning, but the score is now smooth.
     sma_20 = sum(closes[-20:]) / 20
     sma_50 = sum(closes[-50:]) / 50
-    if closes[-1] > sma_20 > sma_50:
-        sma_score = 1.0
+    last   = closes[-1]
+    d20    = (last - sma_20) / sma_20 if sma_20 > 0 else 0.0
+    d50    = (last - sma_50) / sma_50 if sma_50 > 0 else 0.0
+    trend  = (sma_20 - sma_50) / sma_50 if sma_50 > 0 else 0.0
+    sma_score = (
+        _sigmoid(d20,   k=20.0) * 0.40
+      + _sigmoid(d50,   k=20.0) * 0.40
+      + _sigmoid(trend, k=20.0) * 0.20
+    )
+    if last > sma_20 > sma_50:
         reasoning.append("Price above 20-day and 50-day moving averages (uptrend confirmed)")
-    elif closes[-1] > sma_50:
-        sma_score = 0.6
+    elif last > sma_50:
         reasoning.append("Price above 50-day MA but below 20-day MA (mixed trend)")
-    elif closes[-1] > sma_20:
-        sma_score = 0.5
+    elif last > sma_20:
         reasoning.append("Price above 20-day MA but below 50-day MA (short-term bounce only)")
     else:
-        sma_score = 0.2
         reasoning.append("Price below both moving averages (downtrend)")
 
-    # Volume trend: recent 10-day avg vs 30-day avg
+    # ── Component 3: Volume trend ──────────────────────────────────────
+    # Sigmoid over log(10d/30d ratio). At ratio=1.0 (no change),
+    # log(1)=0, sigmoid=0.5. Above-average volume pushes toward 1.0;
+    # below toward 0.0. Smoother than the old 4-bucket threshold.
     vol_score = 0.5
     if len(volumes) >= 30:
+        import math
         avg_10 = sum(volumes[-10:]) / 10
         avg_30 = sum(volumes[-30:]) / 30
         ratio  = avg_10 / avg_30 if avg_30 > 0 else 1.0
+        # log(ratio) maps ratio=1→0, ratio=1.5→0.41, ratio=0.5→-0.69
+        log_r  = math.log(max(ratio, 1e-6))
+        vol_score = _sigmoid(log_r, k=4.0)
         if ratio > 1.20:
-            vol_score = 1.0
-            reasoning.append(f"Volume 20% above 30-day average (institutional interest)")
+            reasoning.append("Volume 20% above 30-day average (institutional interest)")
         elif ratio > 1.05:
-            vol_score = 0.7
-            reasoning.append(f"Volume slightly above average (normal activity)")
+            reasoning.append("Volume slightly above average (normal activity)")
         elif ratio > 0.80:
-            vol_score = 0.5
-            reasoning.append(f"Volume near average (no unusual activity)")
+            reasoning.append("Volume near average (no unusual activity)")
         else:
-            vol_score = 0.3
-            reasoning.append(f"Volume below average (fading interest)")
+            reasoning.append("Volume below average (fading interest)")
 
     score = round(ret_score * 0.50 + sma_score * 0.30 + vol_score * 0.20, 4)
     return score, round(ret_3m, 4), " | ".join(reasoning)
@@ -748,11 +823,24 @@ def run_single(sector, run_id=None):
     momentum_details = {}
     scored_candidates = []
 
+    # Configurable liquidity floor — env override for tuning. Default
+    # $1M/day is below every current universe member by orders of
+    # magnitude; serves as a defensive gate for future universe
+    # expansion (FMP-refreshed holdings, manually added small-caps, etc.)
+    min_dollar_vol = float(os.environ.get('MIN_DOLLAR_VOLUME', '1000000'))
+
     for holding in holdings:
         ticker = holding['ticker']
         bars   = fetch_bars(ticker, days=260)  # ~1 year of trading days
+        # G2 — liquidity floor. Reject before scoring; an illiquid name
+        # that clears the rest of the pipeline is tradable garbage.
+        passes_liq, avg_vol, liq_reason = check_liquidity_floor(bars, min_dollar_vol)
+        if not passes_liq:
+            log.warning(f"  {ticker}: SKIPPED by liquidity floor — {liq_reason}")
+            continue
         score, ret_3m, reasoning = calc_momentum_score(bars)
-        momentum_details[ticker] = {"score": score, "ret_3m": ret_3m, "reasoning": reasoning}
+        momentum_details[ticker] = {"score": score, "ret_3m": ret_3m, "reasoning": reasoning,
+                                     "avg_dollar_volume": avg_vol}
         # 2026-04-29 — capture the last 30 daily closes for the screener
         # page sparkline. Bars are already in hand from the momentum
         # fetch above; pulling closes is free. Round to 2dp to keep the
