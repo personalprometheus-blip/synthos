@@ -1353,7 +1353,48 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
   <div class="cfg-panel-body">
 
-        <div class="cfg-section">Trading Parameters</div>
+    <!-- Agent Mode — primary action, sits at the top of the panel since
+         flipping AUTO/MANAGED is the most common reason a customer opens
+         the slide-out. -->
+    <div class="cfg-section">Agent Mode</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">Trading Mode</div>
+          <div class="setting-desc">Automatic executes without approval; Managed requires your sign-off</div>
+        </div>
+      </div>
+      <button class="save-btn" onclick="toggleMode();closeConfigPanel()"
+              style="background:rgba(245,166,35,0.1);border-color:rgba(245,166,35,0.2);color:var(--amber)">
+        Toggle Automatic / Managed
+      </button>
+    </div>
+
+    <!-- Cash Management — BIL toggle + reserve %. Comes second because
+         once the user has set their mode they often want to confirm /
+         tweak how idle cash is handled. -->
+    <div class="cfg-section" style="margin-top:24px">Cash Management</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+      <div class="setting-row" style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="setting-label">Treasury Reserve (BIL)</div>
+          <div class="setting-desc">Automatically park idle cash in short-term Treasury ETF (BIL) for yield while waiting for trade signals. Disable to keep all idle funds as cash.</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="cfg-bil-enabled" checked style="accent-color:var(--teal)">
+          <span style="font-size:11px;color:var(--muted)" id="cfg-bil-label">Enabled</span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="setting-label" style="margin:0">Reserve %</div>
+        <input id="cfg-bil-reserve" type="number" min="0" max="50" class="glass-input" placeholder="20" style="width:60px">
+        <span style="font-size:11px;color:var(--muted)">% of liquid capital</span>
+      </div>
+    </div>
+
+    <!-- Trading Parameters — preset picker + sizing/risk knobs. Heavier
+         section, sits below the lighter mode + cash controls. -->
+    <div class="cfg-section" style="margin-top:24px">Trading Parameters</div>
     <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
       <button class="preset-btn" data-preset="conservative" onclick="applyPreset('conservative',this)"
         style="padding:6px 14px;border-radius:8px;font-size:11px;font-weight:600;border:1px solid rgba(0,245,212,0.15);background:rgba(0,245,212,0.06);color:var(--teal);cursor:pointer;font-family:var(--sans);transition:all .15s">Conservative</button>
@@ -1500,39 +1541,6 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
     <div style="margin-top:14px">
       <button class="save-btn" onclick="saveCfgPanel()">Save Parameters</button>
-    </div>
-
-    <div class="cfg-section" style="margin-top:24px">Agent Mode</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">Trading Mode</div>
-          <div class="setting-desc">Automatic executes without approval; Managed requires your sign-off</div>
-        </div>
-      </div>
-      <button class="save-btn" onclick="toggleMode();closeConfigPanel()"
-              style="background:rgba(245,166,35,0.1);border-color:rgba(245,166,35,0.2);color:var(--amber)">
-        Toggle Automatic / Managed
-      </button>
-    </div>
-
-    <div class="cfg-section" style="margin-top:24px">Cash Management</div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
-      <div class="setting-row" style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div class="setting-label">Treasury Reserve (BIL)</div>
-          <div class="setting-desc">Automatically park idle cash in short-term Treasury ETF (BIL) for yield while waiting for trade signals. Disable to keep all idle funds as cash.</div>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
-          <input type="checkbox" id="cfg-bil-enabled" checked style="accent-color:var(--teal)">
-          <span style="font-size:11px;color:var(--muted)" id="cfg-bil-label">Enabled</span>
-        </label>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="setting-label" style="margin:0">Reserve %</div>
-        <input id="cfg-bil-reserve" type="number" min="0" max="50" class="glass-input" placeholder="20" style="width:60px">
-        <span style="font-size:11px;color:var(--muted)">% of liquid capital</span>
-      </div>
     </div>
 
     <div class="cfg-section" style="margin-top:24px">Notifications</div>
