@@ -3774,36 +3774,77 @@ setInterval(loadAgentPulse, 10000);
     <!-- ── STEP 2 — WELCOME ───────────────────────────────────── -->
     <div class="setup-v2-step" data-step="2">
       <h3>Welcome to Synthos</h3>
-      <p>Synthos is an <strong>algorithmic-trading agent</strong> that watches
-        the market for you, scores potential trades through 13 gates of
-        evaluation, and either executes them automatically or queues them for
-        your approval — whichever mode you prefer.</p>
+      <p>Synthos is a <strong>market-watching platform</strong> that ingests
+        a wide spread of data on every cycle, turns it into ranked signals,
+        and routes the strongest ones into actual trade decisions. The
+        trader is one component — the breadth of what Synthos watches is
+        the real story, and the watch list keeps growing.</p>
 
-      <p style="font-weight:700;color:var(--text);margin-top:14px">How it's designed to be used</p>
+      <p style="font-weight:700;color:var(--text);margin-top:18px">What we watch every cycle</p>
       <ul>
-        <li><strong>Hands-off (Automatic mode)</strong> — the bot trades on
-          your behalf within risk limits you control. You see every decision
-          in your bell and history.</li>
-        <li><strong>Co-pilot (Managed mode)</strong> — the bot proposes
-          trades; you approve or reject from the dashboard. Useful while
-          you're still learning what the bot does well.</li>
-        <li><strong>Read-only</strong> — turn the bot off entirely and use
-          the dashboard purely as a research and signal tool. Sector
-          screener, news, and watchlist all keep working.</li>
+        <li><strong>Market news</strong> — full wire feed (Alpaca / Benzinga)
+          run through 22 gates of classification, ticker attribution, and
+          source-quality weighting. Nothing reaches the trader without
+          surviving this filter.</li>
+        <li><strong>SEC filings</strong> — Form 4 (insider trades), 8-K
+          (material corporate events), 13D / 13G (activist or large-holder
+          disclosures), Form 144 (intent to sell), and Congressional
+          STOCK Act disclosures. Built ground-up so each source can be
+          enabled, weighted, and evaluated independently.</li>
+        <li><strong>Sector screener</strong> — top-10 holdings of all 11
+          S&amp;P sector ETFs (~110 tickers) scored on news + sentiment +
+          3-month price momentum. Re-runs twice daily so the candidate
+          pool stays current.</li>
+        <li><strong>Market sentiment cascade</strong> — 27-gate detector
+          tracking put/call ratios, insider dollar flow, volume vs.
+          historical average, and macro regime. Captures positioning
+          shifts <em>before</em> they show up in headlines.</li>
+        <li><strong>Live prices + tradable universe</strong> — every 60
+          seconds, 24/7, for ~11,000 US-listed symbols. Always current
+          even when the market itself is closed.</li>
+        <li style="color:var(--teal)"><strong>More on the roadmap</strong>
+          — additional SEC sources, economic data, and earnings-event
+          context are queued for activation. Each new source plugs into
+          the same validator pipeline.</li>
       </ul>
 
-      <p style="font-weight:700;color:var(--text);margin-top:14px">Why we connect to Alpaca</p>
-      <p>Synthos doesn't custody your money. <strong>Alpaca</strong> is the
-        regulated brokerage that holds your funds and executes trades; we
-        connect through their API using a key you generate. You can revoke
-        the key at any time from Alpaca's dashboard, and Alpaca remains the
-        source of truth for your positions and cash.</p>
+      <p style="font-weight:700;color:var(--text);margin-top:18px">What happens with what we see</p>
+      <ul>
+        <li>Every potential signal passes through the <strong>validator
+          stack</strong> — only promoted to actionable when every upstream
+          check (fault detection, market state, macro regime, bias
+          checks) stamps clean.</li>
+        <li>Validated signals reach the <strong>trader</strong>, which
+          runs each one through 13 gates (account health, position
+          sizing, spread, chase caps, event risk, …) before BUY / SKIP /
+          EXIT — or queueing for your approval.</li>
+      </ul>
+
+      <p style="font-weight:700;color:var(--text);margin-top:18px">How it's designed to be used</p>
+      <ul>
+        <li><strong>Hands-off (Automatic)</strong> — the bot trades on
+          your behalf within risk limits you control. You see every
+          decision in your bell + history.</li>
+        <li><strong>Co-pilot (Managed)</strong> — the bot proposes
+          trades; you approve or reject from the dashboard. Useful
+          while you're still calibrating trust.</li>
+        <li><strong>Read-only</strong> — bot off, dashboard becomes a
+          pure research surface. Sector screener, news, and intel still
+          work. You get the data without the auto-trading.</li>
+      </ul>
+
+      <p style="font-weight:700;color:var(--text);margin-top:18px">Why we connect to Alpaca</p>
+      <p>Synthos <strong>doesn't custody your money</strong>. Alpaca is
+        the regulated brokerage that holds your funds and executes
+        trades; we connect through their API using a key you generate.
+        You can revoke the key at any time from Alpaca's dashboard, and
+        Alpaca remains the source of truth for your positions + cash.</p>
 
       <div class="setup-v2-callout">
-        <strong>Important:</strong> the next steps walk you through creating
-        an Alpaca account (free, takes a few minutes) and connecting it to
-        Synthos. You'll need an email address and a way to verify your
-        identity for Alpaca's KYC.
+        <strong>Next:</strong> the remaining steps walk you through
+        creating an Alpaca account (free, takes a few minutes) and
+        connecting it to Synthos. You'll need an email address and a way
+        to verify your identity for Alpaca's KYC.
       </div>
     </div>
 
