@@ -879,6 +879,32 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   width:100px;height:24px;
   margin-top:5px;
 }
+/* Horizon pills (Phase 1B, 2026-04-29) — small inline tag on each
+   screener row indicating what kind of decision the row supports.
+   Catalyst = act-fast (amber), Trend = sustained (teal), Thesis =
+   long-term (purple). Color carries most of the meaning so the tag
+   text stays compact. */
+.horizon-pill{
+  display:inline-block;
+  font-size:9px;font-weight:800;letter-spacing:0.07em;
+  padding:2px 7px;border-radius:4px;margin-left:6px;
+  vertical-align:middle;
+}
+.horizon-pill.horizon-catalyst{
+  background:rgba(245,166,35,0.10);
+  border:1px solid rgba(245,166,35,0.30);
+  color:#f5a623;
+}
+.horizon-pill.horizon-trend{
+  background:rgba(0,245,212,0.10);
+  border:1px solid rgba(0,245,212,0.30);
+  color:var(--teal);
+}
+.horizon-pill.horizon-thesis{
+  background:rgba(123,97,255,0.10);
+  border:1px solid rgba(123,97,255,0.30);
+  color:var(--purple);
+}
 
 /* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
    Replaces the sector summary cards. Each sector renders as a single
@@ -2888,6 +2914,31 @@ var _aboutContent = {
       +     '<code>news 30% + sentiment 30% + momentum 30% + ETF '
       +     'weight 10%</code>. This is the column the rows are sorted '
       +     'by.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Time-horizon chips</div>'
+      +   '<div class="about-body">'
+      +     '<p>A small chip next to each ticker hints at <em>what kind '
+      +     'of decision this row supports</em> — useful when you\'re '
+      +     'sorting names you might trade on a different platform from '
+      +     'names you\'d hold long.</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(245,166,35,0.10);border-color:rgba(245,166,35,0.30);color:#f5a623">CATALYST</span>'
+      +       'Hot news or insider/congressional activity. Days-to-weeks horizon — act fast or wait for confirmation.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(0,245,212,0.10);border-color:rgba(0,245,212,0.30);color:var(--teal)">TREND</span>'
+      +       'Sustained momentum without a near-term catalyst. Weeks-to-months horizon.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(123,97,255,0.10);border-color:rgba(123,97,255,0.30);color:var(--purple)">THESIS</span>'
+      +       'Strong composite without an obvious near-term driver. Long-term hold candidate.'
+      +     '</p>'
+      +     '<p>Rows with low overall conviction (combined &lt; 50) get '
+      +     'no chip — a horizon tag would be misleading without the '
+      +     'underlying strength to back it.</p>'
       +   '</div>'
       + '</div>'
 
@@ -8886,6 +8937,38 @@ async function loadAudit() {
 // -- SCREENING --
 let _screeningSectorsLoaded = false;
 
+// Phase 1B (2026-04-29) — classify a screener row by time-horizon
+// based on which signal is loudest. Returns one of:
+//   'catalyst'  news/insider hot — act fast / days-weeks horizon
+//   'trend'     sustained momentum — weeks-months horizon
+//   'thesis'    high composite without near-term driver — long-hold
+//   null        conviction too low; no chip rendered
+// Heuristic intentionally simple — easier to refine as we learn what
+// reads true. Reused by the screener row template AND (later) the
+// Today's Standouts strip so a ticker carries the same horizon tag
+// in both surfaces.
+const HORIZON_TITLES = {
+  catalyst: 'Catalyst-driven (days-weeks): hot news or insider/congressional activity. Act fast or wait for confirmation.',
+  trend:    'Trend (weeks-months): sustained momentum without a near-term catalyst. Part of a larger move.',
+  thesis:   'Thesis (months+): strong composite without an obvious near-term driver. Long-term hold candidate.',
+};
+function classifyHorizon(cd) {
+  if (!cd) return null;
+  const ns   = cd.news_score;
+  const ms   = cd.momentum_score;
+  const cs   = cd.combined_score;
+  const cong = cd.congressional_flag && cd.congressional_flag !== 'none';
+  if ((ns != null && ns >= 0.7) || cong) return 'catalyst';
+  if (ms != null && ms >= 0.6)           return 'trend';
+  if (cs != null && cs >= 0.5)           return 'thesis';
+  return null;
+}
+function horizonPillHTML(horizon) {
+  if (!horizon) return '';
+  const title = HORIZON_TITLES[horizon] || '';
+  return '<span class="horizon-pill horizon-'+horizon+'" title="'+title+'">'+horizon.toUpperCase()+'</span>';
+}
+
 // Draw a single sparkline onto a canvas. `prices` is a numeric array
 // of closing prices (oldest → newest); `color` is any CSS color string.
 // Renders a simple polyline with no axes, fill, or labels — purely a
@@ -9091,6 +9174,8 @@ async function loadScreening() {
       const _topSent = (i === _leaders.sent    && cd.sentiment_score != null) ? '<span class="spill" data-pill="spill-sent" title="Highest sentiment score in this view">TOP SENT</span>' : '';
       const _topMom  = (i === _leaders.momentum&& cd.momentum_score  != null) ? '<span class="spill" data-pill="spill-mom"  title="Highest momentum score in this view">TOP MOM</span>'   : '';
       const _topComb = (i === _leaders.combined&& cd.combined_score  != null) ? '<span class="spill" data-pill="spill-rank" title="Highest combined score — overall leader">RANK #1</span>' : '';
+      // Phase 1B — time-horizon chip per row (catalyst/trend/thesis).
+      const _horizonTag = horizonPillHTML(classifyHorizon(cd));
       // Tier tint by combined score (top >=0.7 / bottom <0.4 / default).
       const _tier = cs == null ? '' : cs >= 0.7 ? ' tier-top' : cs < 0.4 ? ' tier-bottom' : '';
       // Left-edge stripe when this candidate is held in the portfolio
@@ -9118,7 +9203,7 @@ async function loadScreening() {
       }
       return '<div class="screener-row'+_tier+_trackClass+'" onclick="openPlanningDrawer('+drawerEsc+')">'
         +'<div style="font-size:20px;font-weight:700;color:var(--teal)">'+(i+1)+'</div>'
-        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_topComb+'</div>'
+        +'<div><div style="font-size:14px;font-weight:600">'+cd.ticker+sectorBadge+_horizonTag+_topComb+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">'+(cd.company||'')+'</div>'
         +'<div style="font-size:11px;color:var(--muted)">Weight: '+(cd.etf_weight_pct||0).toFixed(1)+'%</div>'
         +congBadge(cd.congressional_flag)+'</div>'
