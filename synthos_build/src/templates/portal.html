@@ -1725,7 +1725,7 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     <div style="font-size:13px;font-weight:700">Getting Started</div>
   </div>
   <div style="font-size:12px;color:var(--muted);line-height:1.65;margin-bottom:14px">
-    Walk through two-factor authentication, your Alpaca brokerage connection, and API keys any time from the <a href="#" onclick="showTab('guide');eaCloseSetupOverlay();return false" style="color:var(--teal);text-decoration:none;font-weight:600">Setup Guide tab</a>.
+    Walk through the terms, what Synthos does, your Alpaca brokerage connection, and API keys any time from the <a href="#" onclick="openSetupV2();eaCloseSetupOverlay();return false" style="color:var(--teal);text-decoration:none;font-weight:600">Setup Guide</a>.
     <br><br>
     You don't have to do anything here — your account is already active.
   </div>
@@ -2597,6 +2597,126 @@ var _aboutContent = {
   }
 };
 
+// ── SETUP V2 MODAL (Phase J, 2026-04-28) ────────────────────────────────
+// Multi-step rectangular walkthrough — TOS → Welcome → Alpaca setup → ...
+// Modal blocks until the user closes it OR accepts the TOS and progresses.
+// Closing without accepting is allowed; the TOS gate is informational
+// here (legal acceptance happens at signup; this is a refresher).
+var _setupV2Step = 1;
+var _setupV2TotalSteps = 3;
+var _setupV2TosAccepted = false;
+
+function openSetupV2() {
+  _setupV2Step = 1;
+  _setupV2TosAccepted = false;
+  _renderSetupV2();
+  document.getElementById('setup-v2-overlay').classList.add('open');
+  document.getElementById('setup-v2-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  // Wire scroll-to-enable on TOS box
+  setTimeout(_setupV2BindTosScroll, 50);
+}
+
+function closeSetupV2(ev) {
+  // If the click came from the overlay click-target itself, close.
+  // If the user clicked inside the modal (button, content), don't close.
+  if (ev && ev.target && ev.target.id !== 'setup-v2-overlay'
+        && (!ev.target.classList || !ev.target.classList.contains('setup-v2-close'))) {
+    return;
+  }
+  document.getElementById('setup-v2-overlay').classList.remove('open');
+  document.getElementById('setup-v2-modal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function _setupV2BindTosScroll() {
+  var box = document.getElementById('setup-v2-tos-scroll');
+  var btn = document.getElementById('setup-v2-accept');
+  if (!box || !btn) return;
+  function check() {
+    // Enable Accept once user scrolls within 16px of bottom (gives slack
+    // for trackpad inertia + sub-pixel diffs across browsers).
+    var atBottom = (box.scrollTop + box.clientHeight) >= (box.scrollHeight - 16);
+    if (atBottom && _setupV2Step === 1) {
+      btn.disabled = false;
+    }
+  }
+  box.removeEventListener('scroll', check);
+  box.addEventListener('scroll', check);
+  // Also check now in case content fits without scrolling (short TOS).
+  if (box.scrollHeight - box.clientHeight < 24) btn.disabled = false;
+}
+
+function _renderSetupV2() {
+  // Show only the active step
+  document.querySelectorAll('.setup-v2-step').forEach(function(el) {
+    el.classList.toggle('active', parseInt(el.getAttribute('data-step'), 10) === _setupV2Step);
+  });
+  // Counter
+  document.getElementById('setup-v2-counter').textContent =
+    'Step ' + _setupV2Step + ' of ' + _setupV2TotalSteps;
+  // Progress dots — done for completed, active for current
+  document.querySelectorAll('.setup-v2-dot').forEach(function(d) {
+    var n = parseInt(d.getAttribute('data-step-dot'), 10);
+    d.classList.remove('active', 'done');
+    if (n < _setupV2Step) d.classList.add('done');
+    else if (n === _setupV2Step) d.classList.add('active');
+  });
+  // Buttons
+  var back   = document.getElementById('setup-v2-back');
+  var accept = document.getElementById('setup-v2-accept');
+  var next   = document.getElementById('setup-v2-next');
+  back.disabled = (_setupV2Step === 1);
+  if (_setupV2Step === 1) {
+    accept.style.display = '';
+    next.style.display = 'none';
+    accept.disabled = !_setupV2TosAccepted;  // re-disable on going back
+    if (_setupV2TosAccepted) accept.textContent = '✓ Accepted — Continue';
+  } else {
+    accept.style.display = 'none';
+    next.style.display = '';
+    if (_setupV2Step === _setupV2TotalSteps) {
+      next.textContent = 'Done';
+    } else {
+      next.textContent = 'Next →';
+    }
+  }
+}
+
+function setupV2Back() {
+  if (_setupV2Step <= 1) return;
+  _setupV2Step--;
+  _renderSetupV2();
+}
+
+function setupV2Next() {
+  if (_setupV2Step >= _setupV2TotalSteps) {
+    closeSetupV2({target:{id:'setup-v2-overlay'}});
+    return;
+  }
+  // Step 1 → 2 only via the Accept button, not Next. Other steps free.
+  if (_setupV2Step === 1 && !_setupV2TosAccepted) return;
+  _setupV2Step++;
+  _renderSetupV2();
+}
+
+async function setupV2AcceptTos() {
+  // Record acceptance (best-effort; UI advances regardless of save outcome
+  // so a network blip doesn't strand the user on step 1).
+  try {
+    await fetch('/api/setup-v2/accept-tos', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    console.warn('setupV2 TOS save failed (non-blocking):', e);
+  }
+  _setupV2TosAccepted = true;
+  _setupV2Step = 2;
+  _renderSetupV2();
+}
+
 function openAboutDrawer(page) {
   var content = _aboutContent[page];
   if (!content) {
@@ -3332,7 +3452,7 @@ setInterval(loadAgentPulse, 10000);
       <div style="font-size:13px;font-weight:700;color:var(--teal)">New to Synthos?</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px">Follow the setup guide to connect your trading account and secure your login.</div>
     </div>
-    <button class="save-btn" onclick="showTab('guide')" style="white-space:nowrap;padding:6px 14px;font-size:11px">Setup Guide &rarr;</button>
+    <button class="save-btn" onclick="openSetupV2()" style="white-space:nowrap;padding:6px 14px;font-size:11px">Setup Guide &rarr;</button>
   </div>
 
   <div class="section-title">API Keys</div>
@@ -3514,6 +3634,222 @@ setInterval(loadAgentPulse, 10000);
 
 
 </div>
+
+<!-- SETUP TUTORIAL V2 (Phase J, 2026-04-28) — multi-step rectangular modal.
+     Replaces the v1 sidebar/tab-guide flow as the canonical "getting
+     started" walkthrough. TOS first, then welcome, then the actual
+     setup steps (Alpaca account + API keys) with screenshot guidance.
+     Lives at top-level (not inside any tab page) so it shows from any
+     screen the user happens to be on. -->
+<style>
+  /* The V2 modal is a centered rectangular dialog with a dimming
+     backdrop. The CSS lives inline near the markup so the whole
+     feature is one diff to read; if it grows we'll extract. */
+  #setup-v2-overlay{
+    display:none;position:fixed;inset:0;
+    background:rgba(2,4,8,0.74);backdrop-filter:blur(4px);
+    z-index:880;
+  }
+  #setup-v2-overlay.open{display:block}
+  #setup-v2-modal{
+    display:none;position:fixed;
+    left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(720px,94vw);max-height:88vh;
+    background:linear-gradient(180deg,rgba(20,24,36,0.98),rgba(14,17,26,0.98));
+    border:1px solid rgba(255,255,255,0.12);border-radius:14px;
+    box-shadow:0 30px 80px rgba(0,0,0,0.6);
+    z-index:881;flex-direction:column;overflow:hidden;
+  }
+  #setup-v2-modal.open{display:flex}
+  .setup-v2-head{
+    padding:18px 22px 12px;display:flex;align-items:flex-start;gap:14px;
+    border-bottom:1px solid rgba(255,255,255,0.06);flex-shrink:0;
+  }
+  .setup-v2-title{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--text)}
+  .setup-v2-counter{font-size:10px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+  .setup-v2-close{
+    margin-left:auto;background:transparent;border:none;color:var(--muted);
+    font-size:18px;cursor:pointer;padding:2px 8px;border-radius:8px;line-height:1;
+  }
+  .setup-v2-close:hover{background:rgba(255,255,255,0.05);color:var(--text)}
+  .setup-v2-progress{
+    display:flex;gap:6px;padding:10px 22px;align-items:center;flex-shrink:0;
+  }
+  .setup-v2-dot{
+    flex:1;height:3px;border-radius:99px;background:rgba(255,255,255,0.08);
+    transition:background 0.25s;
+  }
+  .setup-v2-dot.done{background:linear-gradient(90deg,var(--teal),var(--purple))}
+  .setup-v2-dot.active{background:var(--teal);box-shadow:0 0 8px rgba(0,245,212,0.4)}
+  .setup-v2-body{
+    padding:18px 22px;overflow-y:auto;flex:1;min-height:200px;
+  }
+  .setup-v2-step{display:none}
+  .setup-v2-step.active{display:block}
+  .setup-v2-step h3{
+    font-size:16px;font-weight:700;color:var(--text);margin:0 0 10px;letter-spacing:-0.2px;
+  }
+  .setup-v2-step p{font-size:13px;line-height:1.6;color:var(--muted);margin:0 0 10px}
+  .setup-v2-step strong{color:var(--text);font-weight:600}
+  .setup-v2-step ul{margin:6px 0 12px;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.6}
+  .setup-v2-step li{margin-bottom:4px}
+  .setup-v2-tos-scroll{
+    max-height:46vh;overflow-y:auto;padding:14px 16px;
+    background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);
+    border-radius:10px;font-size:12px;color:var(--muted);line-height:1.55;
+  }
+  .setup-v2-tos-scroll h2,.setup-v2-tos-scroll h3,.setup-v2-tos-scroll h4{color:var(--text)}
+  .setup-v2-screenshot{
+    margin:10px 0;padding:8px;background:rgba(255,255,255,0.02);
+    border:1px solid rgba(255,255,255,0.06);border-radius:10px;
+  }
+  .setup-v2-screenshot img{width:100%;height:auto;border-radius:6px;display:block}
+  .setup-v2-screenshot .placeholder{
+    height:240px;display:flex;align-items:center;justify-content:center;
+    color:var(--dim);font-size:11px;font-style:italic;text-align:center;padding:20px;
+    background:rgba(255,255,255,0.02);border-radius:6px;
+  }
+  .setup-v2-callout{
+    padding:10px 14px;background:rgba(0,245,212,0.04);border-left:3px solid var(--teal);
+    border-radius:6px;margin:12px 0;font-size:12px;line-height:1.55;color:var(--text);
+  }
+  .setup-v2-callout strong{color:var(--teal)}
+  .setup-v2-foot{
+    padding:14px 22px;display:flex;align-items:center;gap:10px;
+    border-top:1px solid rgba(255,255,255,0.06);flex-shrink:0;
+  }
+  .setup-v2-btn{
+    padding:8px 18px;border-radius:8px;font-size:12px;font-weight:600;letter-spacing:0.04em;
+    border:1px solid;cursor:pointer;transition:all 0.15s;font-family:inherit;
+  }
+  .setup-v2-btn-back{background:transparent;border-color:rgba(255,255,255,0.10);color:var(--muted)}
+  .setup-v2-btn-back:hover:not(:disabled){border-color:rgba(255,255,255,0.20);color:var(--text)}
+  .setup-v2-btn-back:disabled{opacity:0.30;cursor:default}
+  .setup-v2-btn-next{background:rgba(0,245,212,0.10);border-color:rgba(0,245,212,0.30);color:var(--teal);margin-left:auto}
+  .setup-v2-btn-next:hover:not(:disabled){background:rgba(0,245,212,0.18)}
+  .setup-v2-btn-next:disabled{opacity:0.40;cursor:default}
+  .setup-v2-btn-accept{
+    background:linear-gradient(90deg,var(--teal),var(--purple));border-color:transparent;
+    color:#0a0c14;margin-left:auto;font-weight:700;
+  }
+  .setup-v2-btn-accept:hover:not(:disabled){box-shadow:0 0 16px rgba(0,245,212,0.35)}
+  .setup-v2-btn-accept:disabled{opacity:0.40;cursor:default;box-shadow:none}
+</style>
+
+<div id="setup-v2-overlay" onclick="closeSetupV2(event)"></div>
+<div id="setup-v2-modal" role="dialog" aria-labelledby="setup-v2-title">
+  <div class="setup-v2-head">
+    <div>
+      <div class="setup-v2-title" id="setup-v2-title">Getting Started</div>
+      <div class="setup-v2-counter" id="setup-v2-counter">Step 1 of 3</div>
+    </div>
+    <button class="setup-v2-close" onclick="closeSetupV2()" aria-label="Close">&#x2715;</button>
+  </div>
+
+  <div class="setup-v2-progress" id="setup-v2-progress">
+    <div class="setup-v2-dot active" data-step-dot="1"></div>
+    <div class="setup-v2-dot" data-step-dot="2"></div>
+    <div class="setup-v2-dot" data-step-dot="3"></div>
+  </div>
+
+  <div class="setup-v2-body" id="setup-v2-body">
+
+    <!-- ── STEP 1 — TERMS OF SERVICE ──────────────────────────── -->
+    <div class="setup-v2-step active" data-step="1">
+      <h3>Terms of Service</h3>
+      <p>Please read and accept the early-access terms below before continuing
+        with the setup walkthrough. The TOS controls how you use the platform
+        and what each side is responsible for.</p>
+      <div class="setup-v2-tos-scroll" id="setup-v2-tos-scroll">
+        {{ ea_tos_html|safe }}
+      </div>
+      <div style="font-size:11px;color:var(--dim);margin-top:8px">
+        Scroll to the bottom to enable the <strong>I Accept</strong> button.
+      </div>
+    </div>
+
+    <!-- ── STEP 2 — WELCOME ───────────────────────────────────── -->
+    <div class="setup-v2-step" data-step="2">
+      <h3>Welcome to Synthos</h3>
+      <p>Synthos is an <strong>algorithmic-trading agent</strong> that watches
+        the market for you, scores potential trades through 13 gates of
+        evaluation, and either executes them automatically or queues them for
+        your approval — whichever mode you prefer.</p>
+
+      <p style="font-weight:700;color:var(--text);margin-top:14px">How it's designed to be used</p>
+      <ul>
+        <li><strong>Hands-off (Automatic mode)</strong> — the bot trades on
+          your behalf within risk limits you control. You see every decision
+          in your bell and history.</li>
+        <li><strong>Co-pilot (Managed mode)</strong> — the bot proposes
+          trades; you approve or reject from the dashboard. Useful while
+          you're still learning what the bot does well.</li>
+        <li><strong>Read-only</strong> — turn the bot off entirely and use
+          the dashboard purely as a research and signal tool. Sector
+          screener, news, and watchlist all keep working.</li>
+      </ul>
+
+      <p style="font-weight:700;color:var(--text);margin-top:14px">Why we connect to Alpaca</p>
+      <p>Synthos doesn't custody your money. <strong>Alpaca</strong> is the
+        regulated brokerage that holds your funds and executes trades; we
+        connect through their API using a key you generate. You can revoke
+        the key at any time from Alpaca's dashboard, and Alpaca remains the
+        source of truth for your positions and cash.</p>
+
+      <div class="setup-v2-callout">
+        <strong>Important:</strong> the next steps walk you through creating
+        an Alpaca account (free, takes a few minutes) and connecting it to
+        Synthos. You'll need an email address and a way to verify your
+        identity for Alpaca's KYC.
+      </div>
+    </div>
+
+    <!-- ── STEP 3 — ALPACA: VISIT + CHOOSE TRADING API ────────── -->
+    <div class="setup-v2-step" data-step="3">
+      <h3>Create your Alpaca account</h3>
+      <p>Open <a href="https://alpaca.markets" target="_blank" rel="noopener"
+        style="color:var(--teal);text-decoration:none;font-weight:600">alpaca.markets</a>
+        in a new tab. Click <strong>Sign Up</strong> in the top-right.</p>
+      <p>From the dropdown, pick <strong>Trading API</strong> — the personal
+        account type. <strong>Do not</strong> pick Broker API; that's for
+        firms operating brokerages, not individuals.</p>
+
+      <div class="setup-v2-screenshot">
+        <img src="/static/setup/01_alpaca_signup.png"
+             alt="Alpaca homepage with Sign Up dropdown showing Trading API and Broker API options"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="placeholder" style="display:none">
+          Screenshot pending — drop the marked-up image at
+          <code style="color:var(--teal);background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:10px">/static/setup/01_alpaca_signup.png</code>
+        </div>
+      </div>
+
+      <div class="setup-v2-callout">
+        <strong>Why Trading API?</strong> It's the right product for personal
+        algorithmic trading. Broker API is for businesses operating brokerages
+        on top of Alpaca's infrastructure — you don't need that.
+      </div>
+
+      <p style="font-size:11px;color:var(--dim);margin-top:14px">
+        More steps coming — paper-trading account creation, API key
+        generation, and connecting back to Synthos. You can close this
+        walkthrough at any time and reopen it from <strong>Settings →
+        Setup Guide</strong>.
+      </p>
+    </div>
+
+  </div>
+
+  <div class="setup-v2-foot">
+    <button class="setup-v2-btn setup-v2-btn-back" id="setup-v2-back"
+            onclick="setupV2Back()" disabled>&larr; Back</button>
+    <button class="setup-v2-btn setup-v2-btn-accept" id="setup-v2-accept"
+            onclick="setupV2AcceptTos()" disabled>I Accept</button>
+    <button class="setup-v2-btn setup-v2-btn-next" id="setup-v2-next"
+            onclick="setupV2Next()" style="display:none">Next &rarr;</button>
+  </div>
+</div>
+
 
 <!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28) — shared across pages.
      Triggered by .about-link clicks (e.g. "About this page ›" on the

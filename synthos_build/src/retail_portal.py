@@ -3425,6 +3425,43 @@ def api_ea_accept_tos():
         return jsonify({"ok": False, "error": "save_failed"}), 500
 
 
+@app.route('/api/setup-v2/accept-tos', methods=['POST'])
+@login_required
+def api_setup_v2_accept_tos():
+    """Phase J (2026-04-28). Records that the user accepted the TOS during
+    the v2 setup walkthrough. This is informational — legal acceptance
+    happens at signup. The walkthrough is a refresher / re-orientation
+    that any logged-in customer can re-open from Settings → Setup Guide.
+
+    Stores SETUP_V2_TOS_ACCEPTED_AT (ISO timestamp) and the markdown's
+    current version (file mtime as a coarse version marker — proper
+    version field can be added when TOS goes through formal revisions).
+    Idempotent — re-accepting just overwrites with the latest timestamp.
+    """
+    try:
+        from datetime import datetime, timezone
+        cdb = _customer_db()
+        cdb.set_setting('SETUP_V2_TOS_ACCEPTED_AT',
+                        datetime.now(timezone.utc).isoformat())
+        # Coarse version marker — uses the TOS file's mtime so we can
+        # detect "the TOS changed since the user last accepted" later.
+        try:
+            tos_path = os.path.join(_ROOT_DIR, 'docs', 'tos_early_access.md')
+            cdb.set_setting('SETUP_V2_TOS_VERSION',
+                            str(int(os.path.getmtime(tos_path))))
+        except Exception:
+            pass
+        try:
+            cdb.log_event('SETUP_V2_TOS_ACCEPTED', agent='portal',
+                          details=f"customer={session.get('customer_id','?')[:8]}")
+        except Exception:
+            pass
+        return jsonify({"ok": True})
+    except Exception as e:
+        log.error(f"setup-v2/accept-tos: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route('/api/ea/hide-setup', methods=['POST'])
 @authenticated_only
 def api_ea_hide_setup():
