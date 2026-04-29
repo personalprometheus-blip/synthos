@@ -332,8 +332,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .sidebar-nav-sep{height:1px;background:var(--border);margin:6px 16px}
 
 /* ── CONFIG PANEL (right slide-out) ── */
-.cfg-tab{
-  position:fixed;right:0;top:50%;transform:translateY(-50%);
+/* Right-edge stacked vertical tabs: ⚙ Configure (sits slightly above
+   screen-center) and ? About (sits slightly below). When the configure
+   tab is hidden via settings_ui_locked, .about-tab.about-tab-solo
+   centers the lone about-tab so it doesn't look offset. */
+.cfg-tab,.about-tab{
+  position:fixed;right:0;transform:translateY(-50%);
   z-index:150;cursor:pointer;
   display:flex;flex-direction:column;align-items:center;gap:8px;
   padding:18px 9px;
@@ -343,15 +347,20 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   box-shadow:-4px 0 24px rgba(0,0,0,0.35);
   transition:color .15s,background .15s,box-shadow .15s;
 }
-.cfg-tab:hover{background:var(--surface2);box-shadow:-4px 0 28px rgba(0,0,0,0.45)}
-.cfg-tab-icon{font-size:13px;color:var(--muted);transition:color .15s}
-.cfg-tab:hover .cfg-tab-icon{color:var(--teal)}
-.cfg-tab-label{
+.cfg-tab{top:calc(50% - 60px)}
+.about-tab{top:calc(50% + 60px)}
+.about-tab.about-tab-solo{top:50%}
+.cfg-tab:hover,.about-tab:hover{
+  background:var(--surface2);box-shadow:-4px 0 28px rgba(0,0,0,0.45)
+}
+.cfg-tab-icon,.about-tab-icon{font-size:13px;color:var(--muted);transition:color .15s}
+.cfg-tab:hover .cfg-tab-icon,.about-tab:hover .about-tab-icon{color:var(--teal)}
+.cfg-tab-label,.about-tab-label{
   writing-mode:vertical-rl;text-orientation:mixed;
   font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;
   color:var(--muted);transition:color .15s;
 }
-.cfg-tab:hover .cfg-tab-label{color:var(--teal)}
+.cfg-tab:hover .cfg-tab-label,.about-tab:hover .about-tab-label{color:var(--teal)}
 .cfg-overlay{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:155;
 }
@@ -1317,6 +1326,21 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   <span class="cfg-tab-icon">&#9881;</span>
   <span class="cfg-tab-label">Configure</span>
 </div>
+{% endif %}
+
+{# ABOUT tab — right-edge sibling to .cfg-tab. Always rendered (even when
+   settings_ui_locked hides the configure tab). Click triggers the
+   _aboutContent drawer for whichever tab is currently active; pages
+   without explicit content fall back to a placeholder entry. The
+   .about-tab-solo class centers it vertically when the cfg-tab isn't
+   present so it doesn't look offset. #}
+<div class="about-tab{% if settings_ui_locked %} about-tab-solo{% endif %}"
+     id="about-tab" onclick="openAboutForCurrentTab()" title="About this page">
+  <span class="about-tab-icon">?</span>
+  <span class="about-tab-label">About</span>
+</div>
+
+{% if not settings_ui_locked %}
 
 <!-- CONFIG OVERLAY -->
 <div class="cfg-overlay" id="cfg-overlay" onclick="closeConfigPanel()"></div>
@@ -2722,11 +2746,23 @@ async function setupV2AcceptTos() {
 }
 
 function openAboutDrawer(page) {
-  var content = _aboutContent[page];
-  if (!content) {
-    console.warn('openAboutDrawer: no content for page=' + page);
-    return;
-  }
+  // Pages without a dedicated _aboutContent entry fall back to a
+  // generic placeholder — keeps the right-edge ? About tab from
+  // ever feeling like a dead click while individual pages get
+  // documented incrementally.
+  var content = _aboutContent[page] || {
+    title: 'About this page',
+    subtitle: 'Detailed walkthrough coming soon',
+    body: '<div class="about-section">'
+        +   '<div class="about-section-title">In progress</div>'
+        +   '<div class="about-body"><p>A page-specific walkthrough '
+        +     'is still being written for this view. In the meantime, '
+        +     'hover over individual elements for inline tooltips, or '
+        +     'reopen the <strong>Setup Guide</strong> from '
+        +     '<strong>Settings → Setup Guide</strong> for the '
+        +     'platform overview.</p></div>'
+        + '</div>'
+  };
   var dr = document.getElementById('about-drawer');
   var ov = document.getElementById('about-drawer-overlay');
   if (!dr || !ov) return;
@@ -2978,8 +3014,6 @@ setInterval(loadAgentPulse, 10000);
          keyed by 'intel'. Distinct from the dashboard's Agent Status
          "Tap for details ›" cue (#agent-drawer) — different drawer,
          different IDs, no interference. -->
-    <a class="about-link" onclick="openAboutDrawer('intel')"
-       style="margin-left:auto;cursor:pointer">About this page ›</a>
   </div>
   <!-- ══ HERO SIGNAL RAIL — placeholder layout ══
        Wire to signals.db ranking when ready (see todo list):
@@ -3017,8 +3051,6 @@ setInterval(loadAgentPulse, 10000);
       </span>
       <span id="clickbait-toggle-label">Hide low-quality</span>
     </span>
-    <a class="about-link" onclick="openAboutDrawer('news')"
-       style="margin-left:auto;cursor:pointer">About this page ›</a>
   </div>
   <div class="intel-grid" id="news-grid">
     <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading news...</div>
@@ -3041,8 +3073,6 @@ setInterval(loadAgentPulse, 10000);
         <option value="">All sectors</option>
       </select>
       <div id="screening-meta" style="font-size:12px;color:var(--muted);margin-left:auto"></div>
-      <a class="about-link" onclick="openAboutDrawer('screener')"
-         style="margin-left:14px;cursor:pointer">About this page ›</a>
     </div>
     <div id="screening-sector-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:16px"></div>
     <div id="screening-grid" style="display:grid;gap:10px"></div>
@@ -4136,11 +4166,15 @@ setInterval(loadAgentPulse, 10000);
 </div>
 
 
-<!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28) — shared across pages.
-     Triggered by .about-link clicks (e.g. "About this page ›" on the
-     intel/news/screener filter rows). Content is keyed by page name
-     from a JS map (_aboutContent). Distinct from the dashboard's
-     #agent-drawer which holds bot/agent runtime details.
+<!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28; right-edge tab trigger
+     2026-04-29) — shared across pages. Triggered globally by the
+     right-edge "? About" tab (.about-tab → openAboutForCurrentTab),
+     which reads _currentTab and looks up the matching _aboutContent
+     entry. The earlier inline ".about-link" sites on intel/news/
+     screener filter rows have been removed; the .about-link CSS rules
+     below are kept for now in case we want to restore inline triggers
+     anywhere. Distinct from the dashboard's #agent-drawer which holds
+     bot/agent runtime details.
      Lives at top-level OUTSIDE all tab-page containers — earlier
      placement was inside #tab-dashboard, which made the drawer
      invisible whenever the user wasn't on the dashboard tab. -->
@@ -5267,7 +5301,13 @@ async function supReplyTicket(ticketId) {
 }
 
 // ── TABS ──
+// Tracks the currently-active tab so the right-edge "? About" tab knows
+// which _aboutContent entry to surface. Updated on every showTab() call;
+// initial value matches the default tab loaded by the dashboard route.
+var _currentTab = 'dashboard';
+
 function showTab(t, e) {
+  _currentTab = t;
   ['dashboard','intel','news','screening','performance','risk','billing','settings','guide','messages'].forEach(id => {
     const el = document.getElementById('tab-'+id);
     if (el) el.style.display = id===t ? '' : 'none';
@@ -5282,6 +5322,13 @@ function showTab(t, e) {
   if (t === 'risk') loadRisk();
   if (t === 'messages') loadMessages();
   if (t === 'billing') loadBilling();
+}
+
+// Wrapper for the right-edge "? About" tab. Looks up _aboutContent for
+// the active tab and falls through to a generic placeholder when no
+// page-specific entry exists yet (so the tab is never a dead click).
+function openAboutForCurrentTab() {
+  openAboutDrawer(_currentTab || 'dashboard');
 }
 
 // ── POSITION DRAWER ──
