@@ -10,13 +10,7 @@ nav{
   background:rgba(10,12,20,0.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   border-bottom:1px solid var(--border);
 }
-.nav-left{display:flex;align-items:center;gap:0.7rem}
-.hamburger{
-  display:flex;flex-direction:column;gap:4px;
-  background:none;border:none;cursor:pointer;padding:5px;opacity:0.4;transition:opacity .15s;
-}
-.hamburger:hover{opacity:0.9}
-.hamburger span{display:block;width:16px;height:1.5px;background:var(--text);border-radius:2px}
+.nav-left{display:flex;align-items:center}
 .nav-logo{
   font-family:var(--mono);font-size:0.85rem;font-weight:500;letter-spacing:0.18em;
   color:var(--teal);text-shadow:0 0 18px rgba(0,245,212,0.20);
@@ -188,9 +182,6 @@ footer{
 <!-- NAV -->
 <nav>
   <div class="nav-left">
-    <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
-      <span></span><span></span><span></span>
-    </button>
     <div class="nav-logo">SYNTHOS</div>
   </div>
   <div class="profile-btn" id="profile-btn" onclick="toggleAuthDrop(event)" aria-label="Sign in">
@@ -373,7 +364,6 @@ footer{
     e.stopPropagation();
     document.getElementById('auth-drop').classList.toggle('open');
   }
-  function toggleSidebar(){ /* wired in dashboard script */ }
   document.addEventListener('click', function(){
     document.getElementById('auth-drop').classList.remove('open');
   });
