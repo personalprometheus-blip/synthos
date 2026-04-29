@@ -2606,7 +2606,7 @@ var _aboutContent = {
 // Closing without accepting is allowed; the TOS gate is informational
 // here (legal acceptance happens at signup; this is a refresher).
 var _setupV2Step = 1;
-var _setupV2TotalSteps = 5;
+var _setupV2TotalSteps = 6;
 var _setupV2TosAccepted = false;
 
 function openSetupV2() {
@@ -3755,6 +3755,7 @@ setInterval(loadAgentPulse, 10000);
     <div class="setup-v2-dot" data-step-dot="3"></div>
     <div class="setup-v2-dot" data-step-dot="4"></div>
     <div class="setup-v2-dot" data-step-dot="5"></div>
+    <div class="setup-v2-dot" data-step-dot="6"></div>
   </div>
 
   <div class="setup-v2-body" id="setup-v2-body">
@@ -3971,6 +3972,58 @@ setInterval(loadAgentPulse, 10000);
         Next up — generating your API key and pasting it back into
         Synthos. You can close this walkthrough at any time and reopen
         it from <strong>Settings → Setup Guide</strong>.
+      </p>
+    </div>
+
+    <!-- ── STEP 6 — ALPACA: GENERATE API KEYS ──────────────────── -->
+    <div class="setup-v2-step" data-step="6">
+      <h3>Generate your API keys</h3>
+      <p>With 2FA active you'll now see your account listed. Next to the
+        paper account you just created there's an option labelled
+        <strong>Generate Key</strong>. Selecting it creates an
+        <strong>API key pair</strong> — two values issued together:</p>
+
+      <ul>
+        <li><strong>Key ID</strong> — the public half. Identifies which
+          account is making each request.</li>
+        <li><strong>Secret Key</strong> — the private half. <strong
+          style="color:var(--teal)">Shown only once.</strong> If you
+          refresh the browser without copying it, it's gone forever.
+          Don't panic if that happens — just hit <em>Generate Key</em>
+          again for a fresh pair; the old one becomes invalid
+          automatically.</li>
+      </ul>
+
+      <p>Copy both values and paste them into the matching boxes on the
+        Synthos <strong>Customer Settings</strong> page (the next step
+        shows exactly where).</p>
+
+      <div class="setup-v2-screenshot">
+        <img src="/static/setup/04_generate_keys.png"
+             alt="Alpaca account list with the Generate Key button and the one-time key + secret display"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="placeholder" style="display:none">
+          Screenshot pending — drop the marked-up image at
+          <code style="color:var(--teal);background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:10px">/static/setup/04_generate_keys.png</code>
+        </div>
+      </div>
+
+      <div class="setup-v2-callout">
+        <strong>What is an API key?</strong> An API key is a credential
+        that lets one piece of software talk to another <em>on your
+        behalf</em>, without you logging in each time. The Key ID
+        identifies the account; the Secret Key proves it's actually you.
+        Synthos uses the pair to read your balance, fetch live quotes,
+        and place trades through Alpaca — exactly the same actions you'd
+        take by hand on Alpaca's website. Keep the Secret Key private:
+        treat it like a password. If you ever suspect it's been seen,
+        regenerate the pair and Alpaca instantly revokes the old one.
+      </div>
+
+      <p style="font-size:11px;color:var(--dim);margin-top:14px">
+        Next up — pasting the two keys into Synthos and finishing the
+        connection. You can close this walkthrough at any time and
+        reopen it from <strong>Settings → Setup Guide</strong>.
       </p>
     </div>
 
