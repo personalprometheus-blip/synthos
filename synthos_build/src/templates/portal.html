@@ -1005,6 +1005,45 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   width:100%;max-width:140px;height:22px;
   margin-top:3px;
 }
+
+/* Bi-directional spark line on the news + sentiment columns
+   (2026-04-30). The score's natural baseline is "neutral" (~0.5):
+   bullish scores push the fill right (teal), bearish scores push
+   left (pink). Distance from 0.5 controls the fill width. The
+   center reference line (rendered as ::before) stays visible even
+   when the row is truly neutral so the user always sees the zero
+   point. Replaces the single-line news-headline preview which
+   was usually truncated to noise. */
+.screener-v2 .scrv-bibar{
+  position:relative;
+  height:4px;
+  background:rgba(255,255,255,0.04);
+  border-radius:2px;
+  margin-top:5px;
+  width:100%;max-width:140px;
+}
+.screener-v2 .scrv-bibar::before{
+  content:'';
+  position:absolute;
+  left:50%;top:0;bottom:0;
+  width:1px;
+  background:rgba(255,255,255,0.20);
+}
+.screener-v2 .scrv-bibar-fill{
+  position:absolute;
+  top:0;bottom:0;
+  height:100%;
+  border-radius:2px;
+  transition:width .25s ease;
+}
+.screener-v2 .scrv-bibar-fill.bull{
+  left:50%;
+  background:var(--teal);
+}
+.screener-v2 .scrv-bibar-fill.bear{
+  right:50%;
+  background:var(--pink);
+}
 /* Horizon pills (Phase 1B, 2026-04-29) — small inline tag on each
    screener row indicating what kind of decision the row supports.
    Catalyst = act-fast (amber), Trend = sustained (teal), Thesis =
@@ -3152,13 +3191,18 @@ var _aboutContent = {
       +   '<div class="about-body">'
       +     '<p><strong>NEWS</strong> — directional read on this '
       +     'ticker from the news pipeline. Score 0-100 from headline '
-      +     'tone + source weighting + recency. The headline shown '
-      +     'beneath is the most-recent driver.</p>'
+      +     'tone + source weighting + recency. Beneath the score is a '
+      +     'bi-directional bar: <strong style="color:var(--teal)">teal</strong> '
+      +     'pushes right when bullish, <strong style="color:var(--pink)">pink</strong> '
+      +     'pushes left when bearish, distance from the center line '
+      +     'shows how strong the read is. Click the row to see the '
+      +     'underlying articles in the drawer.</p>'
       +     '<p><strong>SENTIMENT</strong> — output of the 27-gate '
       +     'cascade detector: put/call ratio, insider $ flow, volume '
       +     'vs. average, macro regime. A different pipeline from News '
       +     '— answers "what is the market\'s <em>positioning</em> '
-      +     'saying" rather than "what are people <em>writing</em>."</p>'
+      +     'saying" rather than "what are people <em>writing</em>." '
+      +     'Same bi-directional bar treatment as the News column.</p>'
       +     '<p><strong>MOMENTUM</strong> — the headline number is the '
       +     'raw <strong>3-month price return</strong>. The sparkline '
       +     'beneath visualizes the last 30 daily closes — you see the '
@@ -9704,6 +9748,26 @@ async function loadScreening() {
     const sigLabel = s => s==='bullish'?'Bullish':s==='bearish'?'Bearish':s==='pending'?'Pending':'Neutral';
     const pct = v => v!=null?(v*100).toFixed(0):'--';
     const bar = (v,color) => v!=null ? '<div style="background:rgba(255,255,255,0.07);border-radius:4px;height:6px;width:100%;margin-top:4px"><div style="height:6px;border-radius:4px;width:'+pct(v)+'%;background:'+color+'"></div></div>' : '';
+    // Bi-directional spark line (2026-04-30). Score 0-1, signal one of
+    // 'bullish' / 'bearish' / 'neutral' / 'pending'. Renders a thin
+    // bar with center reference line; fill grows left (pink) for
+    // bearish or right (teal) for bullish, width = distance from 0.5
+    // doubled so the bar visually reaches its half-fill at the
+    // extremes (0.0 / 1.0). Empty bar (just the center tick) for
+    // neutral / pending / null score.
+    const biBar = (score, signal) => {
+      if (score == null) return '<div class="scrv-bibar"></div>';
+      const dist     = Math.abs(score - 0.5);
+      const widthPct = (Math.min(dist, 0.5) * 2 * 100).toFixed(1);
+      let cls = '';
+      if (signal === 'bullish')      cls = 'bull';
+      else if (signal === 'bearish') cls = 'bear';
+      else if (score > 0.52)         cls = 'bull';
+      else if (score < 0.48)         cls = 'bear';
+      if (!cls) return '<div class="scrv-bibar"></div>';
+      return '<div class="scrv-bibar"><div class="scrv-bibar-fill '
+           + cls + '" style="width:' + widthPct + '%"></div></div>';
+    };
     const congBadge = f => f==='recent_buy' ? '<span style="font-size:10px;background:rgba(0,245,212,0.09);color:#00f5d4;padding:2px 6px;border-radius:4px;margin-top:4px;display:inline-block">Congress: Buy</span>' : f==='recent_sell' ? '<span style="font-size:10px;background:rgba(255,75,110,0.09);color:#ff4b6e;padding:2px 6px;border-radius:4px;margin-top:4px;display:inline-block">Congress: Sell</span>' : '';
     const scoreColor = cs => cs>=0.6?'#00f5d4':cs>=0.4?'#f5a623':'#ff4b6e';
     // Phase F (2026-04-27) — compute the row that wins each metric so
@@ -9846,9 +9910,10 @@ async function loadScreening() {
         +'<div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:2px">'+(cd.etf_weight_pct||0).toFixed(1)+'% wt'+(cd.congressional_flag && cd.congressional_flag !== "none" ? ' · ' + (cd.congressional_flag === "recent_buy" ? "Insider buy" : "Insider sell") : '')+'</div></div>'
         +'<div><div style="font-size:11px;font-weight:600;color:'+nc+'">'+sigLabel(ns)+'</div>'
         +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.news_score!=null?pct(cd.news_score):'—')+'</div>'
-        +'<div style="font-size:10px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">'+(cd.news_headline||'')+'</div></div>'
+        +biBar(cd.news_score, cd.news_signal)+'</div>'
         +'<div><div style="font-size:11px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
-        +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.sentiment_score!=null?pct(cd.sentiment_score):'—')+'</div></div>'
+        +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.sentiment_score!=null?pct(cd.sentiment_score):'—')+'</div>'
+        +biBar(cd.sentiment_score, cd.sentiment_signal)+'</div>'
         +'<div title="3-month price return + 30-day sparkline"><div style="font-size:11px;font-weight:600;color:'+r3Color+';font-variant-numeric:tabular-nums">'+r3Display+'</div>'
         +'<canvas class="momentum-spark" data-row="'+i+'" data-color="'+r3Color+'" width="200" height="44"></canvas></div>'
         +'<div style="text-align:right"><div style="font-size:18px;font-weight:700;color:'+scoreColor(cs)+';font-family:var(--mono);font-variant-numeric:tabular-nums;line-height:1">'+(cs!=null?pct(cs):'—')+'</div>'
