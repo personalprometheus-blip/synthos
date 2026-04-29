@@ -2606,7 +2606,7 @@ var _aboutContent = {
 // Closing without accepting is allowed; the TOS gate is informational
 // here (legal acceptance happens at signup; this is a refresher).
 var _setupV2Step = 1;
-var _setupV2TotalSteps = 4;
+var _setupV2TotalSteps = 5;
 var _setupV2TosAccepted = false;
 
 function openSetupV2() {
@@ -3754,6 +3754,7 @@ setInterval(loadAgentPulse, 10000);
     <div class="setup-v2-dot" data-step-dot="2"></div>
     <div class="setup-v2-dot" data-step-dot="3"></div>
     <div class="setup-v2-dot" data-step-dot="4"></div>
+    <div class="setup-v2-dot" data-step-dot="5"></div>
   </div>
 
   <div class="setup-v2-body" id="setup-v2-body">
@@ -3920,9 +3921,56 @@ setInterval(loadAgentPulse, 10000);
       </div>
 
       <p style="font-size:11px;color:var(--dim);margin-top:14px">
-        Next up — generating your API key inside Account Management and
-        pasting it back into Synthos. You can close this walkthrough at
+        Next up — Alpaca requires 2FA before exposing API keys, so the
+        next step gets that turned on. You can close this walkthrough at
         any time and reopen it from <strong>Settings → Setup Guide</strong>.
+      </p>
+    </div>
+
+    <!-- ── STEP 5 — ALPACA: ENABLE 2FA ─────────────────────────── -->
+    <div class="setup-v2-step" data-step="5">
+      <h3>Turn on 2-factor authentication</h3>
+      <p>On the <strong>Account Management</strong> page you'll see a
+        button to <strong>activate 2FA</strong> (two-factor authentication).
+        Alpaca requires this before it will expose API keys for the
+        account, so it has to be done now.</p>
+
+      <p>2FA needs an <strong>authenticator app</strong> on your phone.
+        There are many — if you already use one (Google Authenticator,
+        Authy, 1Password, Duo, etc.), just add Alpaca to it. If you don't
+        have one yet, admin recommends <strong>Microsoft Authenticator</strong>
+        or <strong>PingID</strong> — both are free on iOS and Android.</p>
+
+      <p>Once the app is installed, Alpaca will display a QR code (and a
+        copy-able fallback string). Scan the QR code with the
+        authenticator app — or copy the string and paste it in manually.
+        The app will start generating a fresh 6-digit code <strong>every
+        30 seconds</strong>. Type the current code from your phone back
+        into the Alpaca page to confirm pairing.</p>
+
+      <div class="setup-v2-screenshot">
+        <img src="/static/setup/03_2fa_setup.png"
+             alt="Alpaca Account Management page with the 2FA activation button and QR-code pairing screen"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="placeholder" style="display:none">
+          Screenshot pending — drop the marked-up image at
+          <code style="color:var(--teal);background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:10px">/static/setup/03_2fa_setup.png</code>
+        </div>
+      </div>
+
+      <div class="setup-v2-callout">
+        <strong>Why this matters.</strong> An API key is a long-lived
+        credential that can place trades. 2FA on the Alpaca account
+        means even if a key is ever exposed, an attacker can't log into
+        the dashboard, rotate keys, or change settings without the code
+        from your phone. Activating 2FA <strong>unlocks access to the
+        API codes</strong> — that's the next step.
+      </div>
+
+      <p style="font-size:11px;color:var(--dim);margin-top:14px">
+        Next up — generating your API key and pasting it back into
+        Synthos. You can close this walkthrough at any time and reopen
+        it from <strong>Settings → Setup Guide</strong>.
       </p>
     </div>
 
