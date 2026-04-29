@@ -920,12 +920,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   display:grid;
   grid-template-columns:32px 1.4fr 1fr 1fr 1fr 64px;
   gap:var(--scrv-sp-3);
-  padding:5px 14px;
-  font-size:var(--scrv-t-micro);
-  font-weight:700;
-  letter-spacing:0.08em;
+  padding:6px 14px;
+  font-size:var(--scrv-t-cap);
+  font-weight:600;
+  letter-spacing:0.10em;
   text-transform:uppercase;
-  color:var(--dim);
+  color:var(--muted);
   border-bottom:var(--scrv-border-faint);
   margin-bottom:var(--scrv-sp-1);
 }
@@ -948,9 +948,16 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   transition:background .15s,border-color .15s,opacity .15s;
 }
 /* Make sure each column's first line starts at the same vertical
-   position. Wrapper divs inside cells get reset so signal labels in
-   news / sentiment / momentum columns share a baseline. */
-.screener-v2 .screener-row > div{margin:0;padding:0}
+   position AND can clip overflow content. min-width:0 is the magic
+   bit — without it, grid items default to min-content so a long
+   news headline forces the column wider than its 1fr allocation
+   and bleeds into the next column. With it, the column respects
+   its grid track width and inner ellipsis truncation actually
+   takes effect. */
+.screener-v2 .screener-row > div{
+  margin:0;padding:0;
+  min-width:0;
+}
 .screener-v2 .screener-row:hover{
   background:var(--scrv-surface-hover);
   border-color:rgba(0,245,212,0.20);
@@ -9820,7 +9827,7 @@ async function loadScreening() {
         +'<div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-top:2px">'+(cd.etf_weight_pct||0).toFixed(1)+'% wt'+(cd.congressional_flag && cd.congressional_flag !== "none" ? ' · ' + (cd.congressional_flag === "recent_buy" ? "Insider buy" : "Insider sell") : '')+'</div></div>'
         +'<div><div style="font-size:11px;font-weight:600;color:'+nc+'">'+sigLabel(ns)+'</div>'
         +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.news_score!=null?pct(cd.news_score):'—')+'</div>'
-        +'<div style="font-size:10px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">'+(cd.news_headline||'')+'</div></div>'
+        +'<div style="font-size:10px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">'+(cd.news_headline||'')+'</div></div>'
         +'<div><div style="font-size:11px;font-weight:600;color:'+sc+'">'+sigLabel(ss)+'</div>'
         +'<div style="font-size:10px;color:var(--muted);font-family:var(--mono);font-variant-numeric:tabular-nums">'+(cd.sentiment_score!=null?pct(cd.sentiment_score):'—')+'</div></div>'
         +'<div title="3-month price return + 30-day sparkline"><div style="font-size:11px;font-weight:600;color:'+r3Color+';font-variant-numeric:tabular-nums">'+r3Display+'</div>'
