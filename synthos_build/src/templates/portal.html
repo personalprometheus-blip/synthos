@@ -1863,14 +1863,12 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   </div>
 </div>
 
-<!-- NEW ACCOUNT BANNER -->
-<div id="new-account-banner" style="display:none;background:linear-gradient(90deg,rgba(245,166,35,0.12),rgba(245,166,35,0.04));border-bottom:2px solid var(--amber);padding:10px 24px;display:none;align-items:center;gap:10px">
-  <span style="font-size:16px">&#x26A0;</span>
-  <div style="flex:1">
-    <span style="font-size:12px;font-weight:700;color:var(--amber)">New Account</span>
-    <span style="font-size:11px;color:var(--muted);margin-left:8px">Dashboard values are defaults until the trading agent runs for the first time. Your account will update automatically.</span>
-  </div>
-</div>
+<!-- New-account banner removed 2026-04-29: superseded by the Setup
+     Tutorial v2 modal (Settings → Setup Guide), which walks new
+     customers through Alpaca account creation, 2FA, API key
+     generation, and connecting back to Synthos. The banner's
+     "values are defaults until the agent runs" copy added noise
+     after the modal already told them what to expect. -->
 
 <!-- ALPACA FUNDING BANNER -->
 <div id="alpaca-funding-banner" style="display:none;background:linear-gradient(90deg,rgba(255,75,110,0.12),rgba(255,75,110,0.04));border-bottom:2px solid var(--pink);padding:12px 24px;align-items:center;gap:12px">
@@ -2352,14 +2350,12 @@ var _aboutContent = {
       + '<div class="about-section">'
       +   '<div class="about-section-title">Top-of-page banners</div>'
       +   '<div class="about-body">'
-      +     '<p>Three banners can appear above the main content. They '
+      +     '<p>Two banners can appear above the main content. They '
       +     'only render when relevant — most of the time you won\'t '
-      +     'see any of them.</p>'
+      +     'see either of them.</p>'
       +     '<p><strong>Halt banner</strong> — appears when the kill '
       +     'switch is engaged (yours or admin\'s). The bot is paused; '
       +     'existing positions stay open, no new orders.</p>'
-      +     '<p><strong>New account banner</strong> — first-run welcome. '
-      +     'Dismisses once you\'ve completed setup.</p>'
       +     '<p><strong>Alpaca funding banner</strong> — shows when your '
       +     'Alpaca cash balance is too low for the bot to size a normal '
       +     'trade. Add funds in Alpaca and it clears on the next refresh.</p>'
@@ -5384,19 +5380,6 @@ function closePortfolioModal(event) {
   if (event && event.target !== event.currentTarget) return;
   var overlay = document.getElementById('portfolio-modal-overlay');
   if (overlay) overlay.style.display = 'none';
-}
-
-// New account banner — show until trade agent has run at least once
-async function checkNewAccountBanner() {
-  try {
-    var r = await fetch('/api/trader-activity');
-    var d = await r.json();
-    var hasRun = (d.recent && d.recent.length > 0) || (d.scans && d.scans.length > 0);
-    var banner = document.getElementById('new-account-banner');
-    if (banner) {
-      banner.style.display = hasRun ? 'none' : 'flex';
-    }
-  } catch(e) {}
 }
 
 // ── SUPPORT PANEL ──
@@ -9299,7 +9282,6 @@ loadHealth();
 loadAudit();
 loadMarketIndices();
 loadTraderActivity();
-checkNewAccountBanner();
 checkAlpacaFunding(false);
 loadCfgPanel();
 // First-time setup guide check.
