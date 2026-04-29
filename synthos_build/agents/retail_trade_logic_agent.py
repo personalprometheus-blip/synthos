@@ -294,6 +294,20 @@ class TradingControls:
         'interrogation':       float(os.environ.get('W_INTERROGATION', '0.20')),
         'sentiment':           float(os.environ.get('W_SENTIMENT', '0.20')),
     }
+    # 2026-04-30 — V2 stat-arb-first weights for the parallel-test bot.
+    # Inverts v1's information-arbitrage philosophy: the screener's
+    # research composite drives the base score (50%), with sentiment +
+    # momentum as confirmation (35%), signal-quality as a smaller filter
+    # (10%), and politician trades only counted when actual disclosure
+    # data is present (5%). See _gate5_signal_score_v2 for the
+    # function-level rationale; weights pulled from this constant.
+    SIGNAL_WEIGHTS_V2         = {
+        'combined_score':      float(os.environ.get('W2_COMBINED', '0.50')),
+        'sentiment':           float(os.environ.get('W2_SENTIMENT', '0.20')),
+        'momentum':            float(os.environ.get('W2_MOMENTUM', '0.15')),
+        'signal_quality':      float(os.environ.get('W2_QUALITY', '0.10')),
+        'politician':          float(os.environ.get('W2_POLITICIAN', '0.05')),
+    }
     # Market-state modifier added 2026-04-24. Pulls _MARKET_STATE_SCORE
     # from market_state_agent (sentiment 40% + news 25% + macro 35%
     # composite, range -1..+1). Applied as ADDITIVE nudge to Gate 5
@@ -1911,8 +1925,37 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
 def gate5_signal_score(signal: dict, positions: list, alpaca,
                        decision_log: TradeDecisionLog) -> float:
     """
-    Compute composite confidence score. Returns score in [0, 1].
-    Logic: Doc 3 §5
+    Variant-aware Gate 5 dispatcher (2026-04-30).
+
+    Reads the customer's `trader_variant` setting from customer_settings
+    (default 'v1') and routes to the corresponding scoring function.
+    Variant 'v2' is the parallel-test stat-arb-first scorer; 'v1' is
+    the original information-arbitrage scorer that all live customers
+    use today.
+
+    The dispatcher exists at this layer so call sites (Gate 0 → Gate 14
+    pipeline) don't need variant awareness — they keep calling
+    gate5_signal_score() and the variant routing happens transparently.
+    """
+    try:
+        variant = _db().get_setting('trader_variant', 'v1')
+    except Exception:
+        variant = 'v1'  # never let a setting-read failure break trading
+    if variant == 'v2':
+        return _gate5_signal_score_v2(signal, positions, alpaca, decision_log)
+    return _gate5_signal_score_v1(signal, positions, alpaca, decision_log)
+
+
+def _gate5_signal_score_v1(signal: dict, positions: list, alpaca,
+                           decision_log: TradeDecisionLog) -> float:
+    """
+    V1 — original information-arbitrage Gate 5 score. Returns score in
+    [0, 1]. Logic: Doc 3 §5. Weighting heavily favors signal-quality
+    axes (source tier, politician weight, staleness, interrogation)
+    plus sentiment, with the screener's combined_score as a small
+    bonus adjustment. Was the only Gate 5 implementation prior to
+    2026-04-30 when V2 (stat-arb-first) was added behind a customer
+    variant flag.
     """
     ticker = signal.get('ticker') or ''
     if not ticker:
@@ -2134,6 +2177,115 @@ def gate5_signal_score(signal: dict, positions: list, alpaca,
         "threshold":          f"{C.MIN_CONFIDENCE_SCORE:.2f}",
         "result":             "PASS" if passes else "SKIP",
     }, f"score {final_score:.4f} {'≥' if passes else '<'} threshold {C.MIN_CONFIDENCE_SCORE}")
+
+    return final_score if passes else 0.0
+
+
+def _gate5_signal_score_v2(signal: dict, positions: list, alpaca,
+                           decision_log: TradeDecisionLog) -> float:
+    """
+    V2 — stat-arb-first Gate 5 score (2026-04-30). Returns score in [0, 1].
+
+    Inverts v1's information-arbitrage philosophy. Where v1 weights
+    signal-quality axes (source tier, politician weight, staleness,
+    interrogation) heavily and treats screener data as a small bonus,
+    v2 makes the screener's research composite the base (50%), with
+    sentiment + momentum as direct confirmation inputs (35% combined),
+    a collapsed signal-quality composite as a smaller filter (10%),
+    and politician trades as a marginal nudge gated on data presence
+    (5%, zero when politician=null).
+
+    Rationale: the original v1 design assumed Synthos competed on
+    information speed (congressional disclosure → bot reaction). With
+    45-day STOCK Act delays, retail-tier data feeds, and Pi
+    infrastructure, that race is structurally unwinnable. V2 commits
+    instead to disciplined statistical aggregation — momentum,
+    sentiment cascades, sector rotation — which works with the data
+    we actually have at the speed we actually have.
+
+    Inputs come primarily from sector_screening (combined_score,
+    sentiment_score, momentum_score) which is recomputed twice daily
+    by the screener. Signal-quality axes still come from the signal
+    record itself.
+    """
+    ticker = signal.get('ticker') or ''
+    if not ticker:
+        decision_log.gate("5_SIGNAL_SCORE_V2", "SKIP",
+            {"reason": "missing ticker in signal"}, "no ticker")
+        return 0.0
+
+    # Pull screener row — combined_score / sentiment_score / momentum_score
+    # all live here. If the ticker isn't in the screener universe
+    # (shouldn't normally happen since candidate_generator emits from
+    # sector_screening) we fall through to a neutral 0.5.
+    try:
+        scr = _shared_db().get_screening_score(ticker) or {}
+    except Exception as e:
+        log.debug(f"V2 screener lookup failed for {ticker}: {e}")
+        scr = {}
+    if not scr:
+        decision_log.gate("5_SIGNAL_SCORE_V2", "WARN",
+            {"reason": "ticker not in sector_screening", "ticker": ticker},
+            "no screener row — neutral fallback")
+        return 0.5
+
+    cs   = float(scr.get('combined_score')   if scr.get('combined_score')   is not None else 0.5)
+    sent = float(scr.get('sentiment_score')  if scr.get('sentiment_score')  is not None else 0.5)
+    mom  = float(scr.get('momentum_score')   if scr.get('momentum_score')   is not None else 0.5)
+
+    # Signal-quality composite — collapse v1's three trustworthiness
+    # axes into one shared 10% slot. Each component is normalized to
+    # [0, 1] by its existing helper; we average the three.
+    tier_score   = max(0.0, 1.0 - (int(signal.get('source_tier', 2) or 2) - 1) * 0.3)
+    stale_score  = staleness_to_score(signal.get('staleness', 'Fresh'))
+    interr_score = interrogation_to_score(signal.get('interrogation_status', 'UNVALIDATED'))
+    quality_score = (tier_score + stale_score + interr_score) / 3.0
+
+    # Politician — only weight when actual disclosure data is present.
+    # A signal with politician=null gets zero weight here (no inflation
+    # from missing data, addresses the n/a-pollution issue we fixed at
+    # the screener layer). Required: politician name AND a non-null
+    # politician_weight value.
+    pol_w_raw = signal.get('politician_weight')
+    pol_present = (
+        signal.get('politician') is not None
+        and pol_w_raw is not None
+    )
+    pol_value = float(pol_w_raw) if pol_present else 0.0
+
+    # Composite
+    W = C.SIGNAL_WEIGHTS_V2
+    final_score = (
+        W['combined_score']  * cs +
+        W['sentiment']        * sent +
+        W['momentum']         * mom +
+        W['signal_quality']   * quality_score +
+        W['politician']       * pol_value
+    )
+    final_score = round(min(max(final_score, 0.0), 1.0), 4)
+
+    # Adaptive kill / market-state nudges and benchmark relative-strength
+    # adjustments (v1 has both) are deliberately omitted from v2 for
+    # now — keep the variant minimal so we can isolate whether the
+    # weight rebalance alone is what makes a difference. They can be
+    # re-added in a follow-up commit if the validation period shows
+    # they matter.
+
+    # Threshold gate — same MIN_CONFIDENCE_SCORE as v1 so the comparison
+    # is apples-to-apples on the eligibility cut.
+    passes = final_score >= C.MIN_CONFIDENCE_SCORE
+    decision_log.gate("5_SIGNAL_SCORE_V2", "OK" if passes else "SKIP", {
+        "ticker":           ticker,
+        "combined_score":   round(cs, 4),
+        "sentiment":        round(sent, 4),
+        "momentum":         round(mom, 4),
+        "signal_quality":   round(quality_score, 4),
+        "politician_value": round(pol_value, 4),
+        "politician_present": pol_present,
+        "final_score":      final_score,
+        "threshold":        C.MIN_CONFIDENCE_SCORE,
+        "result":           "PASS" if passes else "SKIP",
+    }, f"v2 score {final_score:.4f} {'≥' if passes else '<'} threshold {C.MIN_CONFIDENCE_SCORE}")
 
     return final_score if passes else 0.0
 
