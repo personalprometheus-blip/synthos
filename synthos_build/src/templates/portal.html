@@ -2649,9 +2649,9 @@ var _aboutContent = {
       +   '<div class="about-section-title">What this page shows</div>'
       +   '<div class="about-body">'
       +     '<p>Recent <strong>market headlines</strong> the news pipeline has '
-      +     'pulled and tagged. Each card is one article — title, source, age, '
-      +     'and a tracked-ticker chip when the article references a stock '
-      +     'you hold or are watching.</p>'
+      +     'pulled and tagged. Each card is one article — title, source, '
+      +     'age, and the symbol the article was attributed to (or '
+      +     '"Markets" for general market commentary).</p>'
       +     '<p style="color:var(--amber)"><strong>Important:</strong> this view '
       +     'is <strong>display-only</strong>. The bot does <strong>NOT</strong> '
       +     'use these articles directly to decide what to trade. Trading '
@@ -2663,37 +2663,13 @@ var _aboutContent = {
       + '</div>'
 
       + '<div class="about-section">'
-      +   '<div class="about-section-title">The filter tabs</div>'
+      +   '<div class="about-section-title">Hide low-quality toggle</div>'
       +   '<div class="about-body">'
-      +     '<p><strong>All</strong> — every article the news pipeline pulled '
-      +     'today, regardless of which ticker it mentions.</p>'
-      +     '<p><strong>Tracked tickers only</strong> — narrow to articles '
-      +     'mentioning tickers you hold (open positions) or that the bot is '
-      +     'watching (intel watchlist). Useful for "what\'s happening to my '
-      +     'stocks today."</p>'
-      +     '<p><strong>Hide low-quality</strong> toggle — hides headlines '
-      +     'flagged as clickbait by a heuristic (BREAKING:, listicles, '
-      +     'excessive emoji, opinion-verb patterns). Additive on top of the '
-      +     'ingestion-side filter that already excludes opinion-only sources.</p>'
-      +   '</div>'
-      + '</div>'
-
-      + '<div class="about-section">'
-      +   '<div class="about-section-title">Card styling</div>'
-      +   '<div class="about-body">'
-      +     '<p>Cards have subtle accent borders to mark relevance:</p>'
-      +     '<p>'
-      +       '<span class="about-pill-demo" style="background:rgba(0,245,212,0.06);border-color:rgba(0,245,212,0.25);color:var(--teal)">teal border</span>'
-      +       'You hold this position right now.'
-      +     '</p>'
-      +     '<p>'
-      +       '<span class="about-pill-demo" style="background:rgba(34,211,238,0.06);border-color:rgba(34,211,238,0.25);color:#22d3ee">cyan border</span>'
-      +       'Ticker is on the bot watchlist.'
-      +     '</p>'
-      +     '<p>'
-      +       '<span class="about-pill-demo" style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.10);color:var(--muted)">no border</span>'
-      +       'Generic market article — no direct relevance to your portfolio.'
-      +     '</p>'
+      +     '<p>The single toggle in the filter row hides headlines flagged '
+      +     'as clickbait by a heuristic (BREAKING:, listicles, excessive '
+      +     'emoji, opinion-verb patterns). Additive on top of the '
+      +     'ingestion-side filter that already excludes opinion-only '
+      +     'sources.</p>'
       +     '<p>Stale articles (past their freshness window) are dimmed but '
       +     'still shown so you can scroll back through the day.</p>'
       +   '</div>'
@@ -3246,12 +3222,10 @@ setInterval(loadAgentPulse, 10000);
   </div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Live headlines · MarketWatch · Display only — not used in signal calculations</div>
   <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;align-items:center" id="news-filters">
-    <!-- Phase 7i: dropped Breaking/Markets/US/Global (data audit
-         confirmed 100% of articles are tagged "Markets" so the other
-         three filtered nothing). New filter set is task-oriented. -->
-    <button class="graph-tab active" onclick="switchNewsScope('all',this)">All</button>
-    <button class="graph-tab" onclick="switchNewsScope('tracked',this)" title="Show only articles for tickers you hold or are watching">Tracked tickers only</button>
-    <span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:10px;color:var(--muted);user-select:none;cursor:pointer" title="Hide hype-tagged headlines (BREAKING:, listicles, excessive emoji). Additive on top of the ingestion filter that already excludes opinion sources." onclick="toggleClickbaitHide(this)">
+    <!-- Filter tabs removed 2026-04-29: with "Tracked tickers only" gone
+         (chips/borders ripped out below) the lone "All" button became
+         pointless. Clickbait-hide toggle remains. -->
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);user-select:none;cursor:pointer" title="Hide hype-tagged headlines (BREAKING:, listicles, excessive emoji). Additive on top of the ingestion filter that already excludes opinion sources." onclick="toggleClickbaitHide(this)">
       <span id="clickbait-toggle-dot" style="width:30px;height:16px;border-radius:99px;background:rgba(255,255,255,0.06);border:1px solid var(--border);position:relative;transition:background .15s">
         <span id="clickbait-toggle-knob" style="position:absolute;top:1px;left:1px;width:12px;height:12px;border-radius:50%;background:var(--muted);transition:left .15s,background .15s"></span>
       </span>
@@ -9446,23 +9420,21 @@ const _metaCache = {};   // url → {image, description}
 let   _newsArticles = [];
 
 // News-page filter state (Phase 7i, 2026-04-25):
-//   _newsScope:        'all' | 'tracked'  — narrows by tracked-ticker membership
-//   _newsHideClickbait: boolean           — additive UI-side clickbait pass
-// Replaces the old _newsCat (Breaking/US/Global) which filtered on a
-// metadata field that's never set in practice.
-let _newsScope = 'all';
+//   _newsHideClickbait: boolean — additive UI-side clickbait pass
+// (2026-04-29: dropped _newsScope and the "Tracked tickers only"
+// filter; the only remaining client-side toggle is clickbait-hide.)
 let _newsHideClickbait = false;
 
 async function loadNews(_legacyArg) {
   // Backward-compat: tab-switch / setInterval still call loadNews().
-  // The legacy positional arg is ignored; scope is read from state.
+  // The legacy positional arg is ignored.
   const grid = document.getElementById('news-grid');
   const cnt  = document.getElementById('news-count');
   if (!grid) return;
   try {
     // Always fetch with category=all server-side and let the client
-    // do scope/clickbait filtering — much faster to refilter without a
-    // round trip when the user toggles.
+    // do clickbait filtering — much faster to refilter without a round
+    // trip when the user toggles.
     const r = await fetch('/api/news-headlines?category=all');
     const d = await r.json();
     _newsArticles = d.articles || [];
@@ -9480,15 +9452,7 @@ function renderNewsGrid() {
   if (!grid) return;
   // Apply filters
   let visible = _newsArticles.slice();
-  let hiddenByScope = 0, hiddenByClickbait = 0;
-  if (_newsScope === 'tracked') {
-    visible = visible.filter(a => {
-      const t = (a.ticker || '').toUpperCase();
-      const tracked = !!getTrackerStatus(t);
-      if (!tracked) hiddenByScope++;
-      return tracked;
-    });
-  }
+  let hiddenByClickbait = 0;
   if (_newsHideClickbait) {
     visible = visible.filter(a => {
       const cb = looksLikeClickbait(a.headline);
@@ -9497,8 +9461,8 @@ function renderNewsGrid() {
     });
   }
   // Header count: show net visible, plus a parenthesized "of N" when
-  // filters are active so the user understands what's been hidden.
-  if (_newsScope !== 'all' || _newsHideClickbait) {
+  // the clickbait filter is active so the user understands what's hidden.
+  if (_newsHideClickbait) {
     cnt.textContent = visible.length + ' of ' + _newsArticles.length;
   } else {
     cnt.textContent = visible.length + ' article' + (visible.length === 1 ? '' : 's');
@@ -9506,15 +9470,7 @@ function renderNewsGrid() {
 
   if (!visible.length) {
     let msg = 'No news articles yet — News agent will populate on next run';
-    if (_newsScope === 'tracked') {
-      // Distinguish "no tracked tickers loaded yet" from "no matches"
-      const trackedCount = window._trackedTickers.positions.size + window._trackedTickers.watching.size;
-      if (trackedCount === 0) {
-        msg = 'You don\'t have any tracked tickers yet. Open a position or wait for the watchlist to populate.';
-      } else {
-        msg = 'No recent articles for your tracked tickers (' + trackedCount + ' tracked). Switch back to "All" to see everything.';
-      }
-    } else if (_newsHideClickbait && _newsArticles.length) {
+    if (_newsHideClickbait && _newsArticles.length) {
       msg = 'All ' + _newsArticles.length + ' current articles look low-quality. Toggle "Hide low-quality" off to see them.';
     }
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">' + msg + '</div>';
@@ -9523,15 +9479,14 @@ function renderNewsGrid() {
 
   grid.innerHTML = visible.map((a, idx) => {
     const stale  = a.staleness && a.staleness !== 'fresh';
-    // Phase 7i: drop the per-article category label since 100% of
-    // articles are "Markets" — replaced with a tracked-ticker chip
-    // when the article references a portfolio/watchlist ticker.
-    const tkrStatus = getTrackerStatus(a.ticker);
-    const headerLeft = tkrStatus
-      ? trackerChip(a.ticker)
-      : (a.ticker
-          ? `<span style="font-size:10px;font-weight:600;color:var(--muted);font-family:var(--mono)">${escHtml(a.ticker)}</span>`
-          : '<span style="font-size:10px;font-weight:600;color:var(--dim)">Markets</span>');
+    // Header chip: simple ticker label (or "Markets" fallback). The
+    // tracked-ticker chip + colored accent border experiment was
+    // ripped out 2026-04-29 — added more visual noise than utility
+    // once the news page got busy. Render stays clean: ticker, time,
+    // headline, source. Done.
+    const headerLeft = a.ticker
+      ? `<span style="font-size:10px;font-weight:600;color:var(--muted);font-family:var(--mono)">${escHtml(a.ticker)}</span>`
+      : '<span style="font-size:10px;font-weight:600;color:var(--dim)">Markets</span>';
     const age = a.pub_date ? timeSince(a.pub_date) : (a.staleness || '');
     const storedImg = a.image_url || '';
     const cachedImg = a.link && _metaCache[a.link] && _metaCache[a.link].image;
@@ -9539,12 +9494,7 @@ function renderNewsGrid() {
     const imgHtml   = imgSrc
       ? `<div style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px"><img src="${imgSrc}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.style.display='none'"></div>`
       : `<div class="news-img-placeholder" id="nip-${idx}" style="margin:-12px -16px 12px;border-radius:10px 10px 0 0;overflow:hidden;height:140px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center"><span style="font-size:22px;opacity:0.18">📰</span></div>`;
-    // Outer card gets a faint accent border when ticker is tracked so
-    // the user can spot relevant cards without reading every chip.
-    const accentBorder = tkrStatus === 'position' ? 'border:1px solid rgba(0,245,212,0.25)'
-                       : tkrStatus === 'watching' ? 'border:1px solid rgba(34,211,238,0.25)'
-                       : '';
-    return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative;${accentBorder}"
+    return `<div class="charm-card" style="cursor:pointer;opacity:${stale?0.65:1};padding:12px 16px 14px;position:relative"
                  onclick="openNewsModal(${idx})">
       ${imgHtml}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px">
@@ -9576,13 +9526,6 @@ function renderNewsGrid() {
   window._newsArticlesVisible = visible;
 }
 
-function switchNewsScope(scope, btn) {
-  document.querySelectorAll('#news-filters .graph-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  _newsScope = scope;
-  renderNewsGrid();
-}
-
 function toggleClickbaitHide(el) {
   _newsHideClickbait = !_newsHideClickbait;
   // Update visual toggle state
@@ -9603,16 +9546,6 @@ function toggleClickbaitHide(el) {
     if (label) label.style.color = '';
   }
   renderNewsGrid();
-}
-
-// Backward-compat shim — older callers used switchNews(cat,btn).
-// Map them through to the new scope-based flow when possible; ignore
-// dead categories (Breaking/Markets/US/Global).
-function switchNews(cat, btn) {
-  if (cat === 'all') return switchNewsScope('all', btn);
-  // Anything else (legacy categories) — treat as all + log
-  console.log('switchNews: legacy category "' + cat + '" ignored, defaulting to all');
-  return switchNewsScope('all', btn);
 }
 
 async function openNewsModal(idx) {
