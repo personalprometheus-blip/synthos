@@ -2852,6 +2852,16 @@ class DB:
                 if key in seen:
                     continue
                 seen.add(key)
+                # Project a single 'ticker' field from the symbols list so
+                # the news-grid renderer can drive its tracker chip + accent
+                # border (held=teal, watchlist=cyan) and the "Tracked
+                # tickers only" filter. Without this projection a.ticker
+                # was always undefined on the frontend, so getTrackerStatus
+                # returned null for every article — no borders ever
+                # rendered, and the tracked filter rejected every card.
+                # Bug fix 2026-04-29.
+                _syms = meta.get('symbols', []) or []
+                primary_ticker = _syms[0].upper() if _syms and _syms[0] else None
                 result.append({
                     'headline':  headline,
                     'source':    meta.get('source', 'Unknown'),
@@ -2863,7 +2873,8 @@ class DB:
                     'summary':   meta.get('summary', ''),
                     'image':     meta.get('image_url') or meta.get('image'),
                     'image_url':  meta.get('image_url') or meta.get('image'),
-                    'symbols':   meta.get('symbols', []),
+                    'symbols':   _syms,
+                    'ticker':    primary_ticker,
                     'provider':  meta.get('provider', 'rss'),
                 })
             return result
