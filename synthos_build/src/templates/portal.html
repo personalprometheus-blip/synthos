@@ -4073,9 +4073,11 @@ setInterval(loadAgentPulse, 10000);
     <!-- ── STEP 8 — SYNTHOS: PASTE KEYS + TEST CONNECTION ───────── -->
     <div class="setup-v2-step" data-step="8">
       <h3>Connect Synthos to Alpaca</h3>
-      <p>Open the Synthos <strong>Customer Settings</strong> page (gear
-        icon, top-right). You'll see two input boxes — one for the
-        <strong>Key ID</strong> and one for the <strong>Secret Key</strong>.</p>
+      <p>Open the Synthos <strong>Customer Settings</strong> page —
+        click the <strong>portrait icon</strong> in the top-right, then
+        choose <strong>Settings</strong> from the dropdown. You'll see
+        two input boxes — one for the <strong>Key ID</strong> and one
+        for the <strong>Secret Key</strong>.</p>
 
       <p>Paste the keys <strong>one at a time</strong> and click
         <strong>Update</strong> after each. A <strong style="color:var(--teal)">
@@ -4103,11 +4105,14 @@ setInterval(loadAgentPulse, 10000);
         market, scoring signals, and (depending on the mode you pick)
         either logging dry-run decisions or queuing them for your
         approval.<br><br>
-        <strong>Going live?</strong> Live trading uses the <em>exact
-        same</em> setup — once Alpaca approves your live account, just
-        generate a fresh API key pair from the live account and paste
-        those into the same two boxes. The connection flow doesn't
-        change.
+        <strong>Going live?</strong> Once Alpaca approves your live
+        account, generate a fresh API key pair from the <em>live</em>
+        account, then on the Synthos settings page <strong>switch the
+        Account Mode from Paper to Live</strong> before pasting the new
+        keys into the boxes. Synthos doesn't currently support running
+        paper and live in parallel on the same individual account — it's
+        one mode at a time, and the keys must match the mode you've
+        selected.
       </div>
 
       <p style="font-size:11px;color:var(--dim);margin-top:14px">
