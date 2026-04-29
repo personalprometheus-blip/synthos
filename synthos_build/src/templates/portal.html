@@ -1064,7 +1064,8 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   padding-left:8px;
 }
 .standout-header{
-  display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:4px;
+  flex-wrap:nowrap;overflow:hidden;
   font-size:11px;font-weight:700;color:var(--text);
   font-variant-numeric:tabular-nums;
 }
@@ -1075,8 +1076,13 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
 .standout-spark{
   display:block;width:100%;height:20px;margin:2px 0;
 }
+/* Footer pinned to the card bottom — even if header content varies
+   in height, all cards' score+why rows align horizontally across
+   the strip. Cards default-stretch in the grid; this completes the
+   "tops + bottoms aligned" guarantee. */
 .standout-foot{
   display:flex;align-items:baseline;gap:6px;
+  margin-top:auto;
 }
 .standout-score{
   font-size:16px;font-weight:700;font-family:var(--mono);
@@ -9500,7 +9506,13 @@ async function loadStandouts(force) {
       const score = (cs != null) ? Math.round(cs * 100) : '—';
       const horizonTag = horizonPillHTML(classifyHorizon(cd));
       const why = buildWhySentence(cd);
-      const sectorBadge = '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--teal);background:rgba(0,245,212,0.08);padding:2px 6px;border-radius:4px">'+_esc(cd.sector||'')+'</span>';
+      // Use the ETF symbol (XLE / XLF / XLRE / XLK / etc.) instead of
+      // the full sector name. Long sector strings ("REAL ESTATE",
+      // "TECHNOLOGY") wrapped the standout header to two lines on
+      // some cards but not others, breaking visual alignment across
+      // the strip. ETFs are 3-4 chars and immediately recognizable
+      // to anyone reading a sector view; no risk of wrap.
+      const sectorBadge = '<span title="'+_esc(cd.sector||'')+'" style="font-size:9px;font-weight:700;letter-spacing:0.04em;color:var(--teal);background:rgba(0,245,212,0.08);padding:2px 6px;border-radius:4px;font-family:var(--mono)">'+_esc(cd.etf || cd.sector || '')+'</span>';
       const track = (typeof getTrackerStatus === 'function') ? getTrackerStatus(cd.ticker) : null;
       const trackClass = track === 'position' ? ' held' : track === 'watching' ? ' watching' : '';
       // Same drawerObj shape the candidate row uses — reuse the
