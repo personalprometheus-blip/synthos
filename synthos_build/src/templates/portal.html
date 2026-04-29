@@ -906,6 +906,59 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
   color:var(--purple);
 }
 
+/* ── TODAY'S STANDOUTS STRIP (Phase 1C, 2026-04-29) ──
+   Card grid at the top of the screener. 4 cards across most viewports;
+   collapses to fewer columns on narrow widths via auto-fit. Each card
+   gets its own sparkline canvas drawn after innerHTML mount. */
+.standouts-strip{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:10px;
+}
+.standout-card{
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:10px;
+  padding:14px 16px;
+  cursor:pointer;
+  transition:background .15s,border-color .15s;
+  display:flex;flex-direction:column;gap:6px;
+}
+.standout-card:hover{
+  background:rgba(255,255,255,0.05);
+  border-color:rgba(0,245,212,0.25);
+}
+.standout-card.held{
+  border-left:3px solid var(--teal);
+  padding-left:13px;
+}
+.standout-card.watching{
+  border-left:3px solid var(--purple);
+  padding-left:13px;
+}
+.standout-header{
+  display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  font-size:14px;font-weight:700;color:var(--text);
+}
+.standout-company{
+  font-size:11px;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.standout-spark{
+  display:block;width:100%;height:32px;margin:4px 0;
+}
+.standout-foot{
+  display:flex;align-items:baseline;gap:8px;
+}
+.standout-score{
+  font-size:22px;font-weight:700;font-family:var(--mono);
+  flex-shrink:0;
+}
+.standout-why{
+  font-size:11px;color:var(--muted);line-height:1.4;
+  flex:1;min-width:0;
+}
+
 /* ── SECTOR PULSE BARS (Phase 2, 2026-04-29) ──
    Replaces the sector summary cards. Each sector renders as a single
    horizontal row: name | strength bar | score | ETF · top ticker.
@@ -2878,7 +2931,26 @@ var _aboutContent = {
       + '</div>'
 
       + '<div class="about-section">'
-      +   '<div class="about-section-title">Sector pulse bars (top of page)</div>'
+      +   '<div class="about-section-title">Today\'s Standouts (top strip)</div>'
+      +   '<div class="about-body">'
+      +     '<p>The four cards above the sector filter are the day\'s '
+      +     '<strong>highest-conviction names</strong> across all '
+      +     'sectors — the headline view. Each card shows the ticker, '
+      +     'sector, time-horizon chip, a 30-day price sparkline, the '
+      +     'composite score, and a one-line summary of <em>why this '
+      +     'name stands out today</em>.</p>'
+      +     '<p>The strip stays the same regardless of the sector filter '
+      +     'you pick for the ranked list below — it\'s an at-a-glance '
+      +     '"what\'s interesting overall" surface, not a drill-in. '
+      +     'Click any card to open the deep-dive drawer for that '
+      +     'ticker.</p>'
+      +     '<p>Standouts refresh once per screener run (twice daily). '
+      +     'They do not change as you filter the ranked list.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Sector pulse bars</div>'
       +   '<div class="about-body">'
       +     '<p>One horizontal row per sector. The <strong>filled bar '
       +     'width</strong> reflects the <strong>average composite '
@@ -3486,7 +3558,17 @@ setInterval(loadAgentPulse, 10000);
       Sector <span style="background:linear-gradient(90deg,var(--amber),var(--teal));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Screening</span>
     </div>
   </div>
-  <div style="padding:0 4px 16px">
+  <!-- TODAY'S STANDOUTS — top 4 by combined score across all sectors.
+       Always all-sectors regardless of the sector filter applied to the
+       ranked list below. Acts as the "headline view" of the screener. -->
+  <div style="padding:0 4px 4px">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)">Today's Standouts</div>
+      <div id="standouts-meta" style="font-size:10px;color:var(--dim);font-family:var(--mono)"></div>
+    </div>
+    <div id="standouts-strip" class="standouts-strip"></div>
+  </div>
+  <div style="padding:0 4px 16px;margin-top:18px;border-top:1px solid var(--border);padding-top:18px">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
       <label style="font-size:10px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted)">Sector</label>
       <select id="screening-sector-select" onchange="loadScreening()"
@@ -5725,7 +5807,7 @@ function showTab(t, e) {
   });
   if (t === 'intel') loadIntel();
   if (t === 'news') loadNews('all');
-  if (t === 'screening') loadScreening();
+  if (t === 'screening') { loadStandouts(); loadScreening(); }
   if (t === 'performance') loadPerformance();
   if (t === 'risk') loadRisk();
   if (t === 'messages') loadMessages();
@@ -9001,6 +9083,133 @@ function drawSparkline(canvas, prices, color) {
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+// Phase 1C — Build a one-line "why this row stands out" summary from
+// the strongest signals on a candidate dict. Caps at 2 reasons joined
+// by " · " so the line stays scannable. Used by the Today's Standouts
+// card body. Matched roughly to the horizon classifier above so that
+// CATALYST cards mention news/insider, TREND cards mention momentum,
+// THESIS cards fall back to high composite framing.
+function buildWhySentence(cd) {
+  const reasons = [];
+  // Insider / congressional activity is short-window + high-signal —
+  // promote to the front of the line whenever it's present.
+  if (cd.congressional_flag === 'recent_buy') reasons.push('Insider buy');
+  else if (cd.congressional_flag === 'recent_sell') reasons.push('Insider sell');
+  // Strong news (label-aware so we get "Bullish news" vs "Bearish news"
+  // when a directional read is available).
+  if (cd.news_score != null && cd.news_score >= 0.65) {
+    const tag = cd.news_signal === 'bullish' ? 'Bullish news'
+              : cd.news_signal === 'bearish' ? 'Bearish news'
+              : 'Strong news';
+    reasons.push(tag);
+  }
+  // Momentum — emphasize when ret_3m is materially up.
+  if (cd.ret_3m != null && cd.ret_3m >= 0.10) {
+    reasons.push('+'+(cd.ret_3m * 100).toFixed(0)+'% 3mo');
+  } else if (cd.ret_3m != null && cd.ret_3m >= 0.03) {
+    reasons.push('+'+(cd.ret_3m * 100).toFixed(0)+'% momentum');
+  }
+  // Sentiment cascade
+  if (cd.sentiment_score != null && cd.sentiment_score >= 0.65) {
+    reasons.push('Bullish positioning');
+  }
+  // Cross-run movement — only when the row didn't lead with insider/news.
+  if (reasons.length < 2 && cd.prev_combined_score != null && cd.combined_score != null) {
+    const delta = cd.combined_score - cd.prev_combined_score;
+    if (delta >= 0.10) reasons.push('Climbing fast');
+  } else if (reasons.length < 2 && cd.prev_combined_score == null && cd.combined_score != null) {
+    reasons.push('Newly screened');
+  }
+  if (!reasons.length) reasons.push('High composite score');
+  return reasons.slice(0, 2).join(' · ');
+}
+
+// Phase 1C — Today's Standouts loader. Pulls the all-sectors candidate
+// list once per screener-tab activation, picks the top N by combined
+// score, renders cards into #standouts-strip. Runs in parallel with
+// loadScreening so the standouts strip is independent of whatever
+// sector filter the user has applied to the ranked list below.
+let _standoutsLoaded = false;
+async function loadStandouts(force) {
+  if (_standoutsLoaded && !force) return;  // load once per tab activation
+  const strip = document.getElementById('standouts-strip');
+  const meta  = document.getElementById('standouts-meta');
+  if (!strip) return;
+  try {
+    // Always all-sectors — standouts are a headline view, not subject
+    // to the candidate-list sector filter.
+    const r = await fetch('/api/screening');
+    const d = await r.json();
+    const candidates = (d.candidates || []).filter(c => c.combined_score != null);
+    if (!candidates.length) {
+      strip.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:18px 0;color:var(--muted);font-size:11px">No screening data yet.</div>';
+      if (meta) meta.textContent = '';
+      return;
+    }
+    // Top N by combined_score; data is already sorted desc but defend
+    // anyway in case the API ever changes ordering.
+    const top = candidates.slice().sort((a,b) => (b.combined_score||0) - (a.combined_score||0)).slice(0, 4);
+    if (meta) {
+      const c0 = top[0];
+      meta.textContent = c0 && c0.run_id ? 'Run · '+c0.run_id.slice(0,16) : '';
+    }
+    strip.innerHTML = top.map((cd, i) => {
+      const cs = cd.combined_score;
+      const score = (cs != null) ? Math.round(cs * 100) : '—';
+      const horizonTag = horizonPillHTML(classifyHorizon(cd));
+      const why = buildWhySentence(cd);
+      const sectorBadge = '<span style="font-size:9px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:var(--teal);background:rgba(0,245,212,0.08);padding:2px 6px;border-radius:4px">'+_esc(cd.sector||'')+'</span>';
+      const track = (typeof getTrackerStatus === 'function') ? getTrackerStatus(cd.ticker) : null;
+      const trackClass = track === 'position' ? ' held' : track === 'watching' ? ' watching' : '';
+      // Same drawerObj shape the candidate row uses — reuse the
+      // planning drawer's screener-aware mapping.
+      const drawerObj = {
+        ticker: cd.ticker, company: cd.company || cd.ticker, sector: cd.sector || '',
+        headline: cd.news_headline || (cd.ticker + ' — sector screener candidate'),
+        news_score: cd.news_score, sentiment_score: cd.sentiment_score,
+        entry_signal_score: cd.combined_score,
+        screener_meta: {
+          news_signal: cd.news_signal, news_score: cd.news_score,
+          sentiment_signal: cd.sentiment_signal, combined_score: cd.combined_score,
+          momentum_score: cd.momentum_score, ret_3m: cd.ret_3m,
+          etf: cd.etf, etf_weight_pct: cd.etf_weight_pct,
+          congressional_flag: cd.congressional_flag, run_id: cd.run_id,
+        },
+      };
+      const drawerEsc = JSON.stringify(drawerObj).replace(/"/g,'&quot;');
+      return '<div class="standout-card'+trackClass+'" data-row="'+i+'" '
+        + 'data-color="'+(cd.ret_3m > 0 ? '#00f5d4' : cd.ret_3m < 0 ? '#ff4b6e' : '#a0a0b0')+'" '
+        + 'onclick="openPlanningDrawer('+drawerEsc+')">'
+        + '<div class="standout-header">'+_esc(cd.ticker)+sectorBadge+horizonTag+'</div>'
+        + '<div class="standout-company">'+_esc(cd.company||'')+'</div>'
+        + '<canvas class="standout-spark" data-row="'+i+'" width="480" height="64"></canvas>'
+        + '<div class="standout-foot">'
+        +   '<div class="standout-score" style="color:'+(cs>=0.6?'#00f5d4':cs>=0.4?'#f5a623':'#ff4b6e')+'">'+score+'</div>'
+        +   '<div class="standout-why">'+_esc(why)+'</div>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+    // Draw sparklines — same pattern as the candidate list. Skip rows
+    // with insufficient history.
+    top.forEach((cd, i) => {
+      if (!cd.price_history) return;
+      let prices = null;
+      try { prices = JSON.parse(cd.price_history); } catch(e) { return; }
+      if (!Array.isArray(prices) || prices.length < 2) return;
+      const canvas = strip.querySelector('canvas.standout-spark[data-row="'+i+'"]');
+      if (!canvas) return;
+      // Color from the parent card's data-color (driven by ret_3m sign).
+      const color = canvas.parentElement && canvas.parentElement.dataset.color
+        ? canvas.parentElement.dataset.color
+        : 'rgba(255,255,255,0.45)';
+      drawSparkline(canvas, prices, color);
+    });
+    _standoutsLoaded = true;
+  } catch(e) {
+    console.warn('loadStandouts', e);
+  }
 }
 
 async function loadScreeningSectors() {
