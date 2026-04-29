@@ -20,10 +20,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Synthos{% block title_suffix %}{% if title %} — {{ title }}{% endif %}{% endblock %}</title>
 
-  {# Favicon removed 2026-04-25 — placeholder that didn't fit the brand.
-     When the real one is ready, drop a <link rel="icon" ...> back here.
-     Same placeholder lives in portal.html (the dashboard doesn't extend
-     base.html); keep them in sync. #}
+  {# Favicon (Phase J+, 2026-04-28). Single high-res PNG at
+     /static/favicon.png; modern browsers scale for tab/bookmark and
+     iOS home-screen. Same tags live inline in portal.html (the
+     dashboard doesn't extend base.html); keep them in sync. #}
+  <link rel="icon"            type="image/png" sizes="any" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="apple-touch-icon" sizes="180x180"               href="{{ url_for('static', filename='favicon.png') }}">
 
   {# Core design tokens, fonts, reset, pw-eye primitives #}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/core.css') }}">

@@ -4,9 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Synthos — Systematically Managed</title>
-<!-- Favicon removed 2026-04-25 — placeholder didn't fit the brand.
-     When the real one is ready, drop a <link rel="icon" ...> back here.
-     Same placeholder removal also lives in templates/base.html. -->
+<!-- Favicon (Phase J+, 2026-04-28). Single high-res PNG at
+     /static/favicon.png; modern browsers scale it for tab/bookmark
+     and iOS home-screen shortcuts. apple-touch-icon explicit so
+     iOS picks the right one without falling back to a screenshot. -->
+<link rel="icon"            type="image/png" sizes="any" href="/static/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180"               href="/static/favicon.png">
 <style>
 @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/Inter.woff2') format('woff2')}
 @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:100 900;font-display:swap;src:url('/static/fonts/JetBrainsMono.woff2') format('woff2')}
