@@ -1962,6 +1962,73 @@ html,body{min-height:100vh;background:var(--bg);color:var(--text);font-family:va
     </div>
   </div>
 
+  <!-- ABOUT-THIS-PAGE DRAWER (Phase I, 2026-04-28) — shared across pages.
+       Triggered by .about-link clicks (e.g. "About this page ›" on the
+       intel filter row). Content is keyed by page name from a JS map
+       (_aboutContent). Distinct from the dashboard's #agent-drawer
+       which holds bot/agent runtime details. -->
+  <style>
+    .about-link {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      text-transform: uppercase;
+      transition: color 0.15s;
+      user-select: none;
+    }
+    .about-link:hover { color: var(--teal); }
+    .about-section { margin-bottom: 14px; }
+    .about-section-title {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 6px;
+    }
+    .about-body p { font-size: 12px; line-height: 1.55; color: var(--muted); margin: 0 0 8px; }
+    .about-body strong { color: var(--text); font-weight: 600; }
+    .about-body code {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: var(--teal);
+    }
+    .about-pill-demo {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      padding: 3px 8px;
+      border-radius: 99px;
+      border: 1px solid;
+      margin-right: 4px;
+    }
+    .about-trust-bar {
+      display: inline-block;
+      width: 6px;
+      height: 12px;
+      margin-right: 2px;
+      border-radius: 1px;
+      vertical-align: middle;
+    }
+  </style>
+  <div class="drawer-overlay" id="about-drawer-overlay" onclick="closeAboutDrawer(event)"></div>
+  <div class="drawer" id="about-drawer">
+    <div class="drawer-head">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:var(--text)" id="about-dr-title">About this page</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="about-dr-sub">What you're looking at and how to read it</div>
+      </div>
+      <button class="drawer-close" onclick="closeAboutDrawer()">✕</button>
+    </div>
+    <div class="drawer-body" id="about-dr-body"></div>
+  </div>
+
   <!-- USER WARNINGS (AUTO/USER cap under-utilized, cash-starved) -->
   <div id="user-warnings-banner"></div>
 
@@ -2272,6 +2339,158 @@ function closeAgentDrawer(ev) {
   document.body.style.overflow = '';
 }
 
+// Phase I (2026-04-28) — shared "About this page" drawer.
+// Content map keyed by page name. Adding a new page's about-content
+// is a single entry here; the drawer DOM (#about-drawer) is shared.
+// Distinct from #agent-drawer (dashboard agent-status details) — no
+// overlap, separate IDs, separate open/close functions.
+var _aboutContent = {
+  intel: {
+    title:    'Intelligence — Bot Watchlist',
+    subtitle: 'Signals the bot is currently tracking',
+    body: ''
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">What this page shows</div>'
+      +   '<div class="about-body">'
+      +     '<p>Every <strong>signal</strong> the bot has flagged as worth watching — '
+      +     'sourced from <strong>congressional disclosures</strong>, <strong>news '
+      +     'wire</strong> headlines, and <strong>SEC filings</strong>. Each card is '
+      +     'one ticker the bot might trade.</p>'
+      +     '<p>Click any card to open the <strong>Planning drawer</strong> with the '
+      +     'full deep-dive: live price, size calculator, recent news, and the '
+      +     'thesis behind why the bot is watching it.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">The filter tabs</div>'
+      +   '<div class="about-body">'
+      +     '<p><strong>All</strong> — every signal in the watchlist.</p>'
+      +     '<p><strong>High signal</strong> — only HIGH or MEDIUM confidence (the '
+      +     'bot is more sure of these).</p>'
+      +     '<p><strong>Corroborated</strong> — confirmed by 2+ independent sources '
+      +     '(e.g. a politician trade plus matching news).</p>'
+      +     '<p><strong>Fresh</strong> — recent enough that the news context still '
+      +     'applies.</p>'
+      +     '<p><strong>Archive</strong> — past their useful window. Kept visible so '
+      +     'you can audit what the bot considered yesterday.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Sentiment direction badge</div>'
+      +   '<div class="about-body">'
+      +     '<p>The badge in the top-right of each card shows the bot\'s '
+      +     'directional read on this signal:</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(0,245,212,0.10);border-color:rgba(0,245,212,0.14);color:var(--teal)">↑ Strong</span>'
+      +       'High confidence and/or corroborated.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(123,97,255,0.10);border-color:rgba(123,97,255,0.14);color:#a78bfa">— Mixed</span>'
+      +       'Medium confidence, no corroboration yet.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(255,75,110,0.10);border-color:rgba(255,75,110,0.14);color:var(--pink)">↓ Weak</span>'
+      +       'Low confidence or signal has gone stale.'
+      +     '</p>'
+      +     '<p>This is purely a <strong>directional cue</strong> — it does NOT '
+      +     'mean buy/sell. The trader\'s 13-gate review still has to clear '
+      +     'every signal before any action.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Signal Trust meter</div>'
+      +   '<div class="about-body">'
+      +     '<p>Five bars at the bottom of each card. The fuller the meter, '
+      +     'the more reasons the bot has to take this signal seriously:</p>'
+      +     '<p style="margin-top:6px">'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span> '
+      +       '<strong>5 bars</strong> · gold-standard, e.g. HIGH confidence + '
+      +       'corroborated + fresh'
+      +     '</p>'
+      +     '<p style="margin-top:6px">'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:var(--teal)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span> '
+      +       '<strong>3 bars</strong> · solid but not exceptional'
+      +     '</p>'
+      +     '<p style="margin-top:6px">'
+      +       '<span class="about-trust-bar" style="background:var(--pink)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span>'
+      +       '<span class="about-trust-bar" style="background:rgba(255,255,255,0.12)"></span> '
+      +       '<strong>1 bar</strong> · weak — the bot is unlikely to act'
+      +     '</p>'
+      +     '<p>Inputs include source quality, freshness, corroboration count, '
+      +     'and the underlying confidence label.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Hero badges (gold)</div>'
+      +   '<div class="about-body">'
+      +     '<p>The two cards at the very top with gold pill badges are the '
+      +     'session\'s standouts:</p>'
+      +     '<p><strong>#1 Conviction</strong> — highest Signal Trust score in '
+      +     'the current view.</p>'
+      +     '<p><strong>Corroborated</strong> (or <strong>#2 Conviction</strong>) — '
+      +     'next-best by trust, prioritized when corroboration is present.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">What this page is NOT</div>'
+      +   '<div class="about-body">'
+      +     '<p>It is <strong>not</strong> a buy list. The trader has to clear '
+      +     '13 gates (account health, regime, signal score, position sizing, '
+      +     'spread, chase caps, event risk, etc.) before any signal here turns '
+      +     'into an actual order.</p>'
+      +     '<p>It is <strong>not</strong> personalized. Every customer sees the '
+      +     'same intel — what differs is which signals each customer\'s gates '
+      +     'allow through.</p>'
+      +   '</div>'
+      + '</div>'
+  }
+};
+
+function openAboutDrawer(page) {
+  var content = _aboutContent[page];
+  if (!content) {
+    console.warn('openAboutDrawer: no content for page=' + page);
+    return;
+  }
+  var dr = document.getElementById('about-drawer');
+  var ov = document.getElementById('about-drawer-overlay');
+  if (!dr || !ov) return;
+  document.getElementById('about-dr-title').textContent = content.title;
+  document.getElementById('about-dr-sub').textContent   = content.subtitle;
+  document.getElementById('about-dr-body').innerHTML    = content.body;
+  dr.classList.add('open');
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeAboutDrawer(ev) {
+  if (ev && ev.target && ev.target.id !== 'about-drawer-overlay'
+        && (!ev.target.classList || !ev.target.classList.contains('drawer-close'))) {
+    return;
+  }
+  var dr = document.getElementById('about-drawer');
+  var ov = document.getElementById('about-drawer-overlay');
+  if (dr) dr.classList.remove('open');
+  if (ov) ov.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
 function renderAgentDrawer(d) {
   if (!d) return;
 
@@ -2486,12 +2705,22 @@ setInterval(loadAgentPulse, 10000);
     </div>
   </div>
   <div style="font-size:12px;color:var(--muted);margin-bottom:16px">Signals the bot is tracking · click any card for the full deep-dive</div>
-  <div style="display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap" id="intel-filters">
-    <button class="graph-tab active" onclick="filterIntel('all',this)">All</button>
-    <button class="graph-tab" onclick="filterIntel('high',this)">High signal</button>
-    <button class="graph-tab" onclick="filterIntel('alert',this)">Corroborated</button>
-    <button class="graph-tab" onclick="filterIntel('bull',this)">Fresh</button>
-    <button class="graph-tab" onclick="filterIntel('bear',this)">Archive</button>
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:18px;flex-wrap:wrap">
+    <div style="display:flex;gap:6px;flex-wrap:wrap" id="intel-filters">
+      <button class="graph-tab active" onclick="filterIntel('all',this)">All</button>
+      <button class="graph-tab" onclick="filterIntel('high',this)">High signal</button>
+      <button class="graph-tab" onclick="filterIntel('alert',this)">Corroborated</button>
+      <button class="graph-tab" onclick="filterIntel('bull',this)">Fresh</button>
+      <button class="graph-tab" onclick="filterIntel('bear',this)">Archive</button>
+    </div>
+    <!-- Phase I (2026-04-28) — page-help drawer trigger. Right-aligned
+         on the same row as the filter tabs. Clicking opens the
+         shared about-this-page drawer (#about-drawer) with content
+         keyed by 'intel'. Distinct from the dashboard's Agent Status
+         "Tap for details ›" cue (#agent-drawer) — different drawer,
+         different IDs, no interference. -->
+    <a class="about-link" onclick="openAboutDrawer('intel')"
+       style="margin-left:auto;cursor:pointer">About this page ›</a>
   </div>
   <!-- ══ HERO SIGNAL RAIL — placeholder layout ══
        Wire to signals.db ranking when ready (see todo list):
