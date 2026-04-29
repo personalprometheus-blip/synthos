@@ -7531,10 +7531,31 @@ def _aggregate_customer_market_activity(n_bins, session_start, session_end,
                     has_activity = True
 
             if has_activity:
+                # Pull trader variant + internal flag from the same conn so
+                # the cmd portal can mark v2 / internal customers (V2 chip
+                # on the market activity page; planned 2026-04-30). Read
+                # is best-effort — falls back to defaults if customer_settings
+                # lookup fails for any reason.
+                variant     = 'v1'
+                is_internal = False
+                try:
+                    s_rows = dict(
+                        (r['key'], r['value'])
+                        for r in conn.execute(
+                            "SELECT key, value FROM customer_settings "
+                            "WHERE key IN ('trader_variant','is_internal')"
+                        ).fetchall()
+                    )
+                    variant     = s_rows.get('trader_variant', 'v1')
+                    is_internal = (s_rows.get('is_internal', 'false').lower() == 'true')
+                except Exception:
+                    pass  # leave defaults
                 customers_data[cid] = {
-                    'name':  customer_names.get(cid, cid[:8]),
-                    'buys':  [round(v, 2) for v in cust_buys],
-                    'sells': [round(v, 2) for v in cust_sells],
+                    'name':         customer_names.get(cid, cid[:8]),
+                    'buys':         [round(v, 2) for v in cust_buys],
+                    'sells':        [round(v, 2) for v in cust_sells],
+                    'variant':      variant,
+                    'is_internal':  is_internal,
                 }
         except Exception as e:
             log.warning(f"market-activity scan for {cid[:8]}: {e}")
