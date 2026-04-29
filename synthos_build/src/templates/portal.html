@@ -2459,6 +2459,89 @@ var _aboutContent = {
       +     'allow through.</p>'
       +   '</div>'
       + '</div>'
+  },
+
+  news: {
+    title:    'Market News',
+    subtitle: 'Headlines feeding context — not signals',
+    body: ''
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">What this page shows</div>'
+      +   '<div class="about-body">'
+      +     '<p>Recent <strong>market headlines</strong> the news pipeline has '
+      +     'pulled and tagged. Each card is one article — title, source, age, '
+      +     'and a tracked-ticker chip when the article references a stock '
+      +     'you hold or are watching.</p>'
+      +     '<p style="color:var(--amber)"><strong>Important:</strong> this view '
+      +     'is <strong>display-only</strong>. The bot does <strong>NOT</strong> '
+      +     'use these articles directly to decide what to trade. Trading '
+      +     'signals come from the curated <code>signals</code> pipeline '
+      +     '(Intelligence page) which runs articles through 22 gates of '
+      +     'classification before any are eligible. The News page is '
+      +     'situational awareness for you — not the bot\'s reading list.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">The filter tabs</div>'
+      +   '<div class="about-body">'
+      +     '<p><strong>All</strong> — every article the news pipeline pulled '
+      +     'today, regardless of which ticker it mentions.</p>'
+      +     '<p><strong>Tracked tickers only</strong> — narrow to articles '
+      +     'mentioning tickers you hold (open positions) or that the bot is '
+      +     'watching (intel watchlist). Useful for "what\'s happening to my '
+      +     'stocks today."</p>'
+      +     '<p><strong>Hide low-quality</strong> toggle — hides headlines '
+      +     'flagged as clickbait by a heuristic (BREAKING:, listicles, '
+      +     'excessive emoji, opinion-verb patterns). Additive on top of the '
+      +     'ingestion-side filter that already excludes opinion-only sources.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Card styling</div>'
+      +   '<div class="about-body">'
+      +     '<p>Cards have subtle accent borders to mark relevance:</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(0,245,212,0.06);border-color:rgba(0,245,212,0.25);color:var(--teal)">teal border</span>'
+      +       'You hold this position right now.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(34,211,238,0.06);border-color:rgba(34,211,238,0.25);color:#22d3ee">cyan border</span>'
+      +       'Ticker is on the bot watchlist.'
+      +     '</p>'
+      +     '<p>'
+      +       '<span class="about-pill-demo" style="background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.10);color:var(--muted)">no border</span>'
+      +       'Generic market article — no direct relevance to your portfolio.'
+      +     '</p>'
+      +     '<p>Stale articles (past their freshness window) are dimmed but '
+      +     'still shown so you can scroll back through the day.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">Where headlines come from</div>'
+      +   '<div class="about-body">'
+      +     '<p>Primary feed is <strong>Alpaca Market News API</strong> '
+      +     '(Benzinga). Articles are ingested every news-pipeline cycle, '
+      +     'deduplicated by URL + headline, and stored with attribution '
+      +     'metadata. The bot\'s news agent runs the same articles through '
+      +     'a 22-gate classifier — the OUTPUTS of that classifier surface '
+      +     'on the Intelligence page, not here.</p>'
+      +   '</div>'
+      + '</div>'
+
+      + '<div class="about-section">'
+      +   '<div class="about-section-title">How to read a headline well</div>'
+      +   '<div class="about-body">'
+      +     '<p>This page is best for <strong>context</strong>: what\'s the '
+      +     'broader market doing today, what\'s being said about your '
+      +     'positions, what stories are breaking. If a headline catches '
+      +     'your eye and you want to act on it, that decision still flows '
+      +     'through the trader\'s usual gates — clicking a card here does '
+      +     '<strong>not</strong> trigger any trade.</p>'
+      +   '</div>'
+      + '</div>'
   }
 };
 
@@ -2758,6 +2841,8 @@ setInterval(loadAgentPulse, 10000);
       </span>
       <span id="clickbait-toggle-label">Hide low-quality</span>
     </span>
+    <a class="about-link" onclick="openAboutDrawer('news')"
+       style="margin-left:auto;cursor:pointer">About this page ›</a>
   </div>
   <div class="intel-grid" id="news-grid">
     <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--muted);font-size:13px">Loading news...</div>
