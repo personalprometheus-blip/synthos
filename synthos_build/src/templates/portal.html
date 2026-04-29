@@ -7408,12 +7408,21 @@ async function loadScreeningSectors() {
     const pct = v => v != null ? (v*100).toFixed(0)+'%' : '--';
     const retFmt = v => v != null ? ((v>=0?'+':'')+(v*100).toFixed(1)+'%') : 'n/a';
     const retColor = v => v > 0 ? 'var(--teal)' : v < 0 ? 'var(--pink)' : 'var(--muted)';
+    // 2026-04-28 fix — highlight the currently-SELECTED sector (follows
+    // the dropdown / card-click), not the strongest-by-score one. The
+    // previous `isTop = i === 0` was a render-time-only highlight that
+    // never updated when the user changed selection — Energy stayed
+    // bordered teal even after picking another sector. Read select.value
+    // AFTER the default-on-first-load logic above so we get the
+    // user's actual current pick. Empty value (= "All sectors") = no
+    // card highlighted, which matches the "show everything" intent.
+    const _selectedSector = select.value || '';
     summary.innerHTML = sectors.map((s,i) => {
-      const isTop = i === 0;
+      const isSelected = (_selectedSector && s.sector === _selectedSector);
       return '<div onclick="document.getElementById(\'screening-sector-select\').value=\''+_esc(s.sector)+'\';loadScreening()" '
-        + 'style="background:rgba(255,255,255,0.03);border:1px solid '+(isTop?'rgba(0,245,212,0.4)':'rgba(255,255,255,0.08)')+';'
-        + 'border-radius:8px;padding:10px 12px;cursor:pointer;transition:all 0.15s">'
-        + '<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:var(--muted);text-transform:uppercase">'+_esc(s.sector)+'</div>'
+        + 'style="background:'+(isSelected?'rgba(0,245,212,0.06)':'rgba(255,255,255,0.03)')+';border:1px solid '+(isSelected?'rgba(0,245,212,0.4)':'rgba(255,255,255,0.08)')+';'
+        + 'border-radius:8px;padding:10px 12px;cursor:pointer;transition:all 0.15s'+(isSelected?';box-shadow:0 0 12px rgba(0,245,212,0.15)':'')+'">'
+        + '<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:'+(isSelected?'var(--teal)':'var(--muted)')+';text-transform:uppercase">'+_esc(s.sector)+'</div>'
         + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px">'
         + '<div style="font-size:14px;font-weight:700">'+_esc(s.top_ticker||'—')+'</div>'
         + '<div style="font-size:12px;color:var(--teal);font-weight:600">'+pct(s.top_score)+'</div>'
