@@ -2606,7 +2606,7 @@ var _aboutContent = {
 // Closing without accepting is allowed; the TOS gate is informational
 // here (legal acceptance happens at signup; this is a refresher).
 var _setupV2Step = 1;
-var _setupV2TotalSteps = 3;
+var _setupV2TotalSteps = 4;
 var _setupV2TosAccepted = false;
 
 function openSetupV2() {
@@ -3753,6 +3753,7 @@ setInterval(loadAgentPulse, 10000);
     <div class="setup-v2-dot active" data-step-dot="1"></div>
     <div class="setup-v2-dot" data-step-dot="2"></div>
     <div class="setup-v2-dot" data-step-dot="3"></div>
+    <div class="setup-v2-dot" data-step-dot="4"></div>
   </div>
 
   <div class="setup-v2-body" id="setup-v2-body">
@@ -3875,10 +3876,53 @@ setInterval(loadAgentPulse, 10000);
       </div>
 
       <p style="font-size:11px;color:var(--dim);margin-top:14px">
-        More steps coming — paper-trading account creation, API key
-        generation, and connecting back to Synthos. You can close this
-        walkthrough at any time and reopen it from <strong>Settings →
-        Setup Guide</strong>.
+        More steps coming — API key generation and connecting back to
+        Synthos. You can close this walkthrough at any time and reopen
+        it from <strong>Settings → Setup Guide</strong>.
+      </p>
+    </div>
+
+    <!-- ── STEP 4 — ALPACA: PAPER ACCOUNT + ACCOUNT MANAGEMENT ── -->
+    <div class="setup-v2-step" data-step="4">
+      <h3>Create a paper-trading account</h3>
+      <p>Once you've signed in, Alpaca will land you on the dashboard.
+        <strong>Paper-trading accounts are free</strong> and you can create
+        up to <strong>three</strong> of them on a single login. If anything
+        ever goes wrong with one — bad state, accidental config, you just
+        want a clean slate — delete it and generate a new one. No cost,
+        no waiting.</p>
+
+      <p>Selecting the <strong style="color:#ffcc00">yellow account icon</strong>
+        in the Alpaca header displays all of your active accounts (paper
+        and live). Once an account exists, click
+        <strong>Account Management</strong> to open it — that's where API
+        keys are generated in the next step.</p>
+
+      <div class="setup-v2-screenshot">
+        <img src="/static/setup/02_paper_account.png"
+             alt="Alpaca dashboard showing the yellow account-switcher icon and the Account Management entry point"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="placeholder" style="display:none">
+          Screenshot pending — drop the marked-up image at
+          <code style="color:var(--teal);background:rgba(255,255,255,0.05);padding:2px 6px;border-radius:4px;font-family:var(--mono);font-size:10px">/static/setup/02_paper_account.png</code>
+        </div>
+      </div>
+
+      <div class="setup-v2-callout">
+        <strong>Heads-up — paper vs. live.</strong> If at any point the
+        Alpaca site asks for additional personal information (SSN,
+        employment details, financial disclosures), you've crossed over
+        into <strong>live-account</strong> sign-up. That's the right move
+        if you intend to trade real cash through Synthos — but the
+        approval process can take <strong>up to 7 days</strong>. For now,
+        a paper account is enough to finish this setup and start
+        watching the system run.
+      </div>
+
+      <p style="font-size:11px;color:var(--dim);margin-top:14px">
+        Next up — generating your API key inside Account Management and
+        pasting it back into Synthos. You can close this walkthrough at
+        any time and reopen it from <strong>Settings → Setup Guide</strong>.
       </p>
     </div>
 
