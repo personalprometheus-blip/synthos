@@ -38,6 +38,13 @@ from datetime import datetime, timezone
 # ── Config ──
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / '.watchdog_state.json'
+LAST_RUN_FILE = BASE_DIR / '.watchdog_last_run.json'
+# 2026-04-28 — heartbeat log line cadence. The watchdog only logs on
+# FAIL/RECOVERY transitions; when both nodes are healthy for hours,
+# the log file looks frozen and operator can't tell working-quietly
+# from crashed. A heartbeat every N minutes proves the cron tick is
+# still firing the script. 30 min keeps log noise low (~50 lines/day).
+HEARTBEAT_LOG_INTERVAL_MIN = 30
 
 from dotenv import load_dotenv
 load_dotenv(BASE_DIR / '.env')
@@ -239,6 +246,9 @@ def send_alert(subject, body, priority='normal'):
 def run():
     state = load_state()
     now = datetime.now(timezone.utc).isoformat()
+    # Per-run summary — populated as we check each node so we can
+    # write a status file + optionally a heartbeat log line at the end.
+    run_summary = {}
 
     # Purge state entries for nodes in IGNORE_LIST so the state file
     # doesn't keep stale counters for disabled nodes.
@@ -259,6 +269,7 @@ def run():
 
         alive = check_node(node_id, cfg)
         node_state['last_check'] = now
+        run_summary[node_id] = 'OK' if alive else f'FAIL#{node_state["consecutive_fails"]+1}'
 
         if alive:
             if node_state['alerted']:
@@ -291,6 +302,52 @@ def run():
                     priority='high',
                 )
                 node_state['alerted'] = True
+
+    # 2026-04-28 — periodic heartbeat log + always-fresh status file.
+    # The original watchdog logged ONLY on FAIL/RECOVERY transitions,
+    # so a healthy run was indistinguishable from a crashed cron job
+    # when scanning the log file. Two additions, both purely
+    # observational (no impact on alerting):
+    #
+    # 1. Status file (.watchdog_last_run.json) — overwritten every
+    #    run with timestamp + per-node summary. `stat` confirms the
+    #    cron tick fired; `cat` confirms what it found. Always fresh.
+    #
+    # 2. Heartbeat log line — written every N minutes (default 30)
+    #    so an operator scanning watchdog.log sees evidence of life
+    #    even when nothing's failing. ~48 lines/day at 30-min cadence.
+    try:
+        last_hb_iso = state.get('_last_heartbeat_log', '')
+        write_hb = True
+        if last_hb_iso:
+            try:
+                last_hb = datetime.fromisoformat(last_hb_iso)
+                now_dt = datetime.now(timezone.utc)
+                if (now_dt - last_hb).total_seconds() < HEARTBEAT_LOG_INTERVAL_MIN * 60:
+                    write_hb = False
+            except Exception:
+                pass
+        if write_hb:
+            summary_str = ' '.join(f'{k}={v}' for k, v in run_summary.items()) or 'no-nodes'
+            log.info(f"heartbeat — {summary_str}")
+            state['_last_heartbeat_log'] = now
+    except Exception as _e:
+        log.debug(f"heartbeat log skipped: {_e}")
+
+    # Status file — always written, always overwrites. Uses tmp-then-
+    # rename so a partial write never leaves a corrupt file.
+    try:
+        import json as _json
+        tmp = LAST_RUN_FILE.with_suffix('.tmp')
+        with open(tmp, 'w') as f:
+            _json.dump({
+                'last_run_utc': now,
+                'nodes':        run_summary,
+                'ignore_list':  list(IGNORE_LIST),
+            }, f, indent=2)
+        tmp.replace(LAST_RUN_FILE)
+    except Exception as _e:
+        log.debug(f"status file write skipped: {_e}")
 
     save_state(state)
 
