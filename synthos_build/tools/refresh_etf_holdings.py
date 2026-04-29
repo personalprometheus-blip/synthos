@@ -51,15 +51,19 @@ SPDR_HOLDINGS_URL = (
 )
 
 # Sectors we screen. Keys must match SECTOR_CONFIG in
-# retail_sector_screener.py exactly.
+# retail_sector_screener.py EXACTLY — note the screener uses
+# Yahoo/Morningstar-style names ("Financial Services", "Consumer
+# Cyclical", "Consumer Defensive") rather than S&P standard names.
+# Mismatching the keys here against SECTOR_CONFIG produces a false
+# "all 10 added" diff report that masks real drift.
 SPDR_SECTORS = {
     "Energy":                  "xle",
     "Technology":              "xlk",
-    "Financials":              "xlf",
+    "Financial Services":      "xlf",   # NOT "Financials"
     "Healthcare":              "xlv",
     "Industrials":             "xli",
-    "Consumer Discretionary":  "xly",
-    "Consumer Staples":        "xlp",
+    "Consumer Cyclical":       "xly",   # NOT "Consumer Discretionary"
+    "Consumer Defensive":      "xlp",   # NOT "Consumer Staples"
     "Basic Materials":         "xlb",
     "Utilities":               "xlu",
     "Real Estate":             "xlre",
@@ -70,15 +74,16 @@ SPDR_SECTORS = {
 # To enable, fill in the numeric product IDs from each fund's iShares
 # page URL (e.g. /products/239507/...) and uncomment the cross-check
 # in main(). Different fund family, different methodology — only the
-# top-name *identity* should be compared, never weights.
+# top-name *identity* should be compared, never weights. Keys mirror
+# the screener's SECTOR_CONFIG keys.
 ISHARES_SECTORS = {
     "Energy":                  ("IYE", None),  # TODO: product_id
     "Technology":              ("IYW", None),
-    "Financials":              ("IYF", None),
+    "Financial Services":      ("IYF", None),
     "Healthcare":              ("IYH", None),
     "Industrials":             ("IYJ", None),
-    "Consumer Discretionary":  ("IYC", None),
-    "Consumer Staples":        ("IYK", None),
+    "Consumer Cyclical":       ("IYC", None),
+    "Consumer Defensive":      ("IYK", None),
     "Basic Materials":         ("IYM", None),
     "Utilities":               ("IDU", None),
     "Real Estate":             ("IYR", None),
