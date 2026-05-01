@@ -208,6 +208,45 @@ def _shared_db():
     return get_shared_db()
 
 
+def _vix_from_macro_regime():
+    """Read the current VIX value from `_MACRO_REGIME_DETAIL` JSON written
+    by retail_macro_regime_agent. Returns float or None if unavailable
+    or stale.
+
+    Macro regime agent writes VIX (FRED VIXCLS primary, Yahoo ^VIX
+    fallback) to the detail JSON on every scan. This is real implied
+    volatility — distinct from the ATR/price proxy gate3 used before
+    this integration. Same pattern as news_agent's gate2_benchmark.
+    """
+    try:
+        sdb = _shared_db()
+        raw = sdb.get_setting('_MACRO_REGIME_DETAIL')
+        if not raw:
+            return None
+        detail = json.loads(raw)
+        vix = detail.get('vix')
+        if vix is None:
+            return None
+        # Freshness check — macro_regime runs daily; anything older than
+        # MACRO_REGIME_FRESH_HOURS means the agent missed its window and
+        # the ATR fallback is safer than acting on stale VIX.
+        ts = detail.get('timestamp')
+        if ts:
+            try:
+                ts_dt = datetime.strptime(ts.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                age_h = (datetime.now(timezone.utc).replace(tzinfo=None) - ts_dt
+                         ).total_seconds() / 3600.0
+                if age_h > C.MACRO_REGIME_FRESH_HOURS:
+                    log.debug(f"_MACRO_REGIME_DETAIL stale ({age_h:.1f}h) — using ATR proxy")
+                    return None
+            except (ValueError, TypeError):
+                pass
+        return float(vix)
+    except Exception as e:
+        log.debug(f"_vix_from_macro_regime read failed: {e}")
+        return None
+
+
 def _mark_signal_evaluated(signal_id, reason: str = ''):
     """Mark a QUEUED signal as EVALUATED so it is not re-processed on future runs.
 
@@ -271,10 +310,20 @@ class TradingControls:
     BENCHMARK_VOL_THRESHOLD   = float(os.environ.get('BENCHMARK_VOL_THRESHOLD', '0.018'))
 
     # Regime (Gate 3)
+    # VOL_HIGH_THRESHOLD (ATR/price ratio) is the fallback when VIX is
+    # unavailable. When _MACRO_REGIME_DETAIL.vix is fresh, gate3 uses
+    # the VIX_HIGH/LOW thresholds below (CBOE convention) instead.
     VOL_HIGH_THRESHOLD        = float(os.environ.get('VOL_HIGH_THRESHOLD', '0.020'))
     MA_FLAT_THRESHOLD         = float(os.environ.get('MA_FLAT_THRESHOLD', '0.005'))
     CORR_SPIKE_THRESHOLD      = float(os.environ.get('CORR_SPIKE_THRESHOLD', '0.75'))
-    # TODO: DATA_DEPENDENCY — VIX_HIGH_THRESHOLD requires VIX data feed
+    # Real-VIX thresholds — used by gate3_regime when FRED VIXCLS / Yahoo
+    # VIX is available via the macro_regime agent's _MACRO_REGIME_DETAIL
+    # setting. CBOE convention: <15 calm, 15-25 normal, ≥25 elevated.
+    VIX_HIGH_THRESHOLD        = float(os.environ.get('VIX_HIGH_THRESHOLD', '25.0'))
+    VIX_LOW_THRESHOLD         = float(os.environ.get('VIX_LOW_THRESHOLD',  '15.0'))
+    # Macro regime detail must be at most this old to be trusted as a VIX
+    # source. Beyond this, fall back to the ATR proxy.
+    MACRO_REGIME_FRESH_HOURS  = int(os.environ.get('MACRO_REGIME_FRESH_HOURS', '36'))
     # TODO: DATA_DEPENDENCY — RISK_OFF detection using bonds/credit spreads (TLT proxy in use)
 
     # Trade Eligibility (Gate 4)
@@ -1723,15 +1772,28 @@ def gate3_regime(alpaca, mode: str, decision_log: TradeDecisionLog) -> RegimeSta
     atr = sum(trs[-14:]) / 14 if len(trs) >= 14 else trs[-1] if trs else 0
     vol = atr / closes[-1] if closes[-1] > 0 else 0
 
-    # Volatility regime
-    # IF vol > threshold → HIGH; ELSE NORMAL
-    # TODO: DATA_DEPENDENCY — replace with VIX when data feed available
-    if vol > C.VOL_HIGH_THRESHOLD:
-        regime.volatility = "HIGH"
-    elif vol < C.VOL_HIGH_THRESHOLD * 0.6:
-        regime.volatility = "LOW"
+    # Volatility regime — prefer real VIX from macro_regime agent
+    # (FRED VIXCLS primary, Yahoo ^VIX fallback). Falls back to ATR/price
+    # ratio when VIX is unavailable or stale.
+    vix_live = _vix_from_macro_regime()
+    if vix_live is not None:
+        if vix_live >= C.VIX_HIGH_THRESHOLD:
+            regime.volatility = "HIGH"
+        elif vix_live < C.VIX_LOW_THRESHOLD:
+            regime.volatility = "LOW"
+        else:
+            regime.volatility = "NORMAL"
+        vol_source = "vix"
+        vol_value  = round(vix_live, 2)
     else:
-        regime.volatility = "NORMAL"
+        if vol > C.VOL_HIGH_THRESHOLD:
+            regime.volatility = "HIGH"
+        elif vol < C.VOL_HIGH_THRESHOLD * 0.6:
+            regime.volatility = "LOW"
+        else:
+            regime.volatility = "NORMAL"
+        vol_source = "atr_proxy"
+        vol_value  = round(vol, 4)
 
     # Trend regime
     # IF abs(ma_short - ma_long) < flat_threshold → SIDEWAYS
@@ -1752,14 +1814,18 @@ def gate3_regime(alpaca, mode: str, decision_log: TradeDecisionLog) -> RegimeSta
     regime.risk_posture = "RISK_OFF" if risk_off else "RISK_ON"
 
     decision_log.gate("3_REGIME", f"vol={regime.volatility} trend={regime.trend} posture={regime.risk_posture}", {
-        "volatility_atr_pct": f"{vol*100:.3f}%",
-        "vol_threshold":      f"{C.VOL_HIGH_THRESHOLD*100:.3f}%",
+        "vol_source":         vol_source,           # "vix" or "atr_proxy"
+        "vol_value":          vol_value,            # VIX number (e.g. 16.89) or ATR/price ratio
+        "vix_high_threshold": f"{C.VIX_HIGH_THRESHOLD:.1f}",
+        "vix_low_threshold":  f"{C.VIX_LOW_THRESHOLD:.1f}",
+        "atr_pct":            f"{vol*100:.3f}%",
+        "atr_threshold":      f"{C.VOL_HIGH_THRESHOLD*100:.3f}%",
         "ma_separation_pct":  f"{separation_pct*100:.3f}%",
         "flat_threshold":     f"{C.MA_FLAT_THRESHOLD*100:.3f}%",
         "tlt_trend":          tlt_trend,
         "risk_posture":       regime.risk_posture,
-        # TODO: DATA_DEPENDENCY — VIX, credit spreads not yet included
-    }, f"volatility={regime.volatility} trend={regime.trend} risk={regime.risk_posture}")
+        # TODO: DATA_DEPENDENCY — credit spreads (CDS/CDX) require paid data feed
+    }, f"volatility={regime.volatility}({vol_source}) trend={regime.trend} risk={regime.risk_posture}")
 
     return regime
 
@@ -1829,13 +1895,13 @@ def gate4_eligibility(signal: dict, positions: list, alpaca,
     # volatility we shouldn't absorb.
     #
     # Phase 2 currently writes ONLY 'catalyst' category flags (positive
-    # score), so in practice this check is a no-op today. It activates
-    # when the news agent starts classifying into specific categories
-    # in a future patch — the integration is here so that refinement
-    # lands in one place.
+    # score), so in practice this news-flag check is a no-op today. It
+    # activates when the news agent starts classifying into specific
+    # categories in a future patch.
     #
-    # FOMC/CPI scheduled-events calendar is still a DATA_DEPENDENCY
-    # TODO; this check covers the news-flagged portion only.
+    # The FOMC/CPI scheduled-events calendar is wired below (Phase 5.a)
+    # via retail_event_calendar.check_event_risk(), which handles the
+    # prospective "about to happen" side that news_flags doesn't cover.
     event_risk_categories = {
         'earnings_miss', 'earnings_raise',   # recent earnings = volatility
         'regulatory_probe', 'litigation',
