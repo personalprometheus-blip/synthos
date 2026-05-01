@@ -245,8 +245,36 @@ def _age_minutes(ts_str):
 #  Read _FAULT_SCAN_LAST from master DB (written by Fault Detection Agent)
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate1_system_health(report: ValidationReport, master_db):
-    """Check system health from Fault Detection Agent output."""
+def _finding_applies_to_customer(code: str, short_id: str) -> bool:
+    """True if a fault-finding code applies to the current customer.
+
+    Fault detection's audit (agent 6) added per-customer suffixes to
+    several codes — EQUITY_ZERO_<short_id>, KILL_SWITCH_ON_<short_id>,
+    ORPHAN_POSITION_<short_id>, ALPACA_AUTH_FAIL_<short_id>,
+    WAL_BLOAT_CUST_<short_id>, ACCOUNT_CHECK_FAIL_<short_id>. Without
+    this filter the validator treats ALL findings as global, so one
+    customer's Alpaca 401 flags every other customer NO_GO.
+
+    A code "applies to" the current customer when:
+      - it has no 8-char hex short_id suffix (system-wide finding), OR
+      - the trailing 8-char short_id matches `short_id`.
+    Findings tagged for OTHER customers are skipped.
+    """
+    if not code:
+        return False
+    # Codes ending with "_<8 hex chars>" are per-customer.
+    parts = code.rsplit('_', 1)
+    if len(parts) == 2 and len(parts[1]) == 8 and all(
+            c in '0123456789abcdef' for c in parts[1].lower()):
+        return parts[1] == short_id
+    return True   # no per-customer suffix = system-wide, applies to everyone
+
+
+def gate1_system_health(report: ValidationReport, master_db, customer_id=None):
+    """Check system health from Fault Detection Agent output. Per-customer
+    fault findings (those with a `_<short_id>` suffix) are filtered to
+    only those matching `customer_id` so one customer's broken Alpaca
+    creds doesn't NO_GO everyone."""
     log.info("[GATE 1] System health check")
 
     raw = master_db.get_setting('_FAULT_SCAN_LAST')
@@ -286,12 +314,18 @@ def gate1_system_health(report: ValidationReport, master_db):
         ))
         return
 
-    # Evaluate severity, filtering out informational-only codes that
-    # shouldn't gate the trader. worst_severity and the raw counts in the
-    # payload are overstated for our purposes because fault detection
-    # catches data-quality observations (stale signals, log bloat) that
-    # nobody should act on — we re-count actionable findings here.
-    findings = scan.get('findings', [])
+    # Evaluate severity, filtering out:
+    #   1. Findings tagged for OTHER customers (per-customer suffix
+    #      doesn't match this run's customer)
+    #   2. Informational-only codes that shouldn't gate the trader
+    # worst_severity and the raw counts in the payload reflect the
+    # entire fleet's findings; we re-count what actually applies to
+    # this specific customer.
+    short_id = (customer_id or 'master')[:8] if customer_id else 'master'
+    findings = [
+        f for f in scan.get('findings', [])
+        if _finding_applies_to_customer(f.get('code', ''), short_id)
+    ]
     critical_findings = [
         f for f in findings
         if f.get('severity') == 'CRITICAL'
@@ -741,7 +775,7 @@ def run_for_customer(customer_id):
 
     # ── Gate 1: System health ─────────────────────────────────────────
     try:
-        gate1_system_health(report, master)
+        gate1_system_health(report, master, customer_id=customer_id)
     except Exception as e:
         log.error(f"Gate 1 failed: {e}", exc_info=True)
         report.add(GateResult("GATE1_SYSTEM_HEALTH", GateStatus.CAUTION,
