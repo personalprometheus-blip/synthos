@@ -36,7 +36,6 @@ import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from pathlib import Path
 from dotenv import load_dotenv
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -44,6 +43,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_shared import emit_admin_alert, get_active_customers
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET = ZoneInfo("America/New_York")
@@ -55,7 +55,14 @@ _CUSTOMER_ID      = None   # set from --customer-id arg
 FAULT_SCAN_STALE_MINUTES  = 120   # fault scan older than 2h = degraded
 BIAS_SCAN_STALE_MINUTES   = 120   # bias scan older than 2h = ignore (pass-through)
 MARKET_STATE_STALE_MINUTES = 60   # market state older than 1h = degraded
-MACRO_REGIME_STALE_HOURS   = 24   # macro regime older than 24h = degraded
+# Macro regime is daily — 48h tolerates a weekend gap. The agent runs
+# pre-market each weekday; a successful Monday 8:30 ET run refreshes the
+# timestamp before validator first runs at 9:30. Without weekend
+# tolerance, every Monday morning validator marked the regime stale even
+# though Friday's classification was the freshest data we could possibly
+# have. agent 8's MACRO_REGIME_DEGRADED admin_alert (streak counter)
+# catches the genuine "agent has been failing" case independently.
+MACRO_REGIME_STALE_HOURS   = 48
 
 # Defensive sectors allowed during CONTRACTION regime
 DEFENSIVE_SECTORS = {'BIL', 'XLU', 'XLP', 'SHV', 'TLT', 'SGOV'}
@@ -74,12 +81,40 @@ INFORMATIONAL_FAULT_CODES = frozenset({
     'LOG_BLOAT',             # rotate/archive, never affects trading
     'SECTOR_DATA_INCOMPLETE',# data quality — backfill agent handles async
 })
-INFORMATIONAL_BIAS_CODES = frozenset({
-    'SECTOR_DATA_INCOMPLETE',  # data quality (now INFO-level in bias agent, kept here for belt-and-suspenders)
+
+# Bias codes since the agent-7 audit carry a `_<short_id>` suffix
+# (e.g. DISPOSITION_EFFECT_30eff008) so per-customer dedup works on
+# admin_alerts. We match against the base prefix here so the filter
+# survives the suffix. Listed without suffix; _is_informational_bias_code
+# does the prefix match.
+INFORMATIONAL_BIAS_CODE_PREFIXES = (
+    'SECTOR_DATA_INCOMPLETE',  # data quality (INFO-level in bias agent, belt-and-suspenders here)
     'DISPOSITION_EFFECT',      # behavioral observation — worth surfacing but shouldn't stop trades
     'DISPOSITION_OK',          # pass-through OK finding
     'TOO_FEW_CLOSED',          # explicitly-N/A finding from gate5
-})
+    'ONE_SIDED_RESULTS',       # gate3 N/A — all winners or all losers in window
+    'ONE_SIDED',               # gate5 N/A — same shape
+    'LOSS_AVERSION_OK',        # gate3 pass-through
+    'RECENCY_OK',              # gate2 pass-through
+    'TRADE_FREQ_OK',           # gate4 pass-through
+    'NO_TRADES',               # gate4 N/A — no trades in window
+    'NO_POSITIONS',            # gate1 N/A — no open positions
+    'NO_CLASSIFIED_SECTORS',   # gate1 N/A — only reserves/unknowns
+    'SECTOR_BALANCED',         # gate1 pass-through
+    'ZERO_VALUE',              # gate1 N/A
+    'TOO_FEW_TRADES',          # gate2 N/A
+)
+
+
+def _is_informational_bias_code(code: str) -> bool:
+    """True if a bias-finding code matches a base prefix listed in
+    INFORMATIONAL_BIAS_CODE_PREFIXES. Handles per-customer suffixes
+    (e.g. DISPOSITION_EFFECT_30eff008) so the validator filter keeps
+    working after the agent-7 audit added customer-scoped codes."""
+    if not code:
+        return False
+    return any(code == p or code.startswith(p + '_')
+               for p in INFORMATIONAL_BIAS_CODE_PREFIXES)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -367,7 +402,7 @@ def gate2_bias_guard(report: ValidationReport, cust_db):
         code = f.get('code', '')
         bias_type = f.get('type', code)
 
-        if code in INFORMATIONAL_BIAS_CODES:
+        if _is_informational_bias_code(code):
             info_findings += 1
             continue
 
@@ -568,11 +603,18 @@ MACRO_REGIME_MAP = {
 
 
 def gate4_macro_regime(report: ValidationReport, master_db):
-    """Check macro regime from Macro Regime Agent output."""
+    """Check macro regime from Macro Regime Agent output.
+
+    Reads `_MACRO_REGIME` (bare regime label) and `_MACRO_REGIME_UPDATED`
+    (ISO timestamp) from the shared DB. Pre-2026-05 the macro_regime agent
+    was assumed to potentially write JSON, so this gate had a 12-line
+    JSON-parse path that never fired (agent-8 has always written a plain
+    string). Simplified now — just read the label and the dedicated
+    timestamp setting.
+    """
     log.info("[GATE 4] Macro regime guard")
 
     raw = master_db.get_setting('_MACRO_REGIME')
-
     if not raw:
         # No macro data — pass-through (don't block on missing data)
         log.info("  No macro regime data — pass-through")
@@ -583,19 +625,7 @@ def gate4_macro_regime(report: ValidationReport, master_db):
         ))
         return
 
-    # Try to parse as JSON (may be a simple string or a JSON object)
-    regime = None
-    regime_ts = None
-    try:
-        data = json.loads(raw)
-        if isinstance(data, dict):
-            regime = data.get('regime', data.get('state', '')).upper().strip()
-            regime_ts = data.get('timestamp', data.get('updated_at', ''))
-        elif isinstance(data, str):
-            regime = data.upper().strip()
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        regime = raw.upper().strip()
-
+    regime = str(raw).upper().strip()
     if not regime:
         log.info("  Macro regime data empty — pass-through")
         report.add(GateResult(
@@ -605,9 +635,10 @@ def gate4_macro_regime(report: ValidationReport, master_db):
         ))
         return
 
-    # Check staleness if we have a timestamp
-    if not regime_ts:
-        regime_ts = master_db.get_setting('_MACRO_REGIME_UPDATED')
+    # Staleness — _MACRO_REGIME_UPDATED is the dedicated timestamp added
+    # in the agent-8 audit. Pre-fix the validator would silently treat
+    # missing-timestamp as "fresh" (age=None skipped the > comparison).
+    regime_ts = master_db.get_setting('_MACRO_REGIME_UPDATED')
     age = _age_minutes(regime_ts)
     if age is not None and age > MACRO_REGIME_STALE_HOURS * 60:
         log.info(f"  Macro regime stale ({int(age)}m) — pass-through")
@@ -675,19 +706,17 @@ def gate5_final_verdict(report: ValidationReport):
 # ══════════════════════════════════════════════════════════════════════════
 
 def _get_active_customer_ids():
-    """Get all active customer IDs from the auth database."""
-    try:
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active', True)]
-    except Exception as e:
-        log.warning(f"Could not load customer list: {e}")
-        # Fallback: scan data/customers directory
-        customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
-        if os.path.isdir(customers_dir):
-            return [d for d in os.listdir(customers_dir)
-                    if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
-        return []
+    """Active customer IDs (delegates to retail_shared.get_active_customers).
+    Falls back to scanning data/customers/ when auth is unreachable so the
+    validator can still run on cached customer state."""
+    ids = get_active_customers()
+    if ids:
+        return ids
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    if os.path.isdir(customers_dir):
+        return [d for d in os.listdir(customers_dir)
+                if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
+    return []
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -775,24 +804,36 @@ def run_for_customer(customer_id):
     # ── Admin alerts for NO_GO ────────────────────────────────────────
     # Validator NO_GO means the system decided this customer can't trade
     # right now — a plumbing issue the customer can't fix. Route to the
-    # shared admin_alerts stream on the master DB so admin sees it and
-    # the customer's bell stays clean.
+    # shared admin_alerts stream on the master DB via emit_admin_alert
+    # so per-customer codes are deduped independently (12h window). Was
+    # previously a raw add_admin_alert call with a non-customer-scoped
+    # code, which produced N alerts every cycle for N active customers.
     if verdict == GateStatus.NO_GO:
         no_go_gates = [g for g in report.gates if g.status == GateStatus.NO_GO]
         body_lines = [f"- {g.gate}: {g.message}" for g in no_go_gates]
-        try:
-            _master_db().add_admin_alert(
-                category='validator',
-                severity='CRITICAL',
-                title='Trading Blocked — Validator NO_GO',
-                body='\n'.join(body_lines),
-                source_agent='validator_stack_agent',
-                source_customer_id=OWNER_CUSTOMER_ID if not _CUSTOMER_ID else _CUSTOMER_ID,
-                code='VALIDATOR_NO_GO',
-                meta={"verdict": verdict, "restrictions": restrictions},
-            )
-        except Exception as e:
-            log.warning(f"Failed to write validator admin alert: {e}")
+        # Synthesise a Finding-shaped object for the shared alert router.
+        # customer_id and per-customer code suffix ensure each customer
+        # gets independent dedup tracking.
+        from types import SimpleNamespace
+        f = SimpleNamespace(
+            severity="CRITICAL",
+            code=f"VALIDATOR_NO_GO_{short_id}",
+            gate="GATE5_VERDICT",
+            message=f"{short_id}: Trading blocked — Validator NO_GO",
+            detail='\n'.join(body_lines),
+            meta={
+                "verdict":      verdict,
+                "restrictions": restrictions,
+                "customer_id":  customer_id,
+            },
+            customer_id=customer_id,
+        )
+        emit_admin_alert(
+            _master_db(), f,
+            source_agent='validator_stack_agent',
+            category='validator',
+            fallback_customer_id=customer_id,
+        )
 
     # ── Lifecycle: COMPLETE ───────────────────────────────────────────
     summary = report.summary()
