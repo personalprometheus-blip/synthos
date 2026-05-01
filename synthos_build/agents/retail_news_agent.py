@@ -3108,6 +3108,452 @@ def _handle_screening_requests(db):
     log.info(f"Screening news audit written: {audit_path}")
 
 
+# ── PER-ITEM CLASSIFICATION ───────────────────────────────────────────────
+# Extracted 2026-05-01 from a 600-line run() to keep the orchestration
+# layer readable. Behavior is identical to the inline version it
+# replaces — the function is a one-to-one move with no logic changes.
+
+def _classify_one_item(item, ctrl, regime, db, seen_headlines):
+    """Run a single fetched news item through the 22-gate pipeline.
+
+    Side-effect order (preserved from the original inline implementation):
+      NDL → news_feed write → upsert_signal → signal annotation →
+      announce_for_interrogation → log_signal_decision → news_flags →
+      post_to_company_pi → queue_signal_for_trader / discard_signal.
+
+    `seen_headlines` is mutated by gate1_system (appends accepted headlines)
+    and read by gates 1, 6, 8 for cross-item dedup. Return value is a
+    counter delta the caller adds to running totals:
+        {'new_signals': int, 'queued': int, 'discarded': int, 'skipped': int}
+    """
+    headline    = (item.get("headline") or "").strip()
+    source_tier = item.get("source_tier", 2)
+
+    ndl = NewsDecisionLog(
+        headline    = headline,
+        source      = item.get("source", ""),
+        source_tier = source_tier,
+        ticker      = item.get("ticker"),
+    )
+    state = ArticleState()
+
+    # ── Gate 1: System ────────────────────────────────────────────────
+    if not gate1_system(item, ctrl, ndl, seen_headlines, state):
+        ndl.decide("DISCARD", "NOISE", "gate1_system halt")
+        ndl.commit(db)
+        return {'new_signals': 0, 'queued': 0, 'discarded': 0, 'skipped': 1}
+
+    # ── Copy benchmark regime into state ──────────────────────────────
+    state.trend_state      = regime.trend
+    state.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
+    state.drawdown_state   = regime.drawdown_active
+    state.momentum_state   = regime.momentum
+
+    # ── Gate 3: Source relevance ──────────────────────────────────────
+    if not gate3_source_relevance(item, ctrl, ndl, state):
+        ndl.decide("DISCARD", "NOISE", "gate3_source_relevance skip")
+        ndl.commit(db)
+        return {'new_signals': 0, 'queued': 0, 'discarded': 0, 'skipped': 1}
+
+    # ── Ticker resolution ─────────────────────────────────────────────
+    ticker = extract_ticker_from_headline(
+        headline, existing_ticker=item.get("ticker")
+    )
+    if not ticker:
+        ndl.gate(0, "TICKER_RESOLUTION", {"headline": headline[:60]},
+                 "SKIP", "no ticker resolved")
+        ndl.decide("DISCARD", "NOISE", "no ticker resolved")
+        ndl.commit(db)
+        # Write no-ticker articles to news_feed for Intel page display.
+        # These are macro/regulatory news items (Fed, BEA, EDGAR, etc.)
+        # that have no stock ticker but are still informative.
+        try:
+            db.write_news_feed_entry(
+                congress_member = item.get("politician", ""),
+                ticker          = "MACRO",
+                signal_score    = "NOISE",
+                sentiment_score = None,
+                raw_headline    = headline,
+                metadata        = {
+                    "source":      item.get("source"),
+                    "source_tier": source_tier,
+                    "staleness":   "unknown",
+                    "routing":     "STALE",
+                    "is_amended":  False,
+                    "is_spousal":  False,
+                    "image_url":   item.get("image_url", ""),
+                },
+                source = "ALPACA",
+            )
+        except Exception as e:
+            log.debug(f"stale-signal insert skipped: {e}")
+        return {'new_signals': 0, 'queued': 0, 'discarded': 0, 'skipped': 1}
+    ndl.ticker = ticker
+    item["ticker"] = ticker
+
+    # ── Ancillary data ────────────────────────────────────────────────
+    is_amended = (bool(item.get("is_amended"))
+                  or any(w in headline.lower()
+                         for w in ["amend", "corrected", "revised"]))
+    is_spousal = (bool(item.get("is_spousal"))
+                  or any(w in (item.get("politician", "")).lower()
+                         for w in ["spouse", "joint", "dependent"]))
+    staleness, _discount = get_staleness(
+        item.get("tx_date", ""),
+        item.get("disc_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')),
+    )
+    item["staleness"] = staleness
+    item["is_amended"] = is_amended
+    item["is_spousal"] = is_spousal
+
+    # ── Gates 4-11 ────────────────────────────────────────────────────
+    topic     = gate4_topic(item, ctrl, ndl, state)
+    entity_s  = gate5_entity(item, topic, ctrl, ndl, state)
+    event     = gate6_event(item, ctrl, ndl, db, seen_headlines, state)
+    sentiment = gate7_sentiment(item, ctrl, ndl, state)
+    novelty   = gate8_novelty(item, sentiment, ctrl, ndl, db, seen_headlines, state)
+    scope     = gate9_scope(topic, entity_s, ctrl, ndl, state)
+    gate10_horizon(topic, event, ctrl, ndl, state)
+    gate11_benchmark_relative(sentiment, scope, regime, ctrl, ndl, state)
+
+    # ── Gates 12-16 ───────────────────────────────────────────────────
+    confirmation  = gate12_skip_confirmation(item, ctrl, ndl, db, state)
+    gate13_timing(item, ctrl, ndl, state)
+    gate14_skip_crowding(item, ctrl, ndl, db, state)
+    contradiction = gate15_skip_contradiction(item, ctrl, ndl, state)
+    gate16_impact_magnitude(scope, topic, regime, ctrl, ndl, state)
+
+    # ── Gate 13: Timing exit ──────────────────────────────────────────
+    if not state.timing_tradeable:
+        # Write to news_feed before discarding — stale articles still appear
+        # on the Intelligence page (portal enforces a 30-article floor).
+        _cm = item.get("politician", "")
+        _mw = db.get_member_weight(_cm).get("weight", 1.0) if _cm else 1.0
+        _bc = _state_to_confidence(state)
+        _at, _an = apply_member_weight(_bc, _mw)
+        try:
+            db.write_news_feed_entry(
+                congress_member = _cm,
+                ticker          = ticker,
+                signal_score    = _at,
+                sentiment_score = sentiment.get("score"),
+                raw_headline    = headline,
+                metadata        = {
+                    "source":          item.get("source"),
+                    "source_tier":     source_tier,
+                    "staleness":       staleness,
+                    "routing":         "STALE",
+                    "base_confidence": _bc,
+                    "member_weight":   _mw,
+                    "adj_numeric":     _an,
+                    "is_amended":      is_amended,
+                    "is_spousal":      is_spousal,
+                    "ind_etf":         item.get("ind_etf", ""),
+                    "sec_etf":         item.get("sector", ""),
+                    "image_url":       item.get("image_url", ""),
+                },
+                source = "ALPACA",
+            )
+        except Exception as e:
+            log.debug(f"timing-discard insert skipped: {e}")
+        ndl.decide("DISCARD", "NOISE", "gate13_timing: article too old / not tradeable")
+        ndl.commit(db)
+        return {'new_signals': 0, 'queued': 0, 'discarded': 0, 'skipped': 1}
+
+    # ── Gates 17-22 ───────────────────────────────────────────────────
+    action = gate17_action(sentiment, novelty, confirmation, contradiction,
+                           regime, event, ctrl, ndl, state)
+    risk   = gate18_risk_discounts(action, sentiment, regime, event, ctrl, ndl, state)
+    gate19_persistence(topic, event, ctrl, ndl, state)
+    gate20_evaluation(item, action, ctrl, ndl, db, state)
+    output = gate21_output(action, risk, regime, scope, ctrl, ndl, state)
+    gate22_composite(ctrl, ndl, state)
+
+    # Routing now comes from gate22 composite (may have overridden gate21)
+    routing = state.routing
+
+    # ── Member weight (per-politician confidence multiplier) ──────────
+    # Gate 12 doesn't consume this — its placeholder logic is keyed off
+    # cross-source proxy data, not member reliability. The weight is
+    # applied directly to base_confidence below for routing.
+    congress_member = item.get("politician", "")
+    member_data     = db.get_member_weight(congress_member) if congress_member else {"weight": 1.0}
+    member_weight   = member_data.get("weight", 1.0)
+    base_confidence = _state_to_confidence(state)
+    adj_text, adj_numeric = apply_member_weight(base_confidence, member_weight)
+
+    log.info(f"{ticker} action_state={state.action_state} final_signal={state.final_signal} "
+             f"composite={state.composite_score:.3f} "
+             f"base_conf={base_confidence} weight={member_weight:.2f} "
+             f"adj={adj_text}({adj_numeric:.3f}) routing={routing}")
+
+    # ── Write to news_feed (all signals, regardless of routing) ───────
+    sector = item.get("sector", "")
+    ind_etf, sec_etf = identify_industry_etf(ticker, sector)
+    try:
+        db.write_news_feed_entry(
+            congress_member = congress_member,
+            ticker          = ticker,
+            signal_score    = adj_text,
+            sentiment_score = sentiment.get("score"),
+            raw_headline    = headline,
+            metadata        = {
+                "source":            item.get("source"),
+                "source_tier":       source_tier,
+                "staleness":         staleness,
+                "base_confidence":   base_confidence,
+                "member_weight":     member_weight,
+                "adj_numeric":       adj_numeric,
+                "is_amended":        is_amended,
+                "is_spousal":        is_spousal,
+                "ind_etf":           ind_etf,
+                "sec_etf":           sec_etf,
+                "action_state":      state.action_state,
+                "final_signal":      state.final_signal,
+                "composite_score":   state.composite_score,
+                "entity_state":      state.entity_state,
+                "horizon_state":     state.horizon_state,
+                "benchmark_rel":     state.benchmark_rel_state,
+                "signal_type":       state.signal_type,
+                "impact_score":      state.impact_score,
+                "routing":           routing,
+                "persistence_state": state.persistence_state,
+                "image_url":       item.get("image_url", ""),
+            },
+            source = "CONGRESS" if source_tier == 1 else "RSS",
+        )
+    except Exception as e:
+        log.warning(f"news_feed write failed (non-fatal): {e}")
+
+    ndl.decide(routing, adj_text, output.get("explanation", state.action_reason))
+    ndl.commit(db)
+
+    # ── Discard path ──────────────────────────────────────────────────
+    if routing == "DISCARD" or adj_text == "NOISE":
+        db.upsert_signal(
+            ticker=ticker, source=item.get("source"),
+            source_tier=source_tier, headline=headline,
+            confidence="NOISE", staleness=staleness,
+            tx_date=item.get("tx_date"), disc_date=item.get("disc_date"),
+            is_amended=is_amended, is_spousal=is_spousal,
+        )
+        return {'new_signals': 0, 'queued': 0, 'discarded': 1, 'skipped': 0}
+
+    # ── Threshold check ───────────────────────────────────────────────
+    if adj_numeric < MIN_SIGNAL_THRESHOLD:
+        log.info(f"{ticker} below MIN_SIGNAL_THRESHOLD "
+                 f"({adj_numeric:.3f} < {MIN_SIGNAL_THRESHOLD}) — dropping")
+        return {'new_signals': 0, 'queued': 0, 'discarded': 1, 'skipped': 0}
+
+    # ── Pull 1yr price history ────────────────────────────────────────
+    price_summary, tickers_pulled = fetch_price_history_1yr(ticker, ind_etf, sec_etf)
+    price_history_used = ",".join(tickers_pulled) if tickers_pulled else ""
+
+    # ── Write signal to DB ────────────────────────────────────────────
+    sig_id = db.upsert_signal(
+        ticker        = ticker,
+        company       = item.get("company"),
+        sector        = sector,
+        source        = item.get("source"),
+        source_tier   = source_tier,
+        headline      = headline,
+        politician    = congress_member,
+        tx_date       = item.get("tx_date"),
+        disc_date     = item.get("disc_date"),
+        amount_range  = str(item.get("amount", "")),
+        confidence    = adj_text,
+        staleness     = staleness,
+        corroborated  = confirmation.get("confirmed", False),
+        corroboration_note = output.get("explanation"),
+        is_amended    = is_amended,
+        is_spousal    = is_spousal,
+        image_url     = item.get("image_url"),
+        source_url    = item.get("source_url"),
+    )
+    if not sig_id:
+        return {'new_signals': 0, 'queued': 0, 'discarded': 0, 'skipped': 0}
+
+    # Annotate with score and price history
+    try:
+        with db.conn() as c:
+            c.execute("""
+                UPDATE signals
+                SET entry_signal_score = ?, price_history_used = ?, updated_at = ?
+                WHERE id = ?
+            """, (adj_text, price_history_used, db.now(), sig_id))
+    except Exception as e:
+        log.warning(f"Signal annotation failed (non-fatal): {e}")
+
+    # ── Interrogation broadcast (only for trade candidates, not WATCH) ─
+    if routing == "QUEUE":
+        price_summary_for_announce = dict(price_summary) if price_summary else {}
+        validated = announce_for_interrogation(sig_id, ticker, price_summary_for_announce)
+        interrogation_status = "VALIDATED" if validated else "UNVALIDATED"
+        del price_summary_for_announce
+    else:
+        interrogation_status = "SKIPPED"
+    del price_summary
+
+    try:
+        with db.conn() as c:
+            c.execute(
+                "UPDATE signals SET interrogation_status = ?, updated_at = ? WHERE id = ?",
+                (interrogation_status, db.now(), sig_id)
+            )
+        # Decision-log row so the full validation chain is replayable from
+        # one table. cycle_id is picked up from SYNTHOS_CYCLE_ID env var
+        # set by the daemon at enrichment start.
+        db.log_signal_decision(
+            agent='news', action='STAMPED_TICKER',
+            ticker=ticker, signal_id=sig_id,
+            value=interrogation_status,
+            reason=f"routing={routing} adj={adj_text}",
+        )
+    except Exception as e:
+        log.warning(f"interrogation_status write failed (non-fatal): {e}")
+
+    # ── news_flags write (Phase 2 of TRADER_RESTRUCTURE_PLAN) ─────────
+    # Write a durable annotation alongside the signal row so the trader
+    # (Phase 3) can consult news_flags at Gate 4 EVENT_RISK and Gate 5
+    # composite. Phase 2 scope is limited: always use the generic
+    # 'catalyst' category and the signal's adjusted numeric score as
+    # the flag score (positive magnitude only — direction inference is
+    # Phase 3 work via sentiment/regime). Non-fatal: failure here does
+    # not block signal ingestion.
+    try:
+        db.write_news_flag(
+            ticker           = ticker,
+            category         = 'catalyst',
+            score            = float(adj_numeric),
+            notes            = (headline or '')[:200],
+            source_signal_id = sig_id,
+        )
+    except Exception as e:
+        log.warning(f"news_flags write failed (non-fatal) for {ticker}: {e}")
+
+    # ── Post to company Pi ────────────────────────────────────────────
+    post_to_company_pi(
+        ticker               = ticker,
+        signal_id            = sig_id,
+        congress_member      = congress_member,
+        adjusted_score       = adj_text,
+        headline             = headline,
+        price_summary        = None,
+        interrogation_status = interrogation_status,
+    )
+
+    # ── Route to Trade Logic ──────────────────────────────────────────
+    if routing in ("QUEUE", "WATCH"):
+        db.queue_signal_for_trader(sig_id)
+        log.info(f"Routed to Trade Logic: {ticker} routing={routing} adj={adj_text} "
+                 f"{interrogation_status}")
+        return {'new_signals': 1, 'queued': 1, 'discarded': 0, 'skipped': 0}
+    else:
+        db.discard_signal(sig_id, reason=output.get("explanation", "gate22 discard"))
+        return {'new_signals': 1, 'queued': 0, 'discarded': 1, 'skipped': 0}
+
+
+# ── WATCH RE-EVALUATION ───────────────────────────────────────────────────
+
+def _reeval_watch_signal(sig, ctrl, regime, db):
+    """Run a single existing WATCH signal back through the 22-gate pipeline
+    (without ticker resolution / news_feed write / signal upsert — the
+    signal already exists). Used by re-eval phase to promote stale WATCH
+    rows to QUEUE or move them to DISCARD.
+
+    Returns dict: {'queued': 0|1, 'discarded': 0|1, 'reeval': 1}.
+    """
+    log.info(f"Re-evaluating WATCH signal: {sig['ticker']} T{sig['source_tier']} (id={sig['id']})")
+    reeval_item = {
+        "headline":    sig.get("headline", ""),
+        "subhead":     "",
+        "source":      sig.get("source", ""),
+        "source_tier": sig.get("source_tier", 2),
+        "ticker":      sig.get("ticker", ""),
+        "disc_date":   sig.get("disc_date", ""),
+        "tx_date":     sig.get("tx_date", ""),
+        "politician":  sig.get("politician", ""),
+    }
+    ndl_re = NewsDecisionLog(
+        headline=reeval_item["headline"], source=reeval_item["source"],
+        source_tier=reeval_item["source_tier"], ticker=reeval_item["ticker"]
+    )
+    ndl_re.note("re-evaluation of WATCH signal")
+
+    state_re = ArticleState()
+    state_re.trend_state      = regime.trend
+    state_re.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
+    state_re.drawdown_state   = regime.drawdown_active
+    state_re.momentum_state   = regime.momentum
+
+    topic_re         = gate4_topic(reeval_item, ctrl, ndl_re, state_re)
+    entity_re        = gate5_entity(reeval_item, topic_re, ctrl, ndl_re, state_re)
+    event_re         = gate6_event(reeval_item, ctrl, ndl_re, db, [], state_re)
+    sentiment_re     = gate7_sentiment(reeval_item, ctrl, ndl_re, state_re)
+    novelty_re       = gate8_novelty(reeval_item, sentiment_re, ctrl, ndl_re, db, [], state_re)
+    scope_re         = gate9_scope(topic_re, entity_re, ctrl, ndl_re, state_re)
+    gate10_horizon(topic_re, event_re, ctrl, ndl_re, state_re)
+    gate11_benchmark_relative(sentiment_re, scope_re, regime, ctrl, ndl_re, state_re)
+    confirmation_re  = gate12_skip_confirmation(reeval_item, ctrl, ndl_re, db, state_re)
+    gate13_timing(reeval_item, ctrl, ndl_re, state_re)
+    gate14_skip_crowding(reeval_item, ctrl, ndl_re, db, state_re)
+    contradiction_re = gate15_skip_contradiction(reeval_item, ctrl, ndl_re, state_re)
+    gate16_impact_magnitude(scope_re, topic_re, regime, ctrl, ndl_re, state_re)
+    action_re        = gate17_action(sentiment_re, novelty_re, confirmation_re,
+                                     contradiction_re, regime, event_re, ctrl, ndl_re, state_re)
+    risk_re          = gate18_risk_discounts(action_re, sentiment_re, regime, event_re,
+                                             ctrl, ndl_re, state_re)
+    gate19_persistence(topic_re, event_re, ctrl, ndl_re, state_re)
+    gate20_evaluation(reeval_item, action_re, ctrl, ndl_re, db, state_re)
+    output_re        = gate21_output(action_re, risk_re, regime, scope_re, ctrl, ndl_re, state_re)
+    gate22_composite(ctrl, ndl_re, state_re)
+
+    with db.conn() as c:
+        c.execute("UPDATE signals SET needs_reeval=0, updated_at=? WHERE id=?",
+                  (db.now(), sig["id"]))
+
+    ndl_re.decide(state_re.routing, output_re["confidence"],
+                  output_re.get("explanation", state_re.action_reason))
+    ndl_re.commit(db)
+
+    if state_re.routing == "QUEUE":
+        db.queue_signal_for_trader(sig["id"])
+        log.info(f"Re-eval promoted to queue: {sig['ticker']}")
+        return {'queued': 1, 'discarded': 0, 'reeval': 1}
+    elif state_re.routing == "DISCARD":
+        db.discard_signal(sig["id"],
+                          reason=output_re.get("explanation", "re-eval discard"))
+        log.info(f"Re-eval discarded: {sig['ticker']}")
+        return {'queued': 0, 'discarded': 1, 'reeval': 1}
+    return {'queued': 0, 'discarded': 0, 'reeval': 1}
+
+
+def _run_reeval_phase(db, ctrl, regime):
+    """Pull WATCH signals flagged needs_reeval=1 and run each through the
+    re-eval helper. Returns aggregate counter deltas."""
+    counters = {'queued': 0, 'discarded': 0, 'reeval': 0}
+    try:
+        with db.conn() as c:
+            watching = c.execute("""
+                SELECT * FROM signals
+                WHERE status IN ('PENDING','WATCHING')
+                  AND source_tier IN (2, 3)
+                  AND needs_reeval = 1
+                  AND expires_at > ?
+                ORDER BY created_at ASC
+                LIMIT 10
+            """, (db.now(),)).fetchall()
+            watching = [dict(r) for r in watching]
+
+        for sig in watching:
+            delta = _reeval_watch_signal(sig, ctrl, regime, db)
+            for k, v in delta.items():
+                counters[k] = counters.get(k, 0) + v
+    except Exception as e:
+        log.warning(f"Re-evaluation step failed: {e}")
+    return counters
+
+
 def run(session="market"):
     db   = _db()
     ctrl = ResearchControls()
@@ -3288,427 +3734,17 @@ def run(session="market"):
     seen_headlines = []   # for duplicate detection within this run
 
     for item in all_raw:
-        headline    = (item.get("headline") or "").strip()
-        source_tier = item.get("source_tier", 2)
-
-        ndl = NewsDecisionLog(
-            headline    = headline,
-            source      = item.get("source", ""),
-            source_tier = source_tier,
-            ticker      = item.get("ticker"),
-        )
-
-        # ── Initialize article state ──────────────────────────────────────
-        state = ArticleState()
-
-        # ── Gate 1: System ────────────────────────────────────────────────
-        if not gate1_system(item, ctrl, ndl, seen_headlines, state):
-            ndl.decide("DISCARD", "NOISE", "gate1_system halt")
-            ndl.commit(db)
-            skipped += 1
-            continue
-
-        # ── Copy benchmark regime into state ──────────────────────────────
-        state.trend_state      = regime.trend
-        state.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
-        state.drawdown_state   = regime.drawdown_active
-        state.momentum_state   = regime.momentum
-
-        # ── Gate 3: Source relevance ──────────────────────────────────────
-        if not gate3_source_relevance(item, ctrl, ndl, state):
-            ndl.decide("DISCARD", "NOISE", "gate3_source_relevance skip")
-            ndl.commit(db)
-            skipped += 1
-            continue
-
-        # ── Ticker resolution ─────────────────────────────────────────────
-        ticker = extract_ticker_from_headline(
-            headline, existing_ticker=item.get("ticker")
-        )
-        if not ticker:
-            ndl.gate(0, "TICKER_RESOLUTION", {"headline": headline[:60]},
-                     "SKIP", "no ticker resolved")
-            ndl.decide("DISCARD", "NOISE", "no ticker resolved")
-            ndl.commit(db)
-            # Write no-ticker articles to news_feed for Intel page display.
-            # These are macro/regulatory news items (Fed, BEA, EDGAR, etc.)
-            # that have no stock ticker but are still informative.
-            try:
-                db.write_news_feed_entry(
-                    congress_member = item.get("politician", ""),
-                    ticker          = "MACRO",
-                    signal_score    = "NOISE",
-                    sentiment_score = None,
-                    raw_headline    = headline,
-                    metadata        = {
-                        "source":      item.get("source"),
-                        "source_tier": source_tier,
-                        "staleness":   "unknown",
-                        "routing":     "STALE",
-                        "is_amended":  False,
-                        "is_spousal":  False,
-                        "image_url":   item.get("image_url", ""),
-                    },
-                    source = "ALPACA",
-                )
-            except Exception as e:
-                log.debug(f"stale-signal insert skipped: {e}")
-            skipped += 1
-            continue
-        ndl.ticker = ticker
-        item["ticker"] = ticker
-
-        # ── Ancillary data ────────────────────────────────────────────────
-        is_amended = (bool(item.get("is_amended"))
-                      or any(w in headline.lower()
-                             for w in ["amend", "corrected", "revised"]))
-        is_spousal = (bool(item.get("is_spousal"))
-                      or any(w in (item.get("politician", "")).lower()
-                             for w in ["spouse", "joint", "dependent"]))
-        staleness, discount = get_staleness(
-            item.get("tx_date", ""),
-            item.get("disc_date", datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d')),
-        )
-        item["staleness"] = staleness
-        item["is_amended"] = is_amended
-        item["is_spousal"] = is_spousal
-
-        # ── Gates 4-11: Topic, entity, event, sentiment, novelty, scope,
-        #               horizon, benchmark-relative ─────────────────────────
-        topic    = gate4_topic(item, ctrl, ndl, state)
-        entity_s = gate5_entity(item, topic, ctrl, ndl, state)
-        event    = gate6_event(item, ctrl, ndl, db, seen_headlines, state)
-        sentiment = gate7_sentiment(item, ctrl, ndl, state)
-        novelty   = gate8_novelty(item, sentiment, ctrl, ndl, db, seen_headlines, state)
-        scope     = gate9_scope(topic, entity_s, ctrl, ndl, state)
-        gate10_horizon(topic, event, ctrl, ndl, state)
-        gate11_benchmark_relative(sentiment, scope, regime, ctrl, ndl, state)
-
-        # ── Gates 12-16: Confirmation, timing, crowding, contradiction,
-        #                impact magnitude ────────────────────────────────────
-        confirmation = gate12_skip_confirmation(item, ctrl, ndl, db, state)
-        timing       = gate13_timing(item, ctrl, ndl, state)
-        crowding     = gate14_skip_crowding(item, ctrl, ndl, db, state)
-        contradiction = gate15_skip_contradiction(item, ctrl, ndl, state)
-        gate16_impact_magnitude(scope, topic, regime, ctrl, ndl, state)
-
-        # ── Gate 13: Timing exit ──────────────────────────────────────────
-        if not state.timing_tradeable:
-            # Write to news_feed before discarding — stale articles still appear
-            # on the Intelligence page (portal enforces a 30-article floor).
-            _cm = item.get("politician", "")
-            _mw = db.get_member_weight(_cm).get("weight", 1.0) if _cm else 1.0
-            _bc = _state_to_confidence(state)
-            _at, _an = apply_member_weight(_bc, _mw)
-            try:
-                db.write_news_feed_entry(
-                    congress_member = _cm,
-                    ticker          = ticker,
-                    signal_score    = _at,
-                    sentiment_score = sentiment.get("score"),
-                    raw_headline    = headline,
-                    metadata        = {
-                        "source":          item.get("source"),
-                        "source_tier":     source_tier,
-                        "staleness":       staleness,
-                        "routing":         "STALE",
-                        "base_confidence": _bc,
-                        "member_weight":   _mw,
-                        "adj_numeric":     _an,
-                        "is_amended":      is_amended,
-                        "is_spousal":      is_spousal,
-                        "ind_etf":         item.get("ind_etf", ""),
-                        "sec_etf":         item.get("sector", ""),
-                        "image_url":       item.get("image_url", ""),
-                    },
-                    source = "ALPACA",
-                )
-            except Exception as e:
-                log.debug(f"timing-discard insert skipped: {e}")
-            ndl.decide("DISCARD", "NOISE", "gate13_timing: article too old / not tradeable")
-            ndl.commit(db)
-            skipped += 1
-            continue
-
-        # ── Gates 17-22: Action, risk, persistence, evaluation, output,
-        #                composite scoring ────────────────────────────────────
-        action      = gate17_action(sentiment, novelty, confirmation, contradiction,
-                                    regime, event, ctrl, ndl, state)
-        risk        = gate18_risk_discounts(action, sentiment, regime, event, ctrl, ndl, state)
-        persistence = gate19_persistence(topic, event, ctrl, ndl, state)
-        gate20_evaluation(item, action, ctrl, ndl, db, state)
-        output      = gate21_output(action, risk, regime, scope, ctrl, ndl, state)
-        gate22_composite(ctrl, ndl, state)
-
-        # Routing now comes from gate22 composite (may have overridden gate21)
-        routing = state.routing
-
-        # ── Member weight (per-politician confidence multiplier) ─────────
-        # Gate 12 doesn't consume this — its placeholder logic is keyed
-        # off cross-source proxy data, not member reliability. The weight
-        # is applied directly to base_confidence below for routing.
-        congress_member = item.get("politician", "")
-        member_data     = db.get_member_weight(congress_member) if congress_member else {"weight": 1.0}
-        member_weight   = member_data.get("weight", 1.0)
-        base_confidence = _state_to_confidence(state)
-        adj_text, adj_numeric = apply_member_weight(base_confidence, member_weight)
-
-        log.info(f"{ticker} action_state={state.action_state} final_signal={state.final_signal} "
-                 f"composite={state.composite_score:.3f} "
-                 f"base_conf={base_confidence} weight={member_weight:.2f} "
-                 f"adj={adj_text}({adj_numeric:.3f}) routing={routing}")
-
-        # ── Write to news_feed (all signals, regardless of routing) ───────
-        sector = item.get("sector", "")
-        ind_etf, sec_etf = identify_industry_etf(ticker, sector)
-        try:
-            db.write_news_feed_entry(
-                congress_member = congress_member,
-                ticker          = ticker,
-                signal_score    = adj_text,
-                sentiment_score = sentiment.get("score"),
-                raw_headline    = headline,
-                metadata        = {
-                    "source":            item.get("source"),
-                    "source_tier":       source_tier,
-                    "staleness":         staleness,
-                    "base_confidence":   base_confidence,
-                    "member_weight":     member_weight,
-                    "adj_numeric":       adj_numeric,
-                    "is_amended":        is_amended,
-                    "is_spousal":        is_spousal,
-                    "ind_etf":           ind_etf,
-                    "sec_etf":           sec_etf,
-                    "action_state":      state.action_state,
-                    "final_signal":      state.final_signal,
-                    "composite_score":   state.composite_score,
-                    "entity_state":      state.entity_state,
-                    "horizon_state":     state.horizon_state,
-                    "benchmark_rel":     state.benchmark_rel_state,
-                    "signal_type":       state.signal_type,
-                    "impact_score":      state.impact_score,
-                    "routing":           routing,
-                    "persistence_state": state.persistence_state,
-                    "image_url":       item.get("image_url", ""),
-                },
-                source = "CONGRESS" if source_tier == 1 else "RSS",
-            )
-        except Exception as e:
-            log.warning(f"news_feed write failed (non-fatal): {e}")
-
-        ndl.decide(routing, adj_text, output.get("explanation", state.action_reason))
-        ndl.commit(db)
-
-        # ── Discard path ──────────────────────────────────────────────────
-        if routing == "DISCARD" or adj_text == "NOISE":
-            db.upsert_signal(
-                ticker=ticker, source=item.get("source"),
-                source_tier=source_tier, headline=headline,
-                confidence="NOISE", staleness=staleness,
-                tx_date=item.get("tx_date"), disc_date=item.get("disc_date"),
-                is_amended=is_amended, is_spousal=is_spousal,
-            )
-            discarded += 1
-            continue
-
-        # ── Threshold check ───────────────────────────────────────────────
-        if adj_numeric < MIN_SIGNAL_THRESHOLD:
-            log.info(f"{ticker} below MIN_SIGNAL_THRESHOLD "
-                     f"({adj_numeric:.3f} < {MIN_SIGNAL_THRESHOLD}) — dropping")
-            discarded += 1
-            continue
-
-        # ── Pull 1yr price history ────────────────────────────────────────
-        price_summary, tickers_pulled = fetch_price_history_1yr(ticker, ind_etf, sec_etf)
-        price_history_used = ",".join(tickers_pulled) if tickers_pulled else ""
-
-        # ── Write signal to DB ────────────────────────────────────────────
-        sig_id = db.upsert_signal(
-            ticker        = ticker,
-            company       = item.get("company"),
-            sector        = sector,
-            source        = item.get("source"),
-            source_tier   = source_tier,
-            headline      = headline,
-            politician    = congress_member,
-            tx_date       = item.get("tx_date"),
-            disc_date     = item.get("disc_date"),
-            amount_range  = str(item.get("amount", "")),
-            confidence    = adj_text,
-            staleness     = staleness,
-            corroborated  = confirmation.get("confirmed", False),
-            corroboration_note = output.get("explanation"),
-            is_amended    = is_amended,
-            is_spousal    = is_spousal,
-            image_url     = item.get("image_url"),
-            source_url    = item.get("source_url"),
-        )
-        if not sig_id:
-            continue
-
-        new_signals += 1
-
-        # Annotate with score and price history
-        try:
-            with db.conn() as c:
-                c.execute("""
-                    UPDATE signals
-                    SET entry_signal_score = ?, price_history_used = ?, updated_at = ?
-                    WHERE id = ?
-                """, (adj_text, price_history_used, db.now(), sig_id))
-        except Exception as e:
-            log.warning(f"Signal annotation failed (non-fatal): {e}")
-
-        # ── Interrogation broadcast (only for trade candidates, not WATCH) ─
-        if routing == "QUEUE":
-            price_summary_for_announce = dict(price_summary) if price_summary else {}
-            validated = announce_for_interrogation(sig_id, ticker, price_summary_for_announce)
-            interrogation_status = "VALIDATED" if validated else "UNVALIDATED"
-            del price_summary_for_announce
-        else:
-            interrogation_status = "SKIPPED"
-        del price_summary
-
-        try:
-            with db.conn() as c:
-                c.execute(
-                    "UPDATE signals SET interrogation_status = ?, updated_at = ? WHERE id = ?",
-                    (interrogation_status, db.now(), sig_id)
-                )
-            # Decision-log row so the full validation chain is replayable from
-            # one table. cycle_id is picked up from SYNTHOS_CYCLE_ID env var
-            # set by the daemon at enrichment start.
-            db.log_signal_decision(
-                agent='news', action='STAMPED_TICKER',
-                ticker=ticker, signal_id=sig_id,
-                value=interrogation_status,
-                reason=f"routing={routing} adj={adj_text}",
-            )
-        except Exception as e:
-            log.warning(f"interrogation_status write failed (non-fatal): {e}")
-
-        # ── news_flags write (Phase 2 of TRADER_RESTRUCTURE_PLAN) ──
-        # Write a durable annotation alongside the signal row so the
-        # trader (Phase 3) can consult news_flags at Gate 4 EVENT_RISK
-        # and Gate 5 composite. Phase 2 scope is limited: always use
-        # the generic 'catalyst' category and the signal's adjusted
-        # numeric score as the flag score (positive magnitude only —
-        # direction inference is Phase 3 work via sentiment/regime).
-        # Non-fatal: failure here does not block signal ingestion.
-        try:
-            db.write_news_flag(
-                ticker           = ticker,
-                category         = 'catalyst',
-                score            = float(adj_numeric),
-                notes            = (headline or '')[:200],
-                source_signal_id = sig_id,
-            )
-        except Exception as e:
-            log.warning(f"news_flags write failed (non-fatal) for {ticker}: {e}")
-
-        # ── Post to company Pi ────────────────────────────────────────────
-        post_to_company_pi(
-            ticker               = ticker,
-            signal_id            = sig_id,
-            congress_member      = congress_member,
-            adjusted_score       = adj_text,
-            headline             = headline,
-            price_summary        = None,
-            interrogation_status = interrogation_status,
-        )
-
-        # ── Route to Trade Logic ──────────────────────────────────────────
-        if routing in ("QUEUE", "WATCH"):
-            db.queue_signal_for_trader(sig_id)
-            queued += 1
-            log.info(f"Routed to Trade Logic: {ticker} routing={routing} adj={adj_text} "
-                     f"{interrogation_status}")
-        else:
-            db.discard_signal(sig_id, reason=output.get("explanation", "gate22 discard"))
-            discarded += 1
+        delta = _classify_one_item(item, ctrl, regime, db, seen_headlines)
+        new_signals += delta.get('new_signals', 0)
+        queued      += delta.get('queued',      0)
+        discarded   += delta.get('discarded',   0)
+        skipped     += delta.get('skipped',     0)
 
     # ── Re-evaluate WATCH signals ─────────────────────────────────────────
-    reeval_count = 0
-    try:
-        with db.conn() as c:
-            watching = c.execute("""
-                SELECT * FROM signals
-                WHERE status IN ('PENDING','WATCHING')
-                  AND source_tier IN (2, 3)
-                  AND needs_reeval = 1
-                  AND expires_at > ?
-                ORDER BY created_at ASC
-                LIMIT 10
-            """, (db.now(),)).fetchall()
-            watching = [dict(r) for r in watching]
-
-        for sig in watching:
-            log.info(f"Re-evaluating WATCH signal: {sig['ticker']} T{sig['source_tier']} (id={sig['id']})")
-            reeval_item = {
-                "headline":    sig.get("headline", ""),
-                "subhead":     "",
-                "source":      sig.get("source", ""),
-                "source_tier": sig.get("source_tier", 2),
-                "ticker":      sig.get("ticker", ""),
-                "disc_date":   sig.get("disc_date", ""),
-                "tx_date":     sig.get("tx_date", ""),
-                "politician":  sig.get("politician", ""),
-            }
-            ndl_re = NewsDecisionLog(
-                headline=reeval_item["headline"], source=reeval_item["source"],
-                source_tier=reeval_item["source_tier"], ticker=reeval_item["ticker"]
-            )
-            ndl_re.note("re-evaluation of WATCH signal")
-
-            state_re = ArticleState()
-            state_re.trend_state      = regime.trend
-            state_re.volatility_state = "high_vol" if regime.volatility == "HIGH" else "normal_vol"
-            state_re.drawdown_state   = regime.drawdown_active
-            state_re.momentum_state   = regime.momentum
-
-            topic_re         = gate4_topic(reeval_item, ctrl, ndl_re, state_re)
-            entity_re        = gate5_entity(reeval_item, topic_re, ctrl, ndl_re, state_re)
-            event_re         = gate6_event(reeval_item, ctrl, ndl_re, db, [], state_re)
-            sentiment_re     = gate7_sentiment(reeval_item, ctrl, ndl_re, state_re)
-            novelty_re       = gate8_novelty(reeval_item, sentiment_re, ctrl, ndl_re, db, [], state_re)
-            scope_re         = gate9_scope(topic_re, entity_re, ctrl, ndl_re, state_re)
-            gate10_horizon(topic_re, event_re, ctrl, ndl_re, state_re)
-            gate11_benchmark_relative(sentiment_re, scope_re, regime, ctrl, ndl_re, state_re)
-            confirmation_re  = gate12_skip_confirmation(reeval_item, ctrl, ndl_re, db, state_re)
-            gate13_timing(reeval_item, ctrl, ndl_re, state_re)
-            gate14_skip_crowding(reeval_item, ctrl, ndl_re, db, state_re)
-            contradiction_re = gate15_skip_contradiction(reeval_item, ctrl, ndl_re, state_re)
-            gate16_impact_magnitude(scope_re, topic_re, regime, ctrl, ndl_re, state_re)
-            action_re        = gate17_action(sentiment_re, novelty_re, confirmation_re,
-                                             contradiction_re, regime, event_re, ctrl, ndl_re, state_re)
-            risk_re          = gate18_risk_discounts(action_re, sentiment_re, regime, event_re,
-                                                     ctrl, ndl_re, state_re)
-            gate19_persistence(topic_re, event_re, ctrl, ndl_re, state_re)
-            gate20_evaluation(reeval_item, action_re, ctrl, ndl_re, db, state_re)
-            output_re        = gate21_output(action_re, risk_re, regime, scope_re, ctrl, ndl_re, state_re)
-            gate22_composite(ctrl, ndl_re, state_re)
-
-            reeval_count += 1
-            with db.conn() as c:
-                c.execute("UPDATE signals SET needs_reeval=0, updated_at=? WHERE id=?",
-                          (db.now(), sig["id"]))
-
-            ndl_re.decide(state_re.routing, output_re["confidence"],
-                          output_re.get("explanation", state_re.action_reason))
-            ndl_re.commit(db)
-
-            if state_re.routing == "QUEUE":
-                db.queue_signal_for_trader(sig["id"])
-                queued += 1
-                log.info(f"Re-eval promoted to queue: {sig['ticker']}")
-            elif state_re.routing == "DISCARD":
-                db.discard_signal(sig["id"],
-                                  reason=output_re.get("explanation", "re-eval discard"))
-                discarded += 1
-                log.info(f"Re-eval discarded: {sig['ticker']}")
-
-    except Exception as e:
-        log.warning(f"Re-evaluation step failed: {e}")
+    reeval_delta = _run_reeval_phase(db, ctrl, regime)
+    queued      += reeval_delta.get('queued', 0)
+    discarded   += reeval_delta.get('discarded', 0)
+    reeval_count = reeval_delta.get('reeval', 0)
 
     # ── Cross-validate: boost signals that reinforce each other ──
     try:
