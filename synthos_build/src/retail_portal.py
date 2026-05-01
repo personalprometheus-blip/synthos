@@ -3187,6 +3187,11 @@ def api_get_keys():
         'RESEND_API_KEY':    _obs(os.environ.get('RESEND_API_KEY', '')),
         'LICENSE_KEY':       _obs(os.environ.get('LICENSE_KEY', '')),
         'ALERT_TO':          _obs(os.environ.get('ALERT_TO', '')),
+        # 2026-05-01 — FMP API key. Written to pi5 .env via /api/keys
+        # but absent here meant the maintenance page kept reading it
+        # as NOT SET. Adding to the response so the cmd portal's
+        # /api/get-keys read sees the obfuscated value once set.
+        'FMP_API_KEY':       _obs(os.environ.get('FMP_API_KEY', '')),
         'trading_mode':      trading_mode,
         'live_enabled':      live_enabled,
     })
