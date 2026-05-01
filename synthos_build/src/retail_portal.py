@@ -1047,10 +1047,13 @@ def _notify_admin_access_request(name: str, email: str, why: str,
 
     try:
         import requests as _req
+        # synthos_monitor's _token_authorized() reads X-Token header, NOT
+        # Bearer. Bearer is the retail_portal pattern; the command portal
+        # uses its own scheme.
         r = _req.post(
             f"{monitor_url}/api/enqueue",
             json=payload,
-            headers={"Authorization": f"Bearer {monitor_token}"},
+            headers={"X-Token": monitor_token},
             timeout=10,
         )
         if r.status_code in (200, 201):
