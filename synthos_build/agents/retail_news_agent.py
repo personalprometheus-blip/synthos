@@ -43,7 +43,7 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_shared_db, acquire_agent_lock, release_agent_lock
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 # ANTHROPIC_API_KEY removed — News agent uses no LLM in classification decisions.
@@ -243,13 +243,16 @@ class ArticleState:
     dominance_state: str = "benchmark_dominant"
     confirmation_state: str = "weak"
     confirmation_score: float = 0.0
+    confirmation_proxy: bool = True   # gate12 is placeholder until cross-source feed
     timing_state: str = "unknown"
     timing_tradeable: bool = True
     crowding_state: str = "still_open"
     crowding_discount: float = 0.0
+    crowding_proxy: bool = True       # gate14 is placeholder until social-firehose feed
     cluster_volume: int = 1
     ambiguity_state: str = "clear"
     ambiguity_score: float = 0.0
+    ambiguity_proxy: bool = True      # gate15 is placeholder until analyst-dispersion feed
     impact_magnitude: str = "low"
     impact_link_state: str = "benchmark_weak"
     base_impact_score: float = 0.0
@@ -1261,8 +1264,10 @@ def post_to_company_pi(ticker, signal_id, congress_member, adjusted_score,
     Previously swallowed every error silently — a dead company node could
     have cost us visibility into every signal for days with nobody
     noticing. Now: one WARNING on first failure, one WARNING on circuit
-    open, complete silence after that until the run ends. A run summary
-    is logged at end-of-pipeline if non-zero (TODO: wire into run() tail).
+    open, complete silence after that until the run ends. Run-end
+    summary is emitted from run() (search for "Company-post failure
+    summary") and threaded into AGENT_COMPLETE details so admin alerts
+    and the cmd portal auditor can surface a dead company node.
     """
     global _company_post_failures, _company_post_circuit_open
 
@@ -1319,6 +1324,54 @@ def _record_company_post_failure(detail: str) -> None:
 
 
 # ── SPX BENCHMARK HELPERS ─────────────────────────────────────────────────
+
+# VIX threshold for ELEVATED volatility classification. CBOE convention is
+# 15/25/35 for CALM/NORMAL/ELEVATED/CRISIS — we use 25 as the gate-2
+# trip line because volatility>=ELEVATED is what the rest of the
+# pipeline cares about (event risk, discount multipliers).
+_VIX_ELEVATED_THRESHOLD = 25.0
+
+# Macro regime detail must be at most this old to be trusted as a VIX
+# source. Beyond this we fall back to the ATR proxy.
+_MACRO_REGIME_FRESH_HOURS = 36
+
+
+def _vix_from_macro_regime():
+    """Read the current VIX value from _MACRO_REGIME_DETAIL JSON written
+    by retail_macro_regime_agent. Returns float or None if unavailable
+    or stale.
+
+    Macro regime agent writes VIX (from FRED VIXCLS, with Yahoo ^VIX as
+    fallback) to the detail JSON on every scan. This is a real
+    implied-volatility number, distinct from the ATR/price proxy that
+    gate2 used before this integration."""
+    try:
+        db = _db()
+        raw = db.get_setting('_MACRO_REGIME_DETAIL')
+        if not raw:
+            return None
+        detail = json.loads(raw)
+        vix = detail.get('vix')
+        if vix is None:
+            return None
+        # Freshness check: macro regime runs daily, so anything older than
+        # ~36h means the agent has missed its window. ATR fallback is
+        # safer than acting on stale VIX.
+        ts = detail.get('timestamp')
+        if ts:
+            try:
+                ts_dt = datetime.strptime(ts.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                age_h = (datetime.now(timezone.utc).replace(tzinfo=None) - ts_dt).total_seconds() / 3600.0
+                if age_h > _MACRO_REGIME_FRESH_HOURS:
+                    log.debug(f"_MACRO_REGIME_DETAIL is {age_h:.1f}h old — falling back to ATR proxy")
+                    return None
+            except (ValueError, TypeError):
+                pass
+        return float(vix)
+    except Exception as e:
+        log.debug(f"_vix_from_macro_regime read failed: {e}")
+        return None
+
 
 def _compute_sma(closes, window):
     """Simple moving average of last `window` closes."""
@@ -1432,7 +1485,11 @@ def gate2_benchmark(ctrl):
     Benchmark gate — compute SPX regime for the current session.
     Returns BenchmarkRegime. Called once per run, applied to all articles.
 
-    TODO: DATA_DEPENDENCY — VIX threshold not yet integrated; ATR/price used as proxy.
+    Volatility classification reads real VIX from the macro regime agent
+    (`_MACRO_REGIME_DETAIL` JSON, sourced from FRED VIXCLS with a Yahoo
+    ^VIX fallback). When VIX is unavailable or stale, falls back to the
+    ATR/price ratio proxy — preserves prior behavior on cold start or
+    macro-regime outage.
     """
     bars = _alpaca_bars(ctrl.SPX_TICKER, days=ctrl.SPX_SMA_LONG + 10)
     if not bars:
@@ -1459,9 +1516,17 @@ def gate2_benchmark(ctrl):
     else:
         trend = "neutral"
 
-    # Volatility (ATR/price ratio proxy for VIX)
-    vol_ratio = (atr / spx_price) if (atr and spx_price) else 0.0
-    volatility = "HIGH" if vol_ratio > ctrl.SPX_VOL_THRESHOLD else "NORMAL"
+    # Volatility — prefer real VIX, fall back to ATR/price proxy
+    vix_live = _vix_from_macro_regime()
+    if vix_live is not None:
+        volatility = "HIGH" if vix_live >= _VIX_ELEVATED_THRESHOLD else "NORMAL"
+        vol_source = "vix_fred"
+        vol_ratio  = round(vix_live, 2)
+    else:
+        atr_ratio  = (atr / spx_price) if (atr and spx_price) else 0.0
+        volatility = "HIGH" if atr_ratio > ctrl.SPX_VOL_THRESHOLD else "NORMAL"
+        vol_source = "atr_proxy"
+        vol_ratio  = round(atr_ratio, 4)
 
     # Drawdown
     rolling_peak    = max(closes)
@@ -1482,11 +1547,12 @@ def gate2_benchmark(ctrl):
         drawdown_active=drawdown_active, momentum=momentum,
         spx_price=spx_price,
         raw={"sma_short": sma_short, "sma_long": sma_long,
-             "vol_ratio": round(vol_ratio, 4), "drawdown": round(drawdown, 4),
-             "roc": round(roc, 5)},
+             "vol_ratio": vol_ratio, "vol_source": vol_source,
+             "drawdown": round(drawdown, 4), "roc": round(roc, 5)},
     )
     log.info(f"[GATE 2] Benchmark regime: trend={trend} vol={volatility} "
-             f"drawdown_active={drawdown_active} momentum={momentum} spx=${spx_price:.2f}")
+             f"vol_source={vol_source} drawdown_active={drawdown_active} "
+             f"momentum={momentum} spx=${spx_price:.2f}")
     return regime
 
 
@@ -1501,7 +1567,10 @@ def gate3_source_relevance(item, ctrl, ndl, state):
     +0.1 if primary source signals found (cap 1.0). -0.1 if opinion/analysis.
     Relevance: min(topic_hits/3.0, 1.0) across keyword categories.
 
-    TODO: DATA_DEPENDENCY — language detection, topic universe filtering.
+    Note: non-English content fails benignly here (no keyword hits → low
+    relevance score → discarded). The original TODO around language
+    detection was aspirational; the failure mode doesn't actually need
+    explicit detection.
     """
     source_tier = item.get("source_tier", 2)
     headline    = (item.get("headline") or "")
@@ -1679,15 +1748,21 @@ def gate5_entity(item, topic, ctrl, ndl, state):
 def gate6_event(item, ctrl, ndl, db, seen_headlines, state):
     """
     Event detection — classify the article's event type.
-    Returns dict: {event_type, breaking, follow_up, rumor, scheduled}.
+    Returns dict: {event_type, breaking, follow_up, rumor, scheduled,
+                   event_reasons, next_earnings}.
 
-    TODO: DATA_DEPENDENCY — automated event calendar integration pending.
-    Currently uses source urgency and burst count as proxies.
+    Scheduled-event detection now uses retail_event_calendar.check_event_risk
+    against the populated earnings_cache (Nasdaq daily refresh) and
+    macro_events table (FOMC/CPI/NFP). Pre-fix this gate just used
+    `source_tier == 1` as a proxy — every Fed release was tagged
+    "scheduled" regardless of whether the article's actual ticker had a
+    real upcoming event.
     """
     headline    = item.get("headline", "")
     source_tier = item.get("source_tier", 2)
     subhead     = item.get("subhead", "")
     full_text   = f"{headline} {subhead}".lower()
+    ticker      = (item.get("ticker") or "").upper()
 
     # Breaking news: Tier 1 or 2 + short article (wire breaking = brief)
     breaking = source_tier <= 2 and len(_tokenize(full_text)) < 50
@@ -1703,9 +1778,29 @@ def gate6_event(item, ctrl, ndl, db, seen_headlines, state):
     uncertainty_density = uncertainty_ct / max(len(tokens), 1)
     rumor = source_tier == 3 and uncertainty_density > 0.10
 
-    # Scheduled: TODO: DATA_DEPENDENCY — would use event calendar
-    # For now: assume official government publications are scheduled events
-    scheduled = item.get("source_tier", 2) == 1
+    # Scheduled — real check against the event calendar:
+    #   - earnings_cache (per-ticker next earnings date)
+    #   - macro_events table (FOMC/CPI/NFP and similar)
+    # Falls back to the old source-tier proxy when the calendar lookup
+    # fails (no module, DB error, ticker missing) so the gate still
+    # produces a label.
+    event_reasons  = []
+    next_earnings  = None
+    scheduled      = False
+    try:
+        from retail_event_calendar import check_event_risk
+        risk = check_event_risk(db, ticker, within_biz_days=2) if ticker else None
+        if risk:
+            scheduled     = bool(risk.get('blocked'))
+            event_reasons = list(risk.get('reasons') or [])
+            next_earnings = risk.get('next_earnings')
+    except Exception as e:
+        log.debug(f"gate6 event-calendar lookup failed for {ticker}: {e}")
+        # Fall back to the source-tier proxy — same as pre-integration
+        # behavior. Tier 1 government publications are usually on a
+        # known schedule (BLS, Fed, BEA, Treasury).
+        scheduled = source_tier == 1
+        event_reasons = ["fallback: tier-1 publication"]
 
     # Official: Tier 1 source AND NOT breaking
     official = source_tier == 1 and not breaking
@@ -1728,12 +1823,15 @@ def gate6_event(item, ctrl, ndl, db, seen_headlines, state):
     ndl.gate(6, "EVENT_DETECTION",
              {"breaking": breaking, "follow_up": f"{follow_up_sim:.2f}",
               "rumor": rumor, "uncertainty_density": f"{uncertainty_density:.3f}",
-              "scheduled": scheduled, "official": official},
+              "scheduled": scheduled, "official": official,
+              "event_reasons": ", ".join(event_reasons) if event_reasons else "",
+              "next_earnings": next_earnings or ""},
              f"event_type={event_type}")
     return {
         "event_type": event_type, "breaking": breaking, "follow_up": follow_up,
         "rumor": rumor, "scheduled": scheduled, "official": official,
         "uncertainty_density": uncertainty_density,
+        "event_reasons": event_reasons, "next_earnings": next_earnings,
     }
 
 
@@ -2034,8 +2132,10 @@ def gate12_skip_confirmation(item, ctrl, ndl, db, state):
 
     TODO: DATA_DEPENDENCY — true cross-source claim validation requires a
     multi-outlet aggregation feed. Current implementation is a same-ticker
-    count proxy — does NOT actually confirm independent reporting.
+    count proxy — does NOT actually confirm independent reporting. Gate 22
+    discounts the composite for this proxy via state.confirmation_proxy.
     """
+    state.confirmation_proxy = True   # flip to False when a real feed lands
     ticker      = (item.get("ticker") or "").upper()
     source_tier = item.get("source_tier", 2)
     text        = f"{item.get('headline','')} {item.get('subhead','')}".lower()
@@ -2187,8 +2287,10 @@ def gate14_skip_crowding(item, ctrl, ndl, db, state):
             still_open (discount=0.0).
 
     TODO: DATA_DEPENDENCY — social mention count requires external API.
-    Current: DB-based cluster volume for same topic keyword.
+    Current: DB-based cluster volume for same topic keyword. Gate 22
+    discounts the composite for this proxy via state.crowding_proxy.
     """
+    state.crowding_proxy = True   # flip to False when social-firehose feed lands
     headline = (item.get("headline") or "").lower()
     tokens   = set(_tokenize(headline))
 
@@ -2260,8 +2362,10 @@ def gate15_skip_contradiction(item, ctrl, ndl, state):
       clear (score=0.0)
 
     TODO: DATA_DEPENDENCY — analyst view dispersion requires aggregated
-    expert consensus data not yet available.
+    expert consensus data not yet available. Gate 22 discounts the
+    composite for this proxy via state.ambiguity_proxy.
     """
+    state.ambiguity_proxy = True   # flip to False when analyst-dispersion feed lands
     headline = item.get("headline", "")
     subhead  = item.get("subhead", "")
 
@@ -2802,14 +2906,24 @@ def gate22_composite(ctrl, ndl, state):
       W2=0.15  credibility_score
       W3=0.15  novelty_score
       W4=0.20  sentiment_confidence
-      W5=0.15  confirmation_score
-      W6=0.10  (1 - crowding_discount)
-      W7=0.05  (1 - ambiguity_score)
+      W5=0.15  confirmation_score   ← gate12, currently proxied
+      W6=0.10  (1 - crowding_discount) ← gate14, currently proxied
+      W7=0.05  (1 - ambiguity_score)  ← gate15, currently proxied
+
+    Three of the seven inputs come from "placeholder" gates (12 confirmation,
+    14 crowding, 15 ambiguity) that operate on internal-pipeline proxy data
+    rather than the real cross-source / social / analyst feeds they nominally
+    require. Until those data sources are wired, this gate scales the raw
+    composite by a `data_completeness` multiplier — each proxied input
+    reduces composite quality by half its weight, so a fully-proxied article
+    (the current default) ends up at ~85% of its raw composite. This keeps
+    the score honest about its source quality without redesigning routing
+    or thresholds.
 
     If composite_score < COMPOSITE_QUALITY_THRESH → downgrade routing to DISCARD
     unless action_state is watch_only/provisional_watch (→ WATCH).
     """
-    composite_score = (
+    raw_composite = (
         ctrl.COMPOSITE_W1 * state.impact_score
         + ctrl.COMPOSITE_W2 * state.credibility_score
         + ctrl.COMPOSITE_W3 * state.novelty_score
@@ -2818,7 +2932,20 @@ def gate22_composite(ctrl, ndl, state):
         + ctrl.COMPOSITE_W6 * (1.0 - state.crowding_discount)
         + ctrl.COMPOSITE_W7 * (1.0 - state.ambiguity_score)
     )
-    composite_score = round(composite_score, 4)
+
+    # Data-completeness multiplier — each proxied gate input shaves half
+    # its composite weight. With all three proxied (today's reality) the
+    # multiplier is 1.0 - 0.5*(W5+W6+W7) = 1.0 - 0.5*0.30 = 0.85.
+    proxy_penalty = 0.0
+    if state.confirmation_proxy:
+        proxy_penalty += 0.5 * ctrl.COMPOSITE_W5
+    if state.crowding_proxy:
+        proxy_penalty += 0.5 * ctrl.COMPOSITE_W6
+    if state.ambiguity_proxy:
+        proxy_penalty += 0.5 * ctrl.COMPOSITE_W7
+    data_completeness = round(1.0 - proxy_penalty, 4)
+
+    composite_score = round(raw_composite * data_completeness, 4)
     state.composite_score = composite_score
 
     # Final signal classification
@@ -2852,11 +2979,14 @@ def gate22_composite(ctrl, ndl, state):
                 state.routing = "DISCARD"
 
     ndl.gate(22, "COMPOSITE",
-             {"composite_score": f"{composite_score:.4f}",
+             {"raw_composite": f"{raw_composite:.4f}",
+              "data_completeness": f"{data_completeness:.2f}",
+              "composite_score": f"{composite_score:.4f}",
               "quality_thresh": ctrl.COMPOSITE_QUALITY_THRESH,
               "action_state": state.action_state},
              f"final_signal={final_signal} routing={state.routing}")
-    return {"composite_score": composite_score, "final_signal": final_signal}
+    return {"composite_score": composite_score, "final_signal": final_signal,
+            "data_completeness": data_completeness}
 
 
 # ── STATE → CONFIDENCE MAPPING ────────────────────────────────────────────
@@ -3313,7 +3443,10 @@ def run(session="market"):
         # Routing now comes from gate22 composite (may have overridden gate21)
         routing = state.routing
 
-        # ── Member weight (kept — FLAG: integrate into Gate 12 in future) ─
+        # ── Member weight (per-politician confidence multiplier) ─────────
+        # Gate 12 doesn't consume this — its placeholder logic is keyed
+        # off cross-source proxy data, not member reliability. The weight
+        # is applied directly to base_confidence below for routing.
         congress_member = item.get("politician", "")
         member_data     = db.get_member_weight(congress_member) if congress_member else {"weight": 1.0}
         member_weight   = member_data.get("weight", 1.0)
@@ -3595,17 +3728,33 @@ def run(session="market"):
         f"portfolio=${portfolio['cash']:.2f}"
     )
 
+    # Company-post failure summary — was previously tracked silently. Surface
+    # the count so a dead company node doesn't go unnoticed across the
+    # next-run scan window. Routes through the AGENT_COMPLETE details so
+    # /admin/alerts and the cmd portal auditor can pick it up.
+    company_post_msg = ""
+    if COMPANY_SUBSCRIPTION:
+        if _company_post_circuit_open:
+            company_post_msg = (f" company_post=CIRCUIT_OPEN "
+                                f"(failures={_company_post_failures})")
+        elif _company_post_failures > 0:
+            company_post_msg = f" company_post_failures={_company_post_failures}"
+        if company_post_msg:
+            log.warning(f"[COMPANY] Run summary —{company_post_msg.strip()}")
+
     db.log_heartbeat("news_agent", "OK", portfolio_value=portfolio['cash'])
     db.log_event(
         "AGENT_COMPLETE", agent="News",
-        details=f"new={new_signals} queued={queued} discarded={discarded} skipped={skipped}",
+        details=(f"new={new_signals} queued={queued} discarded={discarded} "
+                 f"skipped={skipped}{company_post_msg}"),
         portfolio_value=portfolio['cash'],
     )
 
-    # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
-    # Check for pending news screening requests from the sector screener.
-    # For each ticker, fetch recent Alpaca news headlines and score sentiment.
-    _handle_screening_requests(db)
+    # Note: screening requests are handled at the top of run() (before the
+    # 22-gate pipeline) so the sector screener doesn't have to wait the
+    # full pipeline duration for results. A second call here used to exist
+    # but was redundant — _handle_screening_requests is idempotent and the
+    # earlier call already covers requests that arrived during this run.
 
     try:
         from retail_heartbeat import write_heartbeat
