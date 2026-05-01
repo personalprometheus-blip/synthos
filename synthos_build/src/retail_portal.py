@@ -6652,12 +6652,25 @@ def api_logs_audit():
     _cutoff_dt = _dt.now(_tz.utc) - _td(hours=72)
     _cutoff_iso = _cutoff_dt.isoformat()
 
+    # 2026-05-01 — tail-only read. Auditor scans for last-72h findings,
+    # but the previous code read every byte of every .log file into
+    # memory and parsed every line. With logs accumulating to tens of
+    # megabytes, the scan would exceed the cmd portal's 10s read
+    # timeout (HTTPConnectionPool: Read timed out). Tail-only read
+    # caps per-file work at MAX_TAIL_BYTES — way more than 72h on any
+    # current log volume — and keeps the endpoint responsive.
+    MAX_TAIL_BYTES = 5 * 1024 * 1024  # 5 MB per log
+
     for log_path in log_files:
         fname = _os.path.basename(log_path)
         try:
             size = _os.path.getsize(log_path)
-            with open(log_path, 'r', errors='replace') as fh:
-                lines = fh.readlines()
+            with open(log_path, 'rb') as fh:
+                if size > MAX_TAIL_BYTES:
+                    fh.seek(size - MAX_TAIL_BYTES)
+                    fh.readline()  # discard partial first line after seek
+                raw = fh.read()
+            lines = raw.decode('utf-8', errors='replace').splitlines(keepends=True)
             offset = size
 
             for line in lines:
