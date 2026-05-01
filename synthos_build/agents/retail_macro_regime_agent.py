@@ -59,6 +59,13 @@ ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 
+# FRED (Federal Reserve Economic Data) — primary source for VIX (gate 1)
+# and treasury yields (gate 2). Government infrastructure, free, doesn't
+# IP-block. Yahoo stays as fallback because the redundancy is cheap.
+# Register: https://fred.stlouisfed.org/docs/api/api_key.html
+FRED_API_KEY      = os.environ.get('FRED_API_KEY', '')
+FRED_BASE_URL     = "https://api.stlouisfed.org/fred"
+
 YAHOO_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 # When gate5 confidence drops below this threshold the scan is treated as
@@ -131,6 +138,70 @@ def _fetch_yahoo_last_close(symbol):
     if closes:
         return closes[-1]
     return None
+
+
+# ── FRED FETCHER ─────────────────────────────────────────────────────────
+
+def _fetch_fred_series(series_id, days=10):
+    """
+    Fetch the most recent N daily observations for a FRED series.
+    Returns list of float values (oldest first), or [] on failure.
+
+    FRED returns a "." for missing observations (e.g. weekends, holidays);
+    those are filtered out so the caller can rely on len() reflecting
+    actual data points.
+
+    Uses limit/sort parameters to fetch only the tail of the series —
+    FRED's free tier is unlimited per key but we don't need all-history.
+
+    Series IDs we use:
+      VIXCLS    — CBOE VIX close (daily)
+      DGS10     — 10-year Treasury constant maturity (daily, percent)
+      DGS3MO    — 3-month Treasury bill secondary market rate (daily, percent)
+    """
+    if not FRED_API_KEY:
+        log.debug(f"FRED_API_KEY not set — skipping FRED fetch for {series_id}")
+        return []
+    try:
+        # sort_order=desc + limit returns the newest N observations.
+        # We then reverse so caller sees oldest-first (matches Yahoo helpers).
+        r = _req.get(
+            f"{FRED_BASE_URL}/series/observations",
+            params={
+                "series_id": series_id,
+                "api_key": FRED_API_KEY,
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit": max(days + 5, 10),   # buffer for missing/holiday days
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        try:
+            _master_db().log_api_call(
+                agent='macro_regime',
+                endpoint=f'/fred/series/observations?series_id={series_id}',
+                method='GET', service='fred',
+                status_code=r.status_code)
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
+        if r.status_code != 200:
+            log.warning(f"FRED {series_id}: HTTP {r.status_code}")
+            return []
+        obs = r.json().get("observations", [])
+        # Newest-first → oldest-first for consistency with Yahoo helpers
+        values = []
+        for ob in reversed(obs):
+            v = ob.get("value", "")
+            if v in (".", "", None):
+                continue
+            try:
+                values.append(float(v))
+            except (TypeError, ValueError):
+                continue
+        return values
+    except Exception as e:
+        log.warning(f"FRED fetch_series({series_id}): {e}")
+        return []
 
 
 # ── ALPACA DATA FETCHERS ─────────────────────────────────────────────────
@@ -238,17 +309,29 @@ class RegimeReport:
 
 def gate1_vix_regime(report: RegimeReport):
     """
-    Fetch VIX from Yahoo Finance.  Classify level + 5-day trend.
+    Fetch VIX from FRED (primary, VIXCLS series) with Yahoo fallback.
+    Classify level + 5-day trend.
     VIX < 15 = CALM, 15-25 = NORMAL, 25-35 = ELEVATED, > 35 = CRISIS.
+
+    Both sources publish the same CBOE VIX close, so thresholds are
+    source-agnostic. Source tracked in report.detail for provenance.
     """
     log.info("[GATE 1] VIX regime classification")
 
-    closes = _fetch_yahoo_chart("%5EVIX", range_str="5d", interval="1d")
+    # Primary: FRED VIXCLS — government infrastructure, no IP blocks
+    source = "fred"
+    closes = _fetch_fred_series("VIXCLS", days=7)
     if not closes:
-        log.warning("[GATE 1] VIX data unavailable")
+        # Fallback: Yahoo Finance ^VIX — undocumented but historically reliable
+        log.info("[GATE 1] FRED VIXCLS empty — falling back to Yahoo ^VIX")
+        source = "yahoo"
+        closes = _fetch_yahoo_chart("%5EVIX", range_str="5d", interval="1d")
+
+    if not closes:
+        log.warning("[GATE 1] VIX data unavailable from both FRED and Yahoo")
         report.add(GateResult(
             gate="GATE1_VIX", status="UNAVAILABLE", signal="UNAVAILABLE",
-            detail="Could not fetch VIX data from Yahoo Finance"
+            detail="Could not fetch VIX from FRED (VIXCLS) or Yahoo (^VIX)"
         ))
         return None, None
 
@@ -279,8 +362,8 @@ def gate1_vix_regime(report: RegimeReport):
         level = "CRISIS"
 
     signal = f"{level}_{trend}"
-    detail = f"VIX={vix_current:.2f}, 5d trend={trend} ({trend_pct:+.1%})"
-    log.info(f"  VIX={vix_current:.2f} level={level} trend={trend} ({trend_pct:+.1%})")
+    detail = f"VIX={vix_current:.2f}, 5d trend={trend} ({trend_pct:+.1%}), source={source}"
+    log.info(f"  VIX={vix_current:.2f} level={level} trend={trend} ({trend_pct:+.1%}) source={source}")
 
     report.add(GateResult(
         gate="GATE1_VIX", status="OK", signal=signal,
@@ -296,40 +379,56 @@ def gate1_vix_regime(report: RegimeReport):
 
 def gate2_yield_curve(report: RegimeReport):
     """
-    Yield spread = 10Y - 13W.
+    Yield spread = 10Y - 3M (or 13W proxy).
     Inverted (<0) = contractionary.  Flat (0 to 0.20) = late-cycle.
     Normal (0.20 to 1.50) = neutral.  Steep (>1.50) = expansionary.
+
+    Primary source: FRED (DGS10 + DGS3MO, both in percent).
+    Fallback: Yahoo (^TNX scaled /10, ^IRX in percent).
+    Both yield identical economic content — the curve shape derived from
+    Treasury constant-maturity rates is the same regardless of source.
     """
     log.info("[GATE 2] Treasury yield curve analysis")
 
-    # ^TNX = 10-year yield (quoted as yield * 10, e.g. 45.2 = 4.52%)
-    # ^IRX = 13-week T-bill yield (quoted as yield * 100, e.g. 4.35 = 4.35%)
-    tnx_closes = _fetch_yahoo_chart("%5ETNX", range_str="5d", interval="1d")
-    irx_closes = _fetch_yahoo_chart("%5EIRX", range_str="5d", interval="1d")
+    # Primary: FRED — DGS10 (10Y constant maturity) + DGS3MO (3M T-bill).
+    # FRED returns both in percent already, no scaling needed.
+    source = "fred"
+    long_closes  = _fetch_fred_series("DGS10",  days=7)   # 10Y
+    short_closes = _fetch_fred_series("DGS3MO", days=7)   # 3M
 
-    if not tnx_closes or not irx_closes:
+    # Fallback: Yahoo — ^TNX (10Y, quoted as yield*10) + ^IRX (13W, percent).
+    # 13W vs 3M is close enough — both are at the very short end of the
+    # curve and move in lockstep, so the shape signal is preserved.
+    if not long_closes or not short_closes:
+        log.info("[GATE 2] FRED yield series empty — falling back to Yahoo ^TNX/^IRX")
+        source = "yahoo"
+        tnx_closes = _fetch_yahoo_chart("%5ETNX", range_str="5d", interval="1d")
+        irx_closes = _fetch_yahoo_chart("%5EIRX", range_str="5d", interval="1d")
+        # ^TNX quoted as yield * 10; normalise so downstream math is uniform.
+        long_closes  = [c / 10.0 for c in tnx_closes] if tnx_closes else []
+        short_closes = irx_closes or []
+
+    if not long_closes or not short_closes:
         missing = []
-        if not tnx_closes:
-            missing.append("10Y (^TNX)")
-        if not irx_closes:
-            missing.append("13W (^IRX)")
-        log.warning(f"[GATE 2] Yield data unavailable: {', '.join(missing)}")
+        if not long_closes:
+            missing.append("10Y")
+        if not short_closes:
+            missing.append("3M/13W")
+        log.warning(f"[GATE 2] Yield data unavailable from both sources: {', '.join(missing)}")
         report.add(GateResult(
             gate="GATE2_YIELD_CURVE", status="UNAVAILABLE", signal="UNAVAILABLE",
-            detail=f"Missing: {', '.join(missing)}"
+            detail=f"Missing: {', '.join(missing)} (tried FRED + Yahoo)"
         ))
         return None
 
-    # Yahoo quotes TNX as yield * 10 (e.g. 43.5 = 4.35%)
-    yield_10y = tnx_closes[-1] / 10.0
-    # Yahoo quotes IRX as yield in percent (e.g. 4.35 = 4.35%)
-    yield_13w = irx_closes[-1]
+    yield_10y = long_closes[-1]
+    yield_13w = short_closes[-1]
 
     spread = yield_10y - yield_13w
 
     # Also check 5d trend in the spread
-    if len(tnx_closes) >= 2 and len(irx_closes) >= 2:
-        spread_start = (tnx_closes[0] / 10.0) - irx_closes[0]
+    if len(long_closes) >= 2 and len(short_closes) >= 2:
+        spread_start = long_closes[0] - short_closes[0]
         spread_change = spread - spread_start
         if spread_change > 0.05:
             curve_trend = "STEEPENING"
@@ -351,10 +450,10 @@ def gate2_yield_curve(report: RegimeReport):
         shape = "STEEP"
 
     signal = f"{shape}_{curve_trend}"
-    detail = (f"10Y={yield_10y:.2f}%, 13W={yield_13w:.2f}%, "
-              f"spread={spread:+.2f}%, shape={shape}, trend={curve_trend}")
-    log.info(f"  10Y={yield_10y:.2f}% 13W={yield_13w:.2f}% spread={spread:+.2f}% "
-             f"shape={shape} trend={curve_trend}")
+    detail = (f"10Y={yield_10y:.2f}%, 3M={yield_13w:.2f}%, "
+              f"spread={spread:+.2f}%, shape={shape}, trend={curve_trend}, source={source}")
+    log.info(f"  10Y={yield_10y:.2f}% 3M={yield_13w:.2f}% spread={spread:+.2f}% "
+             f"shape={shape} trend={curve_trend} source={source}")
 
     report.add(GateResult(
         gate="GATE2_YIELD_CURVE", status="OK", signal=signal,
