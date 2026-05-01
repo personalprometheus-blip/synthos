@@ -2,7 +2,7 @@
 
 > Shared todo list — editable in Obsidian, git-tracked, used by Claude for context.
 > **Checkbox syntax**: `- [ ]` pending, `- [x]` done. Feel free to reorder, add, or delete.
-> Last sync: 2026-05-01 (post-Round-9 audit pass + system-map pipeline page rewrite)
+> Last sync: 2026-05-01 (post-scoop-rebuild + EDGAR enable + branch sweep + server cleanup)
 
 ---
 
@@ -24,6 +24,23 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 - [ ] **#270 Stripe webhook secret unset** (HIGH, x3 hits) — Phase 8 task. Either wire up `STRIPE_WEBHOOK_SECRET` or firewall the endpoint when not in use.
 - [ ] **#249 / #255 Trader 240s timeout** (HIGH, x1 each) — customers `f313a3d9` (2026-04-22) and `80419c9e` (2026-04-24). Once each, days apart. Monitor for recurrence; investigate if a pattern emerges.
 - [ ] **#256 NEGATIVE_CASH owner $-0.01** (CRITICAL, x1) — paper-trade rounding artifact on owner customer (30eff008). Will self-clear on next portfolio reconcile/deposit. No action.
+
+## 🟢 2026-05-01 afternoon session — completed
+
+- [x] **Scoop notification pipeline rebuilt** — diagnosed 3 structural bugs (schema mismatch between strongbox writer + scoop drain; one-shot drain at startup; dead-end portal-dispatch auth). Built `agents/_shared_scoop.py` as single enqueue source of truth. Refactored strongbox + sentinel writers to use it. Removed dead `vault._trigger_scoop`. Made scoop's drain re-pollable + dual-schema (accepts both old `delivered:false` + new `status:pending`). Triple-check passed: 3 emails delivered to `personal_prometheus@icloud.com` end-to-end. Scoop is back in business after 11 silent days.
+- [x] **EDGAR ingestion enabled on pi5** — `SEC_EDGAR_UA_NAME` + `SEC_EDGAR_UA_EMAIL` set; `EDGAR_ALL_ENABLED=true`; live Form 4 fetch verified (1 actionable signal in 10 filings). `data/activists.json` seeded with 12 activists (Pershing, Icahn, ValueAct, Starboard, Third Point, Trian, JANA, Elliott, Engine, Engaged, Cevian, Land & Buildings). 11 entries marked `PENDING_OPERATOR_VERIFICATION` for spot-check at edgar.sec.gov (failure mode is silent miss, not false positive).
+- [x] **Stale branch + server cleanup** — synthos 41 → 3 branches, synthos-company 10 → 1, origin remotes also swept. `TRADER_RESTRUCTURE_PLAN.md` archived under `documentation/archive/specs/` before its source branch deletion. Server cleanup: removed pi4b synthos-login.service / `/home/pi/synthos_build/` / `/home/pi/synthos-process/`; removed pi5 synthos-portal.service.bak; archived `synthos-company/login_server/` → `documentation/archive/login_server/`.
+- [x] **System-architecture pipeline page deferred-data-sources panel** — added new `deferred` gate flag (purple ⏸, distinct from amber ⚠ scaffolding) for News G12/G14/G15 + Sentiment G5/G7/G8/G10/G16. New 'Deferred Data Sources' panel below pipeline grid summarizes paid-tier gaps (StockTwits / X / Reddit social, NYSE TIQ A/D, options chain VVIX, ICE BofA credit, FMP /etf-holdings) and formally-deferred future phases (license validator SYS-B01/B02, Patch D-full, Phase 7e bucket, Congressional weighting).
+- [x] **System-architecture pipeline page accuracy fix** — re-read agent code; removed scaffold flags from all 6 bias gates (sample-size guards aren't stubs), macro G4 (sector rotation, fully implemented), sentiment G15 (5-pattern divergence detector), screener G1 (hand-curated holdings work fine). Macro gate names corrected (page had wrong order — G1 was actually VIX not Yield curve, etc.).
+
+## 🔮 Queued for after market close (16:00 ET, 2026-05-01)
+
+- [ ] **Portal-dispatch service-token auth** — add X-Service-Token check to `synthos_build/src/retail_portal.py`'s `/api/notifications/send` + `/api/notifications/broadcast`. Then set `PORTAL_TOKEN=$MONITOR_TOKEN` in pi4b's `company.env`, restart scoop, in-app notifications light up. ~30 min.
+- [ ] **Customer account-deletion feature** — settings page; confirm dialog + reason capture; design first (hard delete vs deactivate, Stripe cancel, retention period, open positions handling, GDPR). User-requested earlier this session.
+- [ ] **News-agent duplicate flag writes fix** (TODO line 85) — verified still pending; no dedup pattern detected in `retail_news_agent.py`. Article processed via signal + display paths still writes duplicate flag rows.
+- [ ] **`TICKER_ALIASES` grow** (TODO line 86) — review recent `[TICKER_REJECT]` log lines, add observed mega-caps.
+- [ ] **`get_watching_signals()` removal** — legacy function, only test code references it. Update test, delete function. ~15 min.
+- [ ] **`check_email.html` theming** — `📬` emoji + dark-card vs SYNTHOS visual language mismatch.
 
 ## 🟢 11-Agent Audit Pass — completed 2026-04-28 → 2026-05-01
 
@@ -314,8 +331,8 @@ findings to 27.
 ## 🔗 Reference docs
 
 - `PROJECT_STATUS.md` — phased roadmap, gate conditions
-- `synthos_build/data/system_architecture.json` — live system map (v3.23)
-- `synthos_build/data/project_status.json` — live JSON dashboard (v2.4)
+- `synthos_build/data/system_architecture.json` — live system map (v3.24)
+- `synthos_build/data/project_status.json` — live JSON dashboard (v2.5)
 - `docs/` — spec archive
 
 ## Workflow conventions
