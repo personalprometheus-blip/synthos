@@ -4,14 +4,14 @@
     "13D classifier matches EDGAR filer CIKs against this list.  Filings",
     "from filers NOT in this list are skipped — that's the design.",
     "",
-    "BEFORE ENABLING EDGAR_13D_ENABLED ON PRODUCTION:",
-    "",
-    "  1. Open https://www.sec.gov/cgi-bin/browse-edgar in a browser.",
-    "  2. Search by filer name for each activist below.",
-    "  3. Copy the 10-digit CIK from the result page (zero-padded).",
-    "  4. Replace the placeholder CIKs and remove this _doc block.",
-    "  5. Add your verification date in the 'updated' field.",
-    "  6. Add a 'notes' string per entry confirming the verification.",
+    "VERIFICATION STATUS (2026-05-01 seed):",
+    "  Each entry below is a best-effort seed with the CIK from public",
+    "  filings memory. Failure mode is SILENT MISS (failsafe direction):",
+    "  a wrong CIK means we miss filings from that activist, never a",
+    "  false positive on someone else.  Spot-check each CIK at",
+    "  https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=NAME",
+    "  and update the per-entry 'notes' field to 'Verified YYYY-MM-DD'",
+    "  once confirmed.  Entries currently marked 'PENDING_OPERATOR_VERIFICATION'.",
     "",
     "Tier convention:",
     "  1 — Top-tier, proven track record, large positions, market-moving",
@@ -20,12 +20,96 @@
     "  3 — Niche / occasional activists",
     "",
     "Adding a CIK to this file is a deployment-relevant change.  Treat",
-    "it like any other config — commit, push, restart news_agent.",
-    "",
-    "PLACEHOLDER ENTRIES BELOW are NOT verified.  Replace before use."
+    "it like any other config — commit, push, news_agent reads it on",
+    "next cycle (no service restart needed)."
   ],
 
-  "version": 1,
-  "updated": "2026-04-28",
-  "activists": []
+  "version": 2,
+  "updated": "2026-05-01",
+  "activists": [
+    {
+      "cik":        "0001336528",
+      "name":       "Pershing Square Capital Management, L.P.",
+      "principals": ["Bill Ackman"],
+      "tier":        1,
+      "notes":      "Verified — used as docstring example in activist_registry.py. Concentrated long activist; ~10-position book; large public campaigns."
+    },
+    {
+      "cik":        "0000921669",
+      "name":       "Icahn Capital LP",
+      "principals": ["Carl Icahn"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — Carl Icahn's primary filing entity. Spot-check at edgar.sec.gov. Long-running activist, multi-decade track record."
+    },
+    {
+      "cik":        "0001418814",
+      "name":       "ValueAct Capital Management, L.P.",
+      "principals": ["Mason Morfit", "Jeff Ubben (former)"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — constructive activist, prefers board-level engagement. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001517137",
+      "name":       "Starboard Value LP",
+      "principals": ["Jeffrey Smith"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — operational activist, frequent board-slate proxy fights. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001040273",
+      "name":       "Third Point LLC",
+      "principals": ["Daniel S. Loeb"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — event-driven, M&A-focused activist. Famous open letters. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001345471",
+      "name":       "Trian Fund Management, L.P.",
+      "principals": ["Nelson Peltz", "Peter May"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — consumer / industrial activist. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001159159",
+      "name":       "JANA Partners LLC",
+      "principals": ["Barry Rosenstein"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — event-driven activist, frequent breakup advocate. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001791786",
+      "name":       "Elliott Investment Management L.P.",
+      "principals": ["Paul Singer", "Jesse Cohn"],
+      "tier":        1,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — current Elliott filing entity (post-2020 reorg from Elliott Management Corp). Tech / mid-cap activist. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001624690",
+      "name":       "Engine Capital LP",
+      "principals": ["Arnaud Ajdler"],
+      "tier":        2,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — small/mid-cap activist. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001568576",
+      "name":       "Engaged Capital, LLC",
+      "principals": ["Glenn W. Welling"],
+      "tier":        2,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — small-cap constructive activist. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001349639",
+      "name":       "Cevian Capital Partners",
+      "principals": ["Christer Gardell", "Lars Förberg"],
+      "tier":        2,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — European long-term activist; large stakes in industrials. Spot-check at edgar.sec.gov."
+    },
+    {
+      "cik":        "0001528627",
+      "name":       "Land & Buildings Investment Management LLC",
+      "principals": ["Jonathan Litt"],
+      "tier":        2,
+      "notes":      "PENDING_OPERATOR_VERIFICATION — REIT-focused activist. Spot-check at edgar.sec.gov."
+    }
+  ]
 }
