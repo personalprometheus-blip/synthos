@@ -112,6 +112,11 @@ class Finding:
     code: str
     message: str
     detail: str = ""
+    # Optional extra metadata stored on the admin_alert when the central
+    # router writes one. Gate 8 uses this to record baseline_median,
+    # pct_of_baseline, etc. Other gates leave it empty and the router
+    # falls back to {gate, code, severity}.
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -172,6 +177,62 @@ def _now_str():
     return datetime.now(tz=ZoneInfo("UTC")).strftime('%Y-%m-%d %H:%M:%S')
 
 
+ALERT_DEDUP_WINDOW_HOURS = 12
+
+
+def _emit_admin_alert(db, finding: 'Finding',
+                      dedup_window_hours: int = ALERT_DEDUP_WINDOW_HOURS) -> bool:
+    """Write `finding` to admin_alerts with code-based dedup so a sticky
+    fault doesn't spam the alerts inbox at the 30-min fault-scan cadence.
+
+    Skips silently if an unresolved alert with the same code was raised
+    inside the dedup window. Returns True if a row was written, False if
+    deduped or on error.
+
+    Severity passes through from the finding (CRITICAL or WARNING). meta
+    falls back to {gate, code, severity} when the finding doesn't supply
+    bespoke metadata.
+    """
+    if finding.severity not in (Severity.CRITICAL, Severity.WARNING):
+        return False
+    try:
+        cutoff = (datetime.now(ZoneInfo("UTC"))
+                  - timedelta(hours=dedup_window_hours)
+                  ).strftime('%Y-%m-%d %H:%M:%S')
+        with db.conn() as c:
+            existing = c.execute(
+                "SELECT id FROM admin_alerts "
+                "WHERE code=? AND resolved=0 AND created_at >= ? LIMIT 1",
+                (finding.code, cutoff),
+            ).fetchone()
+        if existing:
+            log.debug(f"alert {finding.code} deduped (existing in last {dedup_window_hours}h)")
+            return False
+
+        meta = dict(finding.meta) if finding.meta else {}
+        meta.setdefault('gate', finding.gate)
+        meta.setdefault('code', finding.code)
+        meta.setdefault('severity', finding.severity)
+
+        body = f"{finding.message}\n{finding.detail}" if finding.detail else finding.message
+        title = f"{finding.severity}: {finding.code}"
+
+        db.add_admin_alert(
+            category='fault',
+            severity=finding.severity,
+            title=title,
+            body=body,
+            source_agent='fault_detection_agent',
+            source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
+            code=finding.code,
+            meta=meta,
+        )
+        return True
+    except Exception as e:
+        log.warning(f"_emit_admin_alert({finding.code}) failed: {e}")
+        return False
+
+
 def _is_market_hours():
     """True if currently within US market hours (9:30-16:00 ET, weekdays)."""
     now = _now_et()
@@ -187,36 +248,65 @@ def _is_market_hours():
 #  Check that each core agent has heartbeated recently
 # ══════════════════════════════════════════════════════════════════════════
 
-# Heartbeat agent names (as written by each agent's db.log_heartbeat call),
-# AGENT_COMPLETE names (as written by db.log_event), and an optional
-# per-agent stale threshold override in minutes. Agents that run
-# intraday use the default (HEARTBEAT_STALE_MINUTES). Once-per-day agents
-# (like the sector screener) get a 30h window so a successful prep run
-# counts as healthy until the next day's prep.
+# Single source of truth for the agents fault-detection knows about.
+# Replaces what used to be three separate constants (EXPECTED_AGENTS,
+# PER_CUSTOMER_AGENTS, EXPECTED_DAILY_COMPLETIONS) that drifted apart.
+#
+# Phase H+ (2026-04-28) — `per_customer=True` means the agent writes its
+# heartbeat / AGENT_COMPLETE to *each customer's* DB rather than the shared
+# market-intel DB. fault_detection's _master_db() reads shared, so for those
+# agents we have to aggregate across all active customer DBs (otherwise gate1
+# and gate7 see zero trader activity even when the trader is running).
+@dataclass(frozen=True)
+class ExpectedAgent:
+    hb_name: str                                 # name in db.log_heartbeat
+    complete_name: str                           # name in db.log_event AGENT_COMPLETE
+    label: str                                   # human-readable
+    stale_minutes: int = HEARTBEAT_STALE_MINUTES # gate1 staleness threshold
+    per_customer: bool = False
+    daily_completion_required: bool = False      # gate7 expects ≥1 AGENT_COMPLETE today
+
+
 EXPECTED_AGENTS = [
-    ("market_sentiment_agent",   "The Pulse",               "Market Sentiment"),
-    ("news_agent",               "News",                    "News"),
-    ("trade_logic_agent",        "Trade Logic",             "Trade Logic"),
-    ("sector_screener",          "Sector Screener",         "Sector Screener", 1800),  # 30h
-    ("price_poller",             "Price Poller",            "Price Poller"),
+    ExpectedAgent("market_sentiment_agent",  "The Pulse",
+                  "Market Sentiment",        daily_completion_required=True),
+    ExpectedAgent("news_agent",              "News",
+                  "News",                    daily_completion_required=True),
+    ExpectedAgent("trade_logic_agent",       "Trade Logic",
+                  "Trade Logic",
+                  per_customer=True,         daily_completion_required=True),
+    ExpectedAgent("sector_screener",         "Sector Screener",
+                  "Sector Screener",         stale_minutes=1800),   # 30h window
+    ExpectedAgent("price_poller",            "Price Poller",
+                  "Price Poller"),
     # Interrogation listener posts heartbeat every 60s while running. If it
     # dies, new news signals get interrogation_status='UNVALIDATED' and —
     # with the tightened promoter check — stop promoting, so a dead listener
     # degrades the signal pipeline silently unless we catch it here.
-    ("interrogation_listener",   "Interrogation Listener",  "Interrogation Listener"),
+    ExpectedAgent("interrogation_listener",  "Interrogation Listener",
+                  "Interrogation Listener"),
 ]
 
 
-# Phase H+ (2026-04-28) — agents whose state lives in per-customer DBs
-# rather than the shared market-intel DB. The 2026-04-27 architectural
-# change moved fault_detection's _master_db() to get_shared_db(), but
-# the trader has always written its heartbeat / AGENT_COMPLETE per
-# customer (one row per customer-DB, never to shared). Result: gate1
-# and gate7 read 0 trader activity from the shared DB and flagged
-# CRITICAL even when the trader was running normally. That validator
-# NO_GO was the root cause of the 4-day "no trades" loop. Aggregate
-# across all active customer DBs for these agents.
-PER_CUSTOMER_AGENTS = frozenset({"trade_logic_agent"})
+# ── Per-run scratch state ─────────────────────────────────────────────────
+# Reset at the start of every run() invocation. Holds:
+#   - active_customer_ids: list of UUIDs (auth.list_customers, fetched once)
+#   - scan_cache: {(event, agent, since_iso): (latest_ts, count)}
+# Avoids reopening every customer DB once per gate that needs per-customer
+# event aggregation.
+_RUN = {"active_customer_ids": None, "scan_cache": {}}
+
+
+def _reset_run_state():
+    _RUN["active_customer_ids"] = None
+    _RUN["scan_cache"] = {}
+
+
+def _active_customer_ids():
+    """Memoized accessor for the customer ID list."""
+    if _RUN["active_customer_ids"] is None:
+        _RUN["active_customer_ids"] = _get_active_customer_ids()
+    return _RUN["active_customer_ids"]
 
 
 def _scan_per_customer_for_event(event: str, agent_name: str,
@@ -224,11 +314,17 @@ def _scan_per_customer_for_event(event: str, agent_name: str,
     """Find the most recent (timestamp) and count of system_log events
     matching `event` + `agent_name` across ALL active customer DBs.
     Returns (latest_timestamp_iso_or_None, total_count). Used by
-    gate1_liveness + gate7_schedule for the per-customer agents."""
+    gate1_liveness + gate7_schedule for the per-customer agents.
+    Memoized within a single run() — the same (event, agent, since_iso)
+    lookup from gate1 + gate7 only opens each customer DB once."""
+    cache_key = (event, agent_name, since_iso)
+    if cache_key in _RUN["scan_cache"]:
+        return _RUN["scan_cache"][cache_key]
+
     latest_ts = None
     total = 0
     try:
-        for cid in _get_active_customer_ids():
+        for cid in _active_customer_ids():
             try:
                 cdb = get_customer_db(cid)
                 with cdb.conn() as c:
@@ -253,7 +349,10 @@ def _scan_per_customer_for_event(event: str, agent_name: str,
                 log.debug(f"per-customer scan {cid} {event}/{agent_name}: {e}")
     except Exception as e:
         log.warning(f"_scan_per_customer_for_event({event},{agent_name}): {e}")
-    return latest_ts, total
+
+    result = (latest_ts, total)
+    _RUN["scan_cache"][cache_key] = result
+    return result
 
 
 def gate1_agent_liveness(report: FaultReport, db):
@@ -262,16 +361,10 @@ def gate1_agent_liveness(report: FaultReport, db):
 
     now = datetime.now(tz=ZoneInfo("UTC"))
 
-    for entry in EXPECTED_AGENTS:
-        # Support both 3-tuple (default threshold) and 4-tuple (custom threshold)
-        if len(entry) == 4:
-            hb_name, complete_name, agent_label, stale_threshold = entry
-        else:
-            hb_name, complete_name, agent_label = entry
-            stale_threshold = HEARTBEAT_STALE_MINUTES
-        if hb_name in PER_CUSTOMER_AGENTS:
+    for agent in EXPECTED_AGENTS:
+        if agent.per_customer:
             latest_ts, _ = _scan_per_customer_for_event(
-                event='HEARTBEAT', agent_name=hb_name
+                event='HEARTBEAT', agent_name=agent.hb_name
             )
             row = {'timestamp': latest_ts, 'details': ''} if latest_ts else None
         else:
@@ -280,10 +373,12 @@ def gate1_agent_liveness(report: FaultReport, db):
                     "SELECT timestamp, details FROM system_log "
                     "WHERE event='HEARTBEAT' AND agent=? "
                     "ORDER BY timestamp DESC LIMIT 1",
-                    (hb_name,)
+                    (agent.hb_name,)
                 ).fetchone()
 
-        code_key = hb_name.upper().replace(' ', '_')
+        code_key = agent.hb_name.upper().replace(' ', '_')
+        agent_label = agent.label
+        stale_threshold = agent.stale_minutes
 
         if not row:
             report.add(Finding(
@@ -332,7 +427,6 @@ def gate2_data_freshness(report: FaultReport, db):
     log.info("[GATE 2] Data freshness check")
 
     now = datetime.now(tz=ZoneInfo("UTC"))
-    today_str = now.strftime('%Y-%m-%d')
 
     # 2a. Live prices freshness (only matters during market hours)
     if _is_market_hours():
@@ -653,9 +747,46 @@ def gate4_system_resources(report: FaultReport):
 #  Check equity consistency, orphan positions, kill switch
 # ══════════════════════════════════════════════════════════════════════════
 
+def _ping_customer_alpaca(key: str, secret: str) -> tuple[str, str | None]:
+    """Per-customer Alpaca credential ping. Hits /v2/account with a short
+    timeout. Returns one of:
+      ('ok', None)               — 200, keys authenticate
+      ('skip_no_keys', None)     — no creds stored (handled elsewhere)
+      ('auth_fail', detail_str)  — 401/403 (revoked or wrong keys)
+      ('connect_fail', detail)   — anything else / connection error
+    Connectivity failures are intentionally suppressed by the caller because
+    Gate 3 already covers reachability — this helper exists to surface
+    PER-CUSTOMER credential rejection, which Gate 3's owner-key ping can't
+    detect."""
+    if not key or not secret:
+        return ('skip_no_keys', None)
+    try:
+        import requests as _req
+        resp = _req.get(
+            f"{ALPACA_BASE_URL}/v2/account",
+            headers={"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret},
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            return ('ok', None)
+        if resp.status_code in (401, 403):
+            return ('auth_fail', f"HTTP {resp.status_code}")
+        return ('connect_fail', f"HTTP {resp.status_code}")
+    except Exception as e:
+        return ('connect_fail', f"{type(e).__name__}: {str(e)[:80]}")
+
+
 def gate5_account_health(report: FaultReport, customer_ids):
     """Per-customer account health checks."""
     log.info(f"[GATE 5] Account health check ({len(customer_ids)} customers)")
+
+    # Lazy import — auth lives in src/ which is on sys.path; avoid pulling it
+    # at module load time so unit tests of the helpers above stay light.
+    try:
+        import auth as _auth
+    except Exception as e:
+        _auth = None
+        log.debug(f"auth import skipped (cred ping disabled): {e}")
 
     for cid in customer_ids:
         try:
@@ -687,6 +818,26 @@ def gate5_account_health(report: FaultReport, customer_ids):
                     message=f"Customer {short_id}: Kill switch is active",
                     detail="Trading halted — verify this is intentional"
                 ))
+
+            # 5b-bis. Per-customer Alpaca credential ping. Catches the case
+            # Gate 3 misses: customer's own keys revoked / mistyped while
+            # the owner data-fetch keys (Gate 3) still authenticate fine.
+            # Connection failures are skipped here — Gate 3 owns reachability.
+            if _auth is not None:
+                try:
+                    key, secret = _auth.get_alpaca_credentials(cid)
+                    status, detail = _ping_customer_alpaca(key, secret)
+                    if status == 'auth_fail':
+                        report.add(Finding(
+                            gate="GATE5_ACCOUNT",
+                            severity=Severity.CRITICAL,
+                            code=f"ALPACA_AUTH_FAIL_{short_id}",
+                            message=f"Customer {short_id}: Alpaca credentials rejected ({detail})",
+                            detail="Per-customer keys may be revoked or mistyped — trader will fail until rotated."
+                        ))
+                    # 'ok' / 'skip_no_keys' / 'connect_fail' → silent here.
+                except Exception as e:
+                    log.debug(f"alpaca ping skipped for {short_id}: {e}")
 
             # 5c. Orphan positions (open but no price update in N days)
             positions = db.get_open_positions()
@@ -759,7 +910,7 @@ def gate6_db_integrity(report: FaultReport, db):
             message=f"system_log table: {count:,} rows"
         ))
 
-    # 6b. WAL file size
+    # 6b. WAL file size — shared DB
     db_path = Path(db.path)
     wal_path = db_path.with_suffix('.db-wal')
     if wal_path.exists():
@@ -768,17 +919,38 @@ def gate6_db_integrity(report: FaultReport, db):
             report.add(Finding(
                 gate="GATE6_DB",
                 severity=Severity.WARNING,
-                code="WAL_BLOAT",
-                message=f"SQLite WAL file is {wal_mb:.1f}MB",
+                code="WAL_BLOAT_SHARED",
+                message=f"Shared DB WAL file is {wal_mb:.1f}MB",
                 detail=f"Threshold: {DB_WAL_WARN_MB}MB — needs PRAGMA wal_checkpoint"
             ))
         else:
             report.add(Finding(
                 gate="GATE6_DB",
                 severity=Severity.OK,
-                code="WAL_OK",
-                message=f"WAL file: {wal_mb:.1f}MB"
+                code="WAL_OK_SHARED",
+                message=f"Shared DB WAL: {wal_mb:.1f}MB"
             ))
+
+    # 6b-bis. WAL file size — per-customer DBs. The trader writes most volume
+    # to per-customer signals.db files; if a checkpoint stops happening their
+    # WAL can grow unbounded and a shared-only check misses it entirely.
+    for cid in _active_customer_ids():
+        try:
+            cdb = get_customer_db(cid)
+            cwal = Path(cdb.path).with_suffix('.db-wal')
+            if not cwal.exists():
+                continue
+            cwal_mb = cwal.stat().st_size / (1024 * 1024)
+            if cwal_mb > DB_WAL_WARN_MB:
+                report.add(Finding(
+                    gate="GATE6_DB",
+                    severity=Severity.WARNING,
+                    code=f"WAL_BLOAT_CUST_{cid[:8]}",
+                    message=f"Customer {cid[:8]} signals.db WAL is {cwal_mb:.1f}MB",
+                    detail=f"Threshold: {DB_WAL_WARN_MB}MB — needs PRAGMA wal_checkpoint"
+                ))
+        except Exception as e:
+            log.debug(f"per-customer WAL check {cid[:8]}: {e}")
 
     # 6c. Stale agent lock file
     lock_path = Path(os.path.join(_ROOT_DIR, 'src', '.agent_lock'))
@@ -805,16 +977,10 @@ def gate6_db_integrity(report: FaultReport, db):
 #  Verify expected agents have run today
 # ══════════════════════════════════════════════════════════════════════════
 
-# Use AGENT_COMPLETE names (as written by each agent's db.log_event call)
-EXPECTED_DAILY_COMPLETIONS = [
-    ("The Pulse",    "Market Sentiment"),
-    ("News",         "News"),
-    ("Trade Logic",  "Trade Logic"),
-]
-
-
 def gate7_schedule_compliance(report: FaultReport, db):
-    """Check that each expected agent has completed at least once today."""
+    """Check that each expected agent has completed at least once today.
+    Iterates EXPECTED_AGENTS where daily_completion_required=True and
+    branches on per_customer for shared-vs-customer DB lookup."""
     log.info("[GATE 7] Schedule compliance check")
 
     now_et = _now_et()
@@ -831,16 +997,13 @@ def gate7_schedule_compliance(report: FaultReport, db):
 
     today_str = now_et.strftime('%Y-%m-%d')
 
-    # Phase H+ map: which AGENT_COMPLETE names live in per-customer DBs.
-    # The trader writes its AGENT_COMPLETE to each customer's DB, never
-    # the shared one — so we have to aggregate across all customer DBs.
-    PER_CUSTOMER_COMPLETION = {"Trade Logic"}
-
-    for complete_name, display_label in EXPECTED_DAILY_COMPLETIONS:
-        if complete_name in PER_CUSTOMER_COMPLETION:
+    for agent in EXPECTED_AGENTS:
+        if not agent.daily_completion_required:
+            continue
+        if agent.per_customer:
             _, completions = _scan_per_customer_for_event(
                 event='AGENT_COMPLETE',
-                agent_name=complete_name,
+                agent_name=agent.complete_name,
                 since_iso=today_str,
             )
         else:
@@ -848,25 +1011,27 @@ def gate7_schedule_compliance(report: FaultReport, db):
                 row = c.execute(
                     "SELECT COUNT(*) as cnt FROM system_log "
                     "WHERE event='AGENT_COMPLETE' AND agent=? AND timestamp LIKE ?",
-                    (complete_name, f"{today_str}%")
+                    (agent.complete_name, f"{today_str}%")
                 ).fetchone()
             completions = row['cnt'] if row else 0
+
+        code_label = agent.label.upper().replace(' ', '_')
 
         if completions == 0:
             severity = Severity.WARNING if now_et.hour < 12 else Severity.CRITICAL
             report.add(Finding(
                 gate="GATE7_SCHEDULE",
                 severity=severity,
-                code=f"NO_RUN_{display_label.upper().replace(' ', '_')}",
-                message=f"{display_label}: Has not completed today",
+                code=f"NO_RUN_{code_label}",
+                message=f"{agent.label}: Has not completed today",
                 detail=f"Expected at least 1 run by {now_et.strftime('%H:%M')} ET"
             ))
         else:
             report.add(Finding(
                 gate="GATE7_SCHEDULE",
                 severity=Severity.OK,
-                code=f"RUN_OK_{display_label.upper().replace(' ', '_')}",
-                message=f"{display_label}: {completions} run(s) today"
+                code=f"RUN_OK_{code_label}",
+                message=f"{agent.label}: {completions} run(s) today"
             ))
 
 
@@ -1001,49 +1166,22 @@ def gate8_trade_activity_baseline(report: FaultReport, db):
                   f"locked into BEAR, or candidate generator producing too few "
                   f"signals. Investigate: count VALIDATED signals, scan trade_logic_agent.log "
                   f"for skip reasons.")
+        # Bespoke metadata travels on the Finding; the central admin_alert
+        # router (run() → _emit_admin_alert) handles dedup + write.
         report.add(Finding(
             gate="GATE8_ACTIVITY",
             severity=Severity.WARNING,
             code="ACTIVITY_DEGRADED",
             message=message,
             detail=detail,
+            meta={
+                "gate": "GATE8_ACTIVITY",
+                "today_count": today_count,
+                "baseline_median": median_baseline,
+                "pct_of_baseline": round(pct_of_baseline, 1),
+                "threshold_pct": DEGRADED_THRESHOLD_PCT,
+            },
         ))
-        # Surface this WARNING in admin_alerts so it doesn't sit invisibly in
-        # _FAULT_SCAN_LAST. Idempotent — checks for an existing unresolved
-        # ACTIVITY_DEGRADED alert raised in the last 12h before writing a new
-        # one. Without this dedup the gate would write 24+ alerts/day at the
-        # 30-min fault-scan cadence.
-        try:
-            with db.conn() as c:
-                cutoff = (datetime.now(ZoneInfo("UTC")) - timedelta(hours=12)).strftime('%Y-%m-%d %H:%M:%S')
-                existing = c.execute(
-                    "SELECT id FROM admin_alerts "
-                    "WHERE code='ACTIVITY_DEGRADED' AND resolved=0 AND created_at >= ? "
-                    "LIMIT 1",
-                    (cutoff,),
-                ).fetchone()
-            if not existing:
-                db.add_admin_alert(
-                    category='fault',
-                    severity='WARNING',
-                    title='Trade activity DEGRADED',
-                    body=f"{message}\n\n{detail}",
-                    source_agent='fault_detection_agent',
-                    source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
-                    code='ACTIVITY_DEGRADED',
-                    meta={
-                        "gate": "GATE8_ACTIVITY",
-                        "today_count": today_count,
-                        "baseline_median": median_baseline,
-                        "pct_of_baseline": round(pct_of_baseline, 1),
-                        "threshold_pct": DEGRADED_THRESHOLD_PCT,
-                    },
-                )
-                log.info("[GATE 8] ACTIVITY_DEGRADED alert written to admin_alerts")
-            else:
-                log.debug("[GATE 8] ACTIVITY_DEGRADED already alerted in last 12h — skipping duplicate")
-        except Exception as e:
-            log.warning(f"[GATE 8] Failed to write admin_alert: {e}")
     else:
         report.add(Finding(
             gate="GATE8_ACTIVITY",
@@ -1077,6 +1215,7 @@ def _get_active_customer_ids():
 
 def run():
     """Execute the 8-gate fault detection spine."""
+    _reset_run_state()                                  # clear per-run cache
     db = _master_db()
 
     # ── Lifecycle: START ──────────────────────────────────────────────
@@ -1093,7 +1232,7 @@ def run():
         gate1_agent_liveness(report, db)
     except Exception as e:
         log.error(f"Gate 1 failed: {e}", exc_info=True)
-        report.add(Finding("GATE1_LIVENESS", Severity.WARNING, "GATE1_ERROR",
+        report.add(Finding("GATE1_LIVENESS", Severity.CRITICAL, "GATE1_ERROR",
                            f"Agent liveness check failed: {e}"))
 
     # ── Gate 2: Data freshness ────────────────────────────────────────
@@ -1101,7 +1240,7 @@ def run():
         gate2_data_freshness(report, db)
     except Exception as e:
         log.error(f"Gate 2 failed: {e}", exc_info=True)
-        report.add(Finding("GATE2_FRESHNESS", Severity.WARNING, "GATE2_ERROR",
+        report.add(Finding("GATE2_FRESHNESS", Severity.CRITICAL, "GATE2_ERROR",
                            f"Data freshness check failed: {e}"))
 
     # ── Gate 3: API connectivity ──────────────────────────────────────
@@ -1109,7 +1248,7 @@ def run():
         gate3_api_connectivity(report)
     except Exception as e:
         log.error(f"Gate 3 failed: {e}", exc_info=True)
-        report.add(Finding("GATE3_API", Severity.WARNING, "GATE3_ERROR",
+        report.add(Finding("GATE3_API", Severity.CRITICAL, "GATE3_ERROR",
                            f"API connectivity check failed: {e}"))
 
     # ── Gate 4: System resources ──────────────────────────────────────
@@ -1117,16 +1256,15 @@ def run():
         gate4_system_resources(report)
     except Exception as e:
         log.error(f"Gate 4 failed: {e}", exc_info=True)
-        report.add(Finding("GATE4_RESOURCES", Severity.WARNING, "GATE4_ERROR",
+        report.add(Finding("GATE4_RESOURCES", Severity.CRITICAL, "GATE4_ERROR",
                            f"System resources check failed: {e}"))
 
     # ── Gate 5: Account health ────────────────────────────────────────
     try:
-        customer_ids = _get_active_customer_ids()
-        gate5_account_health(report, customer_ids)
+        gate5_account_health(report, _active_customer_ids())
     except Exception as e:
         log.error(f"Gate 5 failed: {e}", exc_info=True)
-        report.add(Finding("GATE5_ACCOUNT", Severity.WARNING, "GATE5_ERROR",
+        report.add(Finding("GATE5_ACCOUNT", Severity.CRITICAL, "GATE5_ERROR",
                            f"Account health check failed: {e}"))
 
     # ── Gate 6: DB integrity ──────────────────────────────────────────
@@ -1134,7 +1272,7 @@ def run():
         gate6_db_integrity(report, db)
     except Exception as e:
         log.error(f"Gate 6 failed: {e}", exc_info=True)
-        report.add(Finding("GATE6_DB", Severity.WARNING, "GATE6_ERROR",
+        report.add(Finding("GATE6_DB", Severity.CRITICAL, "GATE6_ERROR",
                            f"DB integrity check failed: {e}"))
 
     # ── Gate 7: Schedule compliance ───────────────────────────────────
@@ -1142,7 +1280,7 @@ def run():
         gate7_schedule_compliance(report, db)
     except Exception as e:
         log.error(f"Gate 7 failed: {e}", exc_info=True)
-        report.add(Finding("GATE7_SCHEDULE", Severity.WARNING, "GATE7_ERROR",
+        report.add(Finding("GATE7_SCHEDULE", Severity.CRITICAL, "GATE7_ERROR",
                            f"Schedule compliance check failed: {e}"))
 
     # ── Gate 8: Trade activity baseline (DEGRADED detector) ───────────
@@ -1150,7 +1288,7 @@ def run():
         gate8_trade_activity_baseline(report, db)
     except Exception as e:
         log.error(f"Gate 8 failed: {e}", exc_info=True)
-        report.add(Finding("GATE8_ACTIVITY", Severity.WARNING, "GATE8_ERROR",
+        report.add(Finding("GATE8_ACTIVITY", Severity.CRITICAL, "GATE8_ERROR",
                            f"Trade activity baseline check failed: {e}"))
 
     # ── Aggregate results ─────────────────────────────────────────────
@@ -1167,27 +1305,24 @@ def run():
         else:
             log.info(f"  [{f.gate}] OK: {f.message}")
 
-    # ── Raise admin alerts for critical findings ──────────────────────
+    # ── Raise admin alerts for actionable findings ────────────────────
     # Fault findings are always system-health problems (stale heartbeats,
     # DB lock, price staleness, etc.). Never customer-actionable. Route
-    # to the shared admin_alerts stream on the master DB.
-    critical_findings = [f for f in report.findings if f.severity == Severity.CRITICAL]
-    if critical_findings:
-        admin_db = _master_db()
-        for cf in critical_findings:
-            try:
-                admin_db.add_admin_alert(
-                    category='fault',
-                    severity='CRITICAL',
-                    title=f"System Alert: {cf.code}",
-                    body=f"{cf.message}\n{cf.detail}" if cf.detail else cf.message,
-                    source_agent='fault_detection_agent',
-                    source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
-                    code=cf.code,
-                    meta={"gate": cf.gate, "code": cf.code, "severity": "CRITICAL"},
-                )
-            except Exception as e:
-                log.warning(f"Failed to write fault admin alert: {e}")
+    # to the shared admin_alerts stream on the master DB. _emit_admin_alert
+    # handles per-code dedup so a sticky fault doesn't spam the inbox at
+    # the 30-min fault-scan cadence.
+    admin_db = _master_db()
+    written = 0
+    deduped = 0
+    for f in report.findings:
+        if f.severity not in (Severity.CRITICAL, Severity.WARNING):
+            continue
+        if _emit_admin_alert(admin_db, f):
+            written += 1
+        else:
+            deduped += 1
+    if written or deduped:
+        log.info(f"admin_alerts: wrote {written}, deduped {deduped}")
 
     # ── Store scan summary in customer_settings for portal access ─────
     scan_summary = {
