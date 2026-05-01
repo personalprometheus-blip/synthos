@@ -3083,6 +3083,12 @@ def api_keys():
         'STRIPE_WEBHOOK_SECRET',
         'STRIPE_PRICE_ID',
         'STRIPE_EARLY_ADOPTER_PRICE_ID',
+        # External data API keys. Both surface as rows on the cmd portal
+        # maintenance page; without inclusion here, writes from the page
+        # silently fail with "not allowed" (the get-keys side rendered
+        # the row but the keys-write side rejected the value).
+        'FMP_API_KEY',           # ETF holdings refresh (retail_sector_screener)
+        'FRED_API_KEY',          # VIX + treasury yields fallback (macro_regime_agent)
     }
 
     updated = []
@@ -3187,11 +3193,12 @@ def api_get_keys():
         'RESEND_API_KEY':    _obs(os.environ.get('RESEND_API_KEY', '')),
         'LICENSE_KEY':       _obs(os.environ.get('LICENSE_KEY', '')),
         'ALERT_TO':          _obs(os.environ.get('ALERT_TO', '')),
-        # 2026-05-01 — FMP API key. Written to pi5 .env via /api/keys
-        # but absent here meant the maintenance page kept reading it
-        # as NOT SET. Adding to the response so the cmd portal's
-        # /api/get-keys read sees the obfuscated value once set.
+        # External data API keys exposed on the cmd portal maintenance
+        # page. Without these here the page would render NOT SET even
+        # after a successful write to .env, because get-keys is the read
+        # side and read+write must mirror the same key set.
         'FMP_API_KEY':       _obs(os.environ.get('FMP_API_KEY', '')),
+        'FRED_API_KEY':      _obs(os.environ.get('FRED_API_KEY', '')),
         'trading_mode':      trading_mode,
         'live_enabled':      live_enabled,
     })
