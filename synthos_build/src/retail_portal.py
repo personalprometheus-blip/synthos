@@ -719,6 +719,7 @@ def check_auth():
     # Routes that are always public — no session required
     public_routes = {'/', '/login', '/logout', '/signup', '/verify-email', '/forgot-password', '/sso', '/check-email', '/reset-password',
                      '/terms/view',
+                     '/request-access',
                      '/admin/construction-verify'}
     if request.path in public_routes:
         return
