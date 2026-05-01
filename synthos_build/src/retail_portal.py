@@ -1037,7 +1037,7 @@ def _notify_admin_access_request(name: str, email: str, why: str,
     payload = {
         "event_type":    "ACCESS_REQUEST_SUBMITTED",
         "priority":       2,
-        "subject":       f"[Synthos] New access request — {name}",
+        "subject":       f"[Synthos] New access request - {name}",  # ASCII dash
         "body":           body,
         "source_agent":  "retail_portal",
         "audience":      "internal",
