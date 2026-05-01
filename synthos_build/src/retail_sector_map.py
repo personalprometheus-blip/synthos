@@ -12,7 +12,7 @@ Resolution order (fastest → slowest):
   4. None               — caller should display 'Unknown' and flag for backfill
 
 The hardcoded map takes precedence intentionally — reserve ETFs like BIL
-are classified by FMP as "Financial Services", which is technically true
+are classified by some sources as "Financials", which is technically true
 but misleading for concentration analysis. Cash/Reserve positions must be
 excluded from equity sector bucketing.
 """
@@ -40,7 +40,7 @@ HARDCODED_MAP = {
     # ── Known customer holdings (observed in production) ───────────────
     'AAL':   'Industrials',           # American Airlines
     'AMD':   'Technology',            # Advanced Micro Devices
-    'LYFT':  'Consumer Cyclical',     # Lyft
+    'LYFT':  'Consumer Discretionary',     # Lyft
     'XOM':   'Energy',                # Exxon Mobil (already in screener, kept as safety)
 
     # ── S&P 100 common names ───────────────────────────────────────────
@@ -50,17 +50,17 @@ HARDCODED_MAP = {
     'GOOGL': 'Communication Services',
     'GOOG':  'Communication Services',
     'META':  'Communication Services',
-    'AMZN':  'Consumer Cyclical',
-    'TSLA':  'Consumer Cyclical',
-    'BRK.B': 'Financial Services',
-    'BRK.A': 'Financial Services',
-    'JPM':   'Financial Services',
-    'BAC':   'Financial Services',
-    'WFC':   'Financial Services',
-    'GS':    'Financial Services',
-    'MS':    'Financial Services',
-    'V':     'Financial Services',
-    'MA':    'Financial Services',
+    'AMZN':  'Consumer Discretionary',
+    'TSLA':  'Consumer Discretionary',
+    'BRK.B': 'Financials',
+    'BRK.A': 'Financials',
+    'JPM':   'Financials',
+    'BAC':   'Financials',
+    'WFC':   'Financials',
+    'GS':    'Financials',
+    'MS':    'Financials',
+    'V':     'Financials',
+    'MA':    'Financials',
     'UNH':   'Healthcare',
     'JNJ':   'Healthcare',
     'LLY':   'Healthcare',
@@ -70,16 +70,16 @@ HARDCODED_MAP = {
     'TMO':   'Healthcare',
     'ABT':   'Healthcare',
     'CVS':   'Healthcare',
-    'WMT':   'Consumer Defensive',
-    'PG':    'Consumer Defensive',
-    'KO':    'Consumer Defensive',
-    'PEP':   'Consumer Defensive',
-    'COST':  'Consumer Defensive',
-    'MCD':   'Consumer Cyclical',
-    'NKE':   'Consumer Cyclical',
-    'HD':    'Consumer Cyclical',
-    'LOW':   'Consumer Cyclical',
-    'SBUX':  'Consumer Cyclical',
+    'WMT':   'Consumer Staples',
+    'PG':    'Consumer Staples',
+    'KO':    'Consumer Staples',
+    'PEP':   'Consumer Staples',
+    'COST':  'Consumer Staples',
+    'MCD':   'Consumer Discretionary',
+    'NKE':   'Consumer Discretionary',
+    'HD':    'Consumer Discretionary',
+    'LOW':   'Consumer Discretionary',
+    'SBUX':  'Consumer Discretionary',
     'DIS':   'Communication Services',
     'NFLX':  'Communication Services',
     'CMCSA': 'Communication Services',
@@ -95,9 +95,9 @@ HARDCODED_MAP = {
     'FDX':   'Industrials',
     'DE':    'Industrials',
     'HON':   'Industrials',
-    'LIN':   'Basic Materials',
-    'APD':   'Basic Materials',
-    'DOW':   'Basic Materials',
+    'LIN':   'Materials',
+    'APD':   'Materials',
+    'DOW':   'Materials',
     'NEE':   'Utilities',
     'DUK':   'Utilities',
     'SO':    'Utilities',

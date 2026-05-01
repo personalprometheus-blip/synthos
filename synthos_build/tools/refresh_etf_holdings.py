@@ -51,20 +51,21 @@ SPDR_HOLDINGS_URL = (
 )
 
 # Sectors we screen. Keys must match SECTOR_CONFIG in
-# retail_sector_screener.py EXACTLY — note the screener uses
-# Yahoo/Morningstar-style names ("Financial Services", "Consumer
-# Cyclical", "Consumer Defensive") rather than S&P standard names.
-# Mismatching the keys here against SECTOR_CONFIG produces a false
-# "all 10 added" diff report that masks real drift.
+# retail_sector_screener.py EXACTLY. 2026-05-01 — renamed from the
+# old Yahoo/Morningstar-style labels ("Financial Services", "Consumer
+# Cyclical", "Consumer Defensive", "Basic Materials") to SSGA-aligned
+# names since SSGA is our canonical holdings source. Healthcare stays
+# one-word (SSGA writes "Health Care" with a space; we override for
+# readability — every other system uses one-word).
 SPDR_SECTORS = {
     "Energy":                  "xle",
     "Technology":              "xlk",
-    "Financial Services":      "xlf",   # NOT "Financials"
+    "Financials":              "xlf",
     "Healthcare":              "xlv",
     "Industrials":             "xli",
-    "Consumer Cyclical":       "xly",   # NOT "Consumer Discretionary"
-    "Consumer Defensive":      "xlp",   # NOT "Consumer Staples"
-    "Basic Materials":         "xlb",
+    "Consumer Discretionary":  "xly",
+    "Consumer Staples":        "xlp",
+    "Materials":               "xlb",
     "Utilities":               "xlu",
     "Real Estate":             "xlre",
     "Communication Services":  "xlc",
@@ -79,12 +80,12 @@ SPDR_SECTORS = {
 ISHARES_SECTORS = {
     "Energy":                  ("IYE", None),  # TODO: product_id
     "Technology":              ("IYW", None),
-    "Financial Services":      ("IYF", None),
+    "Financials":              ("IYF", None),
     "Healthcare":              ("IYH", None),
     "Industrials":             ("IYJ", None),
-    "Consumer Cyclical":       ("IYC", None),
-    "Consumer Defensive":      ("IYK", None),
-    "Basic Materials":         ("IYM", None),
+    "Consumer Discretionary":  ("IYC", None),
+    "Consumer Staples":        ("IYK", None),
+    "Materials":               ("IYM", None),
     "Utilities":               ("IDU", None),
     "Real Estate":             ("IYR", None),
     "Communication Services":  ("IYZ", None),

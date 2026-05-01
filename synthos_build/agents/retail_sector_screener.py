@@ -119,7 +119,7 @@ SECTOR_CONFIG = {
             {"ticker": "AMGN", "company": "Amgen Inc",                 "etf_weight_pct":  2.7},
         ],
     },
-    "Financial Services": {
+    "Financials": {
         "etf": "XLF",
         "holdings": [
             {"ticker": "BRK.B","company": "Berkshire Hathaway",        "etf_weight_pct": 13.2},
@@ -134,7 +134,7 @@ SECTOR_CONFIG = {
             {"ticker": "C",    "company": "Citigroup Inc",             "etf_weight_pct":  2.2},
         ],
     },
-    "Consumer Cyclical": {
+    "Consumer Discretionary": {
         "etf": "XLY",
         "holdings": [
             {"ticker": "AMZN", "company": "Amazon.com Inc",            "etf_weight_pct": 22.8},
@@ -149,7 +149,7 @@ SECTOR_CONFIG = {
             {"ticker": "ABNB", "company": "Airbnb Inc",                "etf_weight_pct":  1.8},
         ],
     },
-    "Consumer Defensive": {
+    "Consumer Staples": {
         "etf": "XLP",
         "holdings": [
             {"ticker": "PG",   "company": "Procter & Gamble",          "etf_weight_pct": 12.4},
@@ -209,7 +209,7 @@ SECTOR_CONFIG = {
             {"ticker": "CBRE", "company": "CBRE Group",                "etf_weight_pct":  3.4},
         ],
     },
-    "Basic Materials": {
+    "Materials": {
         "etf": "XLB",
         "holdings": [
             {"ticker": "LIN",  "company": "Linde plc",                 "etf_weight_pct": 16.2},
