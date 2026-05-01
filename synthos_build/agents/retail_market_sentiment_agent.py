@@ -46,7 +46,8 @@ _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_shared import emit_admin_alert
 
 def _master_db():
     """2026-04-27: returns the shared market-intel DB. Was previously routing
@@ -69,6 +70,14 @@ CASCADE_PUT_CALL_THRESHOLD    = 1.10   # put/call > 110% of 30d avg
 CASCADE_SELLER_DOM_THRESHOLD  = 0.70   # 70%+ seller dominance
 CASCADE_VOLUME_THRESHOLD      = 2.50   # 250%+ of average volume
 CASCADE_INSIDER_SELLS_MIN     = 4      # at least 4 insider sells with 0 buys
+
+# admin_alert streak — when sentiment confidence stays below threshold for
+# this many consecutive runs, fire a SENTIMENT_DEGRADED admin_alert. Same
+# pattern as macro_regime / market_state agents. At ~30-min cadence this
+# is ~3h of degraded signal — long enough to filter transient blips,
+# short enough to surface a real upstream outage (Yahoo blocked, Alpaca
+# down, news_feed empty).
+LOW_CONFIDENCE_STREAK_ALERT = 6
 
 logging.basicConfig(
     level=logging.INFO,
@@ -454,33 +463,83 @@ def fetch_alpaca_bars(ticker, days=60):
 
 def fetch_vix():
     """
-    Fetch VIX index from Yahoo Finance chart API.
-    Returns (current_vix, vix_closes_list) or (None, []).
+    Fetch VIX index. Yahoo primary (intraday during market hours, freshest
+    for the 30-min sentiment cadence), FRED VIXCLS fallback when Yahoo is
+    unreachable or rate-limited.
+
+    Returns (current_vix, vix_closes_list) or (None, []) if both fail.
     """
+    # Primary: Yahoo Finance — gives intraday VIX during market hours
     url     = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX"
     params  = {"interval": "1d", "range": "1mo"}
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Synthos/1.0)"}
     try:
         r = fetch_with_retry(url, params=params, headers=headers)
         try:
-            _master_db().log_api_call('sentiment_agent', '/v8/finance/chart/%5EVIX', 'GET', 'yahoo', status_code=getattr(r, 'status_code', None))
+            _master_db().log_api_call('sentiment_agent', '/v8/finance/chart/%5EVIX',
+                                       'GET', 'yahoo',
+                                       status_code=getattr(r, 'status_code', None))
+        except Exception as _e:
+            log.debug(f"suppressed exception: {_e}")
+        if r:
+            data   = r.json()
+            result = data.get("chart", {}).get("result", [])
+            if result:
+                closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+                closes = [c for c in closes if c is not None]
+                if closes:
+                    current = closes[-1]
+                    log.info(f"VIX fetched: current={current:.2f}, "
+                             f"{len(closes)} days history (source=yahoo)")
+                    return current, closes
+    except Exception as e:
+        log.debug(f"fetch_vix Yahoo path failed: {e}")
+
+    # Fallback: FRED VIXCLS (daily close, 1-day lag during market hours).
+    # Less fresh than Yahoo but reliable when Yahoo blocks our IP.
+    fred_key = os.environ.get('FRED_API_KEY', '')
+    if not fred_key:
+        log.warning("VIX unavailable — Yahoo failed and FRED_API_KEY not set")
+        return None, []
+    try:
+        r = fetch_with_retry(
+            "https://api.stlouisfed.org/fred/series/observations",
+            params={
+                "series_id": "VIXCLS",
+                "api_key":   fred_key,
+                "file_type": "json",
+                "sort_order": "desc",
+                "limit":      30,
+            },
+        )
+        try:
+            _master_db().log_api_call('sentiment_agent',
+                                       '/fred/series/observations?series_id=VIXCLS',
+                                       'GET', 'fred',
+                                       status_code=getattr(r, 'status_code', None))
         except Exception as _e:
             log.debug(f"suppressed exception: {_e}")
         if not r:
             return None, []
-        data   = r.json()
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            return None, []
-        closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
-        closes = [c for c in closes if c is not None]
+        obs = r.json().get("observations", [])
+        # Newest-first → reverse to oldest-first to match Yahoo helper output
+        closes = []
+        for ob in reversed(obs):
+            v = ob.get("value", "")
+            if v in (".", "", None):
+                continue
+            try:
+                closes.append(float(v))
+            except (TypeError, ValueError):
+                continue
         if not closes:
             return None, []
         current = closes[-1]
-        log.info(f"VIX fetched: current={current:.2f}, {len(closes)} days history")
+        log.info(f"VIX fetched: current={current:.2f}, "
+                 f"{len(closes)} days history (source=fred fallback)")
         return current, closes
     except Exception as e:
-        log.warning(f"fetch_vix error: {e}")
+        log.warning(f"fetch_vix FRED fallback failed: {e}")
         return None, []
 
 
@@ -663,7 +722,7 @@ class SentimentControls:
     SPX_VOL_THRESHOLD        = float(os.environ.get('SPX_VOL_THRESHOLD', '0.015'))
     DRAWDOWN_THRESHOLD       = float(os.environ.get('DRAWDOWN_THRESHOLD', '0.05'))
     VIX_HIGH_THRESHOLD       = float(os.environ.get('VIX_HIGH_THRESHOLD', '20.0'))
-    # TODO: DATA_DEPENDENCY — VIX real-time integration requires paid/premium feed
+    # VIX is sourced via fetch_vix() — Yahoo primary, FRED VIXCLS fallback.
 
     # Gate 4 — Price Action
     PRICE_TREND_POS_THRESH   = float(os.environ.get('PRICE_TREND_POS_THRESH', '0.55'))
@@ -901,6 +960,20 @@ class SentimentState:
 
     # Gate 16 — Component Scores
     component_scores: dict = field(default_factory=dict)
+
+    # Per-gate proxy flags — True when the gate is operating on a proxy
+    # data source rather than its nominal/canonical input (e.g. gate 5
+    # uses sector-ETF dispersion when no A/D line feed is available).
+    # Gate 18 reads these to compute a data_completeness multiplier so
+    # the composite score is honest about input quality. Each placeholder
+    # gate sets its flag at the top; flipping to False is the contract
+    # for "real data source has been wired."
+    breadth_proxy:    bool = True   # gate 5: sector ETF spread vs A/D line
+    volatility_proxy: bool = True   # gate 7: VIX only, no VVIX/term structure
+    options_proxy:    bool = True   # gate 8: put/call only, no skew/gamma
+    credit_proxy:     bool = True   # gate 10: HYG/LQD vs CDS/CDX
+    macro_proxy:      bool = False  # gate 12: real after agent-8 wiring
+    social_proxy:     bool = True   # gate 14: hardcoded neutral, no feed
 
     # Gate 17 — Effective Weights (after adjustments)
     effective_weights: dict = field(default_factory=dict)
@@ -1397,7 +1470,7 @@ def gate2_input_universe(ctrl, state, sdl, data):
     state.input_options    = "active" if options_data.get("put_call_ratio") else "inactive"
     state.input_safe_haven = "active" if safe_haven else "inactive"
     state.input_credit     = "active" if credit_data else "inactive"
-    # TODO: DATA_DEPENDENCY — macro data requires FRED/Bloomberg
+    # Macro data populated in run() from _MACRO_REGIME settings (agent 8).
     state.input_macro      = "active" if macro_data else "inactive"
     state.input_news       = "active" if news_data.get("count", 0) > 0 else "inactive"
     # TODO: DATA_DEPENDENCY — social sentiment requires paid feed (StockTwits, Twitter/X API)
@@ -1952,32 +2025,89 @@ def gate11_sector_rotation(ctrl, state, sdl, sector_returns):
              f"cyc-def={spread:.4f}")
 
 
-def gate12_skip_macro(ctrl, state, sdl, macro_data):
+def gate12_macro(ctrl, state, sdl, macro_data):
     """
-    [SKIP / PLACEHOLDER] Gate 12 — Macro Conditions.
+    Gate 12 — Macro Conditions.
 
-    MARKED SKIP 2026-04-24: this gate has no free-tier proxy. Every
-    state is hardcoded to "neutral" with macro_score=0.0; the function
-    is effectively a no-op that exists to preserve the gate slot and
-    the state-field surface for when a real data feed (FRED, CME,
-    Bloomberg) is wired in. Do NOT mistake a neutral macro_state
-    entry in the decision log for a real macro check.
+    Reads the macro regime classification from agent 8 (retail_macro_
+    regime_agent) plus the underlying VIX and yield-spread signals
+    from FRED to derive macro_state and macro_policy_state. Replaces
+    the prior [SKIP / PLACEHOLDER] implementation that hardcoded
+    neutral with macro_score=0.0.
 
-    TODO: DATA_DEPENDENCY — economic surprise indices, Fed funds
-    futures, yield curve shape all require FRED or paid Bloomberg.
+    `macro_data` is populated in run() from `_MACRO_REGIME` and
+    `_MACRO_REGIME_DETAIL` settings; expected keys:
+      regime        — agent-8 label (EXPANSION / RECOVERY / LATE_CYCLE /
+                      CONTRACTION / CRISIS / UNCERTAIN)
+      vix           — current VIX (FRED VIXCLS, Yahoo fallback)
+      yield_spread  — 10Y - 3M Treasury spread, percent
+      confidence    — agent-8 confidence in the regime call
+
+    macro_state values:
+      supportive    — RECOVERY / EXPANSION (growth backdrop favorable)
+      neutral       — UNCERTAIN / LATE_CYCLE (mixed)
+      growth_risk   — CONTRACTION / CRISIS, OR yield-curve inverted
+                      (yield curve inversion is a stronger recession
+                      signal than the regime label alone)
+      inflation_risk — currently unreachable (would need CPI surprise
+                       data we don't yet have); reserved for future use
     """
-    # TODO: DATA_DEPENDENCY — CPI surprise, GDP surprise require FRED or paid Bloomberg
-    # TODO: DATA_DEPENDENCY — Fed funds futures require CME data
-    # TODO: DATA_DEPENDENCY — yield curve data requires Treasury/FRED feed
-    state.macro_state           = "neutral"
-    state.macro_policy_state    = "neutral"
-    state.macro_sentiment_state = "neutral"
-    state.macro_score           = 0.0
+    regime       = (macro_data.get("regime") or "").upper().strip()
+    vix          = macro_data.get("vix")
+    yield_spread = macro_data.get("yield_spread")
 
-    sdl.gate(12, "SKIP_macro",
-             {"macro_data_keys": list(macro_data.keys()) if macro_data else []},
-             "neutral",
-             "SKIP:DATA_DEPENDENCY — macro data (CPI/GDP surprise, Fed futures) requires FRED/Bloomberg")
+    REGIME_TO_MACRO = {
+        "EXPANSION":   "supportive",
+        "RECOVERY":    "supportive",
+        "LATE_CYCLE":  "neutral",
+        "CONTRACTION": "growth_risk",
+        "CRISIS":      "growth_risk",
+        "UNCERTAIN":   "neutral",
+    }
+    macro_state = REGIME_TO_MACRO.get(regime, "neutral")
+
+    # Yield-curve inversion overrides to growth_risk regardless of
+    # regime label — historically the most reliable recession indicator.
+    try:
+        spread_val = float(yield_spread) if yield_spread is not None else None
+    except (TypeError, ValueError):
+        spread_val = None
+    if spread_val is not None and spread_val < 0 and macro_state != "growth_risk":
+        macro_state = "growth_risk"
+
+    # Macro policy state — what the Fed is expected to do.
+    if regime == "RECOVERY":
+        macro_policy_state = "easing_expected"
+    elif regime in ("CONTRACTION", "CRISIS"):
+        macro_policy_state = "easing_expected"
+    elif regime == "LATE_CYCLE":
+        macro_policy_state = "tightening_expected"
+    else:
+        macro_policy_state = "neutral"
+
+    state.macro_state           = macro_state
+    state.macro_policy_state    = macro_policy_state
+    state.macro_sentiment_state = "neutral"   # vestigial field, surface compat
+    state.macro_score           = _score_macro(state)
+    # Real data wired = no proxy penalty in Gate 18 composite. Cold start
+    # (no _MACRO_REGIME setting yet) flips back to True so the proxy
+    # multiplier honestly reflects we have no macro context.
+    state.macro_proxy = not bool(regime)
+
+    if not regime:
+        sdl.gate(12, "macro",
+                 {"regime": "absent", "vix": vix, "yield_spread": yield_spread},
+                 "neutral (cold start)",
+                 "no _MACRO_REGIME setting yet — macro_regime agent hasn't run")
+        return
+
+    sdl.gate(12, "macro",
+             {"regime": regime,
+              "vix": vix,
+              "yield_spread": yield_spread},
+             f"macro_state={macro_state} policy={macro_policy_state} "
+             f"score={state.macro_score:.3f}",
+             f"derived from agent-8 regime={regime}")
 
 
 def gate13_news(ctrl, state, sdl, news_data):
@@ -2227,13 +2357,44 @@ def gate17_weighting(ctrl, state, sdl):
 def gate18_composite_score(ctrl, state, sdl):
     """
     Gate 18 — Composite Sentiment Score.
-    Weighted sum of component scores → raw_sentiment_score → market_sentiment_state.
+
+    Weighted sum of component scores → raw_sentiment_score → market_
+    sentiment_state. Components flagged as proxies (state.X_proxy=True)
+    have their weight halved before normalization, so the raw composite
+    honestly reflects which inputs are running on real vs proxy data.
+    Today the proxied gates are: 5 (breadth), 7 (volatility), 8 (options),
+    10 (credit), 14 (social), and gate 12 (macro) before agent-8 has
+    written a regime. Each set its flag at the top of its gate function;
+    flipping proxy=False is the contract for "real data wired."
     """
-    scores  = state.component_scores
-    weights = state.effective_weights
+    scores      = state.component_scores
+    raw_weights = state.effective_weights
+
+    # Apply proxy penalty: 50% weight reduction per proxied component.
+    # Same multiplicative pattern as the news agent's gate 22. Components
+    # without a proxy flag (price, volume, news, cross_asset, sector) are
+    # unaffected — those gates run on real signal.
+    proxy_map = {
+        "breadth":     state.breadth_proxy,
+        "volatility":  state.volatility_proxy,
+        "options":     state.options_proxy,
+        "credit":      state.credit_proxy,
+        "macro":       state.macro_proxy,
+        "social":      state.social_proxy,
+    }
+    weights = {}
+    for k, w in raw_weights.items():
+        weights[k] = w * 0.5 if proxy_map.get(k, False) else w
 
     raw = sum(weights.get(k, 0.0) * scores.get(k, 0.0) for k in scores)
     state.raw_sentiment_score = raw
+
+    # Surface the data_completeness as a 0-1 figure for audit. 1.0 means
+    # all inputs real; lower means proxy components dragged the weighted
+    # sum down. Same shape as news agent's data_completeness.
+    proxy_count = sum(1 for v in proxy_map.values() if v)
+    raw_proxy_weight = sum(raw_weights.get(k, 0.0) for k, v in proxy_map.items() if v)
+    data_completeness = round(1.0 - 0.5 * raw_proxy_weight, 4)
 
     if raw >= ctrl.EUPHORIC_THRESHOLD:
         state.market_sentiment_state = "euphoric"
@@ -2247,11 +2408,15 @@ def gate18_composite_score(ctrl, state, sdl):
         state.market_sentiment_state = "neutral"
 
     sdl.gate(18, "composite_score",
-             {"raw": f"{raw:.4f}", "bullish_thresh": ctrl.BULLISH_THRESHOLD,
+             {"raw": f"{raw:.4f}",
+              "data_completeness": f"{data_completeness:.2f}",
+              "proxied": proxy_count,
+              "bullish_thresh": ctrl.BULLISH_THRESHOLD,
               "bearish_thresh": ctrl.BEARISH_THRESHOLD},
              f"raw_score={raw:.4f} market_sentiment={state.market_sentiment_state}",
              f"euphoric>={ctrl.EUPHORIC_THRESHOLD} bullish>={ctrl.BULLISH_THRESHOLD} "
-             f"bearish<={ctrl.BEARISH_THRESHOLD} panic<={ctrl.PANIC_THRESHOLD}")
+             f"bearish<={ctrl.BEARISH_THRESHOLD} panic<={ctrl.PANIC_THRESHOLD} "
+             f"completeness={data_completeness:.2f}")
 
 
 def gate19_confidence(ctrl, state, sdl):
@@ -2468,51 +2633,51 @@ def gate23_risk_discounts(ctrl, state, sdl):
 def gate24_persistence(ctrl, state, sdl, db):
     """
     Gate 24 — Temporal Persistence.
-    Reads historical sentiment from DB to classify stability.
-    TODO: DATA_DEPENDENCY — requires historical sentiment_log table in DB.
+
+    Reads recent sentiment_log rows (written at end of each Pulse run by
+    db.write_sentiment_log) to classify the stability and trend of market
+    sentiment over the last N runs. Replaces the prior placeholder that
+    string-parsed system_log JSON details for the same data.
+
+    persistence_state values:
+      persistent_bullish   — last PERSISTENCE_THRESHOLD runs all positive
+                             AND current run is positive
+      persistent_bearish   — last PERSISTENCE_THRESHOLD runs all negative
+                             AND current run is negative
+      unstable_sentiment   — sign flipped >= FLIP_THRESHOLD-1 times in window
+                             (rapid bull/bear oscillation = noise)
+      transient_panic      — currently panic but not persistently negative
+                             (one-off panic spike, not a regime)
+      unknown              — insufficient history (cold start)
+
+    sentiment_trend_state values:
+      improving  — current vs prior delta exceeds IMPROVEMENT_THRESHOLD
+      worsening  — current vs prior delta below -DETERIORATION_THRESHOLD
+      neutral    — within band
+
+    Reads up to PERSISTENCE_THRESHOLD + FLIP_THRESHOLD + 5 rows so both
+    checks have enough headroom even at min config. Runs that don't have
+    a stamped final_signal (e.g. gate-1 halts) are filtered out — those
+    rows can't contribute to persistence math.
     """
-    # TODO: DATA_DEPENDENCY — requires sentiment_log table with historical records
-    # Minimal implementation: query recent MARKET_SENTIMENT_CLASSIFIED events
+    history_depth = max(ctrl.PERSISTENCE_THRESHOLD, ctrl.FLIP_THRESHOLD) + 5
     try:
-        rows = db.query(
-            "SELECT details FROM system_log WHERE event_type='MARKET_SENTIMENT_CLASSIFIED' "
-            "ORDER BY created_at DESC LIMIT 10"
-        )
-    except Exception:
+        rows = db.get_recent_sentiment_log(limit=history_depth)
+    except Exception as e:
+        log.debug(f"sentiment_log read failed (cold start? treating as empty): {e}")
         rows = []
 
-    prior_scores = []
-    prior_states = []
-    if rows:
-        for row in rows[:10]:
-            try:
-                rec = _json.loads(row[0]) if row[0] else {}
-                gates_data = rec.get("gates", [])
-                for g in gates_data:
-                    if g.get("gate") == 27:
-                        # Extract final signal from gate 27 result
-                        result_str = g.get("result", "")
-                        if "final_signal=" in result_str:
-                            sig_part = result_str.split("final_signal=")[1].split(" ")[0]
-                            try:
-                                prior_scores.append(float(sig_part))
-                            except ValueError:
-                                pass
-                        if "state=" in result_str:
-                            st_part = result_str.split("state=")[1].split(" ")[0]
-                            prior_states.append(st_part)
-            except Exception:
-                continue
-
+    prior_scores = [r['final_signal'] for r in rows if r.get('final_signal') is not None]
     current_score = state.discounted_sentiment_score
 
     if len(prior_scores) >= ctrl.PERSISTENCE_THRESHOLD:
         recent  = prior_scores[:ctrl.PERSISTENCE_THRESHOLD]
         all_pos = all(s > 0 for s in recent)
         all_neg = all(s < 0 for s in recent)
-        # Flip detection: sign changes
-        flips = sum(1 for i in range(1, len(prior_scores[:ctrl.FLIP_THRESHOLD]))
-                    if (prior_scores[i] > 0) != (prior_scores[i-1] > 0))
+        # Flip detection: count sign changes in the FLIP_THRESHOLD-window.
+        flip_window = prior_scores[:ctrl.FLIP_THRESHOLD]
+        flips = sum(1 for i in range(1, len(flip_window))
+                    if (flip_window[i] > 0) != (flip_window[i-1] > 0))
 
         if flips >= ctrl.FLIP_THRESHOLD - 1:
             state.persistence_state = "unstable_sentiment"
@@ -2525,23 +2690,25 @@ def gate24_persistence(ctrl, state, sdl, db):
         else:
             state.persistence_state = "unknown"
 
-        # Trend vs prior session
-        if prior_scores:
-            delta = current_score - prior_scores[0]
-            if delta > ctrl.IMPROVEMENT_THRESHOLD:
-                state.sentiment_trend_state = "improving"
-            elif delta < -ctrl.DETERIORATION_THRESHOLD:
-                state.sentiment_trend_state = "worsening"
-            else:
-                state.sentiment_trend_state = "neutral"
+        # Trend vs the most-recent prior run (prior_scores is newest-first
+        # because get_recent_sentiment_log uses ORDER BY id DESC).
+        delta = current_score - prior_scores[0]
+        if delta > ctrl.IMPROVEMENT_THRESHOLD:
+            state.sentiment_trend_state = "improving"
+        elif delta < -ctrl.DETERIORATION_THRESHOLD:
+            state.sentiment_trend_state = "worsening"
+        else:
+            state.sentiment_trend_state = "neutral"
     else:
-        state.persistence_state    = "unknown"
+        state.persistence_state     = "unknown"
         state.sentiment_trend_state = "neutral"
 
     sdl.gate(24, "persistence",
-             {"prior_records": len(prior_scores), "current_score": f"{current_score:.4f}"},
+             {"prior_records": len(prior_scores),
+              "current_score":  f"{current_score:.4f}",
+              "history_depth":  history_depth},
              f"persistence={state.persistence_state} trend={state.sentiment_trend_state}",
-             "TODO:DATA_DEPENDENCY — sentiment_log table needed for full persistence tracking")
+             f"reading sentiment_log table directly (depth={len(prior_scores)})")
 
 
 def gate25_evaluation(ctrl, state, sdl, db):
@@ -2772,6 +2939,423 @@ def _handle_screening_requests(db):
     log.info(f"Screening sentiment audit written: {audit_path}")
 
 
+# ── PHASE 1: 27-GATE MARKET SENTIMENT SPINE ───────────────────────────────
+# Extracted 2026-05-01 from a 400-line run() so the orchestration stays
+# legible. Behavior is identical to the inline version it replaces.
+
+def _run_phase1_market_sentiment(db, ctrl, now):
+    """Fetch all sentiment inputs, run gates 1-27, persist sentiment_log /
+    scan_log entries, and update the low-confidence streak counter.
+
+    Returns dict:
+        state          — final SentimentState
+        put_call       — fetched market-wide put/call ratio (float | None)
+        put_call_avg   — 30-day average (float | None)
+        market_data_ok — True if Alpaca SPX bars came back populated
+    """
+    sdl   = SentimentDecisionLog()
+    state = SentimentState()
+
+    # Fetch all data inputs
+    spx_bars                     = fetch_alpaca_bars(ctrl.SPX_TICKER, days=220)  # need 200d MA
+    vix_current, vix_history     = fetch_vix()
+    sector_rets                  = fetch_sector_returns()
+    etf_rets                     = fetch_etf_returns(
+        ["GLD", "TLT", "HYG", "LQD", "UUP", "QQQ", "RSP", "USMV"]
+    )
+    news_score, news_ct, macro_ct, micro_ct = fetch_news_sentiment_from_db(db)
+
+    # Macro data — read agent-8's regime classification + underlying signals
+    # from the shared DB so Gate 12 has real data to score on.
+    macro_data: dict = {}
+    try:
+        macro_label = db.get_setting('_MACRO_REGIME')
+        macro_detail_raw = db.get_setting('_MACRO_REGIME_DETAIL')
+        macro_detail = json.loads(macro_detail_raw) if macro_detail_raw else {}
+        if macro_label:
+            macro_data = {
+                "regime":       macro_label,
+                "vix":          macro_detail.get("vix"),
+                "yield_spread": macro_detail.get("yield_spread"),
+                "confidence":   macro_detail.get("confidence"),
+            }
+    except Exception as _e:
+        log.debug(f"macro_regime lookup failed (gate12 will treat as cold start): {_e}")
+
+    # Build data availability map
+    data = {
+        "price_bars":    spx_bars,
+        "volume_bars":   spx_bars,
+        "breadth_data":  {},   # TODO: DATA_DEPENDENCY — advance/decline requires exchange feed
+        "vol_data":      ({"vix": vix_current, "vix_history": vix_history}
+                          if vix_current else {}),
+        "options_data":  {},   # filled by put/call below
+        "safe_haven_data": etf_rets,
+        "credit_data":   etf_rets,
+        "macro_data":    macro_data,   # populated above from agent-8 settings
+        "news_data":     {
+            "score":       news_score,
+            "count":       news_ct,
+            "macro_count": macro_ct,
+            "micro_count": micro_ct,
+        },
+        "social_data": {},     # TODO: DATA_DEPENDENCY — requires StockTwits/Twitter/X
+    }
+
+    # Fetch put/call for options gate
+    put_call, put_call_avg = fetch_put_call_ratio(ctrl.SPX_TICKER)
+    if put_call is not None:
+        data["options_data"]["put_call_ratio"] = put_call
+        data["options_data"]["put_call_avg"]   = put_call_avg
+
+    # Gate 1: System
+    snapshot_hash    = str(hash(f"{now.strftime('%Y-%m-%d %H')}"))  # hour-level dedup
+    # Intra-run dedup only — every run resets this. Cross-run dedup would
+    # need a persistent table, but the daemon schedules one Pulse run per
+    # cycle so there's no real cross-run dup risk to defend against.
+    processed_hashes: set = set()
+    market_data_ok   = bool(spx_bars)
+
+    if not gate1_system(ctrl, state, sdl, now, snapshot_hash, processed_hashes,
+                        data_available=market_data_ok):
+        sdl.decide(state.system_status, 0.0, f"gate1 halt: {state.system_status}")
+        sdl.commit(db)
+        log.warning(f"Market sentiment spine halted at gate1: {state.system_status}")
+        return {
+            'state':          state,
+            'put_call':       put_call,
+            'put_call_avg':   put_call_avg,
+            'market_data_ok': market_data_ok,
+        }
+
+    # Gates 2-27
+    gate2_input_universe(ctrl, state, sdl, data)
+    gate3_benchmark(ctrl, state, sdl, spx_bars)
+    gate4_price_action(ctrl, state, sdl, spx_bars, sector_rets)
+
+    rsp_spy_spread = (
+        etf_rets.get("RSP", 0.0) - etf_rets.get("SPY", 0.0)
+        if etf_rets else 0.0
+    )
+    gate5_breadth(ctrl, state, sdl, sector_rets, rsp_spy_spread)
+    gate6_volume(ctrl, state, sdl, spx_bars)
+    gate7_volatility(ctrl, state, sdl, spx_bars, vix_current, vix_history)
+    gate8_options(ctrl, state, sdl, data["options_data"])
+    gate9_safe_haven(ctrl, state, sdl, etf_rets)
+    gate10_credit(ctrl, state, sdl, etf_rets)
+    gate11_sector_rotation(ctrl, state, sdl, sector_rets)
+    gate12_macro(ctrl, state, sdl, data["macro_data"])
+    gate13_news(ctrl, state, sdl, data["news_data"])
+    gate14_skip_social(ctrl, state, sdl, data["social_data"])
+    gate15_breadth_price_divergence(ctrl, state, sdl, spx_bars)
+    gate16_composite_construction(ctrl, state, sdl)
+    gate17_weighting(ctrl, state, sdl)
+    gate18_composite_score(ctrl, state, sdl)
+    gate19_confidence(ctrl, state, sdl)
+    gate20_regime(ctrl, state, sdl)
+    gate21_divergence_warnings(ctrl, state, sdl)
+    gate22_action(ctrl, state, sdl)
+    gate23_risk_discounts(ctrl, state, sdl)
+    gate24_persistence(ctrl, state, sdl, db)
+    gate25_evaluation(ctrl, state, sdl, db)
+    gate26_output(ctrl, state, sdl)
+    gate27_final_signal(ctrl, state, sdl)
+
+    sdl.decide(state.classification, state.sentiment_confidence, state.output_action)
+    sdl.commit(db)
+
+    # Persist this run's gate-27 output to sentiment_log so the next
+    # run's Gate 24 can compute persistence and trend. Non-fatal on
+    # failure — sentiment classification doesn't depend on the write
+    # succeeding, just future persistence detection.
+    try:
+        db.write_sentiment_log(
+            composite_score    = state.raw_sentiment_score,
+            final_signal       = state.final_sentiment_signal,
+            classification     = state.classification,
+            regime_state       = state.regime_state,
+            final_market_state = state.final_market_state,
+            confidence         = state.sentiment_confidence,
+            warning_state      = state.warning_state,
+        )
+    except Exception as _e:
+        log.warning(f"sentiment_log write failed (non-fatal): {_e}")
+
+    # Write market sentiment snapshot to scan_log (ticker="MARKET")
+    # so Agent 1 can read aggregate sentiment context in Gate 10
+    try:
+        db.log_scan(
+            ticker="MARKET",
+            put_call_ratio=put_call,
+            put_call_avg30d=put_call_avg,
+            insider_net=None,
+            volume_vs_avg=None,
+            seller_dominance=None,
+            cascade_detected=state.benchmark_risk_state == "drawdown",
+            tier=(1 if state.final_market_state in ("strong_bearish", "panic_override")
+                  else 2 if state.final_market_state in ("mild_bearish",)
+                  else 3 if state.final_market_state == "neutral"
+                  else 4),
+            event_summary=(
+                f"MARKET_SENTIMENT: {state.final_market_state} | "
+                f"regime={state.regime_state} | "
+                f"classification={state.classification} | "
+                f"confidence={state.sentiment_confidence:.2f} | "
+                f"score={state.final_sentiment_signal:.3f} | "
+                f"warning={state.warning_state}"
+            ),
+        )
+    except Exception as e:
+        log.warning(f"Market sentiment log_scan write failed (non-fatal): {e}")
+
+    log.info(
+        f"Market sentiment: {state.final_market_state} | "
+        f"regime={state.regime_state} | score={state.final_sentiment_signal:.3f} | "
+        f"confidence={state.sentiment_confidence:.2f} | {state.classification}"
+    )
+
+    # ── Streak tracking → admin_alert on sustained low confidence ──
+    # Gate 19 sets sentiment_confidence on a 0-1 scale. LOW_CONF_THRESHOLD
+    # is the same threshold that flags a run as low-confidence in the
+    # decision log; we count consecutive runs below it. After
+    # LOW_CONFIDENCE_STREAK_ALERT runs, emit a single admin_alert
+    # (deduped 12h by emit_admin_alert).
+    try:
+        if state.sentiment_confidence < ctrl.LOW_CONF_THRESHOLD:
+            streak = int(db.get_setting('_PULSE_LOW_CONFIDENCE_STREAK') or 0) + 1
+            db.set_setting('_PULSE_LOW_CONFIDENCE_STREAK', str(streak))
+            if streak >= LOW_CONFIDENCE_STREAK_ALERT:
+                from types import SimpleNamespace
+                f = SimpleNamespace(
+                    severity="WARNING",
+                    code="SENTIMENT_DEGRADED",
+                    gate="GATE19_CONFIDENCE",
+                    message=(f"Sentiment agent confidence below "
+                             f"{ctrl.LOW_CONF_THRESHOLD:.2f} for {streak} "
+                             f"consecutive runs — current "
+                             f"{state.sentiment_confidence:.2f}, "
+                             f"market_state={state.final_market_state}"),
+                    detail=("Sustained low confidence usually means an upstream "
+                            "data source is failing: Yahoo VIX, Alpaca bars, "
+                            "CBOE put/call, EDGAR insider transactions, or "
+                            "Finviz volume. Check the per-run log for repeated "
+                            "fetch failures."),
+                    meta={
+                        "streak": streak,
+                        "confidence": state.sentiment_confidence,
+                        "active_inputs": state.active_input_count,
+                        "regime_state": state.regime_state,
+                        "final_market_state": state.final_market_state,
+                    },
+                    customer_id=None,
+                )
+                emit_admin_alert(db, f,
+                                 source_agent='market_sentiment_agent',
+                                 category='system')
+                log.warning(f"low-confidence streak={streak} → admin_alert raised")
+        else:
+            db.set_setting('_PULSE_LOW_CONFIDENCE_STREAK', '0')
+    except Exception as _e:
+        log.warning(f"sentiment streak tracking failed (non-fatal): {_e}")
+
+    return {
+        'state':          state,
+        'put_call':       put_call,
+        'put_call_avg':   put_call_avg,
+        'market_data_ok': market_data_ok,
+    }
+
+
+# ── PHASE 2: PER-POSITION CASCADE SCAN ────────────────────────────────────
+
+def _run_phase2_position_scan(db, put_call, put_call_avg):
+    """Per-position cascade-pattern scan. Reuses the run-cached put/call so
+    every position shares one CBOE call. Logs scan_log row per position
+    and raises urgent_flag rows when cascade_detected. Returns the
+    positions list so the caller can include count in the run summary."""
+    positions = db.get_open_positions()
+    if not positions:
+        log.info("No open positions to scan")
+        return positions
+
+    log.info(f"Scanning {len(positions)} open position(s)")
+    critical_count = 0
+    elevated_count = 0
+
+    for pos in positions:
+        ticker = pos['ticker']
+        log.info(f"Scanning {ticker}...")
+
+        # reuse market-wide put/call from Phase 1 — same CBOE page regardless of ticker
+        pos_put_call, pos_put_call_avg = put_call, put_call_avg
+        insider_data                   = fetch_sec_insider_transactions(ticker)
+        volume_data                    = fetch_volume_profile(ticker, is_position=True)
+
+        # Small delay between tickers to avoid rate limiting
+        time.sleep(2)
+
+        tier, tier_label, cascade_detected, summary = detect_cascade(
+            pos_put_call, pos_put_call_avg, insider_data, volume_data
+        )
+
+        # Deep analysis for elevated/critical positions
+        analysis = None
+        if tier <= 2:
+            analysis = format_scan_analysis(
+                pos, pos_put_call, pos_put_call_avg, insider_data,
+                volume_data, tier, tier_label, cascade_detected, db
+            )
+
+        db.log_scan(
+            ticker=ticker,
+            put_call_ratio=pos_put_call,
+            put_call_avg30d=pos_put_call_avg,
+            insider_net=insider_data.get("net_dollar"),
+            volume_vs_avg=volume_data.get("today_vs_avg"),
+            seller_dominance=volume_data.get("seller_dominance"),
+            cascade_detected=cascade_detected,
+            tier=tier,
+            event_summary=summary + (f" | Analysis: {analysis[:100]}" if analysis else ""),
+        )
+
+        if tier == 1:
+            critical_count += 1
+            log.warning(f"CRITICAL — {ticker}: {summary}")
+        elif tier == 2:
+            elevated_count += 1
+            log.info(f"ELEVATED — {ticker}: {summary}")
+        else:
+            log.info(f"{tier_label} — {ticker}: normal scan")
+
+    log.info(
+        f"Position scan complete — critical={critical_count} elevated={elevated_count} "
+        f"positions={len(positions)}"
+    )
+    return positions
+
+
+# ── PHASE 3: PRE-TRADE QUEUE PARALLEL FETCH ───────────────────────────────
+
+def _run_phase3_pretrade_queue(db, put_call, put_call_avg):
+    """For every QUEUED signal, fulfil sentiment via parallel EDGAR + volume
+    fetches and stamp signals.sentiment_score. SENTIMENT_FETCH_WORKERS
+    threads, PHASE3_BUDGET_SEC soft budget. On budget exhaustion logs a
+    TIME_BUDGET decision-log row so the promoter / fault detector can
+    surface 'sentiment time budget' as the bottleneck rather than a
+    silent miss."""
+    PHASE3_BUDGET_SEC = 480
+    queued_signals = db.get_queued_signals()
+    if not queued_signals:
+        return
+
+    by_ticker: dict = {}
+    for sig in queued_signals:
+        by_ticker.setdefault(sig['ticker'], []).append(sig)
+    log.info(
+        f"Checking sentiment for {len(queued_signals)} queued signal(s) "
+        f"across {len(by_ticker)} unique ticker(s) "
+        f"(workers={SENTIMENT_FETCH_WORKERS})"
+    )
+
+    def _fetch_ticker_bundle(ticker):
+        t0 = time.monotonic()
+        insider = fetch_sec_insider_transactions(ticker, days_back=7)
+        volume  = fetch_volume_profile(ticker)
+        tier, label, cascade_detected, summary = detect_cascade(
+            put_call, put_call_avg, insider, volume
+        )
+        score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
+        return {
+            'insider':    insider,
+            'volume':     volume,
+            'tier':       tier,
+            'label':      label,
+            'cascade':    cascade_detected,
+            'summary':    summary,
+            'score':      score,
+            'fetch_sec':  round(time.monotonic() - t0, 2),
+        }
+
+    phase3_start  = time.monotonic()
+    processed     = 0
+    stopped_early = False
+
+    pool = ThreadPoolExecutor(max_workers=SENTIMENT_FETCH_WORKERS,
+                              thread_name_prefix='pulse-fetch')
+    future_to_ticker = {}
+    try:
+        for ticker, sigs in by_ticker.items():
+            fut = pool.submit(_fetch_ticker_bundle, ticker)
+            future_to_ticker[fut] = (ticker, sigs)
+
+        try:
+            for fut in as_completed(future_to_ticker, timeout=PHASE3_BUDGET_SEC):
+                ticker, sigs = future_to_ticker[fut]
+                try:
+                    bundle = fut.result()
+                except Exception as e:
+                    log.warning(f"Phase 3 fetch failed for {ticker}: {e}")
+                    continue
+
+                # DB writes in the main thread — sqlite under WAL handles
+                # concurrency but keeping writes serial here keeps the per-
+                # customer DB lock contention predictable.
+                db.log_scan(
+                    ticker=ticker,
+                    put_call_ratio=put_call,
+                    put_call_avg30d=put_call_avg,
+                    insider_net=bundle['insider'].get('net_dollar'),
+                    volume_vs_avg=bundle['volume'].get('today_vs_avg'),
+                    seller_dominance=bundle['volume'].get('seller_dominance'),
+                    cascade_detected=bundle['cascade'],
+                    tier=bundle['tier'],
+                    event_summary=f"PRE-TRADE CHECK: {bundle['summary']}",
+                )
+
+                if bundle['tier'] <= 2:
+                    for sig in sigs:
+                        log.warning(
+                            f"Pre-trade warning: {ticker} (signal {sig['id']}) — "
+                            f"{bundle['label']}: {bundle['summary']}"
+                        )
+                        db.annotate_signal_pulse(sig['id'], bundle['tier'],
+                                                 bundle['summary'])
+
+                try:
+                    db.stamp_signals_sentiment(ticker, bundle['score'])
+                except Exception as _e:
+                    log.debug(f"sentiment stamp failed for {ticker}: {_e}")
+
+                processed += 1
+        except FuturesTimeoutError:
+            stopped_early = True
+            log.warning(
+                f"Phase 3 time budget exceeded ({PHASE3_BUDGET_SEC}s) — "
+                f"processed {processed}/{len(by_ticker)} tickers, "
+                f"remainder left unstamped so the agent can commit cleanly"
+            )
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    elapsed = time.monotonic() - phase3_start
+    log.info(
+        f"Phase 3 complete — {processed}/{len(by_ticker)} tickers "
+        f"in {elapsed:.1f}s (parallel={SENTIMENT_FETCH_WORKERS})"
+        + (" (stopped on budget)" if stopped_early else "")
+    )
+
+    if stopped_early:
+        try:
+            db.log_signal_decision(
+                agent='sentiment', action='TIME_BUDGET',
+                value=f"{processed}/{len(by_ticker)}",
+                reason=(f"budget {PHASE3_BUDGET_SEC}s exceeded after {elapsed:.0f}s; "
+                        f"remaining tickers left unstamped this cycle")
+            )
+        except Exception as _e:
+            log.debug(f"TIME_BUDGET decision-log write failed: {_e}")
+
+
 # ── MAIN PIPELINE ─────────────────────────────────────────────────────────
 
 def run():
@@ -2798,336 +3382,21 @@ def run():
         log.warning(f"Screening request enrichment failed: {e}")
 
     # ── Phase 1: 27-gate Market Sentiment Spine ───────────────────────────
-    sdl   = SentimentDecisionLog()
-    state = SentimentState()
+    phase1 = _run_phase1_market_sentiment(db, ctrl, now)
+    state        = phase1['state']
+    put_call     = phase1['put_call']
+    put_call_avg = phase1['put_call_avg']
 
-    # Fetch all data inputs
-    spx_bars                     = fetch_alpaca_bars(ctrl.SPX_TICKER, days=220)  # need 200d MA
-    vix_current, vix_history     = fetch_vix()
-    sector_rets                  = fetch_sector_returns()
-    etf_rets                     = fetch_etf_returns(
-        ["GLD", "TLT", "HYG", "LQD", "UUP", "QQQ", "RSP", "USMV"]
-    )
-    news_score, news_ct, macro_ct, micro_ct = fetch_news_sentiment_from_db(db)
+    # ── Phase 2: Per-position cascade scan ────────────────────────────────
+    positions = _run_phase2_position_scan(db, put_call, put_call_avg)
 
-    # Build data availability map
-    data = {
-        "price_bars":    spx_bars,
-        "volume_bars":   spx_bars,
-        "breadth_data":  {},   # TODO: DATA_DEPENDENCY — advance/decline requires exchange feed
-        "vol_data":      ({"vix": vix_current, "vix_history": vix_history}
-                          if vix_current else {}),
-        "options_data":  {},   # filled by put/call below
-        "safe_haven_data": etf_rets,
-        "credit_data":   etf_rets,
-        "macro_data":    {},   # TODO: DATA_DEPENDENCY — requires FRED/Bloomberg
-        "news_data":     {
-            "score":       news_score,
-            "count":       news_ct,
-            "macro_count": macro_ct,
-            "micro_count": micro_ct,
-        },
-        "social_data": {},     # TODO: DATA_DEPENDENCY — requires StockTwits/Twitter/X
-    }
+    # ── Phase 3: Pre-trade queue parallel sentiment fulfilment ────────────
+    _run_phase3_pretrade_queue(db, put_call, put_call_avg)
 
-    # Fetch put/call for options gate
-    put_call, put_call_avg = fetch_put_call_ratio(ctrl.SPX_TICKER)
-    if put_call is not None:
-        data["options_data"]["put_call_ratio"] = put_call
-        data["options_data"]["put_call_avg"]   = put_call_avg
-
-    # Gate 1: System
-    snapshot_hash    = str(hash(f"{now.strftime('%Y-%m-%d %H')}"))  # hour-level dedup
-    processed_hashes = set()  # TODO: persist across runs via DB
-    market_data_ok   = bool(spx_bars)
-
-    if not gate1_system(ctrl, state, sdl, now, snapshot_hash, processed_hashes,
-                        data_available=market_data_ok):
-        sdl.decide(state.system_status, 0.0, f"gate1 halt: {state.system_status}")
-        sdl.commit(db)
-        log.warning(f"Market sentiment spine halted at gate1: {state.system_status}")
-        # Still run position scan below even if market snapshot rejected
-    else:
-        # Gates 2-27
-        gate2_input_universe(ctrl, state, sdl, data)
-        gate3_benchmark(ctrl, state, sdl, spx_bars)
-        gate4_price_action(ctrl, state, sdl, spx_bars, sector_rets)
-
-        rsp_spy_spread = (
-            etf_rets.get("RSP", 0.0) - etf_rets.get("SPY", 0.0)
-            if etf_rets else 0.0
-        )
-        gate5_breadth(ctrl, state, sdl, sector_rets, rsp_spy_spread)
-        gate6_volume(ctrl, state, sdl, spx_bars)
-        gate7_volatility(ctrl, state, sdl, spx_bars, vix_current, vix_history)
-        gate8_options(ctrl, state, sdl, data["options_data"])
-        gate9_safe_haven(ctrl, state, sdl, etf_rets)
-        gate10_credit(ctrl, state, sdl, etf_rets)
-        gate11_sector_rotation(ctrl, state, sdl, sector_rets)
-        gate12_skip_macro(ctrl, state, sdl, data["macro_data"])
-        gate13_news(ctrl, state, sdl, data["news_data"])
-        gate14_skip_social(ctrl, state, sdl, data["social_data"])
-        gate15_breadth_price_divergence(ctrl, state, sdl, spx_bars)
-        gate16_composite_construction(ctrl, state, sdl)
-        gate17_weighting(ctrl, state, sdl)
-        gate18_composite_score(ctrl, state, sdl)
-        gate19_confidence(ctrl, state, sdl)
-        gate20_regime(ctrl, state, sdl)
-        gate21_divergence_warnings(ctrl, state, sdl)
-        gate22_action(ctrl, state, sdl)
-        gate23_risk_discounts(ctrl, state, sdl)
-        gate24_persistence(ctrl, state, sdl, db)
-        gate25_evaluation(ctrl, state, sdl, db)
-        gate26_output(ctrl, state, sdl)
-        gate27_final_signal(ctrl, state, sdl)
-
-        sdl.decide(state.classification, state.sentiment_confidence, state.output_action)
-        sdl.commit(db)
-
-        # Write market sentiment snapshot to scan_log (ticker="MARKET")
-        # so Agent 1 can read aggregate sentiment context in Gate 10
-        try:
-            db.log_scan(
-                ticker="MARKET",
-                put_call_ratio=put_call,
-                put_call_avg30d=put_call_avg,
-                insider_net=None,
-                volume_vs_avg=None,
-                seller_dominance=None,
-                cascade_detected=state.benchmark_risk_state == "drawdown",
-                tier=(1 if state.final_market_state in ("strong_bearish", "panic_override")
-                      else 2 if state.final_market_state in ("mild_bearish",)
-                      else 3 if state.final_market_state == "neutral"
-                      else 4),
-                event_summary=(
-                    f"MARKET_SENTIMENT: {state.final_market_state} | "
-                    f"regime={state.regime_state} | "
-                    f"classification={state.classification} | "
-                    f"confidence={state.sentiment_confidence:.2f} | "
-                    f"score={state.final_sentiment_signal:.3f} | "
-                    f"warning={state.warning_state}"
-                ),
-            )
-        except Exception as e:
-            log.warning(f"Market sentiment log_scan write failed (non-fatal): {e}")
-
-        log.info(
-            f"Market sentiment: {state.final_market_state} | "
-            f"regime={state.regime_state} | score={state.final_sentiment_signal:.3f} | "
-            f"confidence={state.sentiment_confidence:.2f} | {state.classification}"
-        )
-
-    # ── Phase 2: Per-position cascade scan ───────────────────────────────
-    positions = db.get_open_positions()
-    if not positions:
-        log.info("No open positions to scan")
-    else:
-        log.info(f"Scanning {len(positions)} open position(s)")
-        critical_count = 0
-        elevated_count = 0
-
-        for pos in positions:
-            ticker = pos['ticker']
-            log.info(f"Scanning {ticker}...")
-
-            # Fetch all three signals
-            # reuse market-wide put/call from Phase 1 — same CBOE page regardless of ticker
-            pos_put_call, pos_put_call_avg = put_call, put_call_avg
-            insider_data                   = fetch_sec_insider_transactions(ticker)
-            volume_data                    = fetch_volume_profile(ticker, is_position=True)
-
-            # Small delay between tickers to avoid rate limiting
-            time.sleep(2)
-
-            # Detect cascade
-            tier, tier_label, cascade_detected, summary = detect_cascade(
-                pos_put_call, pos_put_call_avg, insider_data, volume_data
-            )
-
-            # Deep analysis for elevated/critical positions
-            analysis = None
-            if tier <= 2:
-                analysis = format_scan_analysis(
-                    pos, pos_put_call, pos_put_call_avg, insider_data,
-                    volume_data, tier, tier_label, cascade_detected, db
-                )
-
-            # Log scan result to database
-            db.log_scan(
-                ticker=ticker,
-                put_call_ratio=pos_put_call,
-                put_call_avg30d=pos_put_call_avg,
-                insider_net=insider_data.get("net_dollar"),
-                volume_vs_avg=volume_data.get("today_vs_avg"),
-                seller_dominance=volume_data.get("seller_dominance"),
-                cascade_detected=cascade_detected,
-                tier=tier,
-                event_summary=summary + (f" | Analysis: {analysis[:100]}" if analysis else ""),
-            )
-
-            if tier == 1:
-                critical_count += 1
-                log.warning(f"CRITICAL — {ticker}: {summary}")
-            elif tier == 2:
-                elevated_count += 1
-                log.info(f"ELEVATED — {ticker}: {summary}")
-            else:
-                log.info(f"{tier_label} — {ticker}: normal scan")
-
-        log.info(
-            f"Position scan complete — critical={critical_count} elevated={elevated_count} "
-            f"positions={len(positions)}"
-        )
-
-    # ── Phase 3: Pre-trade queue check ───────────────────────────────────
-    # Dedup by ticker, fetch in parallel, serialize DB writes.
-    # Each ticker's fetch (EDGAR + volume) applies to every QUEUED
-    # signal for that ticker; the tier annotation still writes to each
-    # individual signal row. Network IO is the dominant cost so
-    # SENTIMENT_FETCH_WORKERS concurrent fetches scale linearly with
-    # ticker count until we hit rate limits.
-    #
-    # The time budget keeps the daemon's 600s hard kill from leaving us
-    # with a half-written state. Old single-threaded behavior: 268 ×
-    # sleep(1) + 2 HTTP each → exceeded at ticker 119, blocking the
-    # promoter. New parallel behavior with 5 workers and Alpaca-primary
-    # volume: ~5× speedup, budget comfortable for 300+ tickers.
-    PHASE3_BUDGET_SEC = 480
-    queued_signals = db.get_queued_signals()
-    if queued_signals:
-        by_ticker: dict = {}
-        for sig in queued_signals:
-            by_ticker.setdefault(sig['ticker'], []).append(sig)
-        log.info(
-            f"Checking sentiment for {len(queued_signals)} queued signal(s) "
-            f"across {len(by_ticker)} unique ticker(s) "
-            f"(workers={SENTIMENT_FETCH_WORKERS})"
-        )
-
-        # Ticker → fetch result bundle. Populated by the thread pool.
-        # Only network IO lives inside the worker — detect_cascade is
-        # cheap so we leave it in the worker too so the main thread
-        # sees a ready-to-write bundle.
-        def _fetch_ticker_bundle(ticker):
-            t0 = time.monotonic()
-            insider = fetch_sec_insider_transactions(ticker, days_back=7)
-            volume  = fetch_volume_profile(ticker)
-            tier, label, cascade_detected, summary = detect_cascade(
-                put_call, put_call_avg, insider, volume
-            )
-            # tier → score mapping (same as legacy single-thread path)
-            score = {1: 0.10, 2: 0.35, 3: 0.60, 4: 0.85}.get(tier, 0.50)
-            return {
-                'insider':    insider,
-                'volume':     volume,
-                'tier':       tier,
-                'label':      label,
-                'cascade':    cascade_detected,
-                'summary':    summary,
-                'score':      score,
-                'fetch_sec':  round(time.monotonic() - t0, 2),
-            }
-
-        phase3_start  = time.monotonic()
-        processed     = 0
-        stopped_early = False
-
-        # Submit all tickers up front; process as they complete.
-        # as_completed's timeout bounds the TOTAL wait, giving us the
-        # soft-budget semantics we had single-threaded. On timeout we
-        # break out, write a TIME_BUDGET decision-log row, and let the
-        # rest of run() commit cleanly.
-        pool = ThreadPoolExecutor(max_workers=SENTIMENT_FETCH_WORKERS,
-                                  thread_name_prefix='pulse-fetch')
-        future_to_ticker = {}
-        try:
-            for ticker, sigs in by_ticker.items():
-                fut = pool.submit(_fetch_ticker_bundle, ticker)
-                future_to_ticker[fut] = (ticker, sigs)
-
-            try:
-                for fut in as_completed(future_to_ticker,
-                                        timeout=PHASE3_BUDGET_SEC):
-                    ticker, sigs = future_to_ticker[fut]
-                    try:
-                        bundle = fut.result()
-                    except Exception as e:
-                        log.warning(f"Phase 3 fetch failed for {ticker}: {e}")
-                        continue
-
-                    # DB writes in the main thread — sqlite under WAL
-                    # handles concurrency but keeping writes serial
-                    # here keeps the per-customer DB lock contention
-                    # predictable (matches other agents).
-                    db.log_scan(
-                        ticker=ticker,
-                        put_call_ratio=put_call,
-                        put_call_avg30d=put_call_avg,
-                        insider_net=bundle['insider'].get('net_dollar'),
-                        volume_vs_avg=bundle['volume'].get('today_vs_avg'),
-                        seller_dominance=bundle['volume'].get('seller_dominance'),
-                        cascade_detected=bundle['cascade'],
-                        tier=bundle['tier'],
-                        event_summary=f"PRE-TRADE CHECK: {bundle['summary']}",
-                    )
-
-                    if bundle['tier'] <= 2:
-                        for sig in sigs:
-                            log.warning(
-                                f"Pre-trade warning: {ticker} (signal {sig['id']}) — "
-                                f"{bundle['label']}: {bundle['summary']}"
-                            )
-                            db.annotate_signal_pulse(sig['id'], bundle['tier'],
-                                                     bundle['summary'])
-
-                    try:
-                        db.stamp_signals_sentiment(ticker, bundle['score'])
-                    except Exception as _e:
-                        log.debug(f"sentiment stamp failed for {ticker}: {_e}")
-
-                    processed += 1
-            except FuturesTimeoutError:
-                stopped_early = True
-                log.warning(
-                    f"Phase 3 time budget exceeded ({PHASE3_BUDGET_SEC}s) — "
-                    f"processed {processed}/{len(by_ticker)} tickers, "
-                    f"remainder left unstamped so the agent can commit cleanly"
-                )
-        finally:
-            # Drop the pool. cancel_futures=True (Py 3.9+) drops anything
-            # still queued; workers mid-HTTP can't be cancelled but will
-            # exit on their own REQUEST_TIMEOUT since fetch_with_retry
-            # has bounded per-call timeouts. wait=False lets the run()
-            # tail continue immediately rather than blocking on stuck
-            # workers.
-            pool.shutdown(wait=False, cancel_futures=True)
-
-        elapsed = time.monotonic() - phase3_start
-        log.info(
-            f"Phase 3 complete — {processed}/{len(by_ticker)} tickers "
-            f"in {elapsed:.1f}s (parallel={SENTIMENT_FETCH_WORKERS})"
-            + (" (stopped on budget)" if stopped_early else "")
-        )
-
-        # Surface budget exhaustion in the decision log so the
-        # promoter's STUCK rows and the fault detector's bottleneck
-        # reading both show 'sentiment time budget' rather than a
-        # silent miss.
-        if stopped_early:
-            try:
-                db.log_signal_decision(
-                    agent='sentiment', action='TIME_BUDGET',
-                    value=f"{processed}/{len(by_ticker)}",
-                    reason=(f"budget {PHASE3_BUDGET_SEC}s exceeded after {elapsed:.0f}s; "
-                            f"remaining tickers left unstamped this cycle")
-                )
-            except Exception as _e:
-                log.debug(f"TIME_BUDGET decision-log write failed: {_e}")
-
+    # ── Run summary + lifecycle ────────────────────────────────────────────
     portfolio = db.get_portfolio()
     log.info(
-        f"Scan complete — "
-        f"positions={len(positions) if positions else 0} "
+        f"Scan complete — positions={len(positions) if positions else 0} "
         f"portfolio=${portfolio['cash']:.2f}"
     )
 
@@ -3152,12 +3421,6 @@ def run():
     except Exception as _e:
         log.warning(f"_PULSE_REGIME_STATE write failed: {_e}")
 
-    # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
-    # Check for pending sentiment screening requests from the sector screener.
-    # Reuses existing per-ticker scan functions (put/call, insider, volume).
-    _handle_screening_requests(db)
-
-    # Post heartbeat to monitor server
     try:
         from retail_heartbeat import write_heartbeat
         write_heartbeat(agent_name="market_sentiment_agent", status="OK")

@@ -439,6 +439,24 @@ CREATE TABLE IF NOT EXISTS scan_log (
     scanned_at      TEXT    NOT NULL
 );
 
+-- ── SENTIMENT LOG ──────────────────────────────────────────────────────
+-- Per-run snapshot of The Pulse's gate-27 final output. Populates Gate 24
+-- (temporal persistence) and Gate 25 (snapshot retention/evaluation) so
+-- they can detect persistent_bullish, transient_panic, sentiment_trend
+-- across the last N runs. Pre-2026-05-01 Gate 24 was a SKIP placeholder
+-- because no historical sentiment record existed.
+CREATE TABLE IF NOT EXISTS sentiment_log (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp          TEXT    NOT NULL,    -- UTC, db.now()
+    composite_score    REAL,                -- raw composite from Gate 18
+    final_signal       REAL,                -- final_sentiment_signal post-discount
+    classification     TEXT,                -- bullish/bearish/panic/etc from Gate 22
+    regime_state       TEXT,                -- The Pulse's regime classification (Gate 20)
+    final_market_state TEXT,                -- Gate 27 output label
+    confidence         REAL,                -- sentiment_confidence (Gate 19)
+    warning_state      TEXT                 -- divergence/warning state (Gate 21)
+);
+
 -- ── SYSTEM LOG ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS system_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -596,6 +614,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_status        ON signals(status);
 CREATE INDEX IF NOT EXISTS idx_signals_ticker        ON signals(ticker);
 CREATE INDEX IF NOT EXISTS idx_positions_status      ON positions(status);
 CREATE INDEX IF NOT EXISTS idx_scan_log_scanned      ON scan_log(scanned_at);
+CREATE INDEX IF NOT EXISTS idx_sentiment_log_ts       ON sentiment_log(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_system_log_event      ON system_log(event);
 CREATE INDEX IF NOT EXISTS idx_urgent_flags_ack      ON urgent_flags(acknowledged);
 CREATE INDEX IF NOT EXISTS idx_approvals_status      ON pending_approvals(status);
@@ -3555,6 +3574,37 @@ class DB:
                     "image_url":    meta.get("image_url") or meta.get("image"),
                 })
             return out
+
+    # ── SENTIMENT LOG ──────────────────────────────────────────────────────
+    # Per-run snapshots of The Pulse's gate-27 final output. Read by Gate 24
+    # (temporal persistence) so it can detect persistent_bullish, transient_
+    # panic, and sentiment_trend across consecutive runs.
+
+    def write_sentiment_log(self, *, composite_score, final_signal,
+                            classification, regime_state, final_market_state,
+                            confidence, warning_state):
+        """Append one Pulse-run snapshot. Non-fatal on failure (logs warning
+        and continues — sentiment classification doesn't gate on the write
+        succeeding)."""
+        with self.conn() as c:
+            c.execute("""
+                INSERT INTO sentiment_log
+                    (timestamp, composite_score, final_signal, classification,
+                     regime_state, final_market_state, confidence, warning_state)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (self.now(), composite_score, final_signal, classification,
+                  regime_state, final_market_state, confidence, warning_state))
+
+    def get_recent_sentiment_log(self, limit: int = 10):
+        """Return the last N sentiment_log rows newest-first as dicts.
+        Used by Gate 24 to compute persistence_state and trend."""
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM sentiment_log ORDER BY id DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
     # ── SCAN LOG ───────────────────────────────────────────────────────────
 
