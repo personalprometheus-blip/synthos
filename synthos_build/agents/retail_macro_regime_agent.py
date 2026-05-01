@@ -29,6 +29,7 @@ Usage:
 
 import os
 import sys
+import time
 import json
 import logging
 import argparse
@@ -100,36 +101,84 @@ def _alpaca_headers():
     }
 
 
+# ── HTTP RETRY HELPER ────────────────────────────────────────────────────
+
+# Status codes worth retrying — transient server / rate-limit conditions.
+# 4xx codes other than 429 indicate a client error (bad URL, bad key) and
+# won't get better on retry.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _http_get_with_retry(url, *, params=None, headers=None,
+                         timeout=None, max_attempts=3, what=""):
+    """HTTP GET with exponential backoff (1s → 2s → 4s).
+
+    Retries on 429/5xx and on raised exceptions (connection error, timeout).
+    Returns the final `requests.Response` on terminal status (success or
+    non-retryable failure), or None if every attempt raised an exception.
+
+    `what` is a short descriptor used in retry log messages (e.g. "Yahoo
+    ^VIX") so a transient retry is traceable in the agent log without
+    decoding the URL by hand.
+    """
+    if timeout is None:
+        timeout = REQUEST_TIMEOUT
+    backoff = 1.0
+    for attempt in range(max_attempts):
+        try:
+            r = _req.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code in _RETRYABLE_STATUS and attempt < max_attempts - 1:
+                log.info(f"{what or url} got HTTP {r.status_code}, "
+                         f"retry {attempt + 2}/{max_attempts} in {backoff:.1f}s")
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            return r
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                log.info(f"{what or url} raised {type(e).__name__}, "
+                         f"retry {attempt + 2}/{max_attempts} in {backoff:.1f}s")
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            log.warning(f"{what or url} all {max_attempts} attempts failed: {e}")
+            return None
+    return None
+
+
 # ── YAHOO FINANCE FETCHERS ───────────────────────────────────────────────
 
 def _fetch_yahoo_chart(symbol, range_str="5d", interval="1d"):
     """
-    Fetch OHLCV data from Yahoo Finance v8 chart API.
-    Returns list of close prices or empty list on failure.
+    Fetch OHLCV data from Yahoo Finance v8 chart API with retry/backoff.
+    Returns list of close prices or empty list on terminal failure.
     """
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
     params = {"range": range_str, "interval": interval}
+    r = _http_get_with_retry(url, params=params, headers=YAHOO_HEADERS,
+                             what=f"Yahoo chart {symbol}")
     try:
-        r = _req.get(url, params=params, headers=YAHOO_HEADERS, timeout=REQUEST_TIMEOUT)
-        try:
-            _master_db().log_api_call(
-                agent='macro_regime', endpoint=f'/chart/{symbol}',
-                method='GET', service='yahoo')
-        except Exception as _e:
-            log.debug(f"suppressed exception: {_e}")
-        if r.status_code != 200:
+        _master_db().log_api_call(
+            agent='macro_regime', endpoint=f'/chart/{symbol}',
+            method='GET', service='yahoo',
+            status_code=getattr(r, 'status_code', None))
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
+    if r is None or r.status_code != 200:
+        if r is not None:
             log.warning(f"Yahoo chart {symbol}: HTTP {r.status_code}")
-            return []
-        data = r.json()
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            return []
-        closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
-        # Filter out None values
-        return [c for c in closes if c is not None]
-    except Exception as e:
-        log.warning(f"Yahoo chart fetch failed ({symbol}): {e}")
         return []
+    try:
+        data = r.json()
+    except Exception as e:
+        log.warning(f"Yahoo chart {symbol}: JSON decode failed: {e}")
+        return []
+    result = data.get("chart", {}).get("result", [])
+    if not result:
+        return []
+    closes = result[0].get("indicators", {}).get("quote", [{}])[0].get("close", [])
+    # Filter out None values
+    return [c for c in closes if c is not None]
 
 
 def _fetch_yahoo_last_close(symbol):
@@ -162,46 +211,47 @@ def _fetch_fred_series(series_id, days=10):
     if not FRED_API_KEY:
         log.debug(f"FRED_API_KEY not set — skipping FRED fetch for {series_id}")
         return []
+    # sort_order=desc + limit returns the newest N observations.
+    # We then reverse so caller sees oldest-first (matches Yahoo helpers).
+    r = _http_get_with_retry(
+        f"{FRED_BASE_URL}/series/observations",
+        params={
+            "series_id": series_id,
+            "api_key": FRED_API_KEY,
+            "file_type": "json",
+            "sort_order": "desc",
+            "limit": max(days + 5, 10),   # buffer for missing/holiday days
+        },
+        what=f"FRED {series_id}",
+    )
     try:
-        # sort_order=desc + limit returns the newest N observations.
-        # We then reverse so caller sees oldest-first (matches Yahoo helpers).
-        r = _req.get(
-            f"{FRED_BASE_URL}/series/observations",
-            params={
-                "series_id": series_id,
-                "api_key": FRED_API_KEY,
-                "file_type": "json",
-                "sort_order": "desc",
-                "limit": max(days + 5, 10),   # buffer for missing/holiday days
-            },
-            timeout=REQUEST_TIMEOUT,
-        )
-        try:
-            _master_db().log_api_call(
-                agent='macro_regime',
-                endpoint=f'/fred/series/observations?series_id={series_id}',
-                method='GET', service='fred',
-                status_code=r.status_code)
-        except Exception as _e:
-            log.debug(f"suppressed exception: {_e}")
-        if r.status_code != 200:
+        _master_db().log_api_call(
+            agent='macro_regime',
+            endpoint=f'/fred/series/observations?series_id={series_id}',
+            method='GET', service='fred',
+            status_code=getattr(r, 'status_code', None))
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
+    if r is None or r.status_code != 200:
+        if r is not None:
             log.warning(f"FRED {series_id}: HTTP {r.status_code}")
-            return []
-        obs = r.json().get("observations", [])
-        # Newest-first → oldest-first for consistency with Yahoo helpers
-        values = []
-        for ob in reversed(obs):
-            v = ob.get("value", "")
-            if v in (".", "", None):
-                continue
-            try:
-                values.append(float(v))
-            except (TypeError, ValueError):
-                continue
-        return values
-    except Exception as e:
-        log.warning(f"FRED fetch_series({series_id}): {e}")
         return []
+    try:
+        obs = r.json().get("observations", [])
+    except Exception as e:
+        log.warning(f"FRED {series_id}: JSON decode failed: {e}")
+        return []
+    # Newest-first → oldest-first for consistency with Yahoo helpers
+    values = []
+    for ob in reversed(obs):
+        v = ob.get("value", "")
+        if v in (".", "", None):
+            continue
+        try:
+            values.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    return values
 
 
 # ── ALPACA DATA FETCHERS ─────────────────────────────────────────────────
@@ -220,26 +270,29 @@ def _fetch_alpaca_bars(ticker, days=10):
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     start = (now_utc - timedelta(days=days + 5)).strftime('%Y-%m-%dT%H:%M:%SZ')
     end = now_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+    r = _http_get_with_retry(
+        f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
+        params={"timeframe": "1Day", "start": start, "end": end,
+                "limit": days + 10, "feed": "iex"},
+        headers=_alpaca_headers(),
+        what=f"Alpaca {ticker} bars",
+    )
     try:
-        r = _req.get(
-            f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
-            params={"timeframe": "1Day", "start": start, "end": end,
-                    "limit": days + 10, "feed": "iex"},
-            headers=_alpaca_headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
+        _master_db().log_api_call(
+            agent='macro_regime', endpoint=f'/v2/stocks/{ticker}/bars',
+            method='GET', service='alpaca_data',
+            status_code=getattr(r, 'status_code', None))
+    except Exception as _e:
+        log.debug(f"suppressed exception: {_e}")
+    if r is None:
+        return []
+    if r.status_code == 200:
         try:
-            _master_db().log_api_call(
-                agent='macro_regime', endpoint=f'/v2/stocks/{ticker}/bars',
-                method='GET', service='alpaca_data',
-                status_code=r.status_code)
-        except Exception as _e:
-            log.debug(f"suppressed exception: {_e}")
-        if r.status_code == 200:
             return r.json().get("bars", []) or []
-        log.warning(f"Alpaca bars {ticker}: HTTP {r.status_code}")
-    except Exception as e:
-        log.warning(f"Alpaca fetch_bars({ticker}): {e}")
+        except Exception as e:
+            log.warning(f"Alpaca bars {ticker}: JSON decode failed: {e}")
+            return []
+    log.warning(f"Alpaca bars {ticker}: HTTP {r.status_code}")
     return []
 
 
@@ -616,6 +669,93 @@ def gate4_sector_rotation(report: RegimeReport):
 # RECOVERY:     VIX falling from elevated + steepening curve + broad strength
 # UNCERTAIN:    Mixed signals
 
+
+# Fitness tables: per-regime, per-gate score for each possible signal value.
+# 1.0 = textbook fit, 0.0 = doesn't fit at all. Used to scale gate-5 base
+# confidence so a borderline regime call gets a lower confidence than a
+# textbook one — even when both fall in the same branch with the same
+# data availability.
+#
+# Without fitness scaling: a clean EXPANSION (CALM/STEEP/BROAD/RISK_ON) and
+# a marginal EXPANSION (NORMAL/NORMAL/ROTATION/NEUTRAL) both report
+# confidence 0.80. With fitness scaling, the marginal one drops to ~0.52
+# and now correctly trips gate-5's WARNING threshold (< 0.50) when it
+# barely qualifies.
+#
+# Tables only include the 5 confident regimes; UNCERTAIN is the catch-all
+# and keeps its current confidence calculation unchanged.
+_REGIME_FITNESS = {
+    "CRISIS": {
+        "vix":      {"CRISIS": 1.00, "ELEVATED": 0.50, "NORMAL": 0.10, "CALM": 0.00},
+        "curve":    {"INVERTED": 1.00, "FLAT": 0.70, "NORMAL": 0.30, "STEEP": 0.00},
+        "breadth":  {"BROAD_WEAKNESS": 1.00, "NARROW_BREADTH": 0.60,
+                     "ROTATION_TO_SMALL": 0.20, "BROAD_STRENGTH": 0.00},
+        "rotation": {"RISK_OFF": 1.00, "NEUTRAL": 0.30, "RISK_ON": 0.00},
+    },
+    "CONTRACTION": {
+        "vix":      {"CRISIS": 1.00, "ELEVATED": 0.85, "NORMAL": 0.20, "CALM": 0.00},
+        "curve":    {"INVERTED": 1.00, "FLAT": 0.70, "NORMAL": 0.20, "STEEP": 0.00},
+        "breadth":  {"BROAD_WEAKNESS": 1.00, "NARROW_BREADTH": 0.70,
+                     "ROTATION_TO_SMALL": 0.30, "BROAD_STRENGTH": 0.00},
+        "rotation": {"RISK_OFF": 1.00, "NEUTRAL": 0.50, "RISK_ON": 0.00},
+    },
+    "LATE_CYCLE": {
+        "vix":      {"NORMAL": 1.00, "ELEVATED": 0.80, "CALM": 0.30, "CRISIS": 0.00},
+        "curve":    {"FLAT": 1.00, "INVERTED": 0.70, "NORMAL": 0.50, "STEEP": 0.00},
+        "breadth":  {"NARROW_BREADTH": 1.00, "ROTATION_TO_SMALL": 0.60,
+                     "BROAD_WEAKNESS": 0.50, "BROAD_STRENGTH": 0.40},
+        "rotation": {"NEUTRAL": 1.00, "RISK_OFF": 0.70, "RISK_ON": 0.40},
+    },
+    "EXPANSION": {
+        "vix":      {"CALM": 1.00, "NORMAL": 0.70, "ELEVATED": 0.00, "CRISIS": 0.00},
+        "curve":    {"STEEP": 1.00, "NORMAL": 0.70, "FLAT": 0.00, "INVERTED": 0.00},
+        "breadth":  {"BROAD_STRENGTH": 1.00, "ROTATION_TO_SMALL": 0.60,
+                     "NARROW_BREADTH": 0.20, "BROAD_WEAKNESS": 0.00},
+        "rotation": {"RISK_ON": 1.00, "NEUTRAL": 0.60, "RISK_OFF": 0.00},
+    },
+    "RECOVERY": {
+        # vix_trend is required to be FALLING by the branch logic, so the
+        # vix-level fitness here reflects "level to fall FROM" — recovery
+        # is most clearly identified when VIX is falling from ELEVATED back
+        # toward NORMAL.
+        "vix":      {"ELEVATED": 1.00, "NORMAL": 0.70, "CRISIS": 0.50, "CALM": 0.30},
+        "curve":    {"STEEP": 1.00, "NORMAL": 0.70, "FLAT": 0.30, "INVERTED": 0.00},
+        "breadth":  {"BROAD_STRENGTH": 1.00, "ROTATION_TO_SMALL": 0.80,
+                     "NARROW_BREADTH": 0.30, "BROAD_WEAKNESS": 0.00},
+        "rotation": {"RISK_ON": 1.00, "NEUTRAL": 0.50, "RISK_OFF": 0.10},
+    },
+}
+
+
+def _compute_fitness(regime: str, vix_level, curve_shape,
+                     breadth_result, rotation_result) -> float:
+    """Mean fitness across the inputs we have data for. Missing inputs
+    contribute neither to numerator nor denominator (so confidence reflects
+    only the gates that actually fired). Returns 1.0 for regimes without
+    a fitness table (UNCERTAIN) so the legacy confidence path is preserved.
+    """
+    table = _REGIME_FITNESS.get(regime)
+    if not table:
+        return 1.0
+    inputs = (
+        ("vix",      vix_level),
+        ("curve",    curve_shape),
+        ("breadth",  breadth_result),
+        ("rotation", rotation_result),
+    )
+    scores = []
+    for key, value in inputs:
+        if value in (None, "PARTIAL", "UNAVAILABLE"):
+            continue
+        per_value = table.get(key, {})
+        # If a value isn't in the lookup (e.g. an unexpected new label),
+        # treat it as a 0.5 mid-tier match rather than 0 — avoids
+        # silently zeroing the confidence on a string we didn't anticipate.
+        scores.append(per_value.get(value, 0.5))
+    if not scores:
+        return 1.0
+    return sum(scores) / len(scores)
+
 def gate5_regime_classification(report: RegimeReport, vix_result, yield_result,
                                  breadth_result, rotation_result):
     """
@@ -712,15 +852,28 @@ def gate5_regime_classification(report: RegimeReport, vix_result, yield_result,
                   f"breadth={breadth_result}, rotation={rotation_result}")
         log.info(f"  Regime=UNCERTAIN — mixed signals")
 
-    # Adjust confidence by data availability
-    confidence = round(confidence * (available_gates / 4.0), 2)
+    # Adjust confidence by:
+    #   1. Data availability — fewer gates = lower confidence in the result.
+    #   2. Fitness — how strongly the gate signals match the picked regime
+    #      branch. A textbook EXPANSION (CALM/STEEP/BROAD/RISK_ON) scores
+    #      higher than a marginal one (NORMAL/NORMAL/ROTATION/NEUTRAL)
+    #      even though both fall in the same branch with full data.
+    fitness = _compute_fitness(regime, vix_level, curve_shape,
+                               breadth_result, rotation_result)
+    base_confidence = confidence
+    confidence = round(confidence * fitness * (available_gates / 4.0), 2)
 
     # Status reflects classification quality — when more than half the
-    # upstream gates failed, downstream consumers should see this scan
-    # as suspect even though gate 5 produced a label. Was previously
-    # always "OK" which made _MACRO_SCAN_LAST claim "5/5 OK" while the
-    # regime was effectively UNCERTAIN with confidence 0.10.
+    # upstream gates failed (or fitness is poor), downstream consumers
+    # should see this scan as suspect even though gate 5 produced a
+    # label. Previously always "OK" → _MACRO_SCAN_LAST claimed "5/5 OK"
+    # while the underlying regime call was confidence ≤ 0.10.
     gate5_status = "WARNING" if confidence < GATE5_LOW_CONFIDENCE_THRESHOLD else "OK"
+
+    # Append fitness/availability breakdown to the reason so the admin
+    # alert detail tells the operator WHY confidence is what it is.
+    reason = (f"{reason} | base={base_confidence:.2f} × "
+              f"fitness={fitness:.2f} × avail={available_gates}/4")
 
     report.add(GateResult(
         gate="GATE5_REGIME", status=gate5_status, signal=regime,
