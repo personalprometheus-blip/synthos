@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% set title = "Request Access" %}
+
+{% block inline_css %}
+  /* Mirrors signup.html — design tokens come from core.css. */
+  .ra-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 40px 20px;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0, 245, 212, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(123, 97, 255, 0.04) 0%, transparent 60%);
+  }
+  .ra-card {
+    width: 100%; max-width: 460px;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 16px;
+    padding: 2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .ra-logo {
+    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+    letter-spacing: 0.18em; color: var(--teal); text-align: center;
+    margin-bottom: 0.5rem; text-shadow: 0 0 18px rgba(0, 245, 212, 0.20);
+  }
+  .ra-title { font-size: 1.1rem; font-weight: 600; text-align: center; margin-bottom: 0.3rem; }
+  .ra-sub   { font-size: 0.78rem; color: var(--muted); text-align: center; margin-bottom: 1.5rem; line-height: 1.5; }
+  .field        { margin-bottom: 1rem; }
+  .field label {
+    display: block; font-size: 0.62rem; font-weight: 500; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem;
+  }
+  .field input, .field textarea, .field select {
+    font-family: var(--mono); font-size: 0.82rem; width: 100%;
+    padding: 0.5rem 0.7rem; background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+  .field textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
+  .field select  { cursor: pointer; }
+  .field input:focus, .field textarea:focus, .field select:focus {
+    outline: none; border-color: rgba(0, 245, 212, 0.25);
+    box-shadow: 0 0 0 3px rgba(0, 245, 212, 0.06);
+  }
+  .field input::placeholder, .field textarea::placeholder { color: var(--dim); }
+  .field-note { font-size: 0.66rem; color: var(--dim); margin-top: 4px; }
+  .submit-btn {
+    font-family: var(--mono); font-size: 0.78rem; font-weight: 600; letter-spacing: 0.05em;
+    width: 100%; padding: 0.65rem; margin-top: 0.5rem;
+    background: rgba(0, 245, 212, 0.12); color: var(--teal);
+    border: 1px solid rgba(0, 245, 212, 0.18); border-radius: 8px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .submit-btn:hover    { background: rgba(0, 245, 212, 0.18);
+                         box-shadow: 0 0 14px rgba(0, 245, 212, 0.09); }
+  .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .error-msg {
+    background: rgba(255, 75, 110, 0.08); border: 1px solid rgba(255, 75, 110, 0.18);
+    border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 1rem;
+    font-size: 0.78rem; color: var(--pink);
+  }
+  .success-msg {
+    background: rgba(0, 245, 212, 0.06); border: 1px solid rgba(0, 245, 212, 0.14);
+    border-radius: 8px; padding: 0.9rem; margin-bottom: 0.5rem;
+    font-size: 0.82rem; color: var(--teal); text-align: center; line-height: 1.6;
+  }
+  .back-link {
+    display: block; text-align: center; margin-top: 1.2rem;
+    font-size: 0.72rem; color: var(--muted); text-decoration: none;
+  }
+  .back-link:hover { color: var(--text); }
+  /* Honeypot — hidden from real users via off-screen positioning. Still
+     focusable + clickable by scripted bots that scan the DOM. */
+  .ra-honeypot {
+    position: absolute !important; left: -10000px !important;
+    width: 1px !important; height: 1px !important; overflow: hidden;
+  }
+{% endblock %}
+
+{% block content %}
+<div class="ra-wrap">
+  <div class="ra-card">
+    <div class="ra-logo">SYNTHOS</div>
+    <div class="ra-title">Request Access</div>
+    <div class="ra-sub">
+      Synthos is currently invitation-only.<br>
+      Tell us a bit about yourself and we'll be in touch.
+    </div>
+
+    {% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+    {% if success %}
+      <div class="success-msg">
+        <strong>Thanks — we got it.</strong><br>
+        We review every request personally. If you're a fit, we'll send
+        you an email with a link to finish setting up your account.
+      </div>
+      <a href="/login" class="back-link">← Back to login</a>
+    {% else %}
+    <form method="POST" action="/request-access" autocomplete="off">
+      {# Honeypot — real users don't fill, bots do. Submit is silently
+         accepted (no DB write) when this is non-empty. #}
+      <div class="ra-honeypot" aria-hidden="true">
+        <label for="ra-website">Website (leave blank)</label>
+        <input id="ra-website" type="text" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <label for="ra-name">Full name</label>
+        <input id="ra-name" type="text" name="name" maxlength="100" required
+               value="{{ request.form.get('name', '') }}">
+      </div>
+
+      <div class="field">
+        <label for="ra-email">Email</label>
+        <input id="ra-email" type="email" name="email" maxlength="200" required
+               value="{{ request.form.get('email', '') }}">
+      </div>
+
+      <div class="field">
+        <label for="ra-phone">Phone (optional)</label>
+        <input id="ra-phone" type="tel" name="phone" maxlength="30"
+               value="{{ request.form.get('phone', '') }}">
+        <div class="field-note">Used only if we need to follow up.</div>
+      </div>
+
+      <div class="field">
+        <label for="ra-why">What are you looking for?</label>
+        <textarea id="ra-why" name="why_interested" maxlength="500" required
+                  placeholder="Tell us briefly — algorithmic trading, account size, what you're hoping Synthos solves, anything that helps us understand the fit.">{{ request.form.get('why_interested', '') }}</textarea>
+        <div class="field-note">~10–500 characters.</div>
+      </div>
+
+      <div class="field">
+        <label for="ra-how">How did you hear about Synthos?</label>
+        <select id="ra-how" name="how_heard">
+          <option value="">— select —</option>
+          {% for opt in how_options %}
+            <option value="{{ opt }}" {% if request.form.get('how_heard') == opt %}selected{% endif %}>{{ opt|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button type="submit" class="submit-btn">Submit request</button>
+    </form>
+    <a href="/login" class="back-link">Already have an account? Log in</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -27,6 +27,7 @@ Access control layers (in order):
 import os
 import sys
 import json
+import time
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -969,6 +970,171 @@ def signup_page():
     return render_template('signup.html', error=error, success=success)
 
 
+# ── REQUEST ACCESS (public — no access code required) ────────────────────────
+# Two-tier signup model:
+#   /signup           — code-holders go straight to the password-set form
+#   /request-access   — public path for prospective users without a code; lands
+#                       in the same admin queue with request_type='request_access'.
+#                       On admin approve, customer gets a /setup-account link
+#                       to finalize (set password + accept ToS).
+
+# Per-IP rate limit on /request-access submissions. Same pattern as
+# login_attempts — defeats trivial spam without making real users solve a
+# captcha. The honeypot below catches almost all bots; this is a backstop.
+_REQUEST_ACCESS_RATE_WINDOW_S = 3600   # 1h
+_REQUEST_ACCESS_RATE_MAX      = 3      # max submissions per IP per window
+_request_access_rate_log: dict = {}    # ip -> [timestamps]
+
+def _request_access_rate_check(ip: str) -> bool:
+    """Return True if IP is allowed to submit, False if rate-limited.
+    In-memory only — restarts reset the counter, which is fine for a
+    public-facing form whose worst case is a polite-bots campaign."""
+    if not ip:
+        return True
+    now = time.time()
+    history = [t for t in _request_access_rate_log.get(ip, [])
+               if now - t < _REQUEST_ACCESS_RATE_WINDOW_S]
+    if len(history) >= _REQUEST_ACCESS_RATE_MAX:
+        _request_access_rate_log[ip] = history  # prune
+        return False
+    history.append(now)
+    _request_access_rate_log[ip] = history
+    return True
+
+# How-heard dropdown options. Whitelist on POST so a bot can't push freeform
+# garbage into the field.
+_HOW_HEARD_OPTIONS = ('friend', 'social', 'search', 'press', 'other')
+
+
+def _notify_admin_access_request(name: str, email: str, why: str,
+                                 how: str, signup_id: int) -> None:
+    """Notify the operator of a new access request via the pi4b scoop pipeline.
+
+    POSTs to synthos-monitor's /api/enqueue endpoint with admin notification
+    payload. Scoop dispatches via Resend on next 30s poll. Defensive failure:
+    if the cross-node POST fails, the request is still in pending_signups so
+    admin will see it on next page load — they just don't get a proactive
+    email.
+    """
+    monitor_url = (os.environ.get('MONITOR_URL') or
+                   os.environ.get('COMMAND_PORTAL_URL') or
+                   'http://10.0.0.10:5050').rstrip('/')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    if not monitor_token:
+        log.warning("MONITOR_TOKEN not set — cannot notify admin of access request")
+        return
+
+    why_preview = (why or '')[:200]
+    body = (
+        f"New access request submitted to portal.synth-cloud.com\n\n"
+        f"Name:   {name}\n"
+        f"Email:  {email}\n"
+        f"How:    {how or '(not provided)'}\n"
+        f"Why:    {why_preview}\n"
+        f"\nReview at command.synth-cloud.com/approvals (signup #{signup_id})"
+    )
+    payload = {
+        "event_type":    "ACCESS_REQUEST_SUBMITTED",
+        "priority":       2,
+        "subject":       f"[Synthos] New access request — {name}",
+        "body":           body,
+        "source_agent":  "retail_portal",
+        "audience":      "internal",
+        "payload":       {"signup_id": signup_id, "email": email,
+                          "how_heard": how},
+    }
+
+    try:
+        import requests as _req
+        r = _req.post(
+            f"{monitor_url}/api/enqueue",
+            json=payload,
+            headers={"Authorization": f"Bearer {monitor_token}"},
+            timeout=10,
+        )
+        if r.status_code in (200, 201):
+            log.info(f"Admin notification queued for access request #{signup_id}")
+        else:
+            log.warning(
+                f"Admin notification HTTP {r.status_code} on access request "
+                f"#{signup_id}: {r.text[:120]}"
+            )
+    except Exception as e:
+        log.warning(f"Admin notification failed for access request #{signup_id}: {e}")
+
+
+@app.route('/request-access', methods=['GET', 'POST'])
+def request_access_page():
+    """Public form for prospective users without an access code."""
+    error   = None
+    success = False
+
+    if request.method == 'POST':
+        # Honeypot — hidden 'website' field. Real users don't fill it; bots do.
+        # Silently 200 the request (no DB write) so bots don't realize they're
+        # blocked and adjust.
+        if (request.form.get('website') or '').strip():
+            log.info(f"Honeypot triggered on /request-access from {request.remote_addr}")
+            return render_template('request_access.html', error=None, success=True,
+                                   how_options=_HOW_HEARD_OPTIONS)
+
+        # Per-IP rate limit
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+        if not _request_access_rate_check(client_ip):
+            log.warning(f"Rate-limited /request-access submission from {client_ip}")
+            error = "Too many requests from this address. Please try again later."
+            return render_template('request_access.html', error=error, success=False,
+                                   how_options=_HOW_HEARD_OPTIONS)
+
+        name  = request.form.get('name',  '').strip()
+        email = request.form.get('email', '').strip()
+        phone = request.form.get('phone', '').strip()
+        why   = request.form.get('why_interested', '').strip()
+        how   = request.form.get('how_heard', '').strip().lower()
+
+        # Validation
+        import re as _re
+        EMAIL_RE = _re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+        if not name or not email:
+            error = "Name and email are required."
+        elif not EMAIL_RE.match(email):
+            error = "Please enter a valid email address."
+        elif not why or len(why) < 10:
+            error = "Please tell us briefly what you're looking for (at least 10 characters)."
+        elif how and how not in _HOW_HEARD_OPTIONS:
+            # Whitelist enforcement — silently coerce to 'other' rather than reject
+            how = 'other'
+        else:
+            ua = request.headers.get('User-Agent', '')[:500]
+            try:
+                _sid = auth.create_access_request(
+                    name=name, email=email, phone=phone,
+                    why_interested=why, how_heard=how,
+                    request_ip=client_ip, user_agent=ua,
+                )
+                _notify_admin_access_request(name, email, why, how, _sid)
+                success = True
+                log.info(f"Access request received: id #{_sid} {email}")
+            except ValueError as e:
+                # Don't leak whether email exists in our system. Show generic
+                # "we'll review your request" message regardless of duplicate
+                # state — an attacker probing for valid emails sees the same
+                # response either way. Real duplicates surface only in logs.
+                msg = str(e).lower()
+                if 'already exists' in msg or 'already pending' in msg or 'already approved' in msg:
+                    log.info(f"Suppressed duplicate-email leak on /request-access: {email} ({e})")
+                    success = True
+                else:
+                    error = str(e)
+            except Exception as e:
+                log.error(f"Access request error: {e}")
+                error = "An unexpected error occurred. Please try again."
+
+    return render_template('request_access.html',
+                           error=error, success=success,
+                           how_options=_HOW_HEARD_OPTIONS)
+
+
 # ── SIGNUP MANAGEMENT API (admin only) ────────────────────────────────────────
 
 @app.route('/api/pending-signups', methods=['GET'])
@@ -985,7 +1151,18 @@ def api_pending_signups():
 @app.route('/api/approve-signup', methods=['POST'])
 @login_required
 def api_approve_signup():
-    """Approve a pending signup — creates customer account + signals.db."""
+    """Approve a pending signup — creates customer account + signals.db.
+
+    Two paths based on the pending_signups row's request_type:
+      'subscribe'      — customer set password on /signup, email already
+                         verified. Send approval email; customer can log
+                         in immediately.
+      'request_access' — customer only expressed interest. The approve_signup
+                         helper creates the customer record but with
+                         email_verified=0 and no password. We must generate
+                         a verify token and email a /setup-account link so
+                         the customer can finalize.
+    """
     if not is_admin():
         return jsonify({"error": "admin only"}), 403
     data = request.get_json(force=True)
@@ -997,13 +1174,31 @@ def api_approve_signup():
         from retail_database import get_customer_db
         cdb = get_customer_db(result['customer_id'])
         cdb.set_setting('NEW_CUSTOMER', 'true')
-        log.info(f"Admin approved signup #{signup_id} -> customer {result['customer_id']}")
+        log.info(
+            f"Admin approved signup #{signup_id} ({result.get('request_type')}) "
+            f"-> customer {result['customer_id']}"
+        )
 
-        # Send approval email
-        try:
-            _send_approval_email(result.get('email', ''), result.get('name', ''))
-        except Exception as _ae:
-            log.warning(f"Approval email failed: {_ae}")
+        if result.get('needs_setup'):
+            # request_access path: generate verify token + send setup-account
+            # email. Customer can't log in until they complete /setup-account.
+            try:
+                token = auth.generate_verify_token(result['customer_id'])
+                base = PORTAL_BASE_URL or f"http://localhost:{PORT}"
+                setup_link = f"{base}/setup-account/{token}"
+                _send_setup_email(
+                    result.get('email', ''),
+                    setup_link,
+                    display_name=result.get('name', ''),
+                )
+            except Exception as _se:
+                log.warning(f"Setup email for request_access approval failed: {_se}")
+        else:
+            # subscribe path: standard approval email (existing behavior)
+            try:
+                _send_approval_email(result.get('email', ''), result.get('name', ''))
+            except Exception as _ae:
+                log.warning(f"Approval email failed: {_ae}")
 
         return jsonify({"ok": True, **result})
     except ValueError as e:
@@ -1112,12 +1307,33 @@ def api_notifications_read():
     return jsonify({"ok": True})
 
 
+# ── Service-token auth helper for notification endpoints ──────────────────────
+# Scoop on pi4b posts X-Service-Token to dispatch in-app notifications. The
+# header value must equal MONITOR_TOKEN (same secret pi4b uses for /api/proxy
+# calls into pi5). Without this, every scoop dispatch silently 401s.
+#
+# Either auth path is sufficient:
+#   1. Logged-in admin session (existing /admin UX)
+#   2. Valid X-Service-Token header (machine-to-machine path for scoop)
+
+def _notifications_authed() -> bool:
+    """True if request has either admin session OR matching X-Service-Token."""
+    svc_token = request.headers.get('X-Service-Token', '')
+    if svc_token and MONITOR_TOKEN and svc_token == MONITOR_TOKEN:
+        return True
+    # Fall back to admin session check
+    try:
+        return bool(is_admin())
+    except Exception:
+        return False
+
+
 @app.route('/api/notifications/send', methods=['POST'])
-@login_required
 def api_notifications_send():
-    """Send a notification to a specific customer. Admin only."""
-    if not is_admin():
-        return jsonify({"error": "admin only"}), 403
+    """Send a notification to a specific customer.
+    Auth: admin session OR X-Service-Token (for scoop dispatch from pi4b)."""
+    if not _notifications_authed():
+        return jsonify({"error": "unauthorized"}), 401
     data = request.get_json(force=True)
     customer_id = data.get('customer_id')
     category    = data.get('category', 'system')
@@ -1133,11 +1349,11 @@ def api_notifications_send():
 
 
 @app.route('/api/notifications/broadcast', methods=['POST'])
-@login_required
 def api_notifications_broadcast():
-    """Send a system notification to ALL active customers. Admin only."""
-    if not is_admin():
-        return jsonify({"error": "admin only"}), 403
+    """Send a system notification to ALL active customers.
+    Auth: admin session OR X-Service-Token (for scoop dispatch from pi4b)."""
+    if not _notifications_authed():
+        return jsonify({"error": "unauthorized"}), 401
     data = request.get_json(force=True)
     category = data.get('category', 'system')
     title    = data.get('title', '')

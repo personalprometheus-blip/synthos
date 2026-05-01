@@ -2,34 +2,83 @@
 {% set title = "Check Your Email" %}
 
 {% block inline_css %}
-  body { font-family: 'Courier New', monospace;
-         display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-  .card { background: #13131a; border: 1px solid #2a2a3a; border-radius: 12px;
-          padding: 56px 48px; max-width: 480px; width: 100%; text-align: center; }
-  .wordmark { font-size: 28px; font-weight: 700; letter-spacing: 6px;
-              color: #fff; margin-bottom: 12px; }
-  .tagline { color: #888; font-size: 13px; letter-spacing: 2px; margin-bottom: 40px; }
-  .icon { font-size: 48px; margin-bottom: 24px; }
-  h2 { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #e0e0e0; }
-  p { color: #999; font-size: 13px; line-height: 1.7; margin-bottom: 12px; }
-  .note { background: #1e1e2e; border: 1px solid #333; border-radius: 8px;
-          padding: 16px; margin-top: 24px; font-size: 12px; color: #666; }
-  a { color: #6b8cff; text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  /* Mirrors signup.html / request_access.html — design tokens come from core.css. */
+  .ce-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 40px 20px;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0, 245, 212, 0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 80% 60%, rgba(123, 97, 255, 0.04) 0%, transparent 60%);
+  }
+  .ce-card {
+    width: 100%; max-width: 460px;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 16px;
+    padding: 2.5rem 2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    text-align: center;
+  }
+  .ce-logo {
+    font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+    letter-spacing: 0.18em; color: var(--teal); text-align: center;
+    margin-bottom: 0.5rem; text-shadow: 0 0 18px rgba(0, 245, 212, 0.20);
+  }
+  .ce-tagline {
+    font-family: var(--mono); font-size: 0.62rem; color: var(--muted);
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 2rem;
+  }
+  /* Inline SVG envelope icon — themed in teal, no emoji */
+  .ce-icon {
+    width: 56px; height: 56px; margin: 0 auto 1.4rem auto;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 245, 212, 0.06);
+    border: 1px solid rgba(0, 245, 212, 0.18);
+    border-radius: 14px;
+    box-shadow: 0 0 24px rgba(0, 245, 212, 0.06);
+  }
+  .ce-icon svg { width: 28px; height: 28px; stroke: var(--teal); fill: none; stroke-width: 1.6; }
+  .ce-title  { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.6rem; color: var(--text); }
+  .ce-body   { color: var(--muted); font-size: 0.82rem; line-height: 1.7; margin-bottom: 0.6rem; }
+  .ce-meta   { color: var(--dim); font-size: 0.72rem; margin-top: 0.2rem; }
+  .ce-note {
+    background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.9rem 1rem; margin-top: 1.6rem;
+    font-size: 0.74rem; color: var(--muted); line-height: 1.6;
+  }
+  .ce-note a {
+    color: var(--teal); text-decoration: none;
+    border-bottom: 1px dotted rgba(0, 245, 212, 0.3);
+  }
+  .ce-note a:hover { border-bottom-style: solid; }
+  .ce-back {
+    display: block; text-align: center; margin-top: 1.4rem;
+    font-size: 0.72rem; color: var(--muted); text-decoration: none;
+  }
+  .ce-back:hover { color: var(--text); }
 {% endblock %}
 
 {% block content %}
-<div class="card">
-  <div class="wordmark">SYNTHOS</div>
-  <div class="tagline">Algorithmic Trading Platform</div>
-  <div class="icon">📬</div>
-  <h2>Check your inbox</h2>
-  <p>We've sent a setup link to your email address.<br>
-     Click the link to activate your account.</p>
-  <p>The link expires in 48 hours.</p>
-  <div class="note">
-    Didn't receive it? Check your spam folder, or
-    <a href="mailto:synthos.signal@gmail.com">contact support</a>.
+<div class="ce-wrap">
+  <div class="ce-card">
+    <div class="ce-logo">SYNTHOS</div>
+    <div class="ce-tagline">Algorithmic Trading Platform</div>
+    <div class="ce-icon" aria-hidden="true">
+      {# Inline envelope — themed via stroke=currentColor cascade. Replaces the
+         📬 emoji which rendered inconsistently across email clients + OSes. #}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2"/>
+        <path d="M3 7l9 6 9-6"/>
+      </svg>
+    </div>
+    <div class="ce-title">Check your inbox</div>
+    <div class="ce-body">
+      We've sent a setup link to your email address.<br>
+      Click the link to activate your account.
+    </div>
+    <div class="ce-meta">The link expires in 48 hours.</div>
+    <div class="ce-note">
+      Didn't receive it? Check your spam folder, or
+      <a href="mailto:synthos.signal@gmail.com">contact support</a>.
+    </div>
+    <a href="/login" class="ce-back">← Back to login</a>
   </div>
 </div>
 {% endblock %}

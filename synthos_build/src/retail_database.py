@@ -1599,6 +1599,17 @@ class DB:
         Write a news_flags row. Phase 2 primitive — news agent calls this
         after classifying an event.
 
+        Idempotent on (ticker, category, source_signal_id) when
+        source_signal_id is not None: a second call for the same tuple
+        finds the existing row and returns its id rather than inserting
+        a duplicate. The news agent's display path and signal path can
+        both call this function for the same article without producing
+        duplicate flags (TODO 2026-04-21 fix shipped 2026-05-01).
+
+        For standalone flags (source_signal_id IS NULL) the function still
+        unconditionally inserts — there's no good natural key, and the
+        only callers writing standalone flags today don't dedupe at all.
+
         Args:
             ticker: upper-case symbol
             category: one of NEWS_FLAG_TTL_DAYS keys (or 'other' as fallback)
@@ -1607,18 +1618,33 @@ class DB:
             source_signal_id: FK to signals.id if derived from a specific signal
             ttl_days: override the default TTL for this category
 
-        Returns: the new row's id.
+        Returns: the new (or existing) row's id.
         """
         if ttl_days is None:
             ttl_days = self.NEWS_FLAG_TTL_DAYS.get(category, self.NEWS_FLAG_TTL_DAYS['other'])
-        # fresh_until = now + ttl_days
         fresh_until = (datetime.now(timezone.utc) + timedelta(days=ttl_days)).isoformat()
+        ticker_u = (ticker or '').upper()
         with self.conn() as c:
+            # Dedup path — only when we have a signal_id to anchor on.
+            # We don't filter by fresh_until here: even an "expired" prior
+            # write should suppress a same-signal re-write, since both
+            # paths are processing the same article and a duplicate row
+            # adds no information. Re-classifying the same signal later
+            # is intentionally a no-op too.
+            if source_signal_id is not None:
+                existing = c.execute(
+                    "SELECT id FROM news_flags "
+                    "WHERE ticker=? AND category=? AND source_signal_id=? "
+                    "ORDER BY id DESC LIMIT 1",
+                    (ticker_u, category, source_signal_id),
+                ).fetchone()
+                if existing:
+                    return existing[0]
             cur = c.execute(
                 "INSERT INTO news_flags "
                 "(ticker, category, score, fresh_until, notes, source_signal_id) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (ticker.upper(), category, float(score), fresh_until, notes, source_signal_id),
+                (ticker_u, category, float(score), fresh_until, notes, source_signal_id),
             )
             return cur.lastrowid
 
@@ -3510,70 +3536,16 @@ class DB:
                 out.append(d)
             return out
 
-    def get_watching_signals(self, limit=100, min_floor=30):
-        """Return signals for the Intelligence page from news_feed.
-
-        Always returns at least min_floor articles — fresh signals first,
-        stale articles padded in to fill the floor. Field names are mapped
-        to what the portal's renderIntelGrid expects.
-        """
-        with self.conn() as c:
-            def _fetch(routing_filter, n):
-                if routing_filter == "fresh":
-                    rows = c.execute("""
-                        SELECT ticker, congress_member, signal_score,
-                               sentiment_score, raw_headline, metadata,
-                               source, timestamp, created_at
-                        FROM news_feed
-                        WHERE COALESCE(json_extract(metadata,'$.routing'),'?') != 'STALE'
-                        ORDER BY created_at DESC
-                        LIMIT ?
-                    """, (n,)).fetchall()
-                else:
-                    rows = c.execute("""
-                        SELECT ticker, congress_member, signal_score,
-                               sentiment_score, raw_headline, metadata,
-                               source, timestamp, created_at
-                        FROM news_feed
-                        WHERE json_extract(metadata,'$.routing') = 'STALE'
-                        ORDER BY created_at DESC
-                        LIMIT ?
-                    """, (n,)).fetchall()
-                return [dict(r) for r in rows]
-
-            fresh = _fetch("fresh", limit)
-            result = list(fresh)
-            if len(result) < min_floor:
-                result.extend(_fetch("stale", min_floor - len(result)))
-
-            # Map field names and flatten metadata for portal consumption
-            out = []
-            for r in result:
-                meta = {}
-                try:
-                    meta = json.loads(r.get('metadata') or '{}')
-                except Exception:
-                    pass
-                out.append({
-                    "ticker":       r.get("ticker") or "?",
-                    "politician":   r.get("congress_member") or "",
-                    "confidence":   r.get("signal_score") or "NOISE",
-                    "sentiment_score": r.get("sentiment_score"),
-                    "headline":     r.get("raw_headline") or "",
-                    "disc_date":    (r.get("timestamp") or r.get("created_at") or "")[:10],
-                    "created_at":   r.get("created_at") or "",
-                    "staleness":    meta.get("staleness") or "unknown",
-                    "sector":       meta.get("sec_etf") or meta.get("source") or "",
-                    "amount_range": meta.get("source") or "",
-                    "corroborated": meta.get("routing") in ("QUEUE", "WATCH"),
-                    "corroboration_note": meta.get("corroboration_note") or "",
-                    "is_spousal":   bool(meta.get("is_spousal")),
-                    "source":       r.get("source") or "",
-                    "is_stale":     meta.get("routing") == "STALE",
-                    "image":        meta.get("image_url") or meta.get("image"),
-                    "image_url":    meta.get("image_url") or meta.get("image"),
-                })
-            return out
+    # NOTE: get_watching_signals(limit, min_floor) was removed 2026-05-01.
+    # It read news_feed (raw article inbox) which surfaced 1100+ MACRO sentinels
+    # and articles with unresolved tickers as "MACR" / "?" on the watchlist —
+    # making the page look like dirty data when the underlying signals table
+    # was actually clean. Phase 7k (2026-04-25) repointed /api/watchlist and
+    # /api/planning to get_signals_by_status() and that's the only path
+    # production callers should use. validate_02.py was updated to match.
+    # If a future caller needs the legacy news_feed path, query news_feed
+    # directly with json_extract(metadata,'$.routing') filtering — the
+    # full prior implementation is in git history.
 
     # ── SENTIMENT LOG ──────────────────────────────────────────────────────
     # Per-run snapshots of The Pulse's gate-27 final output. Read by Gate 24

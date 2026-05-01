@@ -273,17 +273,22 @@ if conn:
         p("Recent signals", False, str(e))
 
 # 2e. WATCHING signals (portal watchlist)
+# 2026-05-01: switched from db.get_watching_signals() (legacy news_feed reader,
+# removed) to db.get_signals_by_status() — same path /api/watchlist uses since
+# Phase 7k repointed it to the curated signals table.
 if db:
     try:
-        watching = db.get_watching_signals(limit=10)
-        p("get_watching_signals returns", True,
+        watching = db.get_signals_by_status(
+            ['WATCHING', 'QUEUED', 'VALIDATED'], limit=10
+        )
+        p("get_signals_by_status returns", True,
           f"{len(watching)} signal(s) in watchlist")
         if watching:
             for s in watching[:3]:
-                print(f"       {s['ticker']:<6} {s['confidence']:<8} "
-                      f"{s['staleness']:<10} {s.get('headline','')[:50]}")
+                print(f"       {s.get('ticker',''):<6} {s.get('confidence',''):<8} "
+                      f"{s.get('staleness',''):<10} {s.get('headline','')[:50]}")
     except Exception as e:
-        p("get_watching_signals", False, str(e))
+        p("get_signals_by_status", False, str(e))
 
 # 2f. Last news_agent run
 if conn:
@@ -508,9 +513,12 @@ if portal_up:
 section("5. CROSS-SURFACE COHERENCE")
 
 # 5a. Signals in DB match portal watchlist count
+# 2026-05-01: matches /api/watchlist's underlying call after Phase 7k.
 if db and portal_up:
     try:
-        db_watching = db.get_watching_signals(limit=100)
+        db_watching = db.get_signals_by_status(
+            ['WATCHING', 'QUEUED', 'VALIDATED'], limit=50
+        )
         ok, code, api_data, err = api_get("/api/watchlist")
         if ok:
             api_watching = api_data.get('signals', [])

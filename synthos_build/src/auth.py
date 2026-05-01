@@ -228,12 +228,22 @@ def init_auth_db():
 
 
 def _migrate_pending_signups():
-    """Add ToS-acceptance columns to pending_signups. Idempotent."""
+    """Add ToS-acceptance + request-access columns to pending_signups.
+    Idempotent — safe to call on every startup."""
     new_columns = [
+        # ToS audit trail (added 2026-04-XX)
         ("tos_accepted_at", "TEXT"),
         ("tos_version",     "TEXT"),
         ("tos_ip",          "TEXT"),
         ("tos_user_agent",  "TEXT"),
+        # Request-access path (added 2026-05-01) — second entry point into
+        # pending_signups for prospective users WITHOUT an access code.
+        # request_type distinguishes the two flows so admin can review +
+        # approve appropriately. why_interested / how_heard provide context
+        # before admin makes the call.
+        ("request_type",    "TEXT NOT NULL DEFAULT 'subscribe'"),  # subscribe | request_access
+        ("why_interested",  "TEXT"),
+        ("how_heard",       "TEXT"),
     ]
     with _auth_conn() as c:
         for col_name, col_def in new_columns:
@@ -751,6 +761,106 @@ def create_pending_signup(name: str, email: str, phone: str, password: str,
     return signup_id
 
 
+def create_access_request(name: str, email: str, phone: str = "",
+                          why_interested: str = "", how_heard: str = "",
+                          request_ip: str = "", user_agent: str = "") -> int:
+    """
+    Create a pending_signups row for a public 'Request Access' submission
+    (no access code, no password yet — just intent to use Synthos).
+
+    Differs from create_pending_signup:
+      * No access code required
+      * No password collected — customer sets it on /setup-account after
+        admin approves and the verification email lands
+      * No ToS acceptance (ToS is in-app, post-login per operator decision)
+      * request_type='request_access' so admin UI can distinguish
+      * why_interested + how_heard surfaced for context
+
+    Returns the pending_signups row id. Raises ValueError on duplicate
+    email or already-pending request from same address.
+
+    Failure mode for duplicate-email is safe: silent OK from the public
+    handler's point of view (don't leak whether an email is already in
+    our system to a probing attacker). Caller decides whether to log
+    the duplicate.
+    """
+    email = email.lower().strip()
+    if not name or not email:
+        raise ValueError("name and email are required")
+
+    # Light email shape validation — final validation is whether the
+    # verification email actually delivers
+    import re as _re
+    if not _re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        raise ValueError("please enter a valid email address")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Bound free-text fields so a hostile submitter can't bloat the DB
+    why_interested = (why_interested or "")[:500]
+    how_heard      = (how_heard or "")[:50]
+    name           = (name or "")[:100]
+    phone          = (phone or "")[:30]
+    user_agent     = (user_agent or "")[:500]
+    request_ip     = (request_ip or "")[:45]  # IPv6 max length
+
+    email_hash = _email_lookup_hash(email)
+    with _auth_conn() as c:
+        # Already a customer? Don't create a duplicate request row.
+        existing_cust = c.execute(
+            "SELECT id FROM customers WHERE email_hash = ?", (email_hash,)
+        ).fetchone()
+        if existing_cust:
+            raise ValueError("an account already exists for this email")
+
+        # Already-pending request from this email?
+        existing_signup = c.execute(
+            "SELECT id, status, request_type FROM pending_signups WHERE email = ?",
+            (email,)
+        ).fetchone()
+        if existing_signup:
+            existing_signup = dict(existing_signup)
+            if existing_signup['status'] == 'PENDING':
+                raise ValueError("a request for this email is already pending")
+            if existing_signup['status'] == 'APPROVED':
+                raise ValueError("this email has already been approved")
+            # Re-submit after rejection — refresh the row
+            c.execute(
+                "UPDATE pending_signups "
+                "SET name=?, phone=?, why_interested=?, how_heard=?, "
+                "    status='PENDING', created_at=?, "
+                "    reviewed_at=NULL, reviewed_by=NULL, "
+                "    tos_ip=?, tos_user_agent=?, "
+                "    request_type='request_access', password_hash='' "
+                "WHERE id=?",
+                (name, phone, why_interested, how_heard, now,
+                 request_ip, user_agent, existing_signup['id'])
+            )
+            log.info(
+                f"Re-submitted access request: {email} (id #{existing_signup['id']})"
+            )
+            return existing_signup['id']
+
+        # Fresh row. password_hash is empty string (not NULL) because the
+        # column has NOT NULL constraint from the original schema. Customer
+        # sets the real password on /setup-account after email verification.
+        c.execute(
+            "INSERT INTO pending_signups "
+            "(name, email, phone, password_hash, request_type, "
+            " why_interested, how_heard, created_at, tos_ip, tos_user_agent) "
+            "VALUES (?, ?, ?, '', 'request_access', ?, ?, ?, ?, ?)",
+            (name, email, phone, why_interested, how_heard, now,
+             request_ip, user_agent)
+        )
+        signup_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    log.info(
+        f"Access request submitted: id #{signup_id} {email} "
+        f"how_heard={how_heard!r}"
+    )
+    return signup_id
+
+
 def list_pending_signups(status_filter: str = None) -> list:
     """
     List pending signups. If status_filter is provided, only return that status.
@@ -770,8 +880,24 @@ def list_pending_signups(status_filter: str = None) -> list:
 
 def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
     """
-    Approve a pending signup: creates the customer account with auto_activate=True,
-    provisions the customer directory & signals.db. Returns customer info dict.
+    Approve a pending signup: creates the customer account, provisions the
+    customer directory & signals.db. Returns customer info dict.
+
+    Two paths based on row.request_type:
+      * 'subscribe'      — customer already set password + accepted ToS on the
+                           /signup form. email_verified=1, account is fully
+                           active immediately, customer can log in.
+      * 'request_access' — customer only expressed interest (name/email/phone +
+                           why/how_heard). No password. email_verified=0 so login
+                           is blocked. Customer must hit /setup-account/<token>
+                           to set password + accept ToS, which calls
+                           activate_account() and flips email_verified=1.
+                           Caller is responsible for generating the verify
+                           token and emailing the /setup-account link AFTER
+                           this function returns.
+
+    The returned dict contains customer_id + email + name + request_type so
+    the caller can route post-approval logic correctly.
     """
     now = datetime.now(timezone.utc).isoformat()
     with _auth_conn() as c:
@@ -783,8 +909,12 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
             raise ValueError(f"Signup #{signup_id} not found or not pending")
         row = dict(row)
 
-    # Create the customer account using existing create_customer,
-    # but we need to pass the already-hashed password, so we do it manually.
+    # Detect which flow this row came from. Legacy rows (pre-2026-05-01,
+    # created before request_type column existed) have the column defaulted
+    # to 'subscribe' by the schema migration — safe.
+    req_type = (row.get('request_type') or 'subscribe').lower()
+    is_request_access = (req_type == 'request_access')
+
     customer_id = str(uuid.uuid4())
     email       = row['email'].lower().strip()
     email_hash  = _email_lookup_hash(email)
@@ -810,21 +940,27 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
                 encrypt_field(email),
                 encrypt_field(row['name']) if row['name'] else b'',
                 encrypt_field(row['phone']) if row['phone'] else b'',
-                row['password_hash'],   # Already hashed during signup
+                row['password_hash'],   # Empty string for request_access (set later)
                 'customer',
-                1,                      # email_verified = true (admin-approved)
-                'active',               # active subscription (trial)
+                # request_access: email NOT verified yet — customer must complete
+                # /setup-account before login is allowed.
+                # subscribe: admin approval = full activation, email already verified.
+                0 if is_request_access else 1,
+                'active',               # subscription active (trial); request_access
+                                        # customers also get this so the access-allowed
+                                        # gate doesn't block them at the subscription
+                                        # check — only the email_verified=0 gate does.
                 'early_adopter',        # trial users get early_adopter pricing
                 now,                    # pricing_locked_at
                 now,                    # created_at
-                row.get('state', ''),   # from signup form
-                row.get('zip_code', ''),# from signup form
-                # ToS values carried over from pending_signups row (captured when
-                # the user checked the box on the signup form). Falls back to the
-                # approval timestamp only for legacy rows created before ToS was
-                # required at signup — those should not exist post-2026-04-23.
-                row.get('tos_accepted_at') or now,
-                row.get('tos_version')     or '1.0',
+                row.get('state', ''),   # from /signup form (empty for request_access)
+                row.get('zip_code', ''),# from /signup form (empty for request_access)
+                # ToS values carried over from pending_signups row when the
+                # user checked the box on /signup. For request_access there is
+                # no ToS yet (acceptance happens in-app post-login per operator
+                # decision), so we leave the columns empty until activate_account.
+                row.get('tos_accepted_at') if not is_request_access else None,
+                row.get('tos_version')     if not is_request_access else None,
             )
         )
 
@@ -854,12 +990,16 @@ def approve_signup(signup_id: int, reviewed_by: str = 'admin') -> dict:
         except Exception as e:
             log.warning(f"Could not initialize customer DB: {e}")
 
-    log.info(f"Approved signup #{signup_id}: {email} -> customer {customer_id}")
+    log.info(
+        f"Approved signup #{signup_id} ({req_type}): {email} -> customer {customer_id}"
+    )
     return {
-        'customer_id': customer_id,
-        'email':       email,
-        'name':        row['name'],
-        'phone':       row['phone'],
+        'customer_id':  customer_id,
+        'email':        email,
+        'name':         row['name'],
+        'phone':        row['phone'],
+        'request_type': req_type,        # 'subscribe' or 'request_access'
+        'needs_setup':  is_request_access,  # caller must send setup-account email
     }
 
 

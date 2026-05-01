@@ -38,38 +38,62 @@ import re
 # Add entries when [TICKER_REJECT] / [TICKER_FLAG:NOMATCH] logs show legit
 # articles being flagged because the headline uses an informal name.
 TICKER_ALIASES: dict[str, list[str]] = {
-    'GOOGL': ['google', 'alphabet'],
-    'GOOG':  ['google', 'alphabet'],
-    'META':  ['facebook', 'meta', 'instagram', 'whatsapp'],
-    'BRK.A': ['berkshire'],
-    'BRK.B': ['berkshire'],
-    'JPM':   ['jpmorgan', 'jp morgan', 'chase'],
-    'GS':    ['goldman'],
+    # Mega-cap tech — 2026-04-21 seed + 2026-05-01 expansion based on
+    # observed [TICKER_REJECT] no_match patterns. Headlines often reference
+    # the CEO or a major product line instead of the corporate name; aliases
+    # let the resolver still anchor the article to its primary ticker.
+    'GOOGL': ['google', 'alphabet', 'sundar pichai', 'pichai'],
+    'GOOG':  ['google', 'alphabet', 'sundar pichai', 'pichai'],
+    'META':  ['facebook', 'meta', 'instagram', 'whatsapp',
+              'zuckerberg', 'mark zuckerberg'],
+    'AAPL':  ['apple', 'tim cook', 'iphone', 'ipad', 'macbook', 'apple watch'],
+    'MSFT':  ['microsoft', 'azure', 'nadella', 'satya nadella'],
+    'AMZN':  ['amazon', 'aws', 'bezos', 'jeff bezos', 'jassy', 'andy jassy', 'kindle'],
+    'NVDA':  ['nvidia', 'jensen huang', 'cuda', 'geforce'],
+    'AMD':   ['amd', 'lisa su'],
+    'INTC':  ['intel', 'pat gelsinger'],
+    'NFLX':  ['netflix'],
+    'TSLA':  ['tesla', 'musk', 'elon musk', 'cybertruck', 'roadster',
+              'model y', 'model 3', 'model s', 'model x'],
+    # Holdings + finance
+    'BRK.A': ['berkshire', 'warren buffett'],
+    'BRK.B': ['berkshire', 'warren buffett'],
+    'JPM':   ['jpmorgan', 'jp morgan', 'chase', 'jamie dimon', 'dimon'],
+    'GS':    ['goldman', 'goldman sachs'],
     'BAC':   ['bank of america', 'bofa'],
+    'COF':   ['capital one'],
+    'AXP':   ['american express', 'amex'],
+    # Telecom + consumer
     'T':     ['at&t'],
     'VZ':    ['verizon'],
     'KO':    ['coca-cola', 'coke'],
     'WMT':   ['walmart', 'wal-mart'],
     'HD':    ['home depot'],
-    'NFLX':  ['netflix'],
-    'NVDA':  ['nvidia'],
-    'AMD':   ['amd'],
-    'INTC':  ['intel'],
-    'MSFT':  ['microsoft'],
-    'AAPL':  ['apple'],
-    'AMZN':  ['amazon'],
-    'TSLA':  ['tesla'],
+    'UBER':  ['uber'],
+    # Industrial + energy
     'F':     ['ford motor'],
     'GM':    ['general motors'],
     'BA':    ['boeing'],
     'CAT':   ['caterpillar'],
-    'XOM':   ['exxon'],
+    'XOM':   ['exxon', 'exxonmobil'],
     'CVX':   ['chevron'],
+    'SLB':   ['schlumberger'],
+    'APD':   ['air products'],
+    'NEM':   ['newmont'],
+    'NEE':   ['nextera', 'nextera energy'],
+    # Healthcare
     'UNH':   ['unitedhealth'],
     'PFE':   ['pfizer'],
     'MRK':   ['merck'],
     'LLY':   ['lilly', 'eli lilly'],
     'JNJ':   ['johnson & johnson', 'j&j'],
+    # Mid-cap names appearing in 2026-05-01 wrong_ticker / remap flags —
+    # adding them gives the multi-symbol re-ranker a name signal to anchor
+    # the right ticker when an article mentions several companies.
+    'IHRT':  ['iheartmedia', 'iheart'],
+    'SNDK':  ['sandisk'],
+    'FIVN':  ['five9'],
+    'VEEV':  ['veeva', 'veeva systems'],
 }
 
 
