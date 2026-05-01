@@ -3143,6 +3143,15 @@ def run():
         portfolio_value=portfolio['cash'],
     )
 
+    # Dedicated regime-state setting for downstream consumers (notably
+    # the market state aggregator, agent 9). Replaces a brittle string-
+    # parse of this very AGENT_COMPLETE details line — if the format above
+    # ever changed, downstream regime extraction would silently break.
+    try:
+        db.set_setting('_PULSE_REGIME_STATE', state.regime_state or 'indecisive')
+    except Exception as _e:
+        log.warning(f"_PULSE_REGIME_STATE write failed: {_e}")
+
     # ── SCREENING REQUEST HANDLER ──────────────────────────────────────────
     # Check for pending sentiment screening requests from the sector screener.
     # Reuses existing per-ticker scan functions (put/call, insider, volume).

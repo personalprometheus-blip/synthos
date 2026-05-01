@@ -11,13 +11,13 @@ Responsibilities:
   - Ingest recent news signal distribution (News Agent / Agent 2)
   - Ingest macro regime classification (Macro Regime Agent / Agent 8)
   - Synthesize weighted composite score → unified market state label
-  - Store result in customer_settings for downstream consumption
-    (Trade Logic, Validator Stack, portal dashboard)
+  - Persist to the shared market-intel DB settings for downstream
+    consumption (Trade Logic, Validator Stack, portal dashboard).
 
 No LLM in any decision path. All gate logic is deterministic and traceable.
 
 Data sources:
-  - Internal DB only — scan_log, signals, system_log, customer_settings
+  - Internal DB only — scan_log, signals, system_log, settings
   - No external API calls; aggregates what other agents have already collected
 
 Usage:
@@ -32,20 +32,18 @@ import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from pathlib import Path
 from dotenv import load_dotenv
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_shared import emit_admin_alert
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET  = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
-
-OWNER_CUSTOMER_ID = os.environ.get('OWNER_CUSTOMER_ID', '')
 
 # Synthesis weights — must sum to 1.0
 W_SENTIMENT = 0.40    # most immediate market read (The Pulse)
@@ -56,6 +54,12 @@ W_MACRO     = 0.35    # structural backdrop (Macro Regime Agent)
 SENTIMENT_STALE_HOURS = 2     # scan_log older than this = stale
 NEWS_STALE_HOURS      = 24    # signals window for news scoring
 MACRO_STALE_HOURS     = 24    # regime data older than this = stale
+
+# Degraded streak — when 2+ of 3 components are stale for this many
+# consecutive runs, fire an admin_alert. At a 30-min cadence that's
+# ~90 minutes of degraded synthesis — long enough to filter transient
+# upstream blips, short enough to surface real problems.
+DEGRADED_STREAK_ALERT = 3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,21 +126,34 @@ class MarketState:
     composite: float = 50.0
     label: str = "NEUTRAL"
     stale_components: list = field(default_factory=list)
+    # True when 2+ of 3 components are stale — downstream consumers
+    # (validator gate, trader, portal) read this to distinguish
+    # "we know it's neutral" from "we have no idea, the score is a default."
+    # Written to _MARKET_STATE_DEGRADED setting by persist_state.
+    degraded: bool = False
 
 
 # ── TIMESTAMP HELPERS ─────────────────────────────────────────────────────
 
 def _parse_db_timestamp(ts_str):
     """Parse a DB timestamp string into a UTC-aware datetime.
-    DB stores UTC timestamps as naive-looking strings via self.now()."""
+
+    db.now() always returns UTC formatted as 'YYYY-MM-DD HH:MM:SS' (naive
+    string, no offset). Some upstream agents (e.g. macro regime detail
+    JSON) write with the ISO 'T' separator instead. Both forms map to
+    the same UTC instant — accept either and tag tzinfo=UTC.
+    """
     if not ts_str:
         return None
-    try:
-        dt = datetime.strptime(ts_str, '%Y-%m-%d %H:%M:%S')
-        # DB timestamps are local time (server TZ); treat as UTC for age checks
-        return dt.replace(tzinfo=UTC)
-    except (ValueError, TypeError):
-        return None
+    # Strip a trailing 'Z' if present (ISO UTC marker — datetime parses
+    # better without it than with it on older Python versions).
+    s = ts_str.strip().rstrip('Z')
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
+        except (ValueError, TypeError):
+            continue
+    return None
 
 
 def _now_utc():
@@ -213,29 +230,21 @@ def gate1_sentiment(db):
     else:
         log.info("  scan_log: no rows — using default score=50 (stale)")
 
-    # ── Read regime from system_log (The Pulse AGENT_COMPLETE) ────────
+    # ── Read regime from dedicated _PULSE_REGIME_STATE setting ────────
+    # Was previously parsed out of system_log AGENT_COMPLETE details by
+    # tokenising the string — fragile if upstream log format changed.
+    # The Pulse now writes the regime_state to a dedicated setting after
+    # AGENT_COMPLETE, which is what we read here.
     try:
-        with db.conn() as c:
-            regime_row = c.execute(
-                "SELECT details FROM system_log "
-                "WHERE agent='The Pulse' AND event='AGENT_COMPLETE' "
-                "ORDER BY timestamp DESC LIMIT 1"
-            ).fetchone()
+        pulse_regime = db.get_setting('_PULSE_REGIME_STATE')
     except Exception as e:
-        log.warning(f"Gate 1: system_log regime query failed: {e}")
-        regime_row = None
-
-    if regime_row and regime_row['details']:
-        details = regime_row['details']
-        # Parse "regime=XXX" from details string like:
-        # "market_state=CAUTION regime=ELEVATED score=0.423 confidence=0.81"
-        for part in details.split():
-            if part.startswith('regime='):
-                result.regime = part.split('=', 1)[1]
-                break
+        log.warning(f"Gate 1: _PULSE_REGIME_STATE read failed: {e}")
+        pulse_regime = None
+    if pulse_regime:
+        result.regime = pulse_regime
         log.info(f"  regime from The Pulse: {result.regime}")
     else:
-        log.info("  regime: not found in system_log — using UNKNOWN")
+        log.info("  regime: _PULSE_REGIME_STATE not set — using UNKNOWN")
 
     if result.stale:
         log.info("  NOTE: sentiment data is STALE")
@@ -250,7 +259,18 @@ def gate2_news(db):
     Read recent signals from the signals table, score the news environment.
 
     Counts signals by confidence (HIGH/MEDIUM/LOW) in the last 24 hours.
-    Infers direction from headline keywords (buy-side vs sell-side language).
+    NOISE confidence is excluded from the query (S4 — NOISE rows previously
+    counted in total but not in any bucket, dragging confidence_score
+    toward 0).
+
+    Direction: uses signals.sentiment_score (0.0-1.0) populated by the
+    Pulse via stamp_signals_sentiment. Replaces the prior naive headline-
+    keyword matching which had systematic biases (no negation handling,
+    M&A context confusion, single-token false positives like "miss"
+    matching both "earnings miss" and "doesn't miss"). When sentiment_score
+    is NULL on a signal (not yet stamped), we treat that signal as
+    direction-neutral (excluded from direction calc) but still count it
+    in confidence buckets.
 
     Scoring (0-100):
       Heavy HIGH confidence + positive direction → 80+
@@ -260,16 +280,18 @@ def gate2_news(db):
     """
     log.info("Gate 2: News sentiment ingestion")
     result = NewsInput()
-    now = _now_utc()
 
     # DB timestamps are UTC — compare against UTC.
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=NEWS_STALE_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=NEWS_STALE_HOURS)
+              ).strftime('%Y-%m-%d %H:%M:%S')
 
     try:
         with db.conn() as c:
             rows = c.execute(
-                "SELECT confidence, headline, status FROM signals "
-                "WHERE created_at >= ? AND status NOT IN ('DISCARDED', 'EXPIRED')",
+                "SELECT confidence, sentiment_score, status FROM signals "
+                "WHERE created_at >= ? "
+                "AND status NOT IN ('DISCARDED', 'EXPIRED') "
+                "AND confidence != 'NOISE'",
                 (cutoff,)
             ).fetchall()
     except Exception as e:
@@ -283,7 +305,8 @@ def gate2_news(db):
     result.stale = False
     result.total_signals = len(rows)
 
-    # ── Count by confidence level ─────────────────────────────────────
+    # ── Count by confidence level + collect sentiment_scores ──────────
+    sentiment_values = []   # signals where sentiment was stamped (non-NULL)
     for row in rows:
         conf = (row['confidence'] or '').upper()
         if conf == 'HIGH':
@@ -292,31 +315,22 @@ def gate2_news(db):
             result.medium_count += 1
         elif conf == 'LOW':
             result.low_count += 1
-
-    # ── Infer direction from headline keywords ────────────────────────
-    _BULLISH_KEYWORDS = {
-        'buy', 'bought', 'purchase', 'acquired', 'upgrade', 'upgrades',
-        'bullish', 'rally', 'surge', 'soar', 'gain', 'gains', 'growth',
-        'positive', 'beat', 'beats', 'exceeds', 'outperform', 'strong',
-        'recovery', 'rebound', 'breakout', 'expansion', 'profit',
-    }
-    _BEARISH_KEYWORDS = {
-        'sell', 'sold', 'sale', 'downgrade', 'downgrades', 'bearish',
-        'crash', 'plunge', 'drop', 'decline', 'loss', 'losses', 'weak',
-        'miss', 'misses', 'underperform', 'warning', 'warns', 'risk',
-        'recession', 'contraction', 'layoff', 'layoffs', 'cut', 'cuts',
-        'negative', 'concern', 'fears', 'slump', 'tumble',
-    }
-
-    for row in rows:
-        headline = (row['headline'] or '').lower()
-        tokens = set(headline.split())
-        bull_hits = len(tokens & _BULLISH_KEYWORDS)
-        bear_hits = len(tokens & _BEARISH_KEYWORDS)
-
-        if bull_hits > bear_hits:
+        # signals.sentiment_score is REAL (nullable). 0.0-1.0 scale,
+        # 0.5 = neutral. Bucket into pos/neutral/neg for the existing
+        # NewsInput counters (kept for portal/debug display).
+        sscore = row['sentiment_score']
+        if sscore is None:
+            result.neutral_count += 1
+            continue
+        try:
+            sval = float(sscore)
+        except (TypeError, ValueError):
+            result.neutral_count += 1
+            continue
+        sentiment_values.append(sval)
+        if sval > 0.55:
             result.positive_count += 1
-        elif bear_hits > bull_hits:
+        elif sval < 0.45:
             result.negative_count += 1
         else:
             result.neutral_count += 1
@@ -324,28 +338,34 @@ def gate2_news(db):
     # ── Compute news score ────────────────────────────────────────────
     total = result.total_signals
     high_pct = result.high_count / total if total else 0
-    pos_ratio = result.positive_count / total if total else 0.5
-    neg_ratio = result.negative_count / total if total else 0.5
+    med_pct  = result.medium_count / total if total else 0
+    low_pct  = result.low_count / total if total else 0
 
-    # Base score from confidence distribution
+    # Base score from confidence distribution.
     # HIGH signals carry more weight: 80 * high_pct + 50 * med_pct + 30 * low_pct
-    med_pct = result.medium_count / total if total else 0
-    low_pct = result.low_count / total if total else 0
     confidence_score = 80 * high_pct + 50 * med_pct + 30 * low_pct
 
-    # Direction modifier: shift score toward bullish/bearish
-    # net direction ranges from -1 (all bearish) to +1 (all bullish)
-    direction_net = pos_ratio - neg_ratio  # range [-1, +1]
-    # Scale direction impact: +-20 points max
-    direction_modifier = direction_net * 20
+    # Direction modifier from real per-signal sentiment scores. Mean of
+    # stamped sentiments → distance from 0.5 → ±20 points. Skip if no
+    # signal has been stamped yet (direction-modifier = 0).
+    if sentiment_values:
+        mean_sent = sum(sentiment_values) / len(sentiment_values)
+        # mean_sent in [0,1]; distance from 0.5 in [-0.5,0.5];
+        # scale to ±20 points → multiply by 40.
+        direction_modifier = (mean_sent - 0.5) * 40
+    else:
+        mean_sent = None
+        direction_modifier = 0.0
 
     raw_score = confidence_score + direction_modifier
     result.score = max(0, min(100, int(round(raw_score))))
 
+    sent_str = f"mean_sent={mean_sent:.2f}" if mean_sent is not None else "no_stamps"
     log.info(
         f"  signals: {total} total (H={result.high_count} M={result.medium_count} "
-        f"L={result.low_count}) pos={result.positive_count} neg={result.negative_count} "
-        f"neutral={result.neutral_count} → score={result.score}"
+        f"L={result.low_count}) pos={result.positive_count} "
+        f"neg={result.negative_count} neutral={result.neutral_count} "
+        f"{sent_str} → score={result.score}"
     )
 
     return result
@@ -398,27 +418,38 @@ def gate3_macro(db):
     result.regime = regime_label.upper().strip()
     result.detail = regime_detail or ""
 
-    # ── Check staleness from detail JSON ──────────────────────────────
+    # ── Check staleness ───────────────────────────────────────────────
+    # Prefer the timestamp inside _MACRO_REGIME_DETAIL JSON (it's the
+    # canonical scan-completion time). Fall back to _MACRO_REGIME_UPDATED
+    # setting (added in the agent 8 audit) when detail JSON is missing or
+    # malformed — pre-fix Gate 3 would mark stale unconditionally in that
+    # case, depressing market state score even when macro data was fresh.
+    macro_ts_str = None
     if regime_detail:
         try:
             detail_obj = json.loads(regime_detail)
-            ts_str = detail_obj.get('timestamp') or detail_obj.get('updated_at', '')
-            if ts_str:
-                detail_dt = _parse_db_timestamp(ts_str)
-                if detail_dt:
-                    age = now - detail_dt
-                    result.stale = age > timedelta(hours=MACRO_STALE_HOURS)
-                    if result.stale:
-                        log.info(f"  macro regime detail is {age.total_seconds()/3600:.1f}h old — STALE")
-                else:
-                    result.stale = True
-            else:
-                result.stale = True
+            macro_ts_str = (detail_obj.get('timestamp')
+                            or detail_obj.get('updated_at'))
         except (json.JSONDecodeError, TypeError):
+            macro_ts_str = None
+    if not macro_ts_str:
+        try:
+            macro_ts_str = db.get_setting('_MACRO_REGIME_UPDATED')
+        except Exception as e:
+            log.debug(f"_MACRO_REGIME_UPDATED read failed: {e}")
+            macro_ts_str = None
+
+    if macro_ts_str:
+        macro_dt = _parse_db_timestamp(macro_ts_str)
+        if macro_dt:
+            age = now - macro_dt
+            result.stale = age > timedelta(hours=MACRO_STALE_HOURS)
+            if result.stale:
+                log.info(f"  macro regime is {age.total_seconds()/3600:.1f}h old — STALE")
+        else:
             result.stale = True
     else:
-        # No detail JSON — check if setting was updated recently via updated_at
-        # Without detail, we can't determine staleness — mark stale to be safe
+        # No timestamp from any source — can't tell, mark stale to be safe.
         result.stale = True
 
     # ── Map regime to score ───────────────────────────────────────────
@@ -489,6 +520,10 @@ def gate4_synthesis(sentiment, news, macro):
         composite=round(composite, 1),
         label=label,
         stale_components=stale_components,
+        # 2+ stale of 3 = the synthesis is mostly defaults and shouldn't
+        # be trusted. Single stale component is recoverable (other two
+        # still informative).
+        degraded=len(stale_components) >= 2,
     )
 
     log.info(
@@ -517,6 +552,11 @@ def persist_state(db, state, sentiment, news, macro):
     # validator run flagged DEGRADED_STALE_MARKET_STATE. Pairs with
     # `_MARKET_STATE` and `_MARKET_STATE_SCORE` above. Added 2026-04-21.
     db.set_setting('_MARKET_STATE_UPDATED', now_str)
+    # Degraded flag — '1' when 2+ of 3 components are stale. Without this
+    # flag, downstream consumers can't distinguish "fresh data showing
+    # NEUTRAL" from "all 3 sources stale, defaults to NEUTRAL." Validator
+    # / trader can decide independently whether to trust a degraded label.
+    db.set_setting('_MARKET_STATE_DEGRADED', '1' if state.degraded else '0')
 
     # Stamp all QUEUED signals with the current aggregate market state.
     # Required stamp for QUEUED → VALIDATED promotion.
@@ -533,6 +573,7 @@ def persist_state(db, state, sentiment, news, macro):
         "macro_score": state.macro_score,
         "composite": state.composite,
         "state": state.label,
+        "degraded": state.degraded,
         "timestamp": now_str,
         "stale_components": state.stale_components,
         "weights": {
@@ -603,11 +644,51 @@ def run():
     # ── Persist ───────────────────────────────────────────────────────
     persist_state(db, state, sentiment, news, macro)
 
+    # ── Degraded streak → admin_alert ─────────────────────────────────
+    # When 2+ of 3 components are stale for N consecutive runs, fire an
+    # admin_alert. Single stale component is recoverable; sustained
+    # multi-component staleness means the synthesis output is mostly
+    # defaults and the trader / validator are operating blind.
+    try:
+        if state.degraded:
+            streak = int(db.get_setting('_MARKET_STATE_DEGRADED_STREAK') or 0) + 1
+            db.set_setting('_MARKET_STATE_DEGRADED_STREAK', str(streak))
+            if streak >= DEGRADED_STREAK_ALERT:
+                from types import SimpleNamespace
+                f = SimpleNamespace(
+                    severity="WARNING",
+                    code="MARKET_STATE_DEGRADED",
+                    gate="GATE4_SYNTHESIS",
+                    message=(f"Market state synthesis degraded for {streak} "
+                             f"consecutive run(s) — {len(state.stale_components)}/3 "
+                             f"components stale ({', '.join(state.stale_components)})"),
+                    detail=("Sustained degraded state means the validator/trader "
+                            "are operating on default scores rather than real "
+                            "sentiment/news/macro signal. Investigate the upstream "
+                            "agents: sentiment scan_log, news signals, macro regime."),
+                    meta={
+                        "streak": streak,
+                        "label": state.label,
+                        "composite": state.composite,
+                        "stale_components": state.stale_components,
+                    },
+                    customer_id=None,
+                )
+                emit_admin_alert(db, f,
+                                 source_agent='market_state_agent',
+                                 category='system')
+                log.warning(f"degraded streak={streak} → admin_alert raised")
+        else:
+            db.set_setting('_MARKET_STATE_DEGRADED_STREAK', '0')
+    except Exception as _e:
+        log.warning(f"degraded streak tracking failed (non-fatal): {_e}")
+
     # ── Lifecycle: COMPLETE ───────────────────────────────────────────
     log.info("=" * 70)
-    log.info(f"MARKET STATE AGGREGATOR — Complete: {state.label} ({state.composite})")
+    log.info(f"MARKET STATE AGGREGATOR — Complete: {state.label} ({state.composite})"
+             f"{' [DEGRADED]' if state.degraded else ''}")
     if state.stale_components:
-        log.info(f"  Degraded inputs: {', '.join(state.stale_components)}")
+        log.info(f"  Stale inputs: {', '.join(state.stale_components)}")
     log.info("=" * 70)
 
     db.log_heartbeat("market_state_agent", "OK")
@@ -616,6 +697,7 @@ def run():
         agent="Market State Aggregator",
         details=(
             f"state={state.label} composite={state.composite} "
+            f"degraded={'1' if state.degraded else '0'} "
             f"sentiment={state.sentiment_score} news={state.news_score} "
             f"macro={state.macro_score} "
             f"stale=[{','.join(state.stale_components)}]"
