@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_shared import emit_admin_alert
 
 def _master_db():
     """2026-04-27: returns the shared market-intel DB. See get_shared_db()."""
@@ -60,6 +61,17 @@ ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.marke
 
 YAHOO_HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
+# When gate5 confidence drops below this threshold the scan is treated as
+# degraded. Used by gate5 (status=WARNING below this) and run() (streak
+# counter feeds the admin_alert).
+GATE5_LOW_CONFIDENCE_THRESHOLD = 0.50
+
+# When confidence is below threshold for this many consecutive runs, fire an
+# admin_alert. At the daily cadence that's ~3 days of degraded macro signal
+# — long enough to filter transient outages, short enough to surface a
+# sustained Yahoo block / network issue.
+LOW_CONFIDENCE_STREAK_ALERT = 3
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] %(levelname)s %(name)s: %(message)s',
@@ -69,10 +81,6 @@ log = logging.getLogger('macro_regime_agent')
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
-
-def _now_utc():
-    return datetime.now(tz=UTC)
-
 
 def _now_str():
     return datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M:%S')
@@ -162,14 +170,6 @@ def _fetch_alpaca_bars(ticker, days=10):
     except Exception as e:
         log.warning(f"Alpaca fetch_bars({ticker}): {e}")
     return []
-
-
-def _calc_return_from_bars(bars):
-    """Calculate return from first to last bar close. Returns float or None."""
-    closes = [b["c"] for b in bars if "c" in b]
-    if len(closes) < 2:
-        return None
-    return round((closes[-1] - closes[0]) / closes[0], 4)
 
 
 def _fetch_5d_return(ticker):
@@ -558,24 +558,29 @@ def gate5_regime_classification(report: RegimeReport, vix_result, yield_result,
         log.info(f"  Regime=CRISIS — VIX crisis level")
 
     # ── RECOVERY ──────────────────────────────────────────────────────
+    # Accept None for any individual input (matches EXPANSION's pattern).
+    # Without this softening, a single missing data source dropped the
+    # regime to UNCERTAIN even when 3 of 4 signals were textbook recovery.
     elif (vix_level in ("ELEVATED", "NORMAL") and vix_trend == "FALLING"
-          and curve_trend == "STEEPENING"
-          and breadth_result in ("BROAD_STRENGTH", "ROTATION_TO_SMALL")):
+          and curve_trend in ("STEEPENING", None)
+          and breadth_result in ("BROAD_STRENGTH", "ROTATION_TO_SMALL", None)):
         regime = "RECOVERY"
         confidence = 0.75
-        reason = (f"VIX {vix_level} but falling, curve steepening, "
-                  f"breadth={breadth_result}")
+        reason = (f"VIX {vix_level} but falling, curve_trend={curve_trend or '?'}, "
+                  f"breadth={breadth_result or '?'}")
         log.info(f"  Regime=RECOVERY — VIX falling + curve steepening + strength")
 
     # ── CONTRACTION ───────────────────────────────────────────────────
+    # Same softening — accept None for breadth or rotation if other
+    # contraction signals are present.
     elif (vix_level in ("ELEVATED", "CRISIS")
           and curve_shape in ("INVERTED", "FLAT")
-          and breadth_result in ("BROAD_WEAKNESS", "NARROW_BREADTH")
-          and rotation_result in ("RISK_OFF", "NEUTRAL")):
+          and breadth_result in ("BROAD_WEAKNESS", "NARROW_BREADTH", None)
+          and rotation_result in ("RISK_OFF", "NEUTRAL", None)):
         regime = "CONTRACTION"
         confidence = 0.85
         reason = (f"VIX {vix_level}, curve {curve_shape}, "
-                  f"breadth={breadth_result}, rotation={rotation_result}")
+                  f"breadth={breadth_result or '?'}, rotation={rotation_result or '?'}")
         log.info(f"  Regime=CONTRACTION")
 
     # ── LATE_CYCLE ────────────────────────────────────────────────────
@@ -611,8 +616,15 @@ def gate5_regime_classification(report: RegimeReport, vix_result, yield_result,
     # Adjust confidence by data availability
     confidence = round(confidence * (available_gates / 4.0), 2)
 
+    # Status reflects classification quality — when more than half the
+    # upstream gates failed, downstream consumers should see this scan
+    # as suspect even though gate 5 produced a label. Was previously
+    # always "OK" which made _MACRO_SCAN_LAST claim "5/5 OK" while the
+    # regime was effectively UNCERTAIN with confidence 0.10.
+    gate5_status = "WARNING" if confidence < GATE5_LOW_CONFIDENCE_THRESHOLD else "OK"
+
     report.add(GateResult(
-        gate="GATE5_REGIME", status="OK", signal=regime,
+        gate="GATE5_REGIME", status=gate5_status, signal=regime,
         value=confidence, detail=reason
     ))
     report.regime = regime
@@ -710,8 +722,13 @@ def run():
     }
 
     # ── Write regime to DB settings ───────────────────────────────────
+    # _MACRO_REGIME_UPDATED is the timestamp surface the validator's
+    # staleness check looks at (retail_validator_stack_agent gate4).
+    # Without it, the validator's age check silently no-ops and a regime
+    # could go days stale while the validator treats it as fresh.
     db.set_setting('_MACRO_REGIME', report.regime)
     db.set_setting('_MACRO_REGIME_DETAIL', json.dumps(regime_detail))
+    db.set_setting('_MACRO_REGIME_UPDATED', report.completed_at)
 
     # ── Stamp all QUEUED signals with the current macro regime ────────
     # Part of the validation chain: signals need this stamp before being
@@ -733,6 +750,46 @@ def run():
         "gates_total": len(report.gates),
     }
     db.set_setting('_MACRO_SCAN_LAST', json.dumps(scan_summary))
+
+    # ── Streak tracking → admin_alert on sustained data outage ────────
+    # Single low-confidence run isn't worth alerting (transient Yahoo
+    # blip). N consecutive runs is worth admin attention because it means
+    # we've been validating signals against degraded regime data.
+    try:
+        if report.confidence < GATE5_LOW_CONFIDENCE_THRESHOLD:
+            streak = int(db.get_setting('_MACRO_LOW_CONFIDENCE_STREAK') or 0) + 1
+            db.set_setting('_MACRO_LOW_CONFIDENCE_STREAK', str(streak))
+            if streak >= LOW_CONFIDENCE_STREAK_ALERT:
+                # Synthesise a Finding-shaped object for the shared alert
+                # router. emit_admin_alert dedups by code so subsequent
+                # runs at higher streak don't spam the inbox.
+                from types import SimpleNamespace
+                f = SimpleNamespace(
+                    severity="WARNING",
+                    code="MACRO_REGIME_DEGRADED",
+                    gate="GATE5_REGIME",
+                    message=(f"Macro regime degraded for {streak} consecutive run(s) "
+                             f"— confidence {report.confidence:.2f}, regime={report.regime}"),
+                    detail=("Gate 1/2 (VIX/yield) depend on Yahoo Finance which has "
+                            "no Alpaca fallback on the free feed. Sustained UNAVAILABLE "
+                            "→ validator chain operating on stale or missing macro "
+                            "context. Investigate Yahoo connectivity from pi5."),
+                    meta={
+                        "streak": streak,
+                        "confidence": report.confidence,
+                        "regime": report.regime,
+                        "gates_unavailable": scan_summary["gates_unavailable"],
+                    },
+                    customer_id=None,
+                )
+                emit_admin_alert(_master_db(), f,
+                                 source_agent='macro_regime_agent',
+                                 category='system')
+                log.warning(f"low-confidence streak={streak} → admin_alert raised")
+        else:
+            db.set_setting('_MACRO_LOW_CONFIDENCE_STREAK', '0')
+    except Exception as _e:
+        log.warning(f"streak tracking failed (non-fatal): {_e}")
 
     # ── Log gate results ──────────────────────────────────────────────
     for g in report.gates:
@@ -775,8 +832,12 @@ def run():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Synthos — Macro Regime Agent')
+    # Macro regime is system-wide — the scheduler passes --customer-id to
+    # every agent uniformly but this one runs once per scheduler tick and
+    # writes to the shared DB. We accept the arg to keep the scheduler
+    # contract consistent and just don't use it.
     parser.add_argument('--customer-id', default=None,
-                        help='Customer UUID (passed by scheduler — agent is shared, value ignored)')
+                        help='Customer UUID (accepted for scheduler compat; macro regime is shared)')
     args = parser.parse_args()
 
     acquire_agent_lock("retail_macro_regime_agent.py")
