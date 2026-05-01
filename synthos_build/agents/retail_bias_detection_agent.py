@@ -191,8 +191,15 @@ def gate1_sector_concentration(report: BiasReport, db, cid: str):
     # Reserves (Cash/Reserve, Fixed Income), broad-market ETFs (Diversified),
     # and Unknown (data quality gap) are tracked separately and NEVER contribute
     # to behavioral-bias concentration findings — they are not sector bets.
-    sector_value = {}           # equity sector → value  (used for concentration)
-    excluded_value = {}         # reserves/unknown → value (tracked for transparency)
+    #
+    # Concentration is a *portfolio-level risk* (different from the behavioral
+    # gates 2-5 which only score the bot's own trades). Both bot- and user-
+    # controlled positions count toward concentration, but the message
+    # attributes them separately so admin can tell whether the bot is driving
+    # the concentration or just inheriting it from the customer's own buys.
+    sector_value = {}           # equity sector → total value (bot + user)
+    sector_bot   = {}           # equity sector → bot-managed value
+    sector_user  = {}           # equity sector → user-managed value
     total_value = 0.0
     unknown_value = 0.0
     for pos in positions:
@@ -200,13 +207,17 @@ def gate1_sector_concentration(report: BiasReport, db, cid: str):
         price = float(pos.get('current_price') or pos.get('entry_price') or 0)
         shares = float(pos.get('shares') or 0)
         value = price * shares
+        managed_by = pos.get('managed_by', 'bot')
         total_value += value
         if is_excluded_from_concentration(sector):
-            excluded_value[sector] = excluded_value.get(sector, 0.0) + value
             if sector in ('Unknown', ''):
                 unknown_value += value
         else:
             sector_value[sector] = sector_value.get(sector, 0.0) + value
+            if managed_by == 'user':
+                sector_user[sector] = sector_user.get(sector, 0.0) + value
+            else:
+                sector_bot[sector] = sector_bot.get(sector, 0.0) + value
 
     if total_value <= 0:
         report.add(Finding(
@@ -243,15 +254,28 @@ def gate1_sector_concentration(report: BiasReport, db, cid: str):
     for sector, value in sorted(sector_value.items(), key=lambda x: -x[1]):
         pct = round((value / total_value) * 100, 1)
         sector_tok = _sector_token(sector)
+        bot_v  = sector_bot.get(sector, 0.0)
+        user_v = sector_user.get(sector, 0.0)
+        bot_pct  = round((bot_v / total_value) * 100, 1) if total_value else 0
+        user_pct = round((user_v / total_value) * 100, 1) if total_value else 0
+
+        # Attribution detail tells admin whether the bot is driving the
+        # concentration or inheriting it from user-controlled buys.
+        attribution = f"bot {bot_pct}% / user {user_pct}%"
 
         if pct > SECTOR_CONC_CRIT_PCT:
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.CRITICAL,
                 code=f"SECTOR_CRIT_{short_id}_{sector_tok}",
-                message=f"{short_id}: Sector '{sector}' is {pct}% of portfolio (>{SECTOR_CONC_CRIT_PCT}%)",
-                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions",
+                message=(f"{short_id}: Sector '{sector}' is {pct}% of portfolio "
+                         f"(>{SECTOR_CONC_CRIT_PCT}%) — {attribution}"),
+                detail=(f"Value: ${value:,.2f} of ${total_value:,.2f} "
+                        f"(bot ${bot_v:,.2f}, user ${user_v:,.2f}) "
+                        f"across {len(positions)} positions"),
                 customer_id=cid,
+                meta={"sector": sector, "pct": pct,
+                      "bot_pct": bot_pct, "user_pct": user_pct},
             ))
             flagged = True
         elif pct > SECTOR_CONC_WARN_PCT:
@@ -259,9 +283,14 @@ def gate1_sector_concentration(report: BiasReport, db, cid: str):
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.WARNING,
                 code=f"SECTOR_WARN_{short_id}_{sector_tok}",
-                message=f"{short_id}: Sector '{sector}' is {pct}% of portfolio (>{SECTOR_CONC_WARN_PCT}%)",
-                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions",
+                message=(f"{short_id}: Sector '{sector}' is {pct}% of portfolio "
+                         f"(>{SECTOR_CONC_WARN_PCT}%) — {attribution}"),
+                detail=(f"Value: ${value:,.2f} of ${total_value:,.2f} "
+                        f"(bot ${bot_v:,.2f}, user ${user_v:,.2f}) "
+                        f"across {len(positions)} positions"),
                 customer_id=cid,
+                meta={"sector": sector, "pct": pct,
+                      "bot_pct": bot_pct, "user_pct": user_pct},
             ))
             flagged = True
 
@@ -304,12 +333,17 @@ def gate2_recency_bias(report: BiasReport, db, cid: str):
     short_id = cid[:8] if cid else 'master'
     log.info(f"[GATE 2] Recency bias check ({short_id})")
 
-    # Use ledger ENTRY rows as proxy for trades (each open_position writes one)
+    # Use ledger ENTRY rows as proxy for trades (each open_position writes one).
+    # Filter to bot-managed positions only — Gates 2-5 score the BOT's
+    # behavioral biases. User-controlled trades aren't algorithmic biases to
+    # detect; they're customer choices we can't fix in code.
     with db.conn() as c:
         cutoff = (datetime.now(tz=ZoneInfo("UTC")) - timedelta(days=RECENCY_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
         rows = c.execute(
-            "SELECT * FROM ledger WHERE type='ENTRY' AND date >= ? "
-            "ORDER BY created_at DESC LIMIT ?",
+            "SELECT l.* FROM ledger l "
+            "JOIN positions p ON p.id = l.position_id "
+            "WHERE l.type='ENTRY' AND l.date >= ? AND p.managed_by='bot' "
+            "ORDER BY l.created_at DESC LIMIT ?",
             (cutoff, RECENCY_TRADE_COUNT)
         ).fetchall()
 
@@ -319,7 +353,7 @@ def gate2_recency_bias(report: BiasReport, db, cid: str):
             gate="GATE2_RECENCY",
             severity=Severity.OK,
             code=f"TOO_FEW_TRADES_{short_id}",
-            message=f"{short_id}: Only {len(trades)} trade(s) in last {RECENCY_LOOKBACK_DAYS} days — recency check N/A",
+            message=f"{short_id}: Only {len(trades)} bot trade(s) in last {RECENCY_LOOKBACK_DAYS} days — recency check N/A",
             customer_id=cid,
         ))
         return
@@ -364,7 +398,10 @@ def gate3_loss_aversion(report: BiasReport, db, cid: str):
     short_id = cid[:8] if cid else 'master'
     log.info(f"[GATE 3] Loss aversion check ({short_id})")
 
-    closed = db.get_closed_positions(limit=200)
+    # Filter to bot-managed positions only — loss aversion is a behavioral
+    # bias of the algorithm. User-controlled exits are customer choice.
+    closed = [p for p in db.get_closed_positions(limit=200)
+              if p.get('managed_by', 'bot') == 'bot']
 
     # Filter to last N days
     now = datetime.now(tz=ZoneInfo("UTC"))
@@ -390,7 +427,7 @@ def gate3_loss_aversion(report: BiasReport, db, cid: str):
             gate="GATE3_LOSS_AVERSION",
             severity=Severity.OK,
             code=f"TOO_FEW_CLOSED_{short_id}",
-            message=(f"{short_id}: Only {len(recent_closed)} closed position(s) in last "
+            message=(f"{short_id}: Only {len(recent_closed)} bot-closed position(s) in last "
                      f"{LOSS_AVERSION_DAYS} days — loss aversion check needs ≥{MIN_BEHAVIORAL_SAMPLE}"),
             customer_id=cid,
         ))
@@ -468,15 +505,18 @@ def gate4_overtrading(report: BiasReport, db, cid: str):
     short_id = cid[:8] if cid else 'master'
     log.info(f"[GATE 4] Overtrading check ({short_id})")
 
-    # Count ENTRY ledger rows per day over the last N trading days
+    # Count ENTRY ledger rows per day over the last N trading days.
+    # Filter to bot-managed positions — overtrading by a USER on their own
+    # picks isn't an algorithmic bias to detect.
     now = datetime.now(tz=ZoneInfo("UTC"))
     cutoff = (now - timedelta(days=OVERTRADE_DAYS)).strftime('%Y-%m-%d')
 
     with db.conn() as c:
         rows = c.execute(
-            "SELECT date, COUNT(*) as cnt FROM ledger "
-            "WHERE type='ENTRY' AND date >= ? "
-            "GROUP BY date ORDER BY date DESC",
+            "SELECT l.date, COUNT(*) as cnt FROM ledger l "
+            "JOIN positions p ON p.id = l.position_id "
+            "WHERE l.type='ENTRY' AND l.date >= ? AND p.managed_by='bot' "
+            "GROUP BY l.date ORDER BY l.date DESC",
             (cutoff,)
         ).fetchall()
 
@@ -487,7 +527,7 @@ def gate4_overtrading(report: BiasReport, db, cid: str):
             gate="GATE4_OVERTRADING",
             severity=Severity.OK,
             code=f"NO_TRADES_{short_id}",
-            message=f"{short_id}: No trades in last {OVERTRADE_DAYS} days — overtrading check N/A",
+            message=f"{short_id}: No bot trades in last {OVERTRADE_DAYS} days — overtrading check N/A",
             customer_id=cid,
         ))
         return
@@ -534,7 +574,11 @@ def gate5_disposition_effect(report: BiasReport, db, cid: str):
     short_id = cid[:8] if cid else 'master'
     log.info(f"[GATE 5] Disposition effect check ({short_id})")
 
-    closed = db.get_closed_positions(limit=200)
+    # Filter to bot-managed positions only — disposition effect is a
+    # behavioral bias of the algorithm's exit timing. User-controlled
+    # exits aren't relevant to scoring the bot.
+    closed = [p for p in db.get_closed_positions(limit=200)
+              if p.get('managed_by', 'bot') == 'bot']
 
     # Filter to last 30 days
     now = datetime.now(tz=ZoneInfo("UTC"))
@@ -560,7 +604,7 @@ def gate5_disposition_effect(report: BiasReport, db, cid: str):
             gate="GATE5_DISPOSITION",
             severity=Severity.OK,
             code=f"TOO_FEW_CLOSED_{short_id}",
-            message=(f"{short_id}: Only {len(recent)} closed position(s) in last 30 days "
+            message=(f"{short_id}: Only {len(recent)} bot-closed position(s) in last 30 days "
                      f"— disposition check needs ≥{MIN_BEHAVIORAL_SAMPLE}"),
             customer_id=cid,
         ))

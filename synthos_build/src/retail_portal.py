@@ -7835,6 +7835,16 @@ def api_admin_api_usage():
                         'error': str(e)})
 
 
+@app.route('/admin/alerts', methods=['GET'])
+@admin_required
+def admin_alerts_page():
+    """Admin alerts dashboard — surfaces admin_alerts rows from
+    fault_detection, bias_detection, validator, and system in separate
+    panels per category. Reads /api/admin/alerts via JS, refreshes every
+    30s. Resolve button POSTs to /api/admin/alerts/resolve."""
+    return render_template('admin_alerts.html')
+
+
 @app.route('/api/admin/alerts', methods=['GET'])
 @admin_required
 def api_admin_alerts():

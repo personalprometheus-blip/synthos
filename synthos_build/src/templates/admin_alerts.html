@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% set title = "Admin Alerts" %}
+
+{% block inline_css %}
+  /* Admin alerts page — surfaces admin_alerts rows from fault_detection
+     and bias_detection (and validator/system in the future). One panel
+     per category so admin can triage at a glance. */
+  :root {
+    --panel: rgba(20, 22, 30, 0.7);
+    --dim:   #5a5f6b;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+         min-height: 100vh; padding: 32px 16px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  .back { color: var(--teal); text-decoration: none; font-size: 12px; font-weight: 600; }
+  .back:hover { color: var(--signal); }
+
+  .stats-row { display: grid; grid-template-columns: repeat(5, 1fr);
+               gap: 10px; margin-bottom: 18px; }
+  @media(max-width: 720px) { .stats-row { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 10px; padding: 12px 14px; }
+  .stat-label { font-size: 9px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+  .stat-val { font-size: 22px; font-weight: 800; letter-spacing: -1px; }
+  .stat-val.critical { color: var(--pink); }
+  .stat-val.warning  { color: var(--signal); }
+  .stat-val.fault    { color: var(--violet); }
+  .stat-val.bias     { color: var(--teal); }
+
+  .glass { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 12px; backdrop-filter: blur(12px);
+           margin-bottom: 16px; }
+  .panel-header { padding: 12px 16px; border-bottom: 1px solid var(--border);
+                  display: flex; align-items: center; gap: 8px; }
+  .panel-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+                 text-transform: uppercase; color: var(--muted); flex: 1; }
+  .panel-count { font-size: 10px; font-weight: 700; padding: 2px 7px;
+                 border-radius: 99px; }
+  .panel-count.zero { background: rgba(255, 255, 255, 0.03); color: var(--dim); }
+  .panel-count.has  { background: rgba(255, 75, 110, 0.12); color: var(--pink); }
+
+  .alert-list { padding: 4px 0; }
+  .alert-row { padding: 12px 16px; border-bottom: 1px solid var(--border);
+               display: flex; gap: 12px; align-items: flex-start; }
+  .alert-row:last-child { border-bottom: none; }
+  .alert-row.resolving { opacity: 0.4; }
+
+  .sev-badge { flex-shrink: 0; padding: 3px 8px; border-radius: 5px;
+               font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+               text-transform: uppercase; margin-top: 2px; min-width: 60px;
+               text-align: center; }
+  .sev-CRITICAL { background: rgba(255, 75, 110, 0.12); color: var(--pink);
+                  border: 1px solid rgba(255, 75, 110, 0.25); }
+  .sev-WARNING  { background: rgba(245, 166, 35, 0.10); color: var(--signal);
+                  border: 1px solid rgba(245, 166, 35, 0.20); }
+  .sev-INFO     { background: rgba(123, 97, 255, 0.10); color: var(--violet);
+                  border: 1px solid rgba(123, 97, 255, 0.20); }
+
+  .alert-body { flex: 1; min-width: 0; }
+  .alert-code { font-size: 10px; font-family: 'JetBrains Mono', monospace;
+                color: var(--violet); margin-bottom: 3px; }
+  .alert-message { font-size: 13px; font-weight: 500; color: var(--text);
+                   line-height: 1.4; word-break: break-word; }
+  .alert-detail { font-size: 11px; color: var(--muted);
+                  margin-top: 4px; line-height: 1.5; word-break: break-word; }
+  .alert-meta { display: flex; gap: 10px; align-items: center;
+                margin-top: 6px; font-size: 9px;
+                font-family: 'JetBrains Mono', monospace; color: var(--dim); }
+  .resolve-btn { flex-shrink: 0; align-self: flex-start;
+                 padding: 5px 11px; border-radius: 6px;
+                 border: 1px solid var(--border); background: transparent;
+                 color: var(--muted); font-family: inherit;
+                 font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+                 cursor: pointer; transition: all 0.15s; }
+  .resolve-btn:hover { background: rgba(0, 245, 212, 0.06);
+                       border-color: var(--teal); color: var(--teal); }
+  .resolve-btn:disabled { opacity: 0.4; cursor: wait; }
+
+  .empty { padding: 24px 16px; text-align: center; color: var(--muted);
+           font-size: 12px; }
+  .err-bar { padding: 10px 14px; font-size: 11px; color: var(--pink);
+             background: rgba(255, 75, 110, 0.06); border-radius: 8px;
+             margin-bottom: 14px; }
+  .loading { padding: 24px; text-align: center; color: var(--muted);
+             font-size: 12px; }
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <header>
+    <h1>Admin Alerts</h1>
+    <a href="/" class="back">← Portal</a>
+  </header>
+
+  <div id="err-bar" class="err-bar" style="display:none"></div>
+
+  <div class="stats-row">
+    <div class="stat">
+      <div class="stat-label">Unresolved</div>
+      <div class="stat-val" id="stat-total">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Critical</div>
+      <div class="stat-val critical" id="stat-critical">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Warning</div>
+      <div class="stat-val warning" id="stat-warning">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Fault</div>
+      <div class="stat-val fault" id="stat-fault">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Bias</div>
+      <div class="stat-val bias" id="stat-bias">—</div>
+    </div>
+  </div>
+
+  {# Order matters — fault first because system health blocks everything;
+     bias second since it informs trader tuning; validator + system tail. #}
+  <section class="glass" data-cat="fault">
+    <div class="panel-header">
+      <div class="panel-title">System Faults</div>
+      <span class="panel-count zero" id="count-fault">0</span>
+    </div>
+    <div class="alert-list" id="list-fault">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section class="glass" data-cat="bias">
+    <div class="panel-header">
+      <div class="panel-title">Bot Behavioral Bias</div>
+      <span class="panel-count zero" id="count-bias">0</span>
+    </div>
+    <div class="alert-list" id="list-bias">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section class="glass" data-cat="validator">
+    <div class="panel-header">
+      <div class="panel-title">Validator Chain</div>
+      <span class="panel-count zero" id="count-validator">0</span>
+    </div>
+    <div class="alert-list" id="list-validator">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+  <section class="glass" data-cat="system">
+    <div class="panel-header">
+      <div class="panel-title">Other System</div>
+      <span class="panel-count zero" id="count-system">0</span>
+    </div>
+    <div class="alert-list" id="list-system">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CATEGORIES = ['fault', 'bias', 'validator', 'system'];
+const SEV_ORDER  = { 'CRITICAL': 0, 'WARNING': 1, 'INFO': 2 };
+
+function fmtAge(iso) {
+  if (!iso) return '';
+  const t = new Date(iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z'));
+  const diff = (Date.now() - t.getTime()) / 1000;
+  if (diff < 60) return Math.floor(diff) + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+
+function renderAlert(a) {
+  const el = document.createElement('div');
+  el.className = 'alert-row';
+  el.dataset.id = a.id;
+
+  const sev = document.createElement('span');
+  sev.className = 'sev-badge sev-' + a.severity;
+  sev.textContent = a.severity;
+
+  const body = document.createElement('div');
+  body.className = 'alert-body';
+  if (a.code) {
+    const c = document.createElement('div');
+    c.className = 'alert-code';
+    c.textContent = a.code;
+    body.appendChild(c);
+  }
+  const msg = document.createElement('div');
+  msg.className = 'alert-message';
+  msg.textContent = a.title || '';
+  body.appendChild(msg);
+  if (a.body) {
+    const det = document.createElement('div');
+    det.className = 'alert-detail';
+    det.textContent = a.body;
+    body.appendChild(det);
+  }
+  const meta = document.createElement('div');
+  meta.className = 'alert-meta';
+  const parts = [];
+  if (a.source_agent) parts.push(a.source_agent);
+  if (a.source_customer_id) parts.push('cust ' + (a.source_customer_id.slice(0, 8)));
+  if (a.created_at) parts.push(fmtAge(a.created_at));
+  meta.textContent = parts.join(' · ');
+  body.appendChild(meta);
+
+  const btn = document.createElement('button');
+  btn.className = 'resolve-btn';
+  btn.textContent = 'Resolve';
+  btn.onclick = () => resolveAlert(a.id, el, btn);
+
+  el.appendChild(sev);
+  el.appendChild(body);
+  el.appendChild(btn);
+  return el;
+}
+
+async function resolveAlert(id, row, btn) {
+  btn.disabled = true;
+  row.classList.add('resolving');
+  try {
+    const r = await fetch('/api/admin/alerts/resolve', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id})
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    row.style.transition = 'opacity 0.2s';
+    row.style.opacity = '0';
+    setTimeout(load, 250);
+  } catch (e) {
+    row.classList.remove('resolving');
+    btn.disabled = false;
+    showErr('Resolve failed: ' + e.message);
+  }
+}
+
+function showErr(msg) {
+  const bar = document.getElementById('err-bar');
+  bar.textContent = msg;
+  bar.style.display = 'block';
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/admin/alerts?unresolved_only=1&limit=500');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const alerts = data.alerts || [];
+
+    // Bucket by category, sort each bucket by severity then recency.
+    const buckets = {};
+    CATEGORIES.forEach(c => buckets[c] = []);
+    let critCount = 0, warnCount = 0;
+    for (const a of alerts) {
+      const c = (a.category || 'system');
+      const bucket = buckets[c] || (buckets['system']);
+      bucket.push(a);
+      if (a.severity === 'CRITICAL') critCount++;
+      else if (a.severity === 'WARNING') warnCount++;
+    }
+    for (const c of CATEGORIES) {
+      buckets[c].sort((a, b) => {
+        const sa = SEV_ORDER[a.severity] ?? 99;
+        const sb = SEV_ORDER[b.severity] ?? 99;
+        if (sa !== sb) return sa - sb;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
+    }
+
+    document.getElementById('stat-total').textContent    = alerts.length;
+    document.getElementById('stat-critical').textContent = critCount;
+    document.getElementById('stat-warning').textContent  = warnCount;
+    document.getElementById('stat-fault').textContent    = buckets['fault'].length;
+    document.getElementById('stat-bias').textContent     = buckets['bias'].length;
+
+    // Render each panel
+    for (const c of CATEGORIES) {
+      const list = document.getElementById('list-' + c);
+      const countEl = document.getElementById('count-' + c);
+      list.innerHTML = '';
+      countEl.textContent = buckets[c].length;
+      countEl.className = 'panel-count ' + (buckets[c].length ? 'has' : 'zero');
+      if (!buckets[c].length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = 'No unresolved alerts.';
+        list.appendChild(e);
+        continue;
+      }
+      for (const a of buckets[c]) list.appendChild(renderAlert(a));
+    }
+
+    document.getElementById('err-bar').style.display = 'none';
+  } catch (e) {
+    showErr('Load failed: ' + e.message);
+  }
+}
+
+load();
+// Refresh every 30s so a fresh fault/bias scan surfaces without manual reload.
+setInterval(load, 30000);
+</script>
+{% endblock %}
