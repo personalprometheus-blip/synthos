@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
 from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_shared import emit_admin_alert, get_active_customers
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET = ZoneInfo("America/New_York")
@@ -175,62 +176,6 @@ def _now_et():
 
 def _now_str():
     return datetime.now(tz=ZoneInfo("UTC")).strftime('%Y-%m-%d %H:%M:%S')
-
-
-ALERT_DEDUP_WINDOW_HOURS = 12
-
-
-def _emit_admin_alert(db, finding: 'Finding',
-                      dedup_window_hours: int = ALERT_DEDUP_WINDOW_HOURS) -> bool:
-    """Write `finding` to admin_alerts with code-based dedup so a sticky
-    fault doesn't spam the alerts inbox at the 30-min fault-scan cadence.
-
-    Skips silently if an unresolved alert with the same code was raised
-    inside the dedup window. Returns True if a row was written, False if
-    deduped or on error.
-
-    Severity passes through from the finding (CRITICAL or WARNING). meta
-    falls back to {gate, code, severity} when the finding doesn't supply
-    bespoke metadata.
-    """
-    if finding.severity not in (Severity.CRITICAL, Severity.WARNING):
-        return False
-    try:
-        cutoff = (datetime.now(ZoneInfo("UTC"))
-                  - timedelta(hours=dedup_window_hours)
-                  ).strftime('%Y-%m-%d %H:%M:%S')
-        with db.conn() as c:
-            existing = c.execute(
-                "SELECT id FROM admin_alerts "
-                "WHERE code=? AND resolved=0 AND created_at >= ? LIMIT 1",
-                (finding.code, cutoff),
-            ).fetchone()
-        if existing:
-            log.debug(f"alert {finding.code} deduped (existing in last {dedup_window_hours}h)")
-            return False
-
-        meta = dict(finding.meta) if finding.meta else {}
-        meta.setdefault('gate', finding.gate)
-        meta.setdefault('code', finding.code)
-        meta.setdefault('severity', finding.severity)
-
-        body = f"{finding.message}\n{finding.detail}" if finding.detail else finding.message
-        title = f"{finding.severity}: {finding.code}"
-
-        db.add_admin_alert(
-            category='fault',
-            severity=finding.severity,
-            title=title,
-            body=body,
-            source_agent='fault_detection_agent',
-            source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
-            code=finding.code,
-            meta=meta,
-        )
-        return True
-    except Exception as e:
-        log.warning(f"_emit_admin_alert({finding.code}) failed: {e}")
-        return False
 
 
 def _is_market_hours():
@@ -1197,20 +1142,17 @@ def gate8_trade_activity_baseline(report: FaultReport, db):
 # ══════════════════════════════════════════════════════════════════════════
 
 def _get_active_customer_ids():
-    """Get all active customer IDs from the auth database."""
-    try:
-        sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active', True)]
-    except Exception as e:
-        log.warning(f"Could not load customer list: {e}")
-        # Fallback: scan data/customers directory
-        customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
-        if os.path.isdir(customers_dir):
-            return [d for d in os.listdir(customers_dir)
-                    if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
-        return []
+    """Active customer IDs. Uses retail_shared.get_active_customers() and
+    falls back to scanning data/customers/ when auth is unreachable — fault
+    detection itself must keep running when auth is down."""
+    ids = get_active_customers()
+    if ids:
+        return ids
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    if os.path.isdir(customers_dir):
+        return [d for d in os.listdir(customers_dir)
+                if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
+    return []
 
 
 def run():
@@ -1308,16 +1250,20 @@ def run():
     # ── Raise admin alerts for actionable findings ────────────────────
     # Fault findings are always system-health problems (stale heartbeats,
     # DB lock, price staleness, etc.). Never customer-actionable. Route
-    # to the shared admin_alerts stream on the master DB. _emit_admin_alert
-    # handles per-code dedup so a sticky fault doesn't spam the inbox at
-    # the 30-min fault-scan cadence.
+    # to the shared admin_alerts stream on the master DB. emit_admin_alert
+    # (in retail_shared) handles per-code dedup so a sticky fault doesn't
+    # spam the inbox at the 30-min fault-scan cadence.
     admin_db = _master_db()
+    fallback_cid = _CUSTOMER_ID or OWNER_CUSTOMER_ID
     written = 0
     deduped = 0
     for f in report.findings:
         if f.severity not in (Severity.CRITICAL, Severity.WARNING):
             continue
-        if _emit_admin_alert(admin_db, f):
+        if emit_admin_alert(admin_db, f,
+                            source_agent='fault_detection_agent',
+                            category='fault',
+                            fallback_customer_id=fallback_cid):
             written += 1
         else:
             deduped += 1

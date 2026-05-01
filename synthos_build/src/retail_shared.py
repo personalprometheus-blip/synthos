@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -120,3 +120,80 @@ def is_market_hours() -> bool:
     close_time = now.replace(hour=_MARKET_CLOSE_HOUR, minute=_MARKET_CLOSE_MIN,
                              second=0, microsecond=0)
     return open_time <= now < close_time
+
+
+# ── Admin alert routing (with code-based dedup) ───────────────────────────
+
+DEFAULT_ALERT_DEDUP_HOURS = 12
+
+
+def emit_admin_alert(db, finding, *, source_agent: str, category: str,
+                     dedup_window_hours: int = DEFAULT_ALERT_DEDUP_HOURS,
+                     fallback_customer_id: str | None = None) -> bool:
+    """Write `finding` to admin_alerts with code-based dedup.
+
+    Used by retail_fault_detection_agent (category='fault') and
+    retail_bias_detection_agent (category='bias') to surface actionable
+    findings without spamming the alerts inbox at the 30-min scan cadence.
+    Skips silently if an unresolved alert with the same code was raised
+    inside the dedup window. Returns True if a row was written, False if
+    deduped or on error.
+
+    `finding` is a duck-typed object exposing:
+      - severity (str: 'CRITICAL' | 'WARNING' | etc — only the first two emit)
+      - code (str)
+      - gate (str)
+      - message (str)
+      - detail (str, optional, defaults to '')
+      - meta (dict, optional, defaults to {})
+      - customer_id (str, optional — overrides fallback_customer_id when set)
+    """
+    severity = getattr(finding, 'severity', None)
+    if severity not in ('CRITICAL', 'WARNING'):
+        return False
+
+    code = getattr(finding, 'code', '')
+    gate = getattr(finding, 'gate', '')
+    message = getattr(finding, 'message', '')
+    detail = getattr(finding, 'detail', '') or ''
+    finding_meta = getattr(finding, 'meta', None) or {}
+    finding_cid = getattr(finding, 'customer_id', None)
+
+    try:
+        cutoff = (datetime.now(ZoneInfo("UTC"))
+                  - timedelta(hours=dedup_window_hours)
+                  ).strftime('%Y-%m-%d %H:%M:%S')
+        with db.conn() as c:
+            existing = c.execute(
+                "SELECT id FROM admin_alerts "
+                "WHERE code=? AND resolved=0 AND created_at >= ? LIMIT 1",
+                (code, cutoff),
+            ).fetchone()
+        if existing:
+            log.debug(f"alert {code} deduped (existing in last {dedup_window_hours}h)")
+            return False
+
+        meta = dict(finding_meta)
+        meta.setdefault('gate', gate)
+        meta.setdefault('code', code)
+        meta.setdefault('severity', severity)
+        if finding_cid:
+            meta.setdefault('customer_id', finding_cid)
+
+        body = f"{message}\n{detail}" if detail else message
+        title = f"{severity}: {code}"
+
+        db.add_admin_alert(
+            category=category,
+            severity=severity,
+            title=title,
+            body=body,
+            source_agent=source_agent,
+            source_customer_id=finding_cid or fallback_customer_id,
+            code=code,
+            meta=meta,
+        )
+        return True
+    except Exception as e:
+        log.warning(f"emit_admin_alert({code}) failed: {e}")
+        return False

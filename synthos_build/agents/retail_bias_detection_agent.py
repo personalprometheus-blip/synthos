@@ -34,15 +34,15 @@ import argparse
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from pathlib import Path
 from dotenv import load_dotenv
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
 load_dotenv(os.path.join(_ROOT_DIR, 'user', '.env'))
 
-from retail_database import get_db, get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
+from retail_database import get_customer_db, get_shared_db, acquire_agent_lock, release_agent_lock
 from retail_sector_map import is_excluded_from_concentration
+from retail_shared import emit_admin_alert, get_active_customers
 
 # ── CONFIG ────────────────────────────────────────────────────────────────
 ET = ZoneInfo("America/New_York")
@@ -68,7 +68,12 @@ OVERTRADE_DAYS           = 5      # look at last N trading days
 OVERTRADE_WARN_PER_DAY   = 10     # avg trades/day threshold for WARNING
 OVERTRADE_CRIT_PER_DAY   = 20     # avg trades/day threshold for CRITICAL
 
-# Gate 5: Disposition effect (no separate threshold — logic-based)
+# Gates 3 & 5: Behavioral-bias sample floor.
+# At small N a single outlier dominates the avg and produces noise findings
+# (e.g. "3W/2L disposition effect!" that's pure small-sample artifact).
+# 10 closed trades is the floor where the avg starts reflecting actual
+# behavior. Used by both gate3_loss_aversion and gate5_disposition_effect.
+MIN_BEHAVIORAL_SAMPLE    = 10
 
 # Gate 6: Confidence clustering
 CONFIDENCE_HIGH_ONLY_PCT = 80     # >80% of recent trades from HIGH-only signals = INFO
@@ -97,6 +102,12 @@ class Finding:
     code: str
     message: str
     detail: str = ""
+    # Bias findings are per-customer almost always (gate 6 confidence
+    # clustering is the only system-wide one). When set, retail_shared.
+    # emit_admin_alert routes the admin_alert with the right
+    # source_customer_id so admin can tell which customer has the bias.
+    customer_id: str | None = None
+    meta: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -134,19 +145,10 @@ class BiasReport:
 # ── DB HELPERS ────────────────────────────────────────────────────────────
 
 def _master_db():
-    """Shared market-intelligence DB.
-    2026-04-27: was previously get_customer_db(OWNER_CUSTOMER_ID).  See
-    retail_database.get_shared_db() for the architectural rationale.
-    Per-customer findings still go to _customer_db() below."""
+    """Shared market-intelligence DB. 2026-04-27: was previously
+    get_customer_db(OWNER_CUSTOMER_ID). See retail_database.get_shared_db()
+    for rationale."""
     return get_shared_db()
-
-
-def _customer_db(customer_id=None):
-    """Per-customer DB."""
-    cid = customer_id or _CUSTOMER_ID or OWNER_CUSTOMER_ID
-    if cid:
-        return get_customer_db(cid)
-    return get_db()
 
 
 def _now_et():
@@ -162,17 +164,26 @@ def _now_str():
 #  Check if open positions are over-concentrated in one sector
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate1_sector_concentration(report: BiasReport, db):
+def _sector_token(sector: str) -> str:
+    """Sector → uppercase-snake token for use inside admin_alert codes.
+    Full-length (no truncation) — collisions across sectors with similar
+    prefixes were a real risk before."""
+    return sector.upper().replace(' ', '_').replace('-', '_')
+
+
+def gate1_sector_concentration(report: BiasReport, db, cid: str):
     """Flag when too much portfolio weight sits in a single sector."""
-    log.info("[GATE 1] Sector concentration check")
+    short_id = cid[:8] if cid else 'master'
+    log.info(f"[GATE 1] Sector concentration check ({short_id})")
 
     positions = db.get_open_positions()
     if not positions:
         report.add(Finding(
             gate="GATE1_SECTOR_CONC",
             severity=Severity.OK,
-            code="NO_POSITIONS",
-            message="No open positions — sector concentration N/A"
+            code=f"NO_POSITIONS_{short_id}",
+            message=f"{short_id}: No open positions — sector concentration N/A",
+            customer_id=cid,
         ))
         return
 
@@ -201,8 +212,9 @@ def gate1_sector_concentration(report: BiasReport, db):
         report.add(Finding(
             gate="GATE1_SECTOR_CONC",
             severity=Severity.OK,
-            code="ZERO_VALUE",
-            message="Portfolio value is $0 — sector concentration N/A"
+            code=f"ZERO_VALUE_{short_id}",
+            message=f"{short_id}: Portfolio value is $0 — sector concentration N/A",
+            customer_id=cid,
         ))
         return
 
@@ -218,10 +230,11 @@ def gate1_sector_concentration(report: BiasReport, db):
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.INFO,
-                code="SECTOR_DATA_INCOMPLETE",
-                message=f"{unknown_pct}% of portfolio has no sector classification",
+                code=f"SECTOR_DATA_INCOMPLETE_{short_id}",
+                message=f"{short_id}: {unknown_pct}% of portfolio has no sector classification",
                 detail=f"${unknown_value:,.2f} of ${total_value:,.2f} — "
-                       f"retail_sector_backfill_agent will fill this on next run"
+                       f"retail_sector_backfill_agent will fill this on next run",
+                customer_id=cid,
             ))
 
     # Check each equity sector's percentage — reserves/unknowns are already
@@ -229,23 +242,26 @@ def gate1_sector_concentration(report: BiasReport, db):
     flagged = False
     for sector, value in sorted(sector_value.items(), key=lambda x: -x[1]):
         pct = round((value / total_value) * 100, 1)
+        sector_tok = _sector_token(sector)
 
         if pct > SECTOR_CONC_CRIT_PCT:
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.CRITICAL,
-                code=f"SECTOR_CRIT_{sector[:12].upper().replace(' ', '_')}",
-                message=f"Sector '{sector}' is {pct}% of portfolio (>${SECTOR_CONC_CRIT_PCT}%)",
-                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions"
+                code=f"SECTOR_CRIT_{short_id}_{sector_tok}",
+                message=f"{short_id}: Sector '{sector}' is {pct}% of portfolio (>{SECTOR_CONC_CRIT_PCT}%)",
+                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions",
+                customer_id=cid,
             ))
             flagged = True
         elif pct > SECTOR_CONC_WARN_PCT:
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.WARNING,
-                code=f"SECTOR_WARN_{sector[:12].upper().replace(' ', '_')}",
-                message=f"Sector '{sector}' is {pct}% of portfolio (>{SECTOR_CONC_WARN_PCT}%)",
-                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions"
+                code=f"SECTOR_WARN_{short_id}_{sector_tok}",
+                message=f"{short_id}: Sector '{sector}' is {pct}% of portfolio (>{SECTOR_CONC_WARN_PCT}%)",
+                detail=f"Value: ${value:,.2f} of ${total_value:,.2f} total across {len(positions)} positions",
+                customer_id=cid,
             ))
             flagged = True
 
@@ -259,10 +275,11 @@ def gate1_sector_concentration(report: BiasReport, db):
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.OK,
-                code="NO_CLASSIFIED_SECTORS",
-                message="No classified equity sectors to evaluate",
+                code=f"NO_CLASSIFIED_SECTORS_{short_id}",
+                message=f"{short_id}: No classified equity sectors to evaluate",
                 detail=(f"${total_value:,.2f} sits in reserves or unresolved "
-                        f"positions — nothing to concentrate on yet")
+                        f"positions — nothing to concentrate on yet"),
+                customer_id=cid,
             ))
         else:
             top_sector = max(sector_value, key=sector_value.get)
@@ -270,9 +287,10 @@ def gate1_sector_concentration(report: BiasReport, db):
             report.add(Finding(
                 gate="GATE1_SECTOR_CONC",
                 severity=Severity.OK,
-                code="SECTOR_BALANCED",
-                message=f"Sector balance OK — largest is '{top_sector}' at {top_pct}%",
-                detail=f"{len(sector_value)} sectors across {len(positions)} positions"
+                code=f"SECTOR_BALANCED_{short_id}",
+                message=f"{short_id}: Sector balance OK — largest is '{top_sector}' at {top_pct}%",
+                detail=f"{len(sector_value)} sectors across {len(positions)} positions",
+                customer_id=cid,
             ))
 
 
@@ -281,9 +299,10 @@ def gate1_sector_concentration(report: BiasReport, db):
 #  Check if recent trades are concentrated in the same 1-2 tickers/sectors
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate2_recency_bias(report: BiasReport, db):
+def gate2_recency_bias(report: BiasReport, db, cid: str):
     """Flag when the last N trades are all in the same narrow set of tickers."""
-    log.info("[GATE 2] Recency bias check")
+    short_id = cid[:8] if cid else 'master'
+    log.info(f"[GATE 2] Recency bias check ({short_id})")
 
     # Use ledger ENTRY rows as proxy for trades (each open_position writes one)
     with db.conn() as c:
@@ -299,8 +318,9 @@ def gate2_recency_bias(report: BiasReport, db):
         report.add(Finding(
             gate="GATE2_RECENCY",
             severity=Severity.OK,
-            code="TOO_FEW_TRADES",
-            message=f"Only {len(trades)} trade(s) in last {RECENCY_LOOKBACK_DAYS} days — recency check N/A"
+            code=f"TOO_FEW_TRADES_{short_id}",
+            message=f"{short_id}: Only {len(trades)} trade(s) in last {RECENCY_LOOKBACK_DAYS} days — recency check N/A",
+            customer_id=cid,
         ))
         return
 
@@ -319,16 +339,18 @@ def gate2_recency_bias(report: BiasReport, db):
         report.add(Finding(
             gate="GATE2_RECENCY",
             severity=Severity.WARNING,
-            code="RECENCY_BIAS",
-            message=f"Only {unique_count} unique ticker(s) in last {len(trades)} trades — possible recency bias",
-            detail=f"Tickers traded: {', '.join(sorted(tickers))}"
+            code=f"RECENCY_BIAS_{short_id}",
+            message=f"{short_id}: Only {unique_count} unique ticker(s) in last {len(trades)} trades — possible recency bias",
+            detail=f"Tickers traded: {', '.join(sorted(tickers))}",
+            customer_id=cid,
         ))
     else:
         report.add(Finding(
             gate="GATE2_RECENCY",
             severity=Severity.OK,
-            code="RECENCY_OK",
-            message=f"{unique_count} unique tickers in last {len(trades)} trades — diversified"
+            code=f"RECENCY_OK_{short_id}",
+            message=f"{short_id}: {unique_count} unique tickers in last {len(trades)} trades — diversified",
+            customer_id=cid,
         ))
 
 
@@ -337,9 +359,10 @@ def gate2_recency_bias(report: BiasReport, db):
 #  Check if losing positions are held much longer than winning ones
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate3_loss_aversion(report: BiasReport, db):
+def gate3_loss_aversion(report: BiasReport, db, cid: str):
     """Flag when losers are held significantly longer than winners."""
-    log.info("[GATE 3] Loss aversion check")
+    short_id = cid[:8] if cid else 'master'
+    log.info(f"[GATE 3] Loss aversion check ({short_id})")
 
     closed = db.get_closed_positions(limit=200)
 
@@ -360,12 +383,16 @@ def gate3_loss_aversion(report: BiasReport, db):
         except (ValueError, TypeError):
             continue
 
-    if len(recent_closed) < 4:
+    # Aligned with gate5 — 10 closed trades is the floor where avg starts
+    # reflecting behavior rather than a single-outlier coin flip.
+    if len(recent_closed) < MIN_BEHAVIORAL_SAMPLE:
         report.add(Finding(
             gate="GATE3_LOSS_AVERSION",
             severity=Severity.OK,
-            code="TOO_FEW_CLOSED",
-            message=f"Only {len(recent_closed)} closed position(s) in last {LOSS_AVERSION_DAYS} days — loss aversion check N/A"
+            code=f"TOO_FEW_CLOSED_{short_id}",
+            message=(f"{short_id}: Only {len(recent_closed)} closed position(s) in last "
+                     f"{LOSS_AVERSION_DAYS} days — loss aversion check needs ≥{MIN_BEHAVIORAL_SAMPLE}"),
+            customer_id=cid,
         ))
         return
 
@@ -396,8 +423,9 @@ def gate3_loss_aversion(report: BiasReport, db):
         report.add(Finding(
             gate="GATE3_LOSS_AVERSION",
             severity=Severity.OK,
-            code="ONE_SIDED_RESULTS",
-            message=f"Recent closed positions are {label} — loss aversion ratio N/A"
+            code=f"ONE_SIDED_RESULTS_{short_id}",
+            message=f"{short_id}: Recent closed positions are {label} — loss aversion ratio N/A",
+            customer_id=cid,
         ))
         return
 
@@ -413,18 +441,20 @@ def gate3_loss_aversion(report: BiasReport, db):
         report.add(Finding(
             gate="GATE3_LOSS_AVERSION",
             severity=Severity.WARNING,
-            code="LOSS_AVERSION",
-            message=f"Losers held {ratio:.1f}x longer than winners (threshold: {LOSS_AVERSION_RATIO}x)",
+            code=f"LOSS_AVERSION_{short_id}",
+            message=f"{short_id}: Losers held {ratio:.1f}x longer than winners (threshold: {LOSS_AVERSION_RATIO}x)",
             detail=(f"Avg winner hold: {avg_winner_hold:.1f}d ({len(winner_hold_days)} trades) | "
-                    f"Avg loser hold: {avg_loser_hold:.1f}d ({len(loser_hold_days)} trades)")
+                    f"Avg loser hold: {avg_loser_hold:.1f}d ({len(loser_hold_days)} trades)"),
+            customer_id=cid,
         ))
     else:
         report.add(Finding(
             gate="GATE3_LOSS_AVERSION",
             severity=Severity.OK,
-            code="LOSS_AVERSION_OK",
-            message=f"Loser/winner hold ratio: {ratio:.1f}x (threshold: {LOSS_AVERSION_RATIO}x)",
-            detail=(f"Avg winner: {avg_winner_hold:.1f}d | Avg loser: {avg_loser_hold:.1f}d")
+            code=f"LOSS_AVERSION_OK_{short_id}",
+            message=f"{short_id}: Loser/winner hold ratio: {ratio:.1f}x (threshold: {LOSS_AVERSION_RATIO}x)",
+            detail=(f"Avg winner: {avg_winner_hold:.1f}d | Avg loser: {avg_loser_hold:.1f}d"),
+            customer_id=cid,
         ))
 
 
@@ -433,9 +463,10 @@ def gate3_loss_aversion(report: BiasReport, db):
 #  Check if trade frequency is excessive
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate4_overtrading(report: BiasReport, db):
+def gate4_overtrading(report: BiasReport, db, cid: str):
     """Flag when average trades per day over the lookback window is too high."""
-    log.info("[GATE 4] Overtrading check")
+    short_id = cid[:8] if cid else 'master'
+    log.info(f"[GATE 4] Overtrading check ({short_id})")
 
     # Count ENTRY ledger rows per day over the last N trading days
     now = datetime.now(tz=ZoneInfo("UTC"))
@@ -455,8 +486,9 @@ def gate4_overtrading(report: BiasReport, db):
         report.add(Finding(
             gate="GATE4_OVERTRADING",
             severity=Severity.OK,
-            code="NO_TRADES",
-            message=f"No trades in last {OVERTRADE_DAYS} days — overtrading check N/A"
+            code=f"NO_TRADES_{short_id}",
+            message=f"{short_id}: No trades in last {OVERTRADE_DAYS} days — overtrading check N/A",
+            customer_id=cid,
         ))
         return
 
@@ -468,24 +500,27 @@ def gate4_overtrading(report: BiasReport, db):
         report.add(Finding(
             gate="GATE4_OVERTRADING",
             severity=Severity.CRITICAL,
-            code="OVERTRADING_CRIT",
-            message=f"Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) (>{OVERTRADE_CRIT_PER_DAY})",
-            detail=f"Total: {total_trades} trades across {trading_days} trading day(s)"
+            code=f"OVERTRADING_CRIT_{short_id}",
+            message=f"{short_id}: Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) (>{OVERTRADE_CRIT_PER_DAY})",
+            detail=f"Total: {total_trades} trades across {trading_days} trading day(s)",
+            customer_id=cid,
         ))
     elif avg_per_day > OVERTRADE_WARN_PER_DAY:
         report.add(Finding(
             gate="GATE4_OVERTRADING",
             severity=Severity.WARNING,
-            code="OVERTRADING_WARN",
-            message=f"Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) (>{OVERTRADE_WARN_PER_DAY})",
-            detail=f"Total: {total_trades} trades across {trading_days} trading day(s)"
+            code=f"OVERTRADING_WARN_{short_id}",
+            message=f"{short_id}: Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) (>{OVERTRADE_WARN_PER_DAY})",
+            detail=f"Total: {total_trades} trades across {trading_days} trading day(s)",
+            customer_id=cid,
         ))
     else:
         report.add(Finding(
             gate="GATE4_OVERTRADING",
             severity=Severity.OK,
-            code="TRADE_FREQ_OK",
-            message=f"Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) — normal"
+            code=f"TRADE_FREQ_OK_{short_id}",
+            message=f"{short_id}: Avg {avg_per_day:.1f} trades/day over {trading_days} day(s) — normal",
+            customer_id=cid,
         ))
 
 
@@ -494,9 +529,10 @@ def gate4_overtrading(report: BiasReport, db):
 #  Check if profits are taken too early while losses are allowed to run
 # ══════════════════════════════════════════════════════════════════════════
 
-def gate5_disposition_effect(report: BiasReport, db):
+def gate5_disposition_effect(report: BiasReport, db, cid: str):
     """Flag when winners are cut short and losers run — the disposition effect."""
-    log.info("[GATE 5] Disposition effect check")
+    short_id = cid[:8] if cid else 'master'
+    log.info(f"[GATE 5] Disposition effect check ({short_id})")
 
     closed = db.get_closed_positions(limit=200)
 
@@ -517,18 +553,16 @@ def gate5_disposition_effect(report: BiasReport, db):
         except (ValueError, TypeError):
             continue
 
-    # Disposition effect needs a meaningful sample — at N=4 a single lucky
-    # winner / unlucky loser dominates the avg, producing noise findings
-    # like "3W/2L disposition effect!" that are pure small-sample artifacts.
-    # 10 closed trades is the floor where the avg starts reflecting behavior.
-    MIN_DISPOSITION_SAMPLE = 10
-    if len(recent) < MIN_DISPOSITION_SAMPLE:
+    # MIN_BEHAVIORAL_SAMPLE (=10) is shared with gate3 — see config block
+    # for rationale (small-sample artifacts dominate at lower N).
+    if len(recent) < MIN_BEHAVIORAL_SAMPLE:
         report.add(Finding(
             gate="GATE5_DISPOSITION",
             severity=Severity.OK,
-            code="TOO_FEW_CLOSED",
-            message=(f"Only {len(recent)} closed position(s) in last 30 days "
-                     f"— disposition check needs ≥{MIN_DISPOSITION_SAMPLE}")
+            code=f"TOO_FEW_CLOSED_{short_id}",
+            message=(f"{short_id}: Only {len(recent)} closed position(s) in last 30 days "
+                     f"— disposition check needs ≥{MIN_BEHAVIORAL_SAMPLE}"),
+            customer_id=cid,
         ))
         return
 
@@ -557,8 +591,9 @@ def gate5_disposition_effect(report: BiasReport, db):
         report.add(Finding(
             gate="GATE5_DISPOSITION",
             severity=Severity.OK,
-            code="ONE_SIDED",
-            message=f"Recent closed positions are {label} — disposition check N/A"
+            code=f"ONE_SIDED_{short_id}",
+            message=f"{short_id}: Recent closed positions are {label} — disposition check N/A",
+            customer_id=cid,
         ))
         return
 
@@ -571,18 +606,20 @@ def gate5_disposition_effect(report: BiasReport, db):
         report.add(Finding(
             gate="GATE5_DISPOSITION",
             severity=Severity.WARNING,
-            code="DISPOSITION_EFFECT",
-            message=(f"Disposition effect: avg winner +{avg_winner_gain:.1f}% vs "
+            code=f"DISPOSITION_EFFECT_{short_id}",
+            message=(f"{short_id}: Disposition effect — avg winner +{avg_winner_gain:.1f}% vs "
                      f"avg loser -{avg_loser_loss:.1f}% with {len(winners)}W/{len(losers)}L"),
-            detail="Cutting winners short while letting losers run — consider wider profit targets or tighter stop losses"
+            detail="Cutting winners short while letting losers run — consider wider profit targets or tighter stop losses",
+            customer_id=cid,
         ))
     else:
         report.add(Finding(
             gate="GATE5_DISPOSITION",
             severity=Severity.OK,
-            code="DISPOSITION_OK",
-            message=(f"No disposition effect: avg winner +{avg_winner_gain:.1f}% vs "
-                     f"avg loser -{avg_loser_loss:.1f}% ({len(winners)}W/{len(losers)}L)")
+            code=f"DISPOSITION_OK_{short_id}",
+            message=(f"{short_id}: No disposition effect — avg winner +{avg_winner_gain:.1f}% vs "
+                     f"avg loser -{avg_loser_loss:.1f}% ({len(winners)}W/{len(losers)}L)"),
+            customer_id=cid,
         ))
 
 
@@ -649,20 +686,44 @@ def gate6_confidence_clustering(report: BiasReport, db):
 # ══════════════════════════════════════════════════════════════════════════
 
 def _get_active_customer_ids():
-    """Get all active customer IDs from the auth database."""
-    try:
-        sys.path.insert(0, os.path.join(_ROOT_DIR, 'src'))
-        import auth
-        customers = auth.list_customers()
-        return [c['id'] for c in customers if c.get('is_active', True)]
-    except Exception as e:
-        log.warning(f"Could not load customer list: {e}")
-        # Fallback: scan data/customers directory
-        customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
-        if os.path.isdir(customers_dir):
-            return [d for d in os.listdir(customers_dir)
-                    if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
-        return []
+    """Active customer IDs (delegates to retail_shared.get_active_customers).
+    Falls back to scanning data/customers/ when auth is unreachable so a
+    bias scan can still run on cached customer state."""
+    ids = get_active_customers()
+    if ids:
+        return ids
+    customers_dir = os.path.join(_ROOT_DIR, 'data', 'customers')
+    if os.path.isdir(customers_dir):
+        return [d for d in os.listdir(customers_dir)
+                if d != 'default' and os.path.isdir(os.path.join(customers_dir, d))]
+    return []
+
+
+def _per_customer_summary(report: BiasReport, cid: str) -> dict:
+    """Filter `report.findings` down to those belonging to `cid` and build
+    a scan_summary dict suitable for `_BIAS_SCAN_LAST` on that customer's
+    signals.db. Gate 6 is system-wide (no customer_id) and is intentionally
+    excluded — it doesn't describe a single customer's bias."""
+    cust_findings = [f for f in report.findings if f.customer_id == cid]
+    crit = sum(1 for f in cust_findings if f.severity == Severity.CRITICAL)
+    warn = sum(1 for f in cust_findings if f.severity == Severity.WARNING)
+    severities = [Severity.OK, Severity.INFO, Severity.WARNING, Severity.CRITICAL]
+    worst_idx = 0
+    for f in cust_findings:
+        if f.severity in severities:
+            worst_idx = max(worst_idx, severities.index(f.severity))
+    return {
+        "timestamp": report.completed_at,
+        "worst_severity": severities[worst_idx],
+        "critical": crit,
+        "warnings": warn,
+        "total_checks": len(cust_findings),
+        "findings": [
+            {"gate": f.gate, "severity": f.severity, "code": f.code, "message": f.message}
+            for f in cust_findings
+            if f.severity in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
+        ],
+    }
 
 
 def run():
@@ -684,64 +745,58 @@ def run():
         log.warning("No active customers found — running gates against master DB only")
         customer_ids = [OWNER_CUSTOMER_ID] if OWNER_CUSTOMER_ID else []
 
+    # Per-gate definitions to keep the loop small and the gate-error
+    # routing consistent (CRITICAL on gate crash so emit_admin_alert routes
+    # the failure — silent gate failures are gone).
+    PER_CUSTOMER_GATES = [
+        ("GATE1_SECTOR_CONC",    gate1_sector_concentration),
+        ("GATE2_RECENCY",        gate2_recency_bias),
+        ("GATE3_LOSS_AVERSION",  gate3_loss_aversion),
+        ("GATE4_OVERTRADING",    gate4_overtrading),
+        ("GATE5_DISPOSITION",    gate5_disposition_effect),
+    ]
+
     for cid in customer_ids:
+        short_id = cid[:8] if cid else "master"
         try:
             cdb = get_customer_db(cid) if cid else db
-            short_id = cid[:8] if cid else "master"
             log.info(f"--- Customer {short_id} ---")
 
-            # ── Gate 1: Sector concentration ─────────────────────────
-            try:
-                gate1_sector_concentration(report, cdb)
-            except Exception as e:
-                log.error(f"Gate 1 failed for {short_id}: {e}", exc_info=True)
-                report.add(Finding("GATE1_SECTOR_CONC", Severity.WARNING, "GATE1_ERROR",
-                                   f"Sector concentration check failed ({short_id}): {e}"))
-
-            # ── Gate 2: Recency bias ─────────────────────────────────
-            try:
-                gate2_recency_bias(report, cdb)
-            except Exception as e:
-                log.error(f"Gate 2 failed for {short_id}: {e}", exc_info=True)
-                report.add(Finding("GATE2_RECENCY", Severity.WARNING, "GATE2_ERROR",
-                                   f"Recency bias check failed ({short_id}): {e}"))
-
-            # ── Gate 3: Loss aversion ────────────────────────────────
-            try:
-                gate3_loss_aversion(report, cdb)
-            except Exception as e:
-                log.error(f"Gate 3 failed for {short_id}: {e}", exc_info=True)
-                report.add(Finding("GATE3_LOSS_AVERSION", Severity.WARNING, "GATE3_ERROR",
-                                   f"Loss aversion check failed ({short_id}): {e}"))
-
-            # ── Gate 4: Overtrading ──────────────────────────────────
-            try:
-                gate4_overtrading(report, cdb)
-            except Exception as e:
-                log.error(f"Gate 4 failed for {short_id}: {e}", exc_info=True)
-                report.add(Finding("GATE4_OVERTRADING", Severity.WARNING, "GATE4_ERROR",
-                                   f"Overtrading check failed ({short_id}): {e}"))
-
-            # ── Gate 5: Disposition effect ───────────────────────────
-            try:
-                gate5_disposition_effect(report, cdb)
-            except Exception as e:
-                log.error(f"Gate 5 failed for {short_id}: {e}", exc_info=True)
-                report.add(Finding("GATE5_DISPOSITION", Severity.WARNING, "GATE5_ERROR",
-                                   f"Disposition effect check failed ({short_id}): {e}"))
+            for gate_label, gate_fn in PER_CUSTOMER_GATES:
+                try:
+                    gate_fn(report, cdb, cid)
+                except Exception as e:
+                    log.error(f"{gate_label} failed for {short_id}: {e}", exc_info=True)
+                    # CRITICAL (was WARNING) so emit_admin_alert routes it.
+                    report.add(Finding(
+                        gate=gate_label,
+                        severity=Severity.CRITICAL,
+                        code=f"{gate_label}_ERROR_{short_id}",
+                        message=f"{short_id}: {gate_label} crashed: {e}",
+                        customer_id=cid,
+                    ))
 
         except Exception as e:
-            log.error(f"Customer {cid[:8] if cid else '?'} failed: {e}", exc_info=True)
-            report.add(Finding("BIAS_CUSTOMER", Severity.WARNING, "CUSTOMER_ERROR",
-                               f"Customer {cid[:8] if cid else '?'}: bias checks failed: {e}"))
+            log.error(f"Customer {short_id} failed: {e}", exc_info=True)
+            report.add(Finding(
+                gate="BIAS_CUSTOMER",
+                severity=Severity.CRITICAL,
+                code=f"CUSTOMER_ERROR_{short_id}",
+                message=f"{short_id}: bias checks failed: {e}",
+                customer_id=cid,
+            ))
 
-    # ── Gate 6: Confidence clustering (shared signals DB) ────────────
+    # ── Gate 6: Confidence clustering (shared signals DB, system-wide) ─
     try:
         gate6_confidence_clustering(report, db)
     except Exception as e:
         log.error(f"Gate 6 failed: {e}", exc_info=True)
-        report.add(Finding("GATE6_CONFIDENCE", Severity.WARNING, "GATE6_ERROR",
-                           f"Confidence clustering check failed: {e}"))
+        report.add(Finding(
+            gate="GATE6_CONFIDENCE",
+            severity=Severity.CRITICAL,
+            code="GATE6_ERROR",
+            message=f"Confidence clustering check failed: {e}",
+        ))
 
     # ── Aggregate results ─────────────────────────────────────────────
     report.completed_at = _now_str()
@@ -763,25 +818,29 @@ def run():
     # customer — the idea is the customer forgets the account exists
     # until someone asks them about it. Constant flags erode confidence.
     # Admin can decide whether / how to coach the customer.
+    # emit_admin_alert (in retail_shared) does per-code dedup so a sticky
+    # bias finding doesn't spam the inbox at the 30-min scan cadence.
     admin_db = _master_db()
-    actionable = [f for f in report.findings
-                  if f.severity in (Severity.WARNING, Severity.CRITICAL)]
-    for af in actionable:
-        try:
-            admin_db.add_admin_alert(
-                category='bias',
-                severity=af.severity,
-                title=f"Bias Alert: {af.code}",
-                body=f"{af.message}\n{af.detail}" if af.detail else af.message,
-                source_agent='bias_detection_agent',
-                source_customer_id=_CUSTOMER_ID or OWNER_CUSTOMER_ID,
-                code=af.code,
-                meta={"gate": af.gate, "code": af.code, "severity": af.severity},
-            )
-        except Exception as e:
-            log.warning(f"Failed to write bias admin alert: {e}")
+    fallback_cid = _CUSTOMER_ID or OWNER_CUSTOMER_ID
+    written = 0
+    deduped = 0
+    for f in report.findings:
+        if f.severity not in (Severity.WARNING, Severity.CRITICAL):
+            continue
+        if emit_admin_alert(admin_db, f,
+                            source_agent='bias_detection_agent',
+                            category='bias',
+                            fallback_customer_id=fallback_cid):
+            written += 1
+        else:
+            deduped += 1
+    if written or deduped:
+        log.info(f"admin_alerts: wrote {written}, deduped {deduped}")
 
     # ── Store scan summary for portal access ─────────────────────────
+    # Shared DB summary covers everything (system-wide rollup). Per-
+    # customer summaries land on each customer's signals.db so individual
+    # dashboards see their own findings, not the system aggregate.
     scan_summary = {
         "timestamp": report.completed_at,
         "worst_severity": report.worst_severity,
@@ -795,6 +854,15 @@ def run():
         ]
     }
     db.set_setting('_BIAS_SCAN_LAST', json.dumps(scan_summary))
+
+    for cid in customer_ids:
+        if not cid:
+            continue
+        try:
+            cdb = get_customer_db(cid)
+            cdb.set_setting('_BIAS_SCAN_LAST', json.dumps(_per_customer_summary(report, cid)))
+        except Exception as e:
+            log.warning(f"per-customer scan summary write failed for {cid[:8]}: {e}")
 
     # ── Lifecycle: COMPLETE ───────────────────────────────────────────
     summary = report.summary()
