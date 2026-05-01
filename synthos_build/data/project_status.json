@@ -1,11 +1,11 @@
 {
   "meta": {
     "project": "Synthos",
-    "last_updated": "2026-04-27",
-    "current_phase": 7,
+    "last_updated": "2026-05-01",
+    "current_phase": 8,
     "total_phases": 11,
-    "version": "2.3",
-    "next_milestone": "Beta testing + paper trading review (Phase 8)",
+    "version": "2.4",
+    "next_milestone": "Phase 8 — paper-trading observation window + Stripe webhook secret resolution",
     "domain_map": {
       "synth-cloud.com": "Redirect \u2192 portal.synth-cloud.com",
       "portal.synth-cloud.com": "Pi 5 port 5001 \u2014 retail portal (customer + admin)",
@@ -14,6 +14,7 @@
       "ssh2.synth-cloud.com": "Pi 5 port 22 \u2014 Cloudflare Access"
     },
     "recent_milestones": [
+      "2026-05-01 \u2014 11-Agent audit pass complete (Trader, News, Sentiment, Screener, Fault, Bias, Macro, Market State, Validator). Round 9 hot-fix `7d1dd04` closed cross-customer fault-leakage (validator NO_GO on customer A no longer caused by customer B's Alpaca 401). VIX migrated from Yahoo to FRED VIXCLS with ATR fallback (`32a7d19`). Per-customer code suffixes (`_<short_id>`) on validator/bias/screener admin alerts via shared `emit_admin_alert()` with 12h dedup. System-architecture pipeline page rewritten: gate counts corrected to match code (Fault 4\u21928, Market State 5\u21924, Trader 14\u219213), foreign data sources annotated (FRED, Alpaca, Yahoo, News APIs), scaffolding gates flagged in amber, click-to-detail wired on every gate + agent header, Sector Screener restyled to match the other ingest agents.",
       "2026-04-27 \u2014 Trader-visibility audit: verified Gate 5 actually consumes every screener-derived input. Three changes landed. (1) sector_screener.combined_score re-weighted 40/40/0/20 \u2192 30/30/30/10 so momentum is included in candidate ranking (was being computed but never reaching the rank). (2) ret_3m raw 3-month return now persisted on sector_screening + surfaced on portal screener page + planning drawer. (3) Trader Gate 5 emits a single consolidated decision_log entry per evaluation containing every screener field considered (sector, combined, news, sentiment, momentum, ret_3m, congressional, screener_adj, screener_stamp_adj) \u2014 visibility-only, zero behavior change. Bonus: documented intentional sentiment dual-write in retail_market_sentiment_agent.py (sector_screening.sentiment_score per-ticker for screener display + signals.sentiment_score per-signal for trader Gate 5 \u2014 same detect_cascade output, two cardinalities).",
       "2026-04-27 \u2014 Earlier same day: MRVL trail-stop -491% display bug, settlement-lag race in Gate 0 orphan adoption, rotation-at-loss reversed (winners-only), BIL excluded from Gate 10, CBOE put_call_ratio caching + None-safe formatting (had been pinning every screener-sentiment fulfilment to 0.5 since CBOE Cloudflare block), customer-activity report engine on cmd portal /customer-activity, P&L report polish (total-from-zero, sign rendering, long-term, cross-account).",
       "2026-04-24/25 \u2014 Pre-launch security audit closed 2 CRITICAL + 2 HIGH customer\u2192admin escalation paths; added /reset-password handler; persistent login rate limiter (login_attempts table); two-step verify-new-email flow; Phase 4.5 file-upload audit 21/21 pass.",

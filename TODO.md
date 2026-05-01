@@ -2,7 +2,7 @@
 
 > Shared todo list — editable in Obsidian, git-tracked, used by Claude for context.
 > **Checkbox syntax**: `- [ ]` pending, `- [x]` done. Feel free to reorder, add, or delete.
-> Last sync: 2026-04-25 (post-verification sweep)
+> Last sync: 2026-05-01 (post-Round-9 audit pass + system-map pipeline page rewrite)
 
 ---
 
@@ -24,6 +24,21 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 - [ ] **#270 Stripe webhook secret unset** (HIGH, x3 hits) — Phase 8 task. Either wire up `STRIPE_WEBHOOK_SECRET` or firewall the endpoint when not in use.
 - [ ] **#249 / #255 Trader 240s timeout** (HIGH, x1 each) — customers `f313a3d9` (2026-04-22) and `80419c9e` (2026-04-24). Once each, days apart. Monitor for recurrence; investigate if a pattern emerges.
 - [ ] **#256 NEGATIVE_CASH owner $-0.01** (CRITICAL, x1) — paper-trade rounding artifact on owner customer (30eff008). Will self-clear on next portfolio reconcile/deposit. No action.
+
+## 🟢 11-Agent Audit Pass — completed 2026-04-28 → 2026-05-01
+
+Multi-week audit of every agent + the validator stack. All deploys live on pi5.
+
+- [x] **Agent 1 Trader** — 13-gate spine documented; G13 stress overrides activated; G5.5 news veto wired; VIX integration via `_vix_from_macro_regime` (commit `32a7d19`); per-customer dedup keys with `_<short_id>` suffix.
+- [x] **Agent 2 News** — 22-gate spine; risk discounts (G18) now read VIX/macro from signals.db instead of recomputing; admin_alert dedup via `retail_shared.emit_admin_alert()`.
+- [x] **Agent 3 Sentiment** — Stage 4 G24 temporal persistence (must persist 2 cycles) added; ATR fallback when FRED VIX is stale.
+- [x] **Agent 5 Sector Screener** — admin_alert dedup unified; `_short_id` keying; visual styling on `/system-architecture` pipeline page made consistent with other agent cards (2026-05-01).
+- [x] **Agent 6 Fault Detection** — 8-gate spine confirmed (was previously documented as 4 in arch JSON); per-customer Gate 5 added so customer-A's Alpaca 401 no longer leaks into customer-B's validator (Round 9 hot-fix `7d1dd04`, `_finding_applies_to_customer()` filter).
+- [x] **Agent 7 Bias Detection** — `INFORMATIONAL_BIAS_CODE_PREFIXES` tuple + `_is_informational_bias_code()` to handle per-customer code suffixes.
+- [x] **Agent 8 Macro Regime** — VIX migrated to FRED VIXCLS; yield curve uses DGS10 − DGS3MO from FRED; macro_regime_detail JSON persisted with stale-window guard.
+- [x] **Agent 9 Market State** — 4-gate spine (was previously documented as 5); macro stale-hours guard before synthesis.
+- [x] **Agent 10 Validator Stack** — per-customer suffix on VALIDATOR_NO_GO codes; bias informational-prefix filtering; cross-customer fault-leakage closed.
+- [x] **System Map (`/system-architecture`)** — pipeline page now matches reality: gate counts corrected (Fault 4→8, Market State 5→4, Trader 14→13), foreign data sources annotated (FRED / Alpaca / Yahoo / News APIs), scaffolding gates flagged in amber, click-to-detail wired on every gate + agent header, Sector Screener restyled into the ingest column.
 
 ## 🆕 Active follow-ups from 2026-04-25 dashboard sprint
 
@@ -75,6 +90,7 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 ✅ ROI-deferred 2026-04-25. `synthos_monitor.py` is 9,194 lines with ~1,952 lines of inline HTML (21%, 7 constants). Only used by admin (Patrick), no observed bugs. Not extracting unless specific edit-pain emerges.
 
 - [ ] *(reactivate when admin-portal editing actually hurts)*
+- [x] **Sector Screener visual styling on system architecture page** — fixed 2026-05-01. Now renders through the same `agentCard` path as other ingest agents with a small "PRE-COMPUTED · 06:45 ET" pill above it. Click-to-detail also wired.
 
 ## 🧠 Trading Logic
 
@@ -298,8 +314,8 @@ findings to 27.
 ## 🔗 Reference docs
 
 - `PROJECT_STATUS.md` — phased roadmap, gate conditions
-- `synthos_build/data/system_architecture.json` — live system map (v3.14)
-- `synthos_build/data/project_status.json` — live JSON dashboard (v2.3)
+- `synthos_build/data/system_architecture.json` — live system map (v3.23)
+- `synthos_build/data/project_status.json` — live JSON dashboard (v2.4)
 - `docs/` — spec archive
 
 ## Workflow conventions

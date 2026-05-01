@@ -2,19 +2,19 @@
 
 > **⚠ Historical snapshot (frozen 2026-04-05).** The phase tracker
 > below is preserved for audit trail. Current operational truth
-> lives in `data/system_architecture.json` (v3.13) and the live
+> lives in `data/system_architecture.json` (v3.23) and the live
 > JSON dashboard at `data/project_status.json`. Retail Pi 5 is
 > deployed on NVMe, Phase C refactor + pipeline-audit Gaps 1-3 +
-> pre-launch security audit (2026-04-24/25) all landed. The stack
-> is in supervised Phase 6 paper mode and through 2026-04-25 the
-> entire customer-facing dashboard / news / intel pages were
-> overhauled (Phases 5–7L, ~20 commits). For live data:
-> `docs/pipeline_audit_2026-04-24.md`, `docs/security_review.md`,
+> pre-launch security audit (2026-04-24/25) + 11-agent audit pass
+> (2026-04-28 → 2026-05-01) all landed. The stack is in supervised
+> Phase 8 paper mode; the entire customer-facing dashboard / news /
+> intel pages were overhauled (Phases 5–7L, ~20 commits). For live
+> data: `docs/pipeline_audit_2026-04-24.md`, `docs/security_review.md`,
 > `docs/trade_lifecycle.md`, `docs/backlog.md`.
 >
-> **Live phase pointer:** `data/project_status.json` (v2.3,
-> 2026-04-27). 11 phases tracked there — phases 1-7L complete,
-> phase 8 (Paper Trading Review) up next.
+> **Live phase pointer:** `data/project_status.json` (v2.4,
+> 2026-05-01). 11 phases tracked there — phases 1-7L complete,
+> phase 8 (Paper Trading Review) in flight.
 >
 > **2026-04-27 — Trader-visibility audit:** verified Gate 5 actually
 > consumes every screener input that was wired in. Re-weighted
