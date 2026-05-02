@@ -6743,6 +6743,17 @@ def api_support_all_tickets():
     all_tickets.sort(key=lambda t: t.get('updated_at', ''), reverse=True)
     return jsonify({'tickets': all_tickets})
 
+# In-memory scan cache for /api/logs-audit. The scan walks 30+ log files
+# (5MB tail each) running ~10 regexes per line — easily 150MB of text
+# processed per request. Re-scanning on every browser poll thundering-
+# herds the endpoint and used to blow past the cmd portal's 30s read
+# timeout. Cache the result for _LOGS_AUDIT_CACHE_TTL seconds so repeat
+# polls inside the window return instantly. UI polls at 5 min, so a 60s
+# cache covers any concurrent admin loads without serving stale data.
+_LOGS_AUDIT_CACHE_TTL = 60  # seconds
+_logs_audit_cache: dict = {"payload": None, "expires_at": 0.0}
+
+
 @app.route('/api/logs-audit')
 def api_logs_audit():
     """
@@ -6758,6 +6769,16 @@ def api_logs_audit():
     monitor_token = os.environ.get('MONITOR_TOKEN', '')
     if not monitor_token or auth_header != f'Bearer {monitor_token}':
         return jsonify({'error': 'unauthorized'}), 401
+
+    # Cache hit short-circuits the heavy scan. Cache key is a single
+    # global slot — there's only one set of logs to scan; per-IP or
+    # per-token caching adds zero value here.
+    _now_ts = time.time()
+    if _logs_audit_cache.get("payload") is not None and _now_ts < _logs_audit_cache.get("expires_at", 0):
+        cached = dict(_logs_audit_cache["payload"])
+        cached["cached"] = True
+        cached["cache_age_s"] = round(_LOGS_AUDIT_CACHE_TTL - (_logs_audit_cache["expires_at"] - _now_ts), 1)
+        return jsonify(cached)
 
     _log_dir = LOG_DIR  # module-level constant: _ROOT_DIR/logs
     IGNORE = [
@@ -6954,16 +6975,30 @@ def api_logs_audit():
     # Sort by severity
     sev_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
     issues.sort(key=lambda x: sev_order.get(x['severity'], 9))
+    # Capture the TRUE total before truncation. Previously total_unresolved
+    # was len(issues) AFTER the [:200] cap — which made the math look broken
+    # (sev counts in 1000s but total_unresolved capped at 200). Now we
+    # report the real count + a separate `displayed` field for what the
+    # response payload actually contains.
+    _total_before_cap = len(issues)
     issues = issues[:200]
 
-    return jsonify({
+    payload = {
         'issues':           issues,
         'by_severity':      by_sev,
-        'total_unresolved': len(issues),
+        'total_unresolved': _total_before_cap,
+        'displayed':        len(issues),
+        'display_capped':   _total_before_cap > len(issues),
         'scan_state':       scan_state,
         'morning_report':   None,   # retail node has no morning report
         'node':             'retail',
-    })
+        'cached':           False,
+        'cache_age_s':      0.0,
+    }
+    # Stash in cache for the next caller within TTL window.
+    _logs_audit_cache["payload"] = payload
+    _logs_audit_cache["expires_at"] = time.time() + _LOGS_AUDIT_CACHE_TTL
+    return jsonify(payload)
 
 @app.route('/api/audit')
 @admin_required
