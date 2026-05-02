@@ -92,7 +92,7 @@ def step(name, passed, detail=""):
     return passed
 
 
-def _check_systemd_service(unit, label, settle_secs=15):
+def _check_systemd_service(unit, label, settle_secs=120):
     """Check whether a systemd unit is active. Replaces the legacy
     'Popen a second copy and see if it exits' pattern used by step6 /
     step7 / step8: that pattern collided with systemd-owned services
@@ -108,6 +108,13 @@ def _check_systemd_service(unit, label, settle_secs=15):
     ERROR every boot (auditor finding #260 / #281). Now poll
     `is-active` for up to `settle_secs` seconds, treating
     'activating' as a transient state we wait on.
+
+    2026-05-02: bumped settle_secs from 15s → 120s after observing
+    today's boot.log (04:01:17 Watchdog timeout, 04:01:33 Portal
+    timeout — both at exactly 15s settle window). On pi5 with cold
+    cache + db init the services genuinely need more like 30-60s to
+    come up. 120s is generous one-shot wait; boot is a single event
+    so the cost of waiting is bounded.
 
     Returns the result of step() — pass if the unit reports 'active',
     fail otherwise with the actual state (inactive, failed, etc.) in

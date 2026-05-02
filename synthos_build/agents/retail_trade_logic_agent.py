@@ -844,6 +844,38 @@ def calculate_trail_stop(atr, price, sector):
     pct = round((amt / price) * 100, 2)
     return amt, pct, bucket["label"]
 
+
+def _submit_trail_stop_if_whole(alpaca, ticker: str, qty: float,
+                                 trail_amt: float) -> None:
+    """Submit a trailing-stop sell to Alpaca, but skip if qty is fractional.
+
+    Alpaca paper API rejects trailing_stop orders on fractional positions
+    with HTTP 422 — was the top remaining ERROR pattern in the auditor
+    (~25 hits across 6 customers, all on POST /v2/orders right after a
+    fractional-share buy). Internal trail tracking in gate10 handles the
+    exit for fractional positions just fine; the Alpaca-side stop is a
+    belt-and-suspenders safety net that doesn't work for fractional
+    anyway, so skipping cleanly is strictly better than submitting +
+    erroring.
+
+    qty is treated as fractional whenever int(qty) != qty (any non-zero
+    decimal component). The 1e-9 tolerance handles float-rep noise on
+    nominally-whole values (e.g. 5.000000001 from upstream rounding).
+    """
+    is_whole = abs(qty - round(qty)) < 1e-9
+    if not is_whole:
+        log.info(
+            f"[TRAIL_STOP] {ticker} qty={qty:.4f} is fractional — "
+            f"skipping Alpaca trailing_stop submit (Alpaca paper API "
+            f"rejects fractional with 422). gate10 internal trail-stop "
+            f"tracking will manage exit at trail_amt=${trail_amt:.2f}."
+        )
+        return
+    alpaca.submit_order(
+        ticker=ticker, qty=qty, side="sell",
+        order_type="trailing_stop", trail_price=trail_amt,
+    )
+
 def is_last_trading_day_of_month():
     today   = datetime.now(ET).date()
     _, days = monthrange(today.year, today.month)
@@ -1269,6 +1301,10 @@ class AlpacaClient:
         # 597 hits/wk from one customer with revoked keys).
         self.last_status_code = None
         status_code = None  # init so the connection-error path doesn't NameError
+        last_body = None    # 2026-05-02 — capture Alpaca's response body on
+                            # 4xx so the actual rejection reason ends up in
+                            # the error log. Generic "422 Client Error" lines
+                            # told us nothing about WHY orders were rejected.
         for attempt in range(MAX_RETRIES):
             try:
                 r = getattr(requests, method)(
@@ -1276,6 +1312,14 @@ class AlpacaClient:
                 )
                 status_code = r.status_code
                 self.last_status_code = status_code
+                # Capture body BEFORE raise_for_status() so it's available
+                # in the except block. Bound at 500 chars so a malformed
+                # giant response doesn't bloat the log line.
+                if 400 <= status_code < 600:
+                    try:
+                        last_body = (r.text or '')[:500]
+                    except Exception:
+                        last_body = '(body unavailable)'
                 r.raise_for_status()
                 # Success — reset the circuit breaker counter and log.
                 self._consecutive_failures = 0
@@ -1294,6 +1338,13 @@ class AlpacaClient:
                 # Break out of the retry loop and let the caller handle
                 # the auth-fail path. last_status_code is already set.
                 if status_code == 401:
+                    break
+                # 422 = "unprocessable entity" — the request was understood
+                # but Alpaca refused to honor it (insufficient funds,
+                # restricted symbol, fractional-share quirk, wash-trade
+                # prevention, etc.). Retrying with the same payload always
+                # produces the same 422; skip the backoff.
+                if status_code == 422:
                     break
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt)
@@ -1323,7 +1374,15 @@ class AlpacaClient:
                 f"(customer keys invalid; gate0 will set _KEYS_INVALID_AT)"
             )
         else:
-            log.error(f"Alpaca {method.upper()} {endpoint} failed: {last_error}")
+            # Include Alpaca's response body for 4xx so the rejection
+            # reason ends up in the log (e.g. "{"code":40310000,"message":
+            # "insufficient qty available for order"}"). Without this the
+            # operator sees only the generic Client Error string.
+            body_suffix = f" | body={last_body!r}" if last_body else ""
+            log.error(
+                f"Alpaca {method.upper()} {endpoint} failed: {last_error}"
+                f"{body_suffix}"
+            )
         return None
 
     def get_account(self):
@@ -3519,8 +3578,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         # Mark the submitted row RECORDED — open_position
                         # succeeded, settlement lag window can close.
                         db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
-                        alpaca.submit_order(signal['ticker'], size, "sell",
-                                            order_type="trailing_stop", trail_price=trail_amt)
+                        _submit_trail_stop_if_whole(alpaca, signal['ticker'], size, trail_amt)
                         _shared_db().acknowledge_signal(signal['id'])
                         log.info(f"[ROTATION] COMPLETE: Sold {weakest['ticker']} → "
                                  f"BUY {size:.4f} {signal['ticker']} @ ${real_entry:.2f}")
@@ -4355,8 +4413,7 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                      entry_pattern=approval.get('entry_pattern'),
                                      entry_thesis=approval.get('headline'))
                     db.mark_order_recorded(ticker, alpaca_order_id=_aoid)
-                    alpaca.submit_order(ticker=ticker, qty=shares, side="sell",
-                                        order_type="trailing_stop", trail_price=trail_amt)
+                    _submit_trail_stop_if_whole(alpaca, ticker, shares, trail_amt)
                     _shared_db().acknowledge_signal(sig_id)
                     mark_approval_executed(sig_id)
                     log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${real_entry:.2f}")
@@ -4636,8 +4693,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                         entry_thesis=signal.get('headline'),
                     )
                     db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
-                    alpaca.submit_order(signal['ticker'], size, "sell",
-                                        order_type="trailing_stop", trail_price=trail_amt)
+                    _submit_trail_stop_if_whole(alpaca, signal['ticker'], size, trail_amt)
                     _shared_db().acknowledge_signal(signal['id'])
                     log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
                              f"@ ${real_entry:.2f} | stop ${trail_amt:.2f}")

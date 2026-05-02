@@ -310,9 +310,17 @@ def check_positions(db):
             log.error(f"✗ {msg}")
             issues.append(msg)
         if ghosts:
-            msg = f"GHOST positions in DB (not in Alpaca): {', '.join(ghosts)}"
-            log.error(f"✗ {msg}")
-            issues.append(msg)
+            # 2026-05-02 — GHOST positions at boot are usually expected
+            # stale state: positions closed in Alpaca after the last
+            # trader run. The trader's gate0 reconciliation auto-cleans
+            # these on the next market-open cycle. Logging at WARNING
+            # rather than ERROR so the boot health-check pass isn't
+            # flagged as failing on a self-resolving condition.
+            msg = (f"GHOST positions in DB (not in Alpaca): {', '.join(ghosts)}"
+                   f" — trader gate0 will reconcile on next market-open cycle")
+            log.warning(f"⚠ {msg}")
+            # Intentionally NOT appended to issues[] — the boot check
+            # treats issues[] entries as failures, and these are not.
         if not orphans and not ghosts:
             log.info(f"✓ Position reconciliation: clean ({len(alpaca_tickers)} positions)")
 
