@@ -2,7 +2,7 @@
 
 > Shared todo list — editable in Obsidian, git-tracked, used by Claude for context.
 > **Checkbox syntax**: `- [ ]` pending, `- [x]` done. Feel free to reorder, add, or delete.
-> Last sync: 2026-05-01 late PM (post-Request-Access deploy + A/F/G/H/I cleanup batch)
+> Last sync: 2026-05-02 (post pi4b auditor deep-dive — 0 unresolved; week summary captured)
 
 ---
 
@@ -24,6 +24,19 @@ After 2026-04-25 triage sweep (50 → 4 open). Deferred items remaining:
 - [ ] **#270 Stripe webhook secret unset** (HIGH, x3 hits) — Phase 8 task. Either wire up `STRIPE_WEBHOOK_SECRET` or firewall the endpoint when not in use.
 - [ ] **#249 / #255 Trader 240s timeout** (HIGH, x1 each) — customers `f313a3d9` (2026-04-22) and `80419c9e` (2026-04-24). Once each, days apart. Monitor for recurrence; investigate if a pattern emerges.
 - [ ] **#256 NEGATIVE_CASH owner $-0.01** (CRITICAL, x1) — paper-trade rounding artifact on owner customer (30eff008). Will self-clear on next portfolio reconcile/deposit. No action.
+
+## 🟢 2026-05-02 — Pi4b auditor deep-dive (16 → 0 unresolved)
+
+Same-day pi5 + pi4b sweep. Three new bugs found, two stale-class fixes, full noise-floor cleanup.
+
+- [x] **422 POST /v2/orders root cause** — fractional shares + trailing_stop is unsupported on Alpaca paper. Built `_submit_trail_stop_if_whole()` helper checking `abs(qty - round(qty)) < 1e-9`; replaces 3 identical call sites. gate10's internal ratchet manages exits for fractional positions so the Alpaca-side stop was a non-functional belt-and-suspenders for fractional anyway.
+- [x] **AlpacaClient._request** — captures response body (first 500 chars) on any 4xx, includes in error log. Future 422/400/403/409 will show Alpaca's actual rejection reason inline. Also short-circuits the retry loop on 422 (same as 401).
+- [x] **Boot Watchdog/Portal settle window 15s→120s** — round 4 fix code was correct but timeout was too short for pi5 cold-boot path (network + DB init + WAL recovery genuinely needs 30-60s).
+- [x] **GHOST positions at 04:00 boot** — demoted ERROR→WARNING + skipped issues[] append. Trader's gate0 auto-resolves on next market-open cycle; boot health-check runs ~5h before market opens, was flagging itself failed on a self-resolving condition.
+- [x] **`exit_performance.exit_timestamp` NOT NULL** — schema declares the column NOT NULL but the INSERT in `record_exit_performance` was missing it; every position close rolled back. Caught 2 hits 2026-05-01 09:51 ET (customers 30eff008 + f313a3d9). Added to INSERT.
+- [x] **company_auditor SSH cascade** — `check_remote_health` was emitting one SERVICE_DOWN/PROCESS_DOWN finding per configured item when SSH itself failed (one unreachable scan → N findings). Pre-flight `ssh host true` ping now early-returns when the node is unreachable, leaving NODE_UNREACHABLE as the single connectivity finding.
+- [x] **`_ssh_run` retry policy** — 2 retries × 3s delay so the auditor's 5-min cron no longer trips on the pi5-boot-window race.
+- [x] **Auditor.db bulk auto-resolve** — 16 stale findings (yesterday's d88a744d 401 storm + duplicate-column-name + Resend latin-1 + ACCESS_REQUEST_SUBMITTED requeue + today's new fixes) all marked resolved. **0 unresolved.**
 
 ## 🟢 2026-05-01 late PM — Request Access flow + cleanup batch
 
@@ -339,8 +352,8 @@ findings to 27.
 ## 🔗 Reference docs
 
 - `PROJECT_STATUS.md` — phased roadmap, gate conditions
-- `synthos_build/data/system_architecture.json` — live system map (v3.25)
-- `synthos_build/data/project_status.json` — live JSON dashboard (v2.6)
+- `synthos_build/data/system_architecture.json` — live system map (v3.26)
+- `synthos_build/data/project_status.json` — live JSON dashboard (v2.7)
 - `docs/` — spec archive
 
 ## Workflow conventions

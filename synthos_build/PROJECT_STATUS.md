@@ -2,19 +2,30 @@
 
 > **⚠ Historical snapshot (frozen 2026-04-05).** The phase tracker
 > below is preserved for audit trail. Current operational truth
-> lives in `data/system_architecture.json` (v3.23) and the live
+> lives in `data/system_architecture.json` (v3.26) and the live
 > JSON dashboard at `data/project_status.json`. Retail Pi 5 is
 > deployed on NVMe, Phase C refactor + pipeline-audit Gaps 1-3 +
 > pre-launch security audit (2026-04-24/25) + 11-agent audit pass
-> (2026-04-28 → 2026-05-01) all landed. The stack is in supervised
-> Phase 8 paper mode; the entire customer-facing dashboard / news /
-> intel pages were overhauled (Phases 5–7L, ~20 commits). For live
-> data: `docs/pipeline_audit_2026-04-24.md`, `docs/security_review.md`,
+> (2026-04-28 → 2026-05-01) + audit-page deep-dive (2026-05-01 →
+> 2026-05-02) all landed. The stack is in supervised Phase 8 paper
+> mode; customer-facing dashboard / news / intel pages overhauled
+> (Phases 5–7L), Setup Tutorial V2 shipped, public Request Access
+> flow live, EDGAR ingestion enabled (Stages 1-4), audit-page noise
+> floor at 0 unresolved findings. For live data:
+> `docs/pipeline_audit_2026-04-24.md`, `docs/security_review.md`,
 > `docs/trade_lifecycle.md`, `docs/backlog.md`.
 >
-> **Live phase pointer:** `data/project_status.json` (v2.4,
-> 2026-05-01). 11 phases tracked there — phases 1-7L complete,
+> **Live phase pointer:** `data/project_status.json` (v2.7,
+> 2026-05-02). 11 phases tracked there — phases 1-7L complete,
 > phase 8 (Paper Trading Review) in flight.
+>
+> **2026-04-27 → 2026-05-02 sweep (172 commits across both repos):**
+> 11-Agent audit pass + scoop pipeline rebuild + EDGAR live + Request
+> Access public flow + 4-day trader halt loop diagnosed and fixed +
+> screener overhaul + Setup Tutorial V2 + audit-page noise floor
+> 6,729 → 0 unresolved findings + per-customer Alpaca-key auto-skip
+> with portal notification. See `data/system_architecture.json`
+> resolved[] entries for the per-fix narrative.
 >
 > **2026-04-27 — Trader-visibility audit:** verified Gate 5 actually
 > consumes every screener input that was wired in. Re-weighted
