@@ -1974,6 +1974,14 @@ class DB:
         """Record exit metrics for the trailing stop optimizer.
         active_controls is an optional dict of TradingControls values at exit time."""
         ac = active_controls or {}
+        # 2026-05-02 — exit_timestamp column is TEXT NOT NULL in the
+        # schema (line 804 of CREATE TABLE) but was missing from the
+        # INSERT. Caused "NOT NULL constraint failed:
+        # exit_performance.exit_timestamp" ERRORs every time a position
+        # closed (auditor caught 2 hits 2026-05-01 09:51 ET, customers
+        # 30eff008 + f313a3d9). Same `now_str` reused for both
+        # exit_timestamp + created_at since they refer to the same event.
+        now_str = self.now()
         with self.conn() as c:
             c.execute("""
                 INSERT INTO exit_performance
@@ -1984,8 +1992,8 @@ class DB:
                      atr_trail_multiplier, late_day_tighten_pct,
                      benchmark_corr_widen, benchmark_corr_tighten,
                      max_holding_days, entry_multiplier,
-                     last_profit_tier, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     last_profit_tier, exit_timestamp, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 position_id, ticker, sector, vol_bucket,
                 entry_price, exit_price, exit_reason, hold_days,
@@ -1998,7 +2006,8 @@ class DB:
                 ac.get('max_holding_days'),
                 ac.get('entry_multiplier'),
                 last_profit_tier,
-                self.now(),
+                now_str,   # exit_timestamp (NOT NULL)
+                now_str,   # created_at
             ))
 
     def get_exit_performance_needing_backfill(self, min_days=5):
