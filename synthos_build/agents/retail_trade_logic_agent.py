@@ -3654,6 +3654,31 @@ def _run_gate0_account_health(db, alpaca, session_log):
                 f"_KEYS_INVALID_AT={now_iso}. Subsequent cycles will skip "
                 "until keys are rotated (24h auto-retry)."
             )
+            # Customer-facing notification — write to the customer's own
+            # notifications table so it appears in their portal bell. 24h
+            # dedup so a multi-day key outage produces one notification
+            # per day, not one per trader cycle.
+            try:
+                db.add_notification(
+                    category='account',
+                    title='Trading paused — Alpaca API keys not authenticating',
+                    body=(
+                        "Your Alpaca API keys returned 401 (Unauthorized) "
+                        "when the trader tried to read your account. Trading "
+                        "is paused for your account until new keys are "
+                        "installed.\n\n"
+                        "What to do: open Settings → API Keys in the portal "
+                        "and paste a fresh API Key + Secret Key from your "
+                        "Alpaca dashboard. The bot will resume on the next "
+                        "cycle automatically.\n\n"
+                        "If you didn't change anything, your keys may have "
+                        "been revoked from the Alpaca side."
+                    ),
+                    dedup_key='alpaca_keys_invalid',
+                    dedup_window_minutes=1440,   # 24h
+                )
+            except Exception as _ne:
+                log.warning(f"[GATE 0] Could not write customer bad-keys notification: {_ne}")
             session_log.gate("0_HEALTH", "SKIP", {"reason": "auth_fail_401"},
                              "Alpaca 401; marked KEYS_INVALID")
         else:
@@ -3665,10 +3690,27 @@ def _run_gate0_account_health(db, alpaca, session_log):
 
     # Successful reach to Alpaca account API. Clear any prior keys-invalid
     # flag so the trader resumes immediately (auto-recovery path when
-    # admin or customer has rotated keys via portal).
-    if db.get_setting('_KEYS_INVALID_AT'):
+    # admin or customer has rotated keys via portal). If the flag was
+    # actually set (vs blank/empty), also write a customer "resumed"
+    # notification so the user knows their fix took effect.
+    _prior_invalid = db.get_setting('_KEYS_INVALID_AT')
+    if _prior_invalid:
         db.set_setting('_KEYS_INVALID_AT', '')
         log.info("[GATE 0] Alpaca account reachable — cleared _KEYS_INVALID_AT")
+        try:
+            db.add_notification(
+                category='account',
+                title='Trading resumed — Alpaca API keys are working',
+                body=(
+                    "Your Alpaca API keys are authenticating again. The "
+                    "trading bot will resume managing your account on the "
+                    "next cycle."
+                ),
+                dedup_key='alpaca_keys_resumed',
+                dedup_window_minutes=1440,   # 24h
+            )
+        except Exception as _ne:
+            log.warning(f"[GATE 0] Could not write customer keys-resumed notification: {_ne}")
 
     alpaca_equity = float(account.get('equity', 0))
     alpaca_cash = float(account.get('cash', 0))
