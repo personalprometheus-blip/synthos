@@ -6849,6 +6849,35 @@ def api_logs_audit():
         # accounting. (See pre-launch security audit 2026-04-24/25.)
         _re.compile(r'\[KEYS\]\s+Customer\s+\S+\s+attempted to write',
                     _re.I),
+        # 2026-05-02 — log-noise triage. Four high-volume WARNING
+        # patterns identified during audit-page deep-dive (~5,400 hits
+        # / 88% of medium-sev findings) that are all working-as-designed
+        # behavior, not actionable signals.
+        #
+        # 1. Trader self-lock cleanup — `retail_trade_logic_agent.py
+        #    found its own lock — clearing`. The trader writes a lock
+        #    on startup so concurrent invocations don't collide; on
+        #    next cycle the SAME process sees its own stale lock and
+        #    cleans it. That's the lock cleanup working correctly.
+        _re.compile(r'WARNING\s+database:\s+\S+\s+found its own lock\s*[-—]\s*clearing',
+                    _re.I),
+        # 2. Validator CAUTION proceed-with-restrictions — Gate 1 logs
+        #    a WARNING when validator returns CAUTION but the trader
+        #    continues with restricted entries. CAUTION ≠ NO_GO; the
+        #    log entry is by-design risk acknowledgement, not a fault.
+        _re.compile(r'WARNING\s+trade_logic_agent:\s+\[GATE\s*1\]\s+Validator CAUTION\s*[-—]\s*proceeding',
+                    _re.I),
+        # 3. Trader prefetch connection blips — same family as
+        #    price_poller's transient Alpaca data-API flakiness already
+        #    on the IGNORE list. The prefetch retries on its next tick.
+        _re.compile(r'WARNING\s+trade_logic_agent:\s+\[PREFETCH\]\s+Failed',
+                    _re.I),
+        # 4. Pre-market self-check advisory — daemon logs a WARNING
+        #    when caches are cold (e.g. Monday boot, post-restart).
+        #    The check is explicitly advisory and the daemon continues
+        #    anyway (per code comment + log line). Real "system
+        #    degraded" state would be reported by fault_detection.
+        _re.compile(r'WARNING\s+daemon:\s+\[SELFCHECK\]', _re.I),
     ]
     # Match log-level tokens: ] LEVEL or line-start LEVEL (not mid-sentence words)
     PATTERNS = [

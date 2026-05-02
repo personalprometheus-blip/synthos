@@ -1429,16 +1429,25 @@ class DB:
         """
         if managed_by not in ('bot', 'user'):
             raise ValueError(f"managed_by must be 'bot' or 'user', got {managed_by!r}")
-        # Lazy migration: ensure both new columns exist. Each ADD COLUMN
-        # is independently idempotent-by-throwing — wrap separately so a
-        # partial-existing schema (entry_pattern present, entry_thesis
-        # missing) still works.
+        # Lazy migration: ensure both new columns exist. Pre-check via
+        # PRAGMA table_info so we only ALTER when the column is actually
+        # missing — avoids the per-cycle ERROR log emitted by self.conn()
+        # when ADD COLUMN raises "duplicate column name" on already-
+        # migrated DBs (the call site catches it but conn() logs first,
+        # producing one ERROR per trader cycle per customer = ~thousands/wk).
+        # try/except retained as a backstop for the race where two
+        # processes pre-check, both find missing, both ALTER.
+        with self.conn() as _mc:
+            existing_cols = {r[1] for r in _mc.execute(
+                "PRAGMA table_info(positions)").fetchall()}
         for col in ('entry_pattern', 'entry_thesis'):
+            if col in existing_cols:
+                continue
             try:
                 with self.conn() as _mc:
                     _mc.execute(f"ALTER TABLE positions ADD COLUMN {col} TEXT")
             except sqlite3.OperationalError:
-                pass  # already exists
+                pass  # race-condition backstop
         pos_id   = f"pos_{ticker}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         cost     = round(entry_price * shares, 2)
 
@@ -4601,12 +4610,18 @@ class DB:
             raise ValueError(f"queue_approval: invalid queue_origin {queue_origin!r}")
 
         # Lazy migration: ensure entry_pattern column exists on
-        # pending_approvals. Idempotent-by-throwing.
-        try:
-            with self.conn() as _mc:
-                _mc.execute("ALTER TABLE pending_approvals ADD COLUMN entry_pattern TEXT")
-        except sqlite3.OperationalError:
-            pass  # already exists
+        # pending_approvals. Pre-check via PRAGMA table_info — same
+        # rationale as positions migration above (avoid per-cycle ERROR
+        # log from self.conn()).
+        with self.conn() as _mc:
+            _existing = {r[1] for r in _mc.execute(
+                "PRAGMA table_info(pending_approvals)").fetchall()}
+        if 'entry_pattern' not in _existing:
+            try:
+                with self.conn() as _mc:
+                    _mc.execute("ALTER TABLE pending_approvals ADD COLUMN entry_pattern TEXT")
+            except sqlite3.OperationalError:
+                pass  # race-condition backstop
 
         now = self.now()
         with self.conn() as c:

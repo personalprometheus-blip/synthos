@@ -1263,12 +1263,19 @@ class AlpacaClient:
         # partial response. Keeps the blocked-on-DNS / blocked-on-SYN cases
         # from chewing the full timeout budget.
         timeouts = (5, 15)
+        # 2026-05-02 — track 401 explicitly so the trader can detect bad
+        # customer keys at gate0 and short-circuit future cycles instead
+        # of spamming ERRORs (was top high-sev finding on the auditor:
+        # 597 hits/wk from one customer with revoked keys).
+        self.last_status_code = None
+        status_code = None  # init so the connection-error path doesn't NameError
         for attempt in range(MAX_RETRIES):
             try:
                 r = getattr(requests, method)(
                     url, headers=self.headers, timeout=timeouts, **kwargs
                 )
                 status_code = r.status_code
+                self.last_status_code = status_code
                 r.raise_for_status()
                 # Success — reset the circuit breaker counter and log.
                 self._consecutive_failures = 0
@@ -1282,9 +1289,15 @@ class AlpacaClient:
                 return r.json() if r.text else {}
             except Exception as e:
                 last_error = e
+                # 401 = invalid credentials. Retrying won't help and the
+                # exponential backoff just delays the inevitable failure.
+                # Break out of the retry loop and let the caller handle
+                # the auth-fail path. last_status_code is already set.
+                if status_code == 401:
+                    break
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt)
-        # All retries exhausted for this call.
+        # All retries exhausted (or 401 short-circuit) for this call.
         self._consecutive_failures += 1
         if self._consecutive_failures >= ALPACA_CIRCUIT_BREAKER_N:
             self._circuit_open = True
@@ -1300,7 +1313,17 @@ class AlpacaClient:
                 customer_id=_CUSTOMER_ID, status_code=status_code)
         except Exception:
             pass
-        log.error(f"Alpaca {method.upper()} {endpoint} failed: {last_error}")
+        # Downgrade 401 from ERROR to INFO — the keys-invalid flag is
+        # what gate0 acts on, and admin gets a single scoop alert via
+        # fault_detection's ALPACA_AUTH_FAIL_<short_id> finding (deduped
+        # at 12h). Per-call ERROR spam was pure noise.
+        if status_code == 401:
+            log.info(
+                f"Alpaca {method.upper()} {endpoint} -> 401 "
+                f"(customer keys invalid; gate0 will set _KEYS_INVALID_AT)"
+            )
+        else:
+            log.error(f"Alpaca {method.upper()} {endpoint} failed: {last_error}")
         return None
 
     def get_account(self):
@@ -3618,11 +3641,34 @@ def _run_gate0_account_health(db, alpaca, session_log):
     """Gate 0: account health, reconciliation. Returns (account, equity, cash, positions) or (None, None, None, None)."""
     account = alpaca.get_account()
     if not account:
-        log.warning("[GATE 0] Cannot reach Alpaca account API — skipping this run")
-        session_log.gate("0_HEALTH", "SKIP", {}, "Alpaca account unreachable")
+        # Distinguish the "bad keys" case (HTTP 401) from generic
+        # connectivity failures so we can persist a customer-state flag
+        # that subsequent cycles short-circuit on (instead of repeating
+        # the failure every cycle). Bad keys are a customer-action
+        # condition; transient network blips are transient.
+        if getattr(alpaca, 'last_status_code', None) == 401:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            db.set_setting('_KEYS_INVALID_AT', now_iso)
+            log.info(
+                "[GATE 0] Customer Alpaca keys returned 401 — set "
+                f"_KEYS_INVALID_AT={now_iso}. Subsequent cycles will skip "
+                "until keys are rotated (24h auto-retry)."
+            )
+            session_log.gate("0_HEALTH", "SKIP", {"reason": "auth_fail_401"},
+                             "Alpaca 401; marked KEYS_INVALID")
+        else:
+            log.warning("[GATE 0] Cannot reach Alpaca account API — skipping this run")
+            session_log.gate("0_HEALTH", "SKIP", {}, "Alpaca account unreachable")
         session_log.commit(db)
         db.log_heartbeat("trade_logic_agent", "OK")
         return None, None, None, None
+
+    # Successful reach to Alpaca account API. Clear any prior keys-invalid
+    # flag so the trader resumes immediately (auto-recovery path when
+    # admin or customer has rotated keys via portal).
+    if db.get_setting('_KEYS_INVALID_AT'):
+        db.set_setting('_KEYS_INVALID_AT', '')
+        log.info("[GATE 0] Alpaca account reachable — cleared _KEYS_INVALID_AT")
 
     alpaca_equity = float(account.get('equity', 0))
     alpaca_cash = float(account.get('cash', 0))
@@ -4662,6 +4708,42 @@ def run(session='open'):
     _early_phase("watchdog started")
     db, alpaca, now, session_log = _init_clients(session)
     _early_phase("clients initialized — entering Gate 0")
+    # Skip if customer's Alpaca keys were already detected as invalid in
+    # a recent cycle. _KEYS_INVALID_AT is set by _run_gate0_account_health
+    # when Alpaca returns 401, and cleared on the next successful 200.
+    # The 24h auto-retry window means an admin can rotate keys via the
+    # portal, fault_detection's per-customer Gate 5 ping will naturally
+    # confirm health, and the trader will resume on the next-day cycle
+    # without manual intervention. Customer-rotates-via-portal explicitly
+    # clears the flag so trader resumes immediately. Was the top high-sev
+    # auditor finding before this fix landed (~600 ERRORs/week from one
+    # customer with revoked keys).
+    _ki_at = db.get_setting('_KEYS_INVALID_AT') or ''
+    if _ki_at:
+        try:
+            _ki_dt = datetime.fromisoformat(_ki_at.replace('Z', '+00:00'))
+            if _ki_dt.tzinfo is None:
+                _ki_dt = _ki_dt.replace(tzinfo=timezone.utc)
+            _age_h = (datetime.now(timezone.utc) - _ki_dt).total_seconds() / 3600.0
+            if _age_h < 24:
+                log.info(
+                    f"[GATE 0] Skipping — customer Alpaca keys flagged invalid "
+                    f"{_age_h:.1f}h ago at {_ki_at}. Admin or customer must "
+                    f"rotate keys via portal; auto-retry window 24h."
+                )
+                session_log.gate("0_HEALTH", "SKIP", {"keys_invalid_age_h": round(_age_h, 1)},
+                                 "_KEYS_INVALID_AT flag within 24h window")
+                session_log.commit(db)
+                db.log_heartbeat("trade_logic_agent", "OK_KEYS_INVALID")
+                _wd.join(timeout=0)
+                return
+            else:
+                log.info(
+                    f"[GATE 0] _KEYS_INVALID_AT flag is {_age_h:.1f}h old "
+                    f"(>24h auto-retry window) — re-testing keys."
+                )
+        except Exception as _ke:
+            log.debug(f"_KEYS_INVALID_AT parse failed ({_ke}) — ignoring flag")
     account, equity, cash, positions = _run_gate0_account_health(db, alpaca, session_log)
     if account is None:
         return
