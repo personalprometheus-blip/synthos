@@ -292,7 +292,7 @@ def extract_per_manifest(tar_path: Path, manifest: dict, target_home: Path,
                 if apply:
                     target_path.parent.mkdir(parents=True, exist_ok=True)
                     member = tar.getmember(src)
-                    tar.extract(member, path=str(target_home), set_attrs=False)
+                    tar.extract(member, path=str(target_home), set_attrs=False, filter="data")
                     extracted = target_home / src
                     if extracted != target_path:
                         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +323,7 @@ def extract_per_manifest(tar_path: Path, manifest: dict, target_home: Path,
                         if m.isdir():
                             (target_home / n).mkdir(parents=True, exist_ok=True)
                             continue
-                        tar.extract(m, path=str(target_home), set_attrs=False)
+                        tar.extract(m, path=str(target_home), set_attrs=False, filter="data")
                     if perms:
                         target_path.chmod(int(perms, 8))
             else:
