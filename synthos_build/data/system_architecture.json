@@ -22,7 +22,7 @@
         {"name": "company_vault.py", "desc": "License keys, compliance, secrets. 2026-04-23 arch-drift fix: actual cron is daily 01:45 with --backup-now flag, not hourly.", "how": "cron 1:45 daily", "status": "cron"},
         {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
         {"name": "company_librarian.py", "desc": "Package audit, CVE scan, all nodes", "how": "cron Sun", "status": "cron"},
-        {"name": "company_strongbox.py", "desc": "Encrypt + R2 cloud upload (nightly 2am)", "how": "cron 2am", "status": "cron"},
+        {"name": "company_strongbox.py", "desc": "v2 backup manager — builds company stream, accepts pi5-encrypted customer/retail, uploads all 3 to R2 with post-upload validation, 30-day retention. Manifest schema v1.0.", "how": "cron 2am", "status": "cron"},
         {"name": "node_heartbeat.py", "desc": "System metrics (CPU / mem / disk / temp) to monitor DB", "how": "cron * * * * * (every minute, runs in venv)", "status": "cron"}
       ],
       "databases": ["company.db", "auditor.db", "login.db", "support.db"],
@@ -66,7 +66,8 @@
         {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check — trade-daemon / market-daemon services After= this one so they wait for a healthy boot before firing", "how": "systemd (synthos-boot-sequence.service, Type=oneshot)", "status": "boot"},
         {"name": "retail_health_check.py", "desc": "Post-reboot DB + Alpaca verify", "how": "boot only", "status": "boot"},
         {"name": "retail_patch.py", "desc": "Safe file updater, rollback", "how": "manual", "status": "tool"},
-        {"name": "retail_backup.py", "desc": "Nightly archive to pi4b staging", "how": "cron 1:30am", "status": "cron"},
+        {"name": "retail_backup.py", "desc": "v2 nightly backup — 3-stream split (customer + retail), encrypt-on-source with Fernet, manifest.json at tar root, round-trip self-verify, POST .enc to pi4b /receive_backup. See documentation/specs/BACKUP_SYSTEM.md.", "how": "cron 1:30am", "status": "cron"},
+        {"name": "retail_restore.py", "desc": "v2 restore tool — pulls from R2 (via-r2 / via-company / file:), validates manifest, restores per contents[]. Used by operator + v2 installer.", "how": "manual / installer", "status": "live"},
         {"name": "retail_shutdown.py", "desc": "Graceful pre-maintenance shutdown", "how": "Sat 3:55", "status": "cron"},
         {"name": "rebuild_default_template.py", "desc": "Nightly customer DB template rebuild", "how": "cron 3am", "status": "cron"},
         {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"}
@@ -113,7 +114,7 @@
     "trading_pipeline": "Market Daemon (9:15-16:00) orchestrates enrichment → candidate_generator emits sector-driven candidates by momentum_score → validator_stack promotes to VALIDATED + writes _VALIDATOR_VERDICT ∈ {GO, CAUTION, NO_GO} and _MARKET_STATE_SCORE (sentiment 40% + news 25% + macro 35%) to customer_settings → trade_daemon (continuous 9:30-16:00, 30s cycles) pulls VALIDATED signals directly + live_prices → 13-gate eval per signal (Gate 1 halts on NO_GO verdict; Gate 5 composite now blends _MARKET_STATE_SCORE as regime nudge; Gate 6 chase caps block peak entries) → BUY / SKIP / WATCH / EXIT → Alpaca market order → _resolve_fill_price polls filled_avg_price → open_position with real entry price.",
     "shared_data": "price_poller (standalone 24/7 timer, every 60s) → live_prices. News/Sentiment → shared signals pool → all customers see same intel. Sector screener → momentum_score on sector_screening table → candidate_generator filter.",
     "monitoring": "Auditor → SSH scans pi4b + pi5 → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts. pi2w nodes currently disabled (power-source relocation pending).",
-    "backup_chain": "pi5 retail_backup.py (1:30am) → tar.gz → POST to pi4b /receive_backup → Strongbox (2am) → AES-256 encrypt → Cloudflare R2 (30-day retention)",
+    "backup_chain": "v2 (2026-05-03): pi5 retail_backup.py (1:30am) builds 3-stream split (customer + retail) → Fernet encrypt-on-source with BACKUP_ENCRYPTION_KEY → manifest.json embedded at tar root → round-trip self-verify → POST .enc to pi4b /receive_backup → ~/.backup_staging/<stream>/<pi_id>/ → strongbox (2am) → adds company stream locally → uploads all 3 streams to Cloudflare R2 at <stream>/<pi_id>/<date>/ → post-upload validation (decrypt, manifest verify, content sha256) → 30-day retention. Restore via retail_restore.py (--source via-r2|via-company|file:) or strongbox.py --restore <stream> <pi_id>. See documentation/specs/BACKUP_SYSTEM.md.",
     "pipeline_variants": {
       "premarket_prep_09_15": {
         "fires": "weekday at 09:15 ET via synthos-market-daemon.timer",
@@ -185,8 +186,8 @@
     "daily_timeline_weekday_et": [
       {"time": "00:00", "node": "pi4b", "event": "logrotate.timer (approximate — runs daily)"},
       {"time": "00:05-08:05 (:05 past each hour)", "node": "pi5", "event": "retail_scheduler.py --session=overnight (cron-driven news-agent only refresh)"},
-      {"time": "01:30", "node": "pi5", "event": "retail_backup.py — create archive, POST to pi4b /receive_backup"},
-      {"time": "02:00", "node": "pi4b", "event": "company_strongbox.py — encrypt staged backups, upload to R2"},
+      {"time": "01:30", "node": "pi5", "event": "retail_backup.py v2 — build customer+retail streams, Fernet encrypt-on-source, manifest.json, round-trip verify, POST .enc to pi4b /receive_backup"},
+      {"time": "02:00", "node": "pi4b", "event": "company_strongbox.py v2 — build company stream + process staged customer/retail, upload all 3 to R2 with post-upload validation, 30-day retention"},
       {"time": "03:00", "node": "pi5", "event": "rebuild_default_template.py — nightly fresh default customer DB schema"},
       {"time": "06:00 (approximate)", "node": "pi4b", "event": "morning_report generation (company_auditor rollup)"},
       {"time": "08:00", "node": "pi4b", "event": "company_fidget.py — daily keep-alive + anomaly detection"},
