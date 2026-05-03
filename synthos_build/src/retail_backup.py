@@ -34,7 +34,7 @@ import hashlib
 import argparse
 import logging
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
@@ -55,6 +55,7 @@ COMPANY_URL   = os.environ.get("COMPANY_URL", "").rstrip("/")
 SECRET_TOKEN  = os.environ.get("SECRET_TOKEN", "")
 PI_ID         = os.environ.get("PI_ID", "synthos-pi-1")
 UPLOAD_TIMEOUT = 60   # seconds
+LOCAL_RETENTION_DAYS = 7   # delete local copies older than this
 
 # ── LOGGING ────────────────────────────────────────────────────────────────────
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -186,6 +187,28 @@ def save_local_copy(archive_path: Path) -> Path:
     return dest
 
 
+def cleanup_old_local_copies(retention_days: int = LOCAL_RETENTION_DAYS) -> int:
+    """Delete local backup copies older than retention_days. Returns count removed."""
+    if not _BACKUP_DIR.exists():
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    removed = 0
+    for f in _BACKUP_DIR.glob("synthos_backup_*.tar.gz*"):
+        try:
+            mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+            if mtime < cutoff:
+                f.unlink()
+                log.info("Local retention: removed %s (mtime %s)",
+                         f.name, mtime.isoformat()[:19])
+                removed += 1
+        except OSError as e:
+            log.warning("Local retention: failed to remove %s: %s", f.name, e)
+    if removed:
+        log.info("Local retention: %d archive(s) older than %dd removed",
+                 removed, retention_days)
+    return removed
+
+
 # ── MAIN ───────────────────────────────────────────────────────────────────────
 
 def run(dry_run: bool = False, local_only: bool = False) -> bool:
@@ -210,8 +233,8 @@ def run(dry_run: bool = False, local_only: bool = False) -> bool:
                 log.info("=== Retail backup dry-run complete ===")
                 return True
 
-            # Always save a local copy (kept for 7 days by patch/watchdog cleanup)
             local = save_local_copy(archive)
+            cleanup_old_local_copies()
 
             if local_only:
                 log.info("=== Retail backup complete — local only: %s ===", local)
