@@ -357,22 +357,36 @@ def run_trade_all_customers(session='open'):
     """
     import subprocess as _sp
 
-    # 2026-05-04 — Tier 5 of distributed-trader migration: in `distributed`
-    # mode the trader is invoked by synthos_dispatcher (HTTP RPC into
-    # synthos_trader_server on retail-N nodes), not by this daemon. The
-    # market_daemon still runs the enrichment pipeline (news, sentiment,
-    # validator, etc.) — only the trader fan-out is suppressed here so we
-    # don't double-fire trades.
-    _dispatch_mode = os.environ.get('DISPATCH_MODE', 'daemon').lower()
-    if _dispatch_mode == 'distributed':
-        log.info(
-            f"[TRADE] DISPATCH_MODE=distributed — skipping daemon trader fan-out "
-            f"for session={session} (synthos_dispatcher owns trader execution)"
-        )
-        return 0, 0
-
+    # 2026-05-07 — Tier 7 of distributed-trader migration: per-customer
+    # dispatch mode resolution. Each customer can independently be on
+    # 'daemon' (this fan-out) or 'distributed' (synthos_dispatcher).
+    # Filter the active list to ONLY the daemon-mode customers; the
+    # distributed-mode customers belong to the dispatcher.
+    #
+    # If every customer is on distributed, this returns immediately —
+    # the daemon stays alive for the enrichment pipeline (news, sentiment,
+    # validator etc.) but does no trader work.
     write_agent_running('retail_trade_logic_agent.py', session)
-    customers = get_active_customers()
+    all_customers = get_active_customers()
+    try:
+        from dispatch_mode import filter_customers_by_mode
+        customers = filter_customers_by_mode(all_customers, 'daemon')
+    except Exception as e:
+        log.warning(
+            f"[TRADE] dispatch_mode resolver failed ({e}) — falling back to "
+            f"DISPATCH_MODE env var only"
+        )
+        if os.environ.get('DISPATCH_MODE', 'daemon').lower() == 'distributed':
+            log.info(f"[TRADE] DISPATCH_MODE=distributed — skipping daemon trader fan-out")
+            return 0, 0
+        customers = all_customers
+
+    skipped = len(all_customers) - len(customers)
+    if skipped:
+        log.info(
+            f"[TRADE] {skipped} customer(s) on distributed dispatcher — "
+            f"daemon will trade {len(customers)} of {len(all_customers)} active"
+        )
     if not customers:
         log.warning("[TRADE] No active customers found")
         return 0, 0
