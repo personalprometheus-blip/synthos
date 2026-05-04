@@ -93,6 +93,14 @@ REQUIRED_PACKAGES = [
                           # + price_poller + macro_regime_agent. Lazy-imported
                           # so missing install does not crash agents — they
                           # degrade to SQLite-only writes.
+    "httpx",              # 2026-05-04 — async HTTP client used by
+                          # AsyncAlpacaClient (src/async_alpaca_client.py) for
+                          # concurrent Alpaca calls inside the distributed
+                          # trader path. Daemon mode does not import it.
+    "fastapi",            # 2026-05-04 — HTTP server for synthos_trader_server.
+                          # Only used in DISPATCH_MODE=distributed; daemon mode
+                          # does not import it.
+    "uvicorn",            # 2026-05-04 — ASGI runner for FastAPI. Same caveat.
     "resend",
     "cryptography",       # Fernet encryption for auth.db (v3.0)
     "itsdangerous",
@@ -500,6 +508,9 @@ def verify_installation() -> tuple[bool, list[str]]:
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
         "paho-mqtt": "paho.mqtt.client",
+        "httpx": "httpx",
+        "fastapi": "fastapi",
+        "uvicorn": "uvicorn",
         "resend": "resend",
     }
     for pip_name, import_name in pkg_import_map.items():
