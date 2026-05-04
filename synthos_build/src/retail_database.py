@@ -2486,6 +2486,205 @@ class DB:
     # never re-stamped.
     _STAMPABLE_STATUSES = "('QUEUED','VALIDATED')"
 
+    # ── TICKER_STATE (per-ticker live worldview) ──────────────────────────
+    # Phase 1 of the schema split (approved 2026-05-04).
+    # Spec: synthos_build/docs/TICKER_STATE_ARCHITECTURE.md
+    #
+    # ticker_state holds per-ticker time-varying enrichment that used to
+    # live on per-signal rows. One row per ticker; each field has a single
+    # owning agent (sentiment_agent, sector_screener, news_agent, etc.).
+    # Reads (trader gate 5, validator) get the latest worldview without
+    # filtering by signal status — fixing the _STAMPABLE_STATUSES gap that
+    # left candidate signals at 11% sentiment-fill.
+    #
+    # Phase 1 (this code): tables exist, helpers exist, no readers/writers
+    # yet. Phase 2 migrates writers; Phase 3 migrates readers.
+
+    # Whitelist of ticker_state columns that callers may pass to
+    # upsert_ticker_state. Defends against SQL injection in field names
+    # (we substitute field names directly into the UPDATE clause). The
+    # auto-derived *_evaluated_at columns are added when the corresponding
+    # value column is written, so they're not in this whitelist.
+    _TICKER_STATE_FIELDS = frozenset([
+        'sector', 'company', 'exchange',
+        'price', 'price_at', 'vol_bucket', 'atr', 'spy_correlation',
+        'news_score_4h',
+        'sentiment_score', 'cascade_tier',
+        'screener_score', 'momentum_score', 'sector_score',
+        'insider_signal', 'volume_anomaly',
+    ])
+
+    # When a value column gets written, also stamp its *_evaluated_at
+    # twin. Mapping is value-column → twin-column.
+    _TICKER_STATE_EVALUATED_TWINS = {
+        'price':            'price_at',          # named differently from convention
+        'news_score_4h':    'news_evaluated_at',
+        'sentiment_score':  'sentiment_evaluated_at',
+        'cascade_tier':     'sentiment_evaluated_at',
+        'screener_score':   'screener_evaluated_at',
+        'momentum_score':   'momentum_evaluated_at',
+        'sector_score':     'sector_evaluated_at',
+        'insider_signal':   'insider_evaluated_at',
+        'volume_anomaly':   'volume_evaluated_at',
+    }
+
+    def upsert_ticker_state(self, ticker, **fields):
+        """Upsert one or more fields on the ticker's ticker_state row.
+
+        Creates the row on first call (with first_seen_at=now). Updates
+        provided fields plus their *_evaluated_at twins (so
+        sentiment_evaluated_at is always in step with sentiment_score).
+        Always refreshes is_active=1, last_active_at=now, updated_at=now.
+
+        Pass fields as keyword args:
+            db.upsert_ticker_state('AAPL', sentiment_score=0.85)
+            db.upsert_ticker_state('AAPL', screener_score=0.6,
+                                   momentum_score=0.7, sector_score=0.55)
+            db.upsert_ticker_state('AAPL', sector='Technology',
+                                   company='Apple Inc.')
+
+        Caller-provided *_evaluated_at values win over auto-derived ones
+        (useful when backfilling historical data with original timestamps).
+
+        Returns True on success, False on schema validation failure."""
+        if not ticker:
+            return False
+        ticker = ticker.upper()
+
+        # Validate field names against whitelist (SQL injection defense)
+        unknown = [k for k in fields if k not in self._TICKER_STATE_FIELDS
+                   and not k.endswith('_evaluated_at')
+                   and k not in ('first_seen_at', 'last_active_at')]
+        if unknown:
+            log.warning(f"upsert_ticker_state({ticker}): unknown fields {unknown} — skipping")
+            return False
+
+        now = self.now()
+        # Auto-derive *_evaluated_at twins for any value columns being written
+        # (unless the caller explicitly provided one).
+        derived = {}
+        for value_col, ts_col in self._TICKER_STATE_EVALUATED_TWINS.items():
+            if value_col in fields and ts_col not in fields:
+                derived[ts_col] = now
+        fields = {**fields, **derived}
+
+        with self.conn() as c:
+            existing = c.execute(
+                "SELECT 1 FROM ticker_state WHERE ticker=? LIMIT 1",
+                (ticker,)
+            ).fetchone()
+
+            if not existing:
+                # Insert new row with bare lifecycle fields + provided values
+                base_cols = ['ticker', 'is_active', 'first_seen_at',
+                             'last_active_at', 'updated_at']
+                base_vals = [ticker, 1, now, now, now]
+                extra_cols = list(fields.keys())
+                extra_vals = list(fields.values())
+                cols_sql = ', '.join(base_cols + extra_cols)
+                placeholders = ', '.join(['?'] * (len(base_cols) + len(extra_cols)))
+                c.execute(
+                    f"INSERT INTO ticker_state ({cols_sql}) VALUES ({placeholders})",
+                    (*base_vals, *extra_vals)
+                )
+            else:
+                # Update existing row — refresh activity + bump field values
+                set_clauses = ['is_active=1', 'last_active_at=?', 'updated_at=?']
+                params = [now, now]
+                for col, val in fields.items():
+                    set_clauses.append(f"{col}=?")
+                    params.append(val)
+                params.append(ticker)
+                c.execute(
+                    f"UPDATE ticker_state SET {', '.join(set_clauses)} WHERE ticker=?",
+                    params
+                )
+        return True
+
+    def get_ticker_state(self, ticker):
+        """Return the ticker_state row for ticker as a dict, or None.
+        Reads from active table only (not archive)."""
+        if not ticker:
+            return None
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT * FROM ticker_state WHERE ticker=?",
+                (ticker.upper(),)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def mark_ticker_active(self, ticker):
+        """Refresh last_active_at without touching enrichment fields.
+        Use when a signal arrives or a position opens for ticker.
+        Idempotent — creates the row if it doesn't exist."""
+        if not ticker:
+            return False
+        ticker = ticker.upper()
+        now = self.now()
+        with self.conn() as c:
+            existing = c.execute(
+                "SELECT 1 FROM ticker_state WHERE ticker=? LIMIT 1",
+                (ticker,)
+            ).fetchone()
+            if existing:
+                c.execute(
+                    "UPDATE ticker_state SET is_active=1, last_active_at=?, "
+                    "updated_at=? WHERE ticker=?",
+                    (now, now, ticker)
+                )
+            else:
+                c.execute(
+                    "INSERT INTO ticker_state "
+                    "(ticker, is_active, first_seen_at, last_active_at, updated_at) "
+                    "VALUES (?, 1, ?, ?, ?)",
+                    (ticker, now, now, now)
+                )
+        return True
+
+    def archive_cold_tickers(self, cold_days=90, archive_days=180):
+        """Two-phase lifecycle housekeeping for ticker_state:
+
+        1. Mark tickers cold (is_active=0) when no event in `cold_days`.
+        2. Move cold rows older than `archive_days` to ticker_state_archive,
+           then delete from active table.
+
+        Returns dict with counts: {marked_cold, archived}.
+        Cheap to run; can be a daily cron."""
+        now = self.now()
+        marked_cold = 0
+        archived = 0
+        with self.conn() as c:
+            # Phase 1: cold marking
+            cur = c.execute(
+                "UPDATE ticker_state SET is_active=0, updated_at=? "
+                "WHERE is_active=1 AND last_active_at < datetime('now', ?)",
+                (now, f'-{int(cold_days)} days')
+            )
+            marked_cold = cur.rowcount
+            # Phase 2: archive — copy to archive table, then delete from active
+            cold_rows = c.execute(
+                "SELECT * FROM ticker_state "
+                "WHERE is_active=0 AND last_active_at < datetime('now', ?)",
+                (f'-{int(archive_days)} days',)
+            ).fetchall()
+            if cold_rows:
+                placeholders = ', '.join(['?'] * (len(cold_rows[0]) + 1))
+                cols = list(cold_rows[0].keys())
+                # Append archived_at column for the archive table
+                col_list = ', '.join(cols + ['archived_at'])
+                for row in cold_rows:
+                    c.execute(
+                        f"INSERT OR REPLACE INTO ticker_state_archive "
+                        f"({col_list}) VALUES ({placeholders})",
+                        (*tuple(row), now)
+                    )
+                    c.execute(
+                        "DELETE FROM ticker_state WHERE ticker=?",
+                        (row['ticker'],)
+                    )
+                archived = len(cold_rows)
+        return {'marked_cold': marked_cold, 'archived': archived}
+
     def stamp_signals_sentiment(self, ticker, sentiment_score, cycle_id=None):
         """Sentiment agent attaches a numeric score (0.0-1.0) and timestamp to
         all in-flight signals for `ticker`. Records a STAMPED_TICKER decision
