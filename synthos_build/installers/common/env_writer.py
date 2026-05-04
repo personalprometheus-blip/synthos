@@ -25,6 +25,28 @@ from typing import Optional
 log = logging.getLogger("installer.env_writer")
 
 
+# ── PORT REGISTRY ─────────────────────────────────────────────────────────────
+# Centralized so a port change happens in ONE place. History: company_server
+# was retired 2026-05-04 (it was specced for :5010 but never deployed); pi5's
+# COMPANY_URL has always pointed at synthos_monitor on :5050. The 2026-05-04
+# audit caught a stale '5010' default in build_company_env that would have
+# bricked fresh company-node installs.
+#
+# Pi2w_monitor (separate hardware fallback) is currently disabled; if it
+# returns it binds 5000. synthos_monitor on pi4b binds 5050.
+PORT_RETAIL_PORTAL = 5001         # retail_portal.py (Flask, on pi5)
+PORT_TRADER_SERVER = 8443         # synthos_trader_server.py (FastAPI, on pi5/retail-N)
+PORT_MOSQUITTO     = 1883         # MQTT broker (on pi5)
+PORT_SYNTHOS_MONITOR = 5050       # synthos_monitor.py (on pi4b — company node)
+PORT_PI2W_MONITOR    = 5000       # pi2w_monitor heartbeat receiver (currently disabled)
+
+# ── PLACEHOLDER NETWORK ENDPOINTS ─────────────────────────────────────────────
+# Default IPs are pre-ethernet-switch placeholders. After the switch is
+# installed, operators set static IPs manually (or via .env override).
+DEFAULT_COMPANY_NODE_IP = "192.168.206.172"
+DEFAULT_MONITOR_NODE_IP = "192.168.203.10"
+
+
 def _backup_existing(env_path: Path) -> Optional[Path]:
     """
     Copy existing env file to a timestamped backup.
@@ -131,7 +153,7 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"MAX_SECTOR_PCT=25",
         f"",
         f"# ── PORTAL ────────────────────────────────────────────────────",
-        f"PORTAL_PORT={config.get('portal_port', '5001')}",
+        f"PORTAL_PORT={config.get('portal_port', str(PORT_RETAIL_PORTAL))}",
         f"PORTAL_PASSWORD={config.get('portal_password', '')}",
         f"PORTAL_SECRET_KEY={generated_secret_key}",
         f"# Set to your Cloudflare tunnel URL once active.",
@@ -152,11 +174,11 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"# DHCP-assigned IP — update to static IP when ethernet switch is installed.",
         f"# MONITOR_TOKEN must exactly match SECRET_TOKEN on pi2w_monitor_node .env",
         f"# See MEMORY.md — Future Planning Notes for IP finalization checklist.",
-        f"MONITOR_URL=http://192.168.203.10:5000",
+        f"MONITOR_URL=http://{DEFAULT_MONITOR_NODE_IP}:{PORT_PI2W_MONITOR}",
         f"MONITOR_TOKEN=synthos-default-token",
         f"# Company node: pi4b — forwards alerts and event queue",
         f"# Update IP alongside MONITOR_URL when ethernet switch is installed.",
-        f"COMPANY_URL=http://192.168.206.172:5050",
+        f"COMPANY_URL=http://{DEFAULT_COMPANY_NODE_IP}:{PORT_SYNTHOS_MONITOR}",
         f"",
         f"# ── ALERTS — restore from backup ──────────────────────────────",
         f"RESEND_API_KEY=",
@@ -184,8 +206,10 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
 
 def build_monitor_env(config: dict) -> str:
     """
-    Build the .env file content for a Monitor Node (any Pi).
-    Used by synthos_monitor.py (Flask, port 5000).
+    Build the .env file content for a Monitor Node (pi2w_monitor — currently
+    disabled, see project_pi4b_cleanup_followups.md). When re-enabled this
+    will bind PORT_PI2W_MONITOR (5000) and act as the external fallback
+    heartbeat receiver. Distinct from synthos_monitor.py on pi4b.
     Returns the full file content as a string.
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -199,7 +223,7 @@ def build_monitor_env(config: dict) -> str:
         f"# ── NODE IDENTITY ─────────────────────────────────────────────",
         f"# Shared with all retail Pis as MONITOR_TOKEN.",
         f"SECRET_TOKEN={config.get('secret_token', '')}",
-        f"PORT={config.get('port', '5000')}",
+        f"PORT={config.get('port', str(PORT_PI2W_MONITOR))}",
         f"",
         f"# ── ALERT WINDOW ──────────────────────────────────────────────",
         f"# Hours during which silence alerts are sent (Eastern).",
@@ -242,7 +266,7 @@ def build_company_env(config: dict) -> str:
         f"# ── NODE IDENTITY ─────────────────────────────────────────────",
         f"COMPANY_MODE=true",
         f"SECRET_TOKEN={config.get('secret_token', '')}",
-        f"PORT={config.get('port', '5010')}",
+        f"PORT={config.get('port', str(PORT_SYNTHOS_MONITOR))}",
         f"",
         f"# ── DATABASE ──────────────────────────────────────────────────",
         f"COMPANY_DB_PATH={config.get('company_db_path', '')}",

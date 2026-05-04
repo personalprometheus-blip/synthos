@@ -10,10 +10,10 @@ A distributed algorithmic trading assistant running on Raspberry Pi hardware tha
 Phase 3 — System Validation + Normalization Sprint
 
 ## Node Architecture
-- **retail_node** (Pi 2W): trading agents, portal, local signals.db — lives in this repo (synthos_build/)
-- **process_node** (Pi 3): news/signal ingestion pipeline, article enrichment, Redis-based distribution — repo TBD; hardware in hand, SD card arriving ~2026-03-31
-- **company_node** (Pi 4B): operational agents (scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) — lives in synthos-company/
-- **monitor_node** (same Pi 4B): synthos_monitor.py on port 5050, dashboard + queue API + heartbeat receiver (formerly two services on :5000 and :5010; consolidated)
+- **retail_node** (Pi 5, deployed 2026-04-18, NVMe boot): trading agents, retail_portal, customer signals.db, ingestion pipeline (news/sentiment/screener absorbed from cancelled process_node), MQTT broker, distributed-trader server — lives in this repo (synthos_build/)
+- **company_node** (Pi 4B): operational agents (scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) + synthos_monitor.py (dashboard + queue API + heartbeat receiver, port 5050) + company_mqtt_listener.py (subscribes to pi5 broker) — lives in synthos-company/
+- **pi2w_monitor** (Pi Zero 2W): external fallback heartbeat receiver, currently disabled — planned for MQTT subscriber upgrade (see project_pi4b_cleanup_followups memory)
+- ~~**process_node** (Pi 3)~~: cancelled 2026-04-05 — news/signal ingestion absorbed into retail_node
 
 ## Where To Find Things
 - **Master project status** → PROJECT_STATUS.md (phases, cross-repo blockers, overall progress)
