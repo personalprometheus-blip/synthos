@@ -4417,7 +4417,18 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                     pos['trail_stop_amt'] = tightened
                     pos_log.note(f"Late-day tightening ({tighten*100:.0f}%): stop -> ${tightened:.2f}")
 
-        # Protective exit (urgent flag)
+        # ── Exit-decision chain (2026-05-04 control-flow fix) ────────────────
+        # Was: one elif chain — `elif not exit_reason:` always matched first,
+        # making MAX_HOLDING_TIME and PROFIT_TAKE branches unreachable for any
+        # non-urgent position. Stops still fired (5/wk on owner) but no
+        # position ever hit a profit tier despite +14%/+19% gains.
+        # Now: independent guards. Each branch only fires if exit_reason is
+        # still unset. Order = priority: urgent → stop-loss → profit-taking.
+        # MAX_HOLDING_TIME is intentionally disabled (operator decision
+        # 2026-05-04 — positions can hold past MAX_HOLDING_DAYS without a
+        # forced time-exit). To re-enable, uncomment the block below.
+
+        # A. Protective exit (urgent flag)
         if pos['ticker'] in urgent_tickers:
             exit_reason = "PULSE_EXIT"
             flag_info   = next((f for f in urgent_flags if f['ticker'] == pos['ticker']), {})
@@ -4427,8 +4438,8 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                 "detected": flag_info.get('detected_at', 'unknown'),
             }, "CASCADE signal — protective exit triggered")
 
-        # Stop loss hit (with benchmark-relative adjustment)
-        elif not exit_reason:
+        # B. Stop loss (with benchmark-relative adjustment)
+        if not exit_reason:
             effective_stop = pos.get('trail_stop_amt', 0) or 0
             # Adjust stop based on SPY correlation
             corr = compute_spy_correlation(alpaca, pos['ticker'],
@@ -4478,16 +4489,19 @@ def _run_position_management(db, alpaca, regime, session_log, now, session):
                         "spy_corr":   f"{corr:.2f}" if corr is not None else "N/A",
                     }, "stop loss triggered")
 
-        # Max holding time
-        elif holding_days > C.MAX_HOLDING_DAYS:
-            exit_reason = "MAX_HOLDING_TIME"
-            pos_log.gate("10_MAX_TIME", True, {
-                "holding_days": holding_days,
-                "max_days":     C.MAX_HOLDING_DAYS,
-            }, f"max holding time {C.MAX_HOLDING_DAYS}d exceeded")
+        # C. MAX_HOLDING_TIME — DEFERRED 2026-05-04 (operator decision).
+        # Re-enable by uncommenting this block. holding_days is computed
+        # earlier in the loop body so this is drop-in.
+        #
+        # if not exit_reason and holding_days > C.MAX_HOLDING_DAYS:
+        #     exit_reason = "MAX_HOLDING_TIME"
+        #     pos_log.gate("10_MAX_TIME", True, {
+        #         "holding_days": holding_days,
+        #         "max_days":     C.MAX_HOLDING_DAYS,
+        #     }, f"max holding time {C.MAX_HOLDING_DAYS}d exceeded")
 
-        else:
-            # Profit-taking: tiered partial sells, reduce shares in-place
+        # D. Profit-taking — tiered partial sells.
+        if not exit_reason:
             gain_pct = (current_price - pos['entry_price']) / pos['entry_price']
             last_tier = float(pos.get('last_profit_tier') or 0)
             triggered = [r for r in get_profit_rules()
