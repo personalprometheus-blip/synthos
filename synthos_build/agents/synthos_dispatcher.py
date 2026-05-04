@@ -394,12 +394,33 @@ def run_cycle(session: str = "open") -> tuple[int, int]:
         log.error("cannot import get_active_customers")
         return (0, 0)
 
-    customers = get_active_customers() or []
-    if not customers:
+    all_customers = get_active_customers() or []
+    if not all_customers:
         log.info("no active customers — skipping cycle")
         return (0, 0)
 
-    log.info(f"cycle={session} customers={len(customers)} retail={RETAIL_URL}")
+    # 2026-05-07 — Tier 7: per-customer mode filter. Dispatcher only
+    # owns customers explicitly flipped to 'distributed' (or all of
+    # them when env DISPATCH_MODE=distributed and the customer hasn't
+    # opted out via per-customer setting). Daemon owns the rest.
+    try:
+        from dispatch_mode import filter_customers_by_mode
+        customers = filter_customers_by_mode(all_customers, 'distributed')
+    except Exception as e:
+        log.warning(f"dispatch_mode resolver failed ({e}) — assuming all customers")
+        customers = all_customers
+
+    if not customers:
+        log.info(
+            f"no customers on distributed dispatch this cycle "
+            f"({len(all_customers)} total, all on daemon path)"
+        )
+        return (0, 0)
+
+    log.info(
+        f"cycle={session} dispatching {len(customers)}/{len(all_customers)} "
+        f"customers retail={RETAIL_URL}"
+    )
 
     # Build all packets first (without quotes), then collect tickers, then
     # one batched Alpaca call, then stamp quotes into every packet, then
@@ -488,16 +509,16 @@ def run_cycle(session: str = "open") -> tuple[int, int]:
 
 
 def main() -> int:
-    if DISPATCH_MODE != "distributed":
-        log.info(
-            f"DISPATCH_MODE={DISPATCH_MODE!r} (default 'daemon') — dispatcher "
-            f"is a no-op in this mode. Set DISPATCH_MODE=distributed to enable."
-        )
-        return 0
-
+    # 2026-05-07 — Tier 7 update: dispatcher no longer requires the env
+    # var to be 'distributed'. Per-customer setting can flip individual
+    # customers regardless of env default. If NO customer is on
+    # distributed mode AND env is 'daemon', the cycle is a fast no-op
+    # that just iterates an empty filtered list — cheap to leave running.
     log.info(
-        f"dispatcher starting — DISPATCH_MODE=distributed, retail={RETAIL_URL}, "
-        f"cycle={CYCLE_INTERVAL_SEC}s, http_timeout={HTTP_TIMEOUT_SEC}s"
+        f"dispatcher starting — env DISPATCH_MODE={DISPATCH_MODE!r}, "
+        f"retail={RETAIL_URL}, cycle={CYCLE_INTERVAL_SEC}s, "
+        f"http_timeout={HTTP_TIMEOUT_SEC}s "
+        f"(per-customer override via _DISPATCH_MODE setting)"
     )
     _install_signal_handlers()
 
