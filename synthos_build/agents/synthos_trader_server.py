@@ -222,25 +222,32 @@ async def work_endpoint(
     return result
 
 
-# 2026-05-04 — Trader execution serialization lock.
+# 2026-05-04 — Trader execution serialization lock (within one worker).
 #
-# The trader module has process-global state (ALPACA_API_KEY,
-# ALPACA_SECRET_KEY, ALPACA_BASE_URL, _CUSTOMER_ID, OPERATING_MODE,
-# TRADING_MODE) that we stamp from each work packet's per-customer creds
-# before calling t.run(). If two /work requests run concurrently in
-# different threads, they will RACE on these stamps and trade for the
-# wrong customer with the wrong keys.
+# The trader module reads ALPACA_API_KEY / ALPACA_SECRET_KEY /
+# ALPACA_BASE_URL / ALPACA_DATA_URL / OPERATING_MODE / TRADING_MODE /
+# _CUSTOMER_ID via Python's LOAD_GLOBAL opcode (bare-name lookups
+# inside trader functions). LOAD_GLOBAL bypasses module __getattr__
+# and reads the module __dict__ directly. So stamps must be on the
+# module dict, and concurrent stamps would race across customers.
 #
-# Until AlpacaClient is refactored to accept per-instance creds (deferred —
-# a Tier 6+ refactor across every call site in the trader), we must
-# serialize execution. This loses cross-customer parallelism within
-# trader_server, but correctness > throughput on day one.
+# The fix would be the "73-callsite refactor" — change every bare
+# reference in the trader to an accessor call (`ALPACA_API_KEY` →
+# `_get_api_key()`). Investigated 2026-05-04 and DEFERRED: high
+# maintenance cost, marginal gain over uvicorn multi-worker.
 #
-# The async-at-the-HTTP-boundary work (asyncio.to_thread, Tier 6) is
-# still useful: while one customer's trader holds this lock and waits
-# on Alpaca, the event loop is free to ACCEPT other /work requests +
-# return their deltas as soon as the lock releases. Just no overlap of
-# trader execution itself.
+# Live concurrency story:
+#   - Within ONE worker process: this _TRADER_LOCK serializes execution.
+#     Customer A finishes, stamps cleared, Customer B starts. Correct
+#     by construction — at no point are two customer's stamps live.
+#   - Across N worker processes (UVICORN_WORKERS=N, set in the
+#     install_retail_node.py systemd unit): each worker has its own
+#     module globals, its own lock. N customers run truly in parallel.
+#     Live test on Pi5: 3.3x speedup with WORKERS=3 + 5 concurrent
+#     requests.
+#
+# So the lock is the single-process correctness boundary; multi-worker
+# uvicorn is the parallelism. Both compose cleanly.
 import threading
 _TRADER_LOCK = threading.Lock()
 
@@ -249,13 +256,16 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
     """Execute one work packet end-to-end. WIRED 2026-05-04.
 
     Flow (loopback case, retail-N == process node):
-      1. Stamp trader module globals from packet (under _TRADER_LOCK)
+      1. Set per-thread request context (creds + modes) via
+         t._set_request_context — thread-local, no global mutation
       2. Call trader._apply_customer_settings() to pick up per-customer
          trading params (the CLI normally does this from auth.db)
       3. Reset per-cycle accumulators (_PENDING_ACKS, _GATE_TIMINGS_MS)
       4. Invoke t.run(session=cycle) — trader writes to local DB as usual
       5. Drain accumulators into result delta
       6. Return WorkResult
+      7. Clear per-thread context in `finally` so worker thread doesn't
+         carry stale creds into next request
 
     For the loopback case (retail-N is the process node, all DBs local),
     the trader writes positions/cash/cooling_off/orders to the customer
@@ -265,10 +275,8 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
     gate14 dispatcher-side post-trade).
 
     When retail-2 hardware exists and trader_server runs on a different
-    machine, this function will need a DB-mock layer that satisfies
-    trader's read calls from packet data and accumulates writes into
-    the delta. That's the Tier 7+ refactor; for today's skeleton+wiring
-    we lean on local DB access.
+    machine without local DB access, _execute_packet uses TRADER_DB_MODE
+    =packet to inject a WorkPacketDB mock for _db()/_shared_db().
     """
     import retail_trade_logic_agent as t
 
@@ -278,17 +286,27 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
     creds       = packet.get("alpaca_creds", {}) or {}
     state       = packet.get("state_snapshot", {}) or {}
 
-    with _TRADER_LOCK:
-        # Stamp trader module globals — AlpacaClient picks these up on
-        # construction. _CUSTOMER_ID drives _db() routing to the right
-        # customer signals.db.
-        t.ALPACA_API_KEY    = creds.get("key", "")
-        t.ALPACA_SECRET_KEY = creds.get("secret", "")
-        t.ALPACA_BASE_URL   = creds.get("base_url", "https://paper-api.alpaca.markets")
-        t.ALPACA_DATA_URL   = creds.get("data_url", "https://data.alpaca.markets")
-        t._CUSTOMER_ID      = customer_id
-        t.OPERATING_MODE    = state.get("operating_mode", "MANAGED")
-        t.TRADING_MODE      = state.get("trading_mode", "PAPER")
+    # Within-process serialization: trader reads ALPACA_API_KEY etc. via
+    # LOAD_GLOBAL (bypasses module __getattr__), so concurrent stamps
+    # would race. The lock makes Customer A's run + cleanup complete
+    # before Customer B's stamp lands. Across worker processes
+    # (UVICORN_WORKERS=N), each worker has its own lock — true
+    # parallelism via the OS process boundary.
+    _TRADER_LOCK.acquire()
+    try:
+        # Set request context (also writes to module globals — the trader's
+        # bare-name LOAD_GLOBAL reads see them). _clear_request_context in
+        # finally wipes thread-local, but module globals are overwritten by
+        # the next request's stamps anyway.
+        t._set_request_context(
+            ALPACA_API_KEY    = creds.get("key", ""),
+            ALPACA_SECRET_KEY = creds.get("secret", ""),
+            ALPACA_BASE_URL   = creds.get("base_url", "https://paper-api.alpaca.markets"),
+            ALPACA_DATA_URL   = creds.get("data_url", "https://data.alpaca.markets"),
+            _CUSTOMER_ID      = customer_id,
+            OPERATING_MODE    = state.get("operating_mode", "MANAGED"),
+            TRADING_MODE      = state.get("trading_mode", "PAPER"),
+        )
 
         # Apply per-customer trading parameters from customer_settings DB
         # (the CLI normally calls this after credential load). Best-effort —
@@ -345,6 +363,18 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
         # ── Drain accumulators ──────────────────────────────────────────
         acked_signals = list(t._PENDING_ACKS)
         gate_timings  = t.get_gate_timings_ms()
+    finally:
+        # ALWAYS clean up per-thread context AND release the lock —
+        # even if t.run() crashed mid-cycle. A worker thread serves
+        # many requests over its lifetime; stale creds from a crashed
+        # cycle would silently apply to the next customer.
+        try:
+            t._clear_request_context()
+        finally:
+            try:
+                _TRADER_LOCK.release()
+            except RuntimeError:
+                pass  # already released (paranoid; shouldn't happen)
 
     # ── Build delta ─────────────────────────────────────────────────────
     if TRADER_DB_MODE == "packet" and cust_mock_db is not None:
