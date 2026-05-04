@@ -84,6 +84,13 @@ DISPATCH_AUTH_TOKEN = os.environ.get("DISPATCH_AUTH_TOKEN", "")
 CYCLE_INTERVAL_SEC  = int(os.environ.get("DISPATCH_CYCLE_SEC", "30"))
 HTTP_TIMEOUT_SEC    = int(os.environ.get("DISPATCH_HTTP_TIMEOUT", "60"))
 
+# Alpaca data-API credentials — same key the news/signal pipeline uses
+# (one shared market-data key; per-customer keys are only needed for
+# trading actions, not quote reads).
+ALPACA_API_KEY    = os.environ.get("ALPACA_API_KEY", "")
+ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
+ALPACA_DATA_URL   = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets")
+
 # ── STATE ─────────────────────────────────────────────────────────────────
 _stop_event = Event()
 _session: requests.Session | None = None
@@ -112,6 +119,75 @@ def _get_session() -> requests.Session:
         s.headers.update({"Content-Type": "application/json"})
         _session = s
     return _session
+
+
+# ── ALPACA QUOTE PRE-FETCH (Tier 6 task 30) ──────────────────────────────
+# Dispatcher fetches all needed market data ONCE per cycle via Alpaca's
+# multi-symbol endpoint, then distributes the same quote map to every
+# customer's work packet. This eliminates ~50–150ms per ticker per
+# customer of Alpaca read latency from the trader's hot path; the only
+# Alpaca calls left in the trader are: (a) one final freshness re-check
+# on tickers it's about to trade, (b) the order placements themselves.
+
+_alpaca_data_session: requests.Session | None = None
+
+
+def _get_alpaca_session() -> requests.Session:
+    """Persistent session for Alpaca market-data calls. Reuses connection
+    + headers across cycles."""
+    global _alpaca_data_session
+    if _alpaca_data_session is None:
+        s = requests.Session()
+        s.headers.update({
+            "APCA-API-KEY-ID":     ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+        })
+        _alpaca_data_session = s
+    return _alpaca_data_session
+
+
+def prefetch_quotes(tickers: set[str]) -> dict[str, dict[str, Any]]:
+    """Fetch latest quote (bid / ask / mid) for every ticker in one batched
+    Alpaca call. Returns dict ticker → quote dict. Returns empty dict on
+    failure (callers degrade gracefully — empty quotes mean each gate
+    will fall back to its own per-ticker fetch if needed).
+
+    Uses Alpaca's multi-symbol latest-quotes endpoint which accepts
+    comma-separated symbols up to ~100 per request. Larger ticker sets
+    are chunked.
+    """
+    if not tickers or not ALPACA_API_KEY:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    unique = sorted({t.upper() for t in tickers if t})
+    CHUNK = 50
+    for i in range(0, len(unique), CHUNK):
+        chunk = unique[i:i + CHUNK]
+        try:
+            r = _get_alpaca_session().get(
+                f"{ALPACA_DATA_URL}/v2/stocks/quotes/latest",
+                params={"symbols": ",".join(chunk), "feed": "iex"},
+                timeout=(5, 15),
+            )
+            if r.status_code != 200:
+                log.warning(
+                    f"prefetch_quotes: Alpaca returned {r.status_code} for "
+                    f"{len(chunk)} tickers"
+                )
+                continue
+            quotes_map = (r.json() or {}).get("quotes") or {}
+            for sym, q in quotes_map.items():
+                bid = float(q.get("bp", 0) or 0)
+                ask = float(q.get("ap", 0) or 0)
+                mid = (bid + ask) / 2 if (bid and ask) else (bid or ask)
+                out[sym.upper()] = {
+                    "bid": bid, "ask": ask, "mid": mid,
+                    "ts": q.get("t", ""),
+                }
+        except Exception as e:
+            log.warning(f"prefetch_quotes chunk failed: {e}")
+    log.info(f"prefetch_quotes: {len(out)}/{len(unique)} tickers cached")
+    return out
 
 
 # ── WORK PACKET BUILD (per customer) ──────────────────────────────────────
@@ -303,7 +379,15 @@ def apply_delta(customer_id: str, result: dict[str, Any]) -> None:
 
 def run_cycle(session: str = "open") -> tuple[int, int]:
     """One full dispatch cycle: build + send + apply for every active
-    customer. Returns (success_count, failure_count)."""
+    customer. Returns (success_count, failure_count).
+
+    Tier 6 (task 30) addition: pre-fetch every ticker's quote in ONE
+    batched Alpaca call, then embed the resulting map in each customer's
+    packet. Big throughput gain — instead of N customers × M tickers
+    individual quote fetches inside the trader (200ms each), we do one
+    batched fetch up front (~150ms total), and the trader runs gates
+    against the in-memory map.
+    """
     try:
         from retail_shared import get_active_customers
     except ImportError:
@@ -316,20 +400,90 @@ def run_cycle(session: str = "open") -> tuple[int, int]:
         return (0, 0)
 
     log.info(f"cycle={session} customers={len(customers)} retail={RETAIL_URL}")
-    ok = fail = 0
+
+    # Build all packets first (without quotes), then collect tickers, then
+    # one batched Alpaca call, then stamp quotes into every packet, then
+    # dispatch. The build phase is fast (local SQLite) so doing it twice
+    # would be wasteful — we do it once and mutate the quotes field.
+    packets: list[dict[str, Any]] = []
     for cid in customers:
         if _stop_event.is_set():
-            break
-        packet = build_work_packet(cid, cycle=session)
-        if packet is None:
-            continue
-        result = dispatch(packet)
+            return (0, 0)
+        p = build_work_packet(cid, cycle=session)
+        if p is not None:
+            packets.append(p)
+
+    if not packets:
+        log.info("no dispatchable packets this cycle")
+        return (0, 0)
+
+    # Collect every ticker referenced across all customers' validated
+    # signals + open positions. One set, one batched fetch.
+    all_tickers: set[str] = set()
+    for p in packets:
+        for sig in p.get("signals", []) or []:
+            t = sig.get("ticker")
+            if t:
+                all_tickers.add(t)
+        state = p.get("state_snapshot", {}) or {}
+        for pos in state.get("positions", []) or []:
+            t = pos.get("ticker")
+            if t:
+                all_tickers.add(t)
+
+    quote_map = prefetch_quotes(all_tickers)
+    for p in packets:
+        # Per-packet quote subset — only include tickers this customer
+        # actually cares about, keeps packet size proportional to need.
+        wanted: set[str] = set()
+        for sig in p.get("signals", []) or []:
+            t = sig.get("ticker")
+            if t:
+                wanted.add(t.upper())
+        for pos in p.get("state_snapshot", {}).get("positions", []) or []:
+            t = pos.get("ticker")
+            if t:
+                wanted.add(t.upper())
+        p["quotes"] = {t: quote_map[t] for t in wanted if t in quote_map}
+
+    # Tier 6 task 29: dispatch all packets concurrently via thread pool
+    # instead of one-at-a-time. requests.Session is thread-safe for
+    # concurrent GETs/POSTs (each call uses its own connection from the
+    # pool). MAX_PARALLEL_DISPATCHES caps the in-flight count to avoid
+    # overwhelming the retail server or Alpaca per-customer rate limits.
+    # Each customer's POST is independent; the bottleneck per dispatch
+    # is the trader's wall-clock time on the retail side, not local CPU.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    max_parallel = int(os.environ.get("DISPATCH_MAX_PARALLEL", "8"))
+
+    ok = fail = 0
+    results: dict[str, dict[str, Any] | None] = {}
+    with ThreadPoolExecutor(max_workers=max_parallel, thread_name_prefix="dispatch") as pool:
+        future_to_cid = {pool.submit(dispatch, p): p["customer_id"] for p in packets}
+        for fut in as_completed(future_to_cid):
+            if _stop_event.is_set():
+                break
+            cid = future_to_cid[fut]
+            try:
+                results[cid] = fut.result()
+            except Exception as e:
+                log.warning(f"[{cid[:8]}] dispatch future raised: {e}")
+                results[cid] = None
+
+    # Apply deltas serially. The master DB is single-writer; serializing
+    # apply_delta keeps us out of SQLite-locked territory and also makes
+    # per-customer ordering deterministic for the audit log.
+    for cid, result in results.items():
         if result is None:
             fail += 1
             continue
         apply_delta(cid, result)
         ok += 1
-    log.info(f"cycle complete: {ok} ok, {fail} fail")
+
+    log.info(
+        f"cycle complete: {ok} ok, {fail} fail "
+        f"(parallel={max_parallel}, prefetched={len(quote_map)} quotes)"
+    )
     return (ok, fail)
 
 

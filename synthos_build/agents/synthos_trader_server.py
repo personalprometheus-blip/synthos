@@ -167,9 +167,18 @@ async def work_endpoint(
             "executed_by": os.environ.get("NODE_ID", "retail-?"),
         }
 
+    # Tier 6 task 27: run the (sync) trader in a thread so the asyncio
+    # event loop stays free to accept and process other concurrent /work
+    # requests. uvicorn already runs each request in its own coroutine
+    # context — to_thread is what gives us actual cross-customer
+    # parallelism on the same retail node. The trader code itself remains
+    # synchronous (Alpaca calls, SQLite reads in daemon mode); each
+    # customer cycle gets its own thread, and Python's GIL releases
+    # during I/O so concurrency is real.
+    import asyncio
     t0 = time.perf_counter()
     try:
-        result = _execute_packet(payload)
+        result = await asyncio.to_thread(_execute_packet, payload)
     except Exception as e:
         log.error(f"[{cid_short}] work {work_id} crashed: {e}", exc_info=True)
         result = {
