@@ -109,6 +109,16 @@ SNAPSHOT_FILES = [
 # Agents Watchdog monitors
 # managed=True  → long-running server, Watchdog keeps alive via process check
 # managed=False → cron-managed, Watchdog monitors log for errors only
+#
+# 2026-05-04 — PROFILE SCOPE NOTE: this list assumes the watchdog runs
+# on the process node (Pi5) where every agent below is potentially
+# running. On retail-N hardware (separate box, install_retail_node.py
+# installer), most of these agents do NOT exist — only synthos_trader_server
+# runs there. install_retail_node.py does NOT deploy retail_watchdog.py
+# at all; systemd's `Restart=on-failure` on the trader_server unit handles
+# crash recovery. If a retail-N watchdog is ever added (for log scanning
+# or richer telemetry), it should ship with a smaller WATCHED_AGENTS list
+# scoped to ['TraderServer'] only.
 WATCHED_AGENTS = [
     {
         "name":    "Bolt",
