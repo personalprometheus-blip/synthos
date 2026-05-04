@@ -331,7 +331,7 @@ if company_url:
 else:
     w("COMPANY_URL not set",
       "Scoop events will route via MONITOR_URL proxy (or be dropped if MONITOR_URL "
-      "also unset). Set COMPANY_URL=http://<company-pi-ip>:5010 for direct routing.")
+      "also unset). Set COMPANY_URL=http://<company-pi-ip>:5050 for direct routing.")
 
 
 # ══════════════════════════════════════════════════════════
@@ -531,7 +531,7 @@ if _req and company_url:
               f"{company_url} — {detail}")
         elif r.status_code == 401:
             p("Company Node reachable (/health)", False,
-              f"401 — /health should be unauthenticated; check company_server.py version")
+              f"401 — /health should be unauthenticated; check synthos_monitor.py version")
         else:
             p("Company Node reachable (/health)", False,
               f"HTTP {r.status_code}: {r.text[:80]}")
@@ -541,7 +541,7 @@ if _req and company_url:
           f"or proxy via monitor if MONITOR_URL is set)")
 else:
     w("Company Node test skipped",
-      "COMPANY_URL not set — set to http://<company-pi-ip>:5010 to enable direct routing")
+      "COMPANY_URL not set — set to http://<company-pi-ip>:5050 to enable direct routing")
 
 
 # ══════════════════════════════════════════════════════════

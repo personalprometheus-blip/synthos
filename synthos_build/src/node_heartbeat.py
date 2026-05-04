@@ -127,7 +127,6 @@ def _detect_agents() -> dict:
             # ── Company node (pi4b) long-running agents ───────────────────
             'scoop.py':             'scoop',
             'strongbox.py':         'strongbox',
-            'company_server.py':    'company_server',
             'company_vault.py':     'company_vault',
             'company_sentinel.py':  'company_sentinel',
             'company_archivist.py': 'company_archivist',

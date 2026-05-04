@@ -26,10 +26,9 @@ ALIAS → DESCRIPTIVE NAME MAP:
 
   Company:  scoop     = scoop.py           (email queue daemon)
             strongbox = strongbox.py        (backup manager)
-            server    = company_server.py   (ops server + dashboard)
 
-  Planned (not yet built):
-            company_vault, company_archivist, company_sentinel, company_keepalive, company_auditor
+  (synthos_monitor.py on Pi 4B :5050 is the dashboard / ops server.
+  company_server.py was retired 2026-05-04 — pi5's COMPANY_URL points at it.)
 """
 
 import os
@@ -68,14 +67,11 @@ AGENTS = {
     # ── Company Pi (built) ────────────────────────────────────────────────
     "scoop":     {"script": "scoop.py",            "log": "scoop.log",     "args": []},
     "strongbox": {"script": "strongbox.py",        "log": "strongbox.log", "args": []},
-    "server":    {"script": "company_server.py",   "log": "company_server.log", "args": []},
-    # ── Company Pi (planned — not yet built) ──────────────────────────────
-    # company_vault, company_archivist, company_sentinel, company_keepalive, company_auditor
 }
 
 RETAIL_AGENTS  = ["trader", "research", "sentiment", "screener",
                   "portal", "watchdog", "scheduler", "monitor"]
-COMPANY_AGENTS = ["scoop", "strongbox", "server"]
+COMPANY_AGENTS = ["scoop", "strongbox"]
 
 # ── ANSI COLORS ───────────────────────────────────────────────────────────────
 

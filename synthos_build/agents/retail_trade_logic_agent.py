@@ -194,8 +194,9 @@ AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 RESEND_API_KEY    = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
 USER_EMAIL        = os.environ.get('USER_EMAIL', '')
-# COMPANY_URL routes Scoop events to the Company Node (Pi 4B running company_server.py).
-# Falls back to MONITOR_URL if not set (monitor will proxy if it has COMPANY_URL configured).
+# COMPANY_URL routes Scoop events to the Company Node (Pi 4B running synthos_monitor.py
+# on port 5050). Falls back to MONITOR_URL if not set (monitor will proxy if it has
+# COMPANY_URL configured).
 COMPANY_URL       = os.environ.get('COMPANY_URL', '').rstrip('/')
 ET                = ZoneInfo("America/New_York")
 MAX_RETRIES       = 2   # Alpaca retry budget per call.
@@ -3290,7 +3291,7 @@ def _enqueue_p0_alert(subject, body, event_type, related_ticker=None, related_si
     Route a P0 alert to the Scoop queue on the Company Node.
 
     Routing priority:
-      1. COMPANY_URL  — direct to company_server.py (preferred)
+      1. COMPANY_URL  — direct to synthos_monitor.py on Pi 4B port 5050 (preferred)
       2. MONITOR_URL  — monitor proxies to company node if COMPANY_URL is set there
                         (backward-compat: works during transition before COMPANY_URL is deployed)
 

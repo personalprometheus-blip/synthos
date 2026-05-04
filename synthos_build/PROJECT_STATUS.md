@@ -57,7 +57,7 @@
 | Repo | Node | Role | Status |
 |------|------|------|--------|
 | [personalprometheus-blip/synthos](https://github.com/personalprometheus-blip/synthos) | retail_node (Pi 5, incoming) | Trading agents, portal, signals.db, ingestion pipeline | Hardware pending |
-| [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B) | Ops agents, company_server API, backups, monitoring | Active |
+| [personalprometheus-blip/synthos-company](https://github.com/personalprometheus-blip/synthos-company) | company_node (Pi 4B) | Ops agents, monitor dashboard + queue API (synthos_monitor.py :5050), backups, monitoring | Active |
 | ~~personalprometheus-blip/synthos-process~~ | ~~process_node~~ | ~~News/signal ingestion~~ | CANCELLED — merged into retail_node |
 
 ---
@@ -92,7 +92,7 @@
 
 ## Phase 2 — Company Node + Validation Infrastructure ✅ COMPLETE
 
-- [x] Company node agents deployed: scoop, strongbox, company_server (planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive)
+- [x] Company node agents deployed: scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive (synthos_monitor.py serves dashboard + queue API on :5050; company_server.py retired 2026-05-04 — never deployed)
 - [x] company_auditor.py bugs fixed (dry-run, timezone, continuous mode)
 - [x] Heartbeat architecture resolved
 - [x] Full architectural reconciliation (26 conflicts logged in CONFLICT_LEDGER.md)
@@ -258,10 +258,12 @@ All web-facing access routes through the Pi 5 retail portal (`app.synth-cloud.co
 Customers log in and see their own data. Patrick logs in as `role='admin'` and sees his trading
 dashboard plus a Company Admin link. There is no separate admin subdomain.
 
-**2. company_server.py is internal API only.**
-The Pi 4B runs `company_server.py` on port 5010 as a private backend. The Pi 5 retail portal
-calls it over the local network to serve admin data. No public domain points to it.
-`admin.synth-cloud.com` DNS and Cloudflare Access app have been removed.
+**2. synthos_monitor.py is the company-side API + dashboard.**
+The Pi 4B runs `synthos_monitor.py` on port 5050. The Pi 5 retail portal calls it over the
+local network to serve admin data. No public domain points to it. `admin.synth-cloud.com`
+DNS and Cloudflare Access app have been removed. (Originally a separate `company_server.py`
+on port 5010 was specced; routes were merged into `synthos_monitor.py` and the standalone
+file was retired 2026-05-04 — never deployed.)
 
 **3. login_server/ retired.**
 The node-picker SSO model was the wrong design. Customers do not have individual Pi nodes.
@@ -280,7 +282,7 @@ heartbeat monitor node. Reflashed 2026-04-06. See Addendum below for full setup 
 | `portal.synth-cloud.com` | redirect → app | none | Convenience redirect |
 | `ssh.synth-cloud.com` | Pi 4B port 22 | Cloudflare Access (iCloud OTP) | Admin SSH |
 | `ssh2.synth-cloud.com` | Pi 5 port 22 | Cloudflare Access (iCloud OTP) | Retail SSH |
-| ~~`admin.synth-cloud.com`~~ | removed | — | Was Pi 4B :5010 — retired |
+| ~~`admin.synth-cloud.com`~~ | removed | — | Was Pi 4B :5010 — retired (server merged into synthos_monitor :5050) |
 
 ### Portal flow
 
@@ -292,8 +294,9 @@ portal.synth-cloud.com ──redirect──▶ app.synth-cloud.com (Pi 5 :5001)
                               → trading dashboard      → trading dashboard
                                                         + [Company Admin →]
                                                               │
-                                                    Pi 4B :5010 API
-                                                    (local network only)
+                                                    Pi 4B :5050 API
+                                                    (synthos_monitor.py,
+                                                    local network only)
 ```
 
 ---
@@ -317,7 +320,7 @@ To be executed when Pi 5 arrives. All items must pass before Phase 6 considerati
 - [ ] Test customer account can log in and sees only their own data
 
 ### Company Admin Link
-- [ ] Company Admin link in retail portal points to Pi 4B `company_server.py` API
+- [ ] Company Admin link in retail portal points to Pi 4B `synthos_monitor.py` API (port 5050)
 - [ ] Admin section in portal renders company queue, agent status, and logs correctly
 - [ ] Non-admin users receive 403 if they attempt to access admin routes directly
 
@@ -330,7 +333,7 @@ To be executed when Pi 5 arrives. All items must pass before Phase 6 considerati
 - [ ] Friday push runbook tested end-to-end on Pi 5
 
 ### Company ↔ Retail Integration
-- [ ] Retail agents can reach Pi 4B `company_server.py` at local network address
+- [ ] Retail agents can reach Pi 4B `synthos_monitor.py` at local network address (port 5050)
 - [ ] Heartbeat from Pi 5 received by company_sentinel on Pi 4B
 - [ ] Scoop queue drains correctly — alerts delivered via Resend
 
@@ -402,7 +405,7 @@ SECRET_TOKEN=synthos-default-token        # must match MONITOR_TOKEN on retail P
 RESEND_API_KEY=re_NwsJo4Yh_...            # from pi4b vault
 ALERT_FROM=Synth_Alerts@synth-cloud.com
 ALERT_TO=personal_prometheus@icloud.com
-COMPANY_URL=http://192.168.206.172:5010   # pi4b company server
+COMPANY_URL=http://192.168.206.172:5050   # pi4b synthos_monitor
 ```
 
 ### Retail Pi integration — pending

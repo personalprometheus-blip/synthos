@@ -20,7 +20,7 @@ Each stream:
 
 .env keys required (synthos_build/user/.env):
     COMPANY_URL              http://<company-pi-ip>:5050
-    SECRET_TOKEN             shared token (same as company_server)
+    SECRET_TOKEN             shared token (same as synthos_monitor)
     PI_ID                    unique identifier for this retail Pi
     BACKUP_ENCRYPTION_KEY    base64 Fernet key — MUST match pi4b's key
 

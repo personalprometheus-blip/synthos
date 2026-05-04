@@ -156,7 +156,7 @@ def build_retail_env(config: dict, generated_secret_key: str) -> str:
         f"MONITOR_TOKEN=synthos-default-token",
         f"# Company node: pi4b — forwards alerts and event queue",
         f"# Update IP alongside MONITOR_URL when ethernet switch is installed.",
-        f"COMPANY_URL=http://192.168.206.172:5010",
+        f"COMPANY_URL=http://192.168.206.172:5050",
         f"",
         f"# ── ALERTS — restore from backup ──────────────────────────────",
         f"RESEND_API_KEY=",
@@ -228,7 +228,7 @@ def build_monitor_env(config: dict) -> str:
 def build_company_env(config: dict) -> str:
     """
     Build the .env file content for a Company Node (Pi 4B).
-    Used by company_server.py (Flask, port 5010) and scoop.py (queue drain daemon).
+    Used by synthos_monitor.py (Flask, port 5050) and scoop.py (queue drain daemon).
     Returns the full file content as a string.
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")

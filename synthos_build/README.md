@@ -38,7 +38,7 @@ Operational truth lives in `data/system_architecture.json`.
 | Node | Hardware | Role |
 |------|----------|------|
 | retail_node | Pi 2W | Trading agents, portal, local DB — this repo |
-| company_node | Pi 4B | Operational agents (scoop, strongbox, company_server — planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) |
+| company_node | Pi 4B | Operational agents (scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) — synthos_monitor.py serves the dashboard + queue API on :5050 |
 | monitor_node | Pi 4B (same) | Heartbeat receiver, alert routing (port 5000) |
 
 ## Current Phase

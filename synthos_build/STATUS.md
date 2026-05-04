@@ -214,7 +214,7 @@
 - Approval queue: validate_03b passing 44/44
 
 ### Phase 2 — Company Node + Validation Infrastructure
-- Company node agents operational: scoop, strongbox, company_server (planned: company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive)
+- Company node agents operational: scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive (synthos_monitor.py serves dashboard + queue API on :5050; company_server.py retired 2026-05-04 — never deployed)
 - validate_02.py passing 22/22 (portal surface)
 - validate_03b.py passing 44/44 (approval queue)
 - company_auditor.py bugs fixed (dry-run, timezone, continuous mode)

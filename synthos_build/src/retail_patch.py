@@ -114,7 +114,6 @@ PATCHABLE_FILE_MAP = {
     'strongbox.py':                     'src',
 
     # ── Company node (co-deployed on Pi 4B) ───────────────────────────────
-    'company_server.py':                'src',
     'scoop.py':                         'src',
     'install_company.py':               'src',
 
