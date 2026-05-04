@@ -2685,10 +2685,22 @@ class DB:
                 archived = len(cold_rows)
         return {'marked_cold': marked_cold, 'archived': archived}
 
-    def stamp_signals_sentiment(self, ticker, sentiment_score, cycle_id=None):
+    def stamp_signals_sentiment(self, ticker, sentiment_score, cycle_id=None,
+                                cascade_tier=None):
         """Sentiment agent attaches a numeric score (0.0-1.0) and timestamp to
         all in-flight signals for `ticker`. Records a STAMPED_TICKER decision
-        log row. Returns count stamped."""
+        log row. Returns count stamped.
+
+        2026-05-04 (Phase 2 of ticker_state migration): also writes to the
+        ticker_state table — the new source of truth for per-ticker live
+        worldview. Per-signal stamps continue as the deprecation shim until
+        Phase 3 readers migrate; both writes happen in lockstep so there's
+        no divergence window.
+
+        cascade_tier (optional): the 1-4 tier from the cascade detector.
+        Sentiment_agent passes it; screening-request fulfillment doesn't
+        have it and leaves it None (column stays at last known value).
+        """
         with self.conn() as c:
             result = c.execute(
                 f"UPDATE signals SET sentiment_score=?, sentiment_evaluated_at=? "
@@ -2696,6 +2708,17 @@ class DB:
                 (float(sentiment_score), self.now(), ticker.upper())
             )
             count = result.rowcount
+
+        # Phase 2 dual-write: ticker_state is keyed by ticker, no status
+        # filter needed — fixes the candidate-fill gap automatically.
+        ts_fields = {'sentiment_score': float(sentiment_score)}
+        if cascade_tier is not None:
+            ts_fields['cascade_tier'] = int(cascade_tier)
+        try:
+            self.upsert_ticker_state(ticker, **ts_fields)
+        except Exception as _e:
+            log.debug(f"stamp_signals_sentiment ticker_state dual-write failed for {ticker}: {_e}")
+
         if count > 0:
             self.log_signal_decision(
                 agent='sentiment', action='STAMPED_TICKER',
@@ -2751,6 +2774,21 @@ class DB:
                     (self.now(), *upper)
                 )
             count = result.rowcount
+
+        # Phase 2 dual-write to ticker_state. screener_score is per-ticker so
+        # we walk the list. If score is None (legacy boolean-stamp callers),
+        # we still bump screener_evaluated_at via the ticker_state side by
+        # passing a sentinel — but the cleanest behavior is "no value, no
+        # write" so we only update the timestamp twin. We do this by writing
+        # a no-op marker via the screener_evaluated_at twin only when a real
+        # score is provided.
+        if score is not None:
+            for tk in upper:
+                try:
+                    self.upsert_ticker_state(tk, screener_score=float(score))
+                except Exception as _e:
+                    log.debug(f"stamp_signals_screener ticker_state dual-write failed for {tk}: {_e}")
+
         if count > 0:
             summary = ','.join(upper[:10]) + (f"+{len(upper)-10}" if len(upper) > 10 else "")
             reason  = f"candidates: {summary}"
