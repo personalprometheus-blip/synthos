@@ -4981,6 +4981,33 @@ def run(session='open'):
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('trade_logic_agent', long_running=False)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
+    # 2026-05-04 — In `distributed` mode the trader is invoked in-process by
+    # synthos_trader_server (FastAPI), which receives credentials/state in
+    # the work packet rather than parsing argv + reading auth.db. Direct
+    # CLI invocation is still supported for debugging (set --force-cli to
+    # bypass this guard), but the default case warns and exits to avoid
+    # subtle bugs where someone runs the script directly and gets stale
+    # daemon-mode behavior they didn't expect.
+    if DISPATCH_MODE == 'distributed' and '--force-cli' not in sys.argv:
+        log.warning(
+            "DISPATCH_MODE=distributed: trader CLI invocation is not the "
+            "supported path. The HTTP server (synthos_trader_server) drives "
+            "the trader in distributed mode. Pass --force-cli to override "
+            "for one-off debugging."
+        )
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(description='Synthos — ExecutionAgent (Agent 1)')
     parser.add_argument('--session', choices=['open', 'midday', 'close', 'hourly'], default='hourly')
     parser.add_argument('--customer-id', default=None,
@@ -4989,6 +5016,10 @@ if __name__ == '__main__':
                         help='Force MANAGED mode — trades queue as pending_approvals instead '
                              'of executing. Used by retail_dry_run.py so pipeline tests do '
                              'not submit real paper orders on AUTOMATIC customers.')
+    parser.add_argument('--force-cli', action='store_true',
+                        help='Override the DISPATCH_MODE=distributed CLI guard. Use only for '
+                             'one-off debugging — production trades in distributed mode go '
+                             'through synthos_trader_server.')
     args = parser.parse_args()
 
     # ── Multi-tenant: load per-customer credentials if --customer-id is given ──

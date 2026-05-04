@@ -88,6 +88,11 @@ REQUIRED_PACKAGES = [
     # 2026-05-03 — alpaca-trade-api removed: trader uses custom AlpacaClient
     # wrapper in retail_trade_logic_agent.py (built on `requests`), not the
     # legacy SDK. Was installed but never imported.
+    "paho-mqtt",          # 2026-05-04 — telemetry plane (Mosquitto broker on
+                          # process node). Used by mqtt_client.py + heartbeat.py
+                          # + price_poller + macro_regime_agent. Lazy-imported
+                          # so missing install does not crash agents — they
+                          # degrade to SQLite-only writes.
     "resend",
     "cryptography",       # Fernet encryption for auth.db (v3.0)
     "itsdangerous",
@@ -494,6 +499,7 @@ def verify_installation() -> tuple[bool, list[str]]:
         "requests": "requests",
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
+        "paho-mqtt": "paho.mqtt.client",
         "resend": "resend",
     }
     for pip_name, import_name in pkg_import_map.items():
