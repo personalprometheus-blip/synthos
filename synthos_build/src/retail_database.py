@@ -2193,6 +2193,58 @@ class DB:
 
     # ── SIGNALS ────────────────────────────────────────────────────────────
 
+    # Variant sector names from external sources (sector_screening, third-party
+    # APIs) that need to be normalized to the canonical ticker_sectors set
+    # so the bias-detection agent doesn't treat them as separate buckets.
+    _SECTOR_NORMALIZE = {
+        'Consumer Discretionary': 'Consumer Cyclical',
+        'Consumer Staples':       'Consumer Defensive',
+        'Materials':              'Basic Materials',
+        'Communications':         'Communication Services',
+        'Information Technology': 'Technology',
+        'Financials':             'Financial Services',
+    }
+
+    def _resolve_ticker_meta(self, ticker):
+        """Look up sector + company for a ticker via ticker_sectors → tradable_assets.
+
+        Returns (sector, company) tuple, either may be None if no match.
+        Used by upsert_signal to backfill sector/company at insert time
+        when the caller doesn't provide them — the 2026-05-04 funnel
+        audit showed benzinga news signals were arriving with sector=NULL
+        ~70% of the time, which the validator then turned into
+        BLOCK_SECTOR_UNKNOWN restrictions that throttled trade flow.
+        """
+        sector, company = None, None
+        try:
+            with self.conn() as c:
+                row = c.execute(
+                    "SELECT sector FROM ticker_sectors WHERE ticker=? LIMIT 1",
+                    (ticker.upper(),)
+                ).fetchone()
+                if row and row[0]:
+                    sector = self._SECTOR_NORMALIZE.get(row[0], row[0])
+                # Fallback to sector_screening if ticker_sectors didn't have it
+                if not sector:
+                    row = c.execute(
+                        "SELECT sector FROM sector_screening "
+                        "WHERE ticker=? AND sector IS NOT NULL "
+                        "ORDER BY id DESC LIMIT 1",
+                        (ticker.upper(),)
+                    ).fetchone()
+                    if row and row[0]:
+                        sector = self._SECTOR_NORMALIZE.get(row[0], row[0])
+                # tradable_assets carries the company name for any Alpaca-listed ticker
+                row = c.execute(
+                    "SELECT name FROM tradable_assets WHERE ticker=? LIMIT 1",
+                    (ticker.upper(),)
+                ).fetchone()
+                if row and row[0]:
+                    company = row[0]
+        except Exception as _e:
+            log.debug(f"_resolve_ticker_meta({ticker}) failed: {_e}")
+        return sector, company
+
     def upsert_signal(self, ticker, source, source_tier, headline,
                       politician=None, tx_date=None, disc_date=None,
                       amount_range=None, confidence="MEDIUM",
@@ -2202,6 +2254,13 @@ class DB:
         """
         Insert a new signal or update if same ticker+tx_date already exists.
         Returns signal id.
+
+        sector and company are auto-resolved from ticker_sectors +
+        tradable_assets if the caller doesn't supply them. This keeps
+        every signal — regardless of source (benzinga, edgar_form4,
+        candidate) — at parity with the screener's gold-standard
+        completeness, so the validator never sees an unknown-sector
+        signal that would otherwise trigger BLOCK_SECTOR_UNKNOWN.
         """
         # Deduplication check — same ticker + tx_date = same disclosure
         with self.conn() as c:
@@ -2214,6 +2273,20 @@ class DB:
             if existing:
                 log.info(f"Signal dedup: {ticker} {tx_date} already exists (id={existing['id']}, status={existing['status']})")
                 return existing['id']
+
+            # Auto-resolve sector + company at insert time so the validator
+            # gets complete data on every signal. Caller-provided values win.
+            if not sector or not company:
+                resolved_sector, resolved_company = self._resolve_ticker_meta(ticker)
+                if not sector:
+                    sector = resolved_sector
+                if not company:
+                    company = resolved_company
+
+            # Normalize a caller-supplied sector too (some upstream feeds
+            # use "Financials" / "Consumer Discretionary" variants).
+            if sector:
+                sector = self._SECTOR_NORMALIZE.get(sector, sector)
 
             # Calculate expiry based on tier
             expiry_days = {1:30, 2:7, 3:2, 4:1}.get(source_tier, 7)
@@ -2238,7 +2311,7 @@ class DB:
                   discard_del, self.now(), self.now(), image_url, source_url))
 
             sig_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
-            log.info(f"New signal: {ticker} T{source_tier} {confidence} — id={sig_id}")
+            log.info(f"New signal: {ticker} T{source_tier} {confidence} sec={sector or '?'} — id={sig_id}")
             return sig_id
 
     # ── PER-AGENT STAMPS ───────────────────────────────────────────────────
