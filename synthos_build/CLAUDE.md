@@ -62,6 +62,27 @@ that changes the system.
   `python3 -c "import json; json.load(open('synthos_build/data/system_architecture.json'))"`
 - A broken JSON breaks the entire portal page — never push unvalidated
 
+**Completeness check before bumping the version:**
+
+Use the diff to verify every code change in this commit has a JSON
+counterpart. Common pattern: forget to register a newly-shipped tier or
+agent, then a follow-up "v3.X+1" bump lands the missing pieces minutes
+later. **Same-day double-bumps mean the first one missed something —
+catch it the first time.**
+
+Quick one-liner to surface what you might be missing:
+```sh
+# Newly-added .py files in the staged commit (these need agent entries)
+git diff --cached --diff-filter=A --name-only -- 'synthos_build/**/*.py'
+
+# Files renamed or removed (these need an arch.json update too)
+git diff --cached --diff-filter=DR --name-only -- 'synthos_build/**/*.py'
+```
+For each result, confirm there's a matching change in the JSON — agents/
+DBs/services arrays, telemetry_agents, trader_gates, or
+distributed_trader_tiers as appropriate. If the table above doesn't
+cover your change, add a row to it as part of the same commit.
+
 **Visual layout coordinates are in the TEMPLATE, not the JSON.** The
 positioning of nodes / agents / DBs on the topology map (`x`, `y`, `w`,
 `h` props) lives in `synthos-company/templates/system_map.html` under

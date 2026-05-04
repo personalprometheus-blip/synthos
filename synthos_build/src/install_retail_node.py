@@ -3,6 +3,16 @@
 install_retail_node.py — Synthos Retail-N Node Installer
 Synthos · 2026-05-04 (Phase B of distributed-trader migration)
 
+⚠️  DEFERRED — NOT CURRENTLY DEPLOYED (audit 2026-05-04)
+   Designed for retail-1 / retail-2 / ... hardware that doesn't exist yet.
+   Production today runs trader_server in loopback on pi5 (the process
+   node) — install_retail.py covers that path. Once retail-N hardware
+   ships, this installer is the runway for cutover. Until then it's
+   intentional WIP — keep it consistent with install_retail.py changes
+   so the day we cutover the runway is short.
+   See project_triple_node_migration + project_pi4b_cleanup_followups
+   memories for the broader context.
+
 This is the MINIMAL installer for a retail trader node (retail-1, retail-2,
 ...). A retail-N node only runs the synthos_trader_server HTTP service
 that receives work packets from the dispatcher on the process node.

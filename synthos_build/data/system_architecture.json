@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-05-04T02:30:00-04:00",
-    "version": "3.29"
+    "last_updated": "2026-05-04T13:30:00-04:00",
+    "version": "3.30"
   },
   "nodes": [
     {
@@ -291,7 +291,15 @@
       {"tier": 6, "name": "Tier 6 — async + parallel dispatch", "status": "complete (verified 4.9x speedup)", "shipped": "2026-05-04", "highlights": ["server /work runs in asyncio.to_thread", "dispatcher fans 8 concurrent POSTs via ThreadPoolExecutor", "Alpaca quotes pre-fetched batched per cycle", "src/async_alpaca_client.py ready for full async refactor"]},
       {"tier": 7, "name": "Tier 7 — per-customer migration tooling", "status": "complete (operator-driven cutover)", "shipped": "2026-05-04", "highlights": ["src/dispatch_mode.py per-customer resolver", "agents/synthos_migration.py CLI", "docs/CUTOVER_RUNBOOK.md", "market_daemon + dispatcher both filter by per-customer mode"]}
     ],
-    "current_state": "All 13 active customers on daemon mode. No customer migrated to distributed yet (operator decision per CUTOVER_RUNBOOK.md). Dispatcher runs idle if no distributed customers — cheap no-op."
+    "current_state": {
+      "as_of": "2026-05-04",
+      "summary": "2 customers on distributed mode; the rest fall back to env DISPATCH_MODE default (daemon).",
+      "distributed_customer_id_prefixes": ["c5fc97cc", "46b10ff0"],
+      "first_migrated": "2026-05-04T07:11:08-04:00",
+      "rollout_paused": "Operator gating further migrations on v2 customer test compatibility. See project_pi4b_cleanup_followups memory.",
+      "refresh_command": "python3 synthos_build/agents/synthos_migration.py status  (run on pi5)",
+      "audit_trail": "DISPATCH_MODE_CHANGE events in each customer's signals.db.system_log; persistence in customer_settings._DISPATCH_MODE."
+    }
   },
   "telemetry_agents": {
     "_note": "Every long-running and subprocess agent now publishes a heartbeat to the MQTT broker on Pi5:1883. Topic shape: process/heartbeat/<node>/<agent>. Long-running agents publish every 30s via background thread + LWT. Subprocess agents publish a single one-shot at startup. company_mqtt_listener on pi4b subscribes to wildcard topics and persists every observation to auditor.db.mqtt_observations.",

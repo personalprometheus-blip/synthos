@@ -2,6 +2,14 @@
 work_packet_db.py — In-memory DB substitute that satisfies the trader's
 read calls from work-packet data and accumulates writes into delta dicts.
 
+⚠️  DEFERRED — NOT CURRENTLY ACTIVATED (audit 2026-05-04)
+   Activated only when TRADER_DB_MODE=packet on trader_server. Production
+   today runs TRADER_DB_MODE=local (loopback: trader_server on the same
+   machine as the customer DBs). This mock is the seam that lets a future
+   retail-1 node run the trader without local DBs — required infrastructure
+   for cross-machine deployment, but no retail-N hardware exists today.
+   See project_pi4b_cleanup_followups.md memory for the broader context.
+
 Created 2026-05-04 as Phase A of the retail-1-readiness plan
 (distributed-trader migration Tier 7+).
 

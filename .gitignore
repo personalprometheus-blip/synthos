@@ -44,3 +44,13 @@ synthos_build/data/migrations/
 reports/*.pdf
 reports/*.csv
 reports/*.html
+
+# Operator scratchpads — handoff/audit notes from ad-hoc Claude sessions.
+# Useful as ephemeral context; not deployable, not authoritative. Anything
+# worth keeping should graduate into documentation/ or a memory file.
+.claude/*.md
+
+# WIP onboarding screenshots — operator captures these during signup-flow
+# documentation sweeps. Un-gitignore (or commit with -f) when the set is
+# complete and ready to publish as part of onboarding docs.
+synthos_build/static/setup/

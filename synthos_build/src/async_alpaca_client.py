@@ -1,6 +1,16 @@
 """
 async_alpaca_client.py — Async-native Alpaca client built on httpx.
 
+⚠️  DEFERRED — NOT CURRENTLY ACTIVATED (audit 2026-05-04)
+   Defined in this file but not instantiated anywhere. The trader
+   (synthos_trader_server.py and the daemon-mode trader) still uses the
+   sync `AlpacaClient` in agents/retail_trade_logic_agent.py. This class
+   is the planned async successor for when /work execution is rewritten
+   to issue Alpaca calls concurrently within a single customer cycle
+   (Tier 6 follow-up). Until then it's intentional WIP — do not delete,
+   do not depend on it being maintained for current trading paths.
+   See project_pi4b_cleanup_followups.md memory for the broader context.
+
 Created 2026-05-04 as Tier 6 of the distributed-trader migration.
 
 WHY THIS IS A SEPARATE CLASS (not a refactor of AlpacaClient):
