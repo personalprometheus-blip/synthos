@@ -85,7 +85,9 @@ REQUIRED_PACKAGES = [
     "requests",
     "python-dotenv",
     "anthropic",
-    "alpaca-trade-api",
+    # 2026-05-03 — alpaca-trade-api removed: trader uses custom AlpacaClient
+    # wrapper in retail_trade_logic_agent.py (built on `requests`), not the
+    # legacy SDK. Was installed but never imported.
     "resend",
     "cryptography",       # Fernet encryption for auth.db (v3.0)
     "itsdangerous",
@@ -492,7 +494,6 @@ def verify_installation() -> tuple[bool, list[str]]:
         "requests": "requests",
         "python-dotenv": "dotenv",
         "anthropic": "anthropic",
-        "alpaca-trade-api": "alpaca_trade_api",
         "resend": "resend",
     }
     for pip_name, import_name in pkg_import_map.items():
