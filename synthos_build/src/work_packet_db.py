@@ -244,22 +244,22 @@ class WorkPacketDB:
     # WRITE METHODS — accumulate into delta_* fields
     # ──────────────────────────────────────────────────────────────────
 
-    def acknowledge_signal(self, signal_id: str) -> None:
+    def acknowledge_signal(self, signal_id: str, *args, **kwargs) -> None:
         if signal_id and signal_id not in self.delta_acked_signal_ids:
             self.delta_acked_signal_ids.append(signal_id)
 
-    def acknowledge_urgent_flag(self, flag_id: str) -> None:
+    def acknowledge_urgent_flag(self, *args, **kwargs) -> None:
         # Urgent flags not tracked per-cycle in packet. Silently accept.
         pass
 
-    def add_notification(self, kind: str, title: str, body: str, meta: dict | None = None) -> None:
+    def add_notification(self, kind: str = "", title: str = "", body: str = "", *args, **kwargs) -> None:
         self.delta_log_events.append({
             "event": "NOTIFICATION_ADDED",
             "agent": "trade_logic_agent",
-            "details": json.dumps({"kind": kind, "title": title, "body": body, "meta": meta or {}})[:1000],
+            "details": json.dumps({"kind": kind, "title": title, "body": body, "meta": kwargs.get("meta") or {}}, default=str)[:1000],
         })
 
-    def check_bil_concentration(self) -> bool:
+    def check_bil_concentration(self, *args, **kwargs) -> bool:
         # Returns True if BIL concentration is at/over limit. Without
         # concentration tracking in packet, conservative answer = False
         # (not over limit) so trader doesn't auto-exit BIL on every
@@ -289,11 +289,11 @@ class WorkPacketDB:
                 return True
         return False
 
-    def enqueue_scoop_email(self, **kwargs) -> None:
+    def enqueue_scoop_email(self, *args, **kwargs) -> None:
         self.delta_log_events.append({
             "event": "SCOOP_EMAIL_QUEUED",
             "agent": "trade_logic_agent",
-            "details": json.dumps(kwargs, default=str)[:1000],
+            "details": json.dumps({"args": list(args), **kwargs}, default=str)[:1000],
         })
 
     def expire_stale_approvals(self, *args, **kwargs) -> int:
@@ -303,44 +303,40 @@ class WorkPacketDB:
         # can call without crashing.
         return 0
 
-    def log_api_call(self, **kwargs) -> None:
+    def log_api_call(self, *args, **kwargs) -> None:
         # API call logging is high-volume; skip in packet mode to keep
-        # delta payload small. Production observability comes from
-        # Alpaca dashboard + per-cycle gate timings.
+        # delta payload small.
         pass
 
-    def log_event(self, event: str, agent: str = "", details: str = "") -> None:
+    def log_event(self, event: str = "", agent: str = "", details: str = "", *args, **kwargs) -> None:
         self.delta_log_events.append({
             "event": event,
             "agent": agent,
-            "details": details,
+            "details": str(details),
         })
 
-    def log_heartbeat(self, agent_name: str, status: str) -> None:
+    def log_heartbeat(self, *args, **kwargs) -> None:
         # Heartbeats already covered by MQTT register_telemetry().
+        # Trader passes various kwargs (status, portfolio_value, ...).
         pass
 
-    def log_scan(self, **kwargs) -> None:
+    def log_scan(self, *args, **kwargs) -> None:
         pass
 
-    def log_signal_decision(self, **kwargs) -> None:
-        self.delta_signal_decisions.append(dict(kwargs))
+    def log_signal_decision(self, *args, **kwargs) -> None:
+        self.delta_signal_decisions.append({"args": list(args), **kwargs})
 
-    def mark_order_failed(self, **kwargs) -> None:
+    def mark_order_failed(self, *args, **kwargs) -> None:
         self.delta_log_events.append({
             "event": "ORDER_FAILED",
             "agent": "trade_logic_agent",
-            "details": json.dumps(kwargs, default=str)[:1000],
+            "details": json.dumps({"args": list(args), **kwargs}, default=str)[:1000],
         })
 
-    def mark_order_recorded(self, **kwargs) -> None:
-        # Bookkeeping that daemon-mode uses to track submitted-vs-filled.
-        # In packet mode we let the order's actual fill come back via
-        # the trader's _resolve_fill_price polling and rely on
-        # open_position to record the real entry.
+    def mark_order_recorded(self, *args, **kwargs) -> None:
         pass
 
-    def open_position(self, **kwargs) -> dict:
+    def open_position(self, *args, **kwargs) -> dict:
         new_pos = dict(kwargs)
         new_pos.setdefault("status", "OPEN")
         self._positions.append(new_pos)
@@ -359,12 +355,12 @@ class WorkPacketDB:
             self.delta_cash_delta -= cost
         return new_pos
 
-    def record_submitted_order(self, **kwargs) -> None:
-        entry = dict(kwargs)
+    def record_submitted_order(self, *args, **kwargs) -> None:
+        entry = {**({f"_arg{i}": a for i, a in enumerate(args)}), **kwargs}
         self._recent_bot_orders.append(entry)
         self.delta_recent_bot_orders_added.append(entry)
 
-    def reduce_position(self, ticker: str, qty_delta: float, **kwargs) -> bool:
+    def reduce_position(self, ticker: str, qty_delta: float, *args, **kwargs) -> bool:
         t = (ticker or "").upper()
         for p in self._positions:
             if p.get("ticker", "").upper() == t and (p.get("status") or "OPEN") == "OPEN":
@@ -388,13 +384,13 @@ class WorkPacketDB:
         self.delta_setting_changes[key] = value
         self._customer_settings[key] = value
 
-    def sweep_monthly_tax(self, **kwargs) -> int:
+    def sweep_monthly_tax(self, *args, **kwargs) -> int:
         return 0
 
-    def update_member_weight_after_trade(self, **kwargs) -> None:
+    def update_member_weight_after_trade(self, *args, **kwargs) -> None:
         pass
 
-    def update_portfolio(self, **kwargs) -> None:
+    def update_portfolio(self, *args, **kwargs) -> None:
         for k, v in kwargs.items():
             if k == "cash_delta":
                 self._portfolio["cash"] = (self._portfolio.get("cash", 0) or 0) + float(v or 0)
@@ -402,7 +398,7 @@ class WorkPacketDB:
             else:
                 self._portfolio[k] = v
 
-    def update_position_price(self, ticker: str, price: float) -> bool:
+    def update_position_price(self, ticker: str, price: float = 0, *args, **kwargs) -> bool:
         t = (ticker or "").upper()
         for p in self._positions:
             if p.get("ticker", "").upper() == t:
@@ -410,7 +406,7 @@ class WorkPacketDB:
                 return True
         return False
 
-    def update_profit_tier(self, **kwargs) -> None:
+    def update_profit_tier(self, *args, **kwargs) -> None:
         pass
 
     def update_trail_stop(self, ticker: str, **kwargs) -> bool:
