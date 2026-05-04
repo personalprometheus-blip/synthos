@@ -2,7 +2,31 @@
 
 > Shared todo list — editable in Obsidian, git-tracked, used by Claude for context.
 > **Checkbox syntax**: `- [ ]` pending, `- [x]` done. Feel free to reorder, add, or delete.
-> Last sync: 2026-05-02 (post pi4b auditor deep-dive — 0 unresolved; week summary captured)
+> Last sync: 2026-05-04 (post 5-day sprint audit; experiment + condition-sensitive sections added)
+
+---
+
+## 🧪 Active Experiments
+
+Tracker only. Details live further down or in their own docs / migration scripts.
+
+| Experiment | Status | What's being tested | Off-ramp |
+|---|---|---|---|
+| **Per-customer dispatch mode (daemon → distributed)** | ⚙️ ROLLING — 2 of 13 | Per-customer routing through `synthos_dispatcher` → `synthos_trader_server` HTTP RPC instead of subprocess fan-out | Migrate everyone, then retire daemon — *gated on confirming v2 customer test still works under distributed mode* |
+| **Conservative / Moderate / Aggressive position-sizing presets** | 🛑 SHUT DOWN 2026-05-04 | Three preset tiers letting customers pick sizing aggression | Everyone defaulted to moderate. UI already locked to moderate-only since 2026-04-30. Re-implement when customer-selectable sizing returns; for now system tunes via average scores + history. |
+| **BIL treasury reserve (fleet-wide)** | 🛑 SHUT DOWN 2026-05-04 | Idle-cash parking in BIL ETF (was on for conservative+moderate, off for aggressive) | Function proven. Disabling fleet-wide to test off-ramp UX: trader winds down existing BIL on next cycle when toggle flips off (auto-runs-out-on-its-own). Customer-side "sell now" button is a future portal task if needed. |
+| **Customer v2 trade style** | 🟢 ACTIVE — Victor only | New trade-style focus on a single customer pre-rollout | Ongoing — keeps running as everyone migrates to distributed mode. |
+
+## ⏰ Time- and Condition-Sensitive
+
+Items gated on external timing (operator absence, hardware deliveries, market hours, dependent-experiment outcomes).
+
+- [ ] **Pre-trip SD mitigations** — before operator is away 3 weeks. Subitems below in "Active this week."
+- [ ] **SD card swap on pi4b** — waiting on powered USB hub delivery.
+- [ ] **Stop-loss 15:00–16:00 ET window verification** — `LATE_DAY_TIGHTEN_PCT=0.0` deployed 2026-04-21; needs ≥4 trading days to confirm pattern is gone (now have it, just pull `exit_performance`).
+- [ ] **Migrate remaining 11 customers to distributed dispatch mode** — gated on confirming v2 customer test compatibility under distributed.
+- [ ] **Retire daemon-mode trader path** — only after 100% distributed cutover.
+- [ ] **Cash-deployment investigation** (Patrick personal account) — `~$30k` cash sitting idle outside BIL on the personal account. Need to determine: is the trader receiving but skipping signals, or are gates (validator / fault / regime / position-cap) suppressing? Pull a recent cycle's gate-trip log + signal pool count for `30eff008` and decide whether `MAX_POSITION_PCT` / `MAX_EXPOSURE_PCT` need raising or signal supply needs broadening. Holding off on changes until BIL wind-down completes (frees the additional `~$20k`) — don't tune two knobs at once.
 
 ---
 

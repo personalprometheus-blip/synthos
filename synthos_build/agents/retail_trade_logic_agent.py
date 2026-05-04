@@ -3464,10 +3464,11 @@ def _reconcile_position_qty(db, alpaca_pos):
 # ── BIL RESERVE (KEEP from v1.x — REVIEW: integrate into Gate 11) ────────────
 
 def sync_bil_reserve(db, alpaca):
-    # Check per-customer BIL setting
-    if not getattr(C, 'ENABLE_BIL_RESERVE', True):
-        log.info('[BIL] Treasury reserve disabled by customer setting')
-        return
+    # Check per-customer BIL setting. When disabled we don't return immediately —
+    # if there's still an existing BIL position, wind it down on this cycle so
+    # the customer's "BIL off" toggle has a visible effect (cash returns to
+    # the deployable pool). Only after the position is empty do we no-op.
+    bil_enabled = getattr(C, 'ENABLE_BIL_RESERVE', True)
     try:
         account   = alpaca.get_account()
         if not account:
@@ -3476,6 +3477,24 @@ def sync_bil_reserve(db, alpaca):
         free_cash = float(account.get('cash', 0))
         bil_pos   = alpaca.get_position_safe(C.BIL_TICKER)
         bil_value = float(bil_pos.get('market_value', 0)) if bil_pos else 0.0
+
+        if not bil_enabled:
+            if bil_value <= 0:
+                # Disabled and nothing held — clean state, nothing to do.
+                return
+            # Disabled with an active position: customer flipped the toggle
+            # off (or fleet-wide deactivation 2026-05-04). Liquidate the full
+            # position so the cash returns to the deployable pool. Single-
+            # cycle wind-down is the right UX: the customer saw an immediate
+            # toggle change in the portal; the trader honoring it on the
+            # next cycle matches that expectation.
+            log.info(f"[BIL] Reserve disabled — winding down ${bil_value:.2f} position")
+            if alpaca.close_position(C.BIL_TICKER):
+                db.log_event("BIL_WIND_DOWN", agent="Trade Logic",
+                             details=f"Sold all BIL (${bil_value:.2f}) — reserve disabled by customer")
+                # close_position() at Alpaca → BIL ticker becomes a ghost on
+                # next cycle; gate0's existing ghost-detection cleans up.
+            return
         # Use equity (not cash + bil) to avoid margin-inflated totals
         total_liq = equity
         target    = round(total_liq * C.IDLE_RESERVE_PCT, 2)
