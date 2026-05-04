@@ -8242,6 +8242,17 @@ auth.ensure_owner_customer()
 log.info(f"Synthos Portal initialized — port {PORT} | Pi: {PI_ID}")
 
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('portal', long_running=True)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     # Dev-only fallback (production uses gunicorn)
     log.info(f"Starting Flask dev server on port {PORT}")
     log.info(f"Kill switch: {'ACTIVE' if kill_switch_active() else 'clear'}")
