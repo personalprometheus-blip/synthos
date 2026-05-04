@@ -107,12 +107,75 @@ from retail_shared import (
 )
 
 # ── ENVIRONMENT ───────────────────────────────────────────────────────────────
+#
+# 2026-05-04 — Per-request module globals + thread-local stamping.
+#
+# These 7 names (ALPACA_API_KEY / ALPACA_SECRET_KEY / ALPACA_BASE_URL /
+# ALPACA_DATA_URL / OPERATING_MODE / TRADING_MODE / _CUSTOMER_ID) are
+# request-scoped: each /work request needs its own values for the
+# customer being served. They live as MODULE GLOBALS — Python's
+# LOAD_GLOBAL opcode reads from the module's __dict__ and bypasses
+# any module-level __getattr__, so making these bare names resolve
+# through thread-local would require changing all 73 read sites in
+# the trader (`ALPACA_API_KEY` → `_get_api_key()` style). That's the
+# "73-call-site refactor" we explored 2026-05-04 and DEFERRED.
+#
+# Concurrency strategy without that refactor:
+#
+#   1. Process-level concurrency (the live answer):
+#      uvicorn runs multiple worker processes (UVICORN_WORKERS=3 on
+#      retail-N nodes per install_retail_node.py). Each worker is a
+#      fully separate Python process with its own module globals, so
+#      stamping is per-worker, no cross-customer race. Tested live on
+#      Pi5 — 5 concurrent requests across 3 workers gives 3.3x speedup.
+#
+#   2. Within a single process: trader_server uses a threading.Lock
+#      (_TRADER_LOCK) to serialize execution. Customer A's stamp is
+#      cleaned up before Customer B's stamp lands. Cost: serial within
+#      one worker, but workers 2..N can run concurrently in parallel
+#      processes.
+#
+# The threading.local + _set_request_context / _clear_request_context
+# helpers below are KEPT (no-op for the trader's own internal reads,
+# but useful for trader_server to stamp safely without lifting the
+# lock). When the day comes that single-process concurrency matters,
+# the path forward is the 73-callsite mass-rename — a finite, well-
+# scoped refactor.
 ALPACA_API_KEY    = os.environ.get('ALPACA_API_KEY', '')
 ALPACA_SECRET_KEY = os.environ.get('ALPACA_SECRET_KEY', '')
 ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
 ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
 OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
+
+import threading as _threading_for_request_ctx
+_request_local = _threading_for_request_ctx.local()
+
+_REQUEST_SCOPED_NAMES = (
+    'ALPACA_API_KEY', 'ALPACA_SECRET_KEY', 'ALPACA_BASE_URL', 'ALPACA_DATA_URL',
+    'TRADING_MODE', 'OPERATING_MODE', '_CUSTOMER_ID',
+)
+
+def _set_request_context(**kwargs):
+    """Set per-thread + module-global request-scoped vars under the
+    caller's lock. The thread-local is for any future code path that
+    reads via the helper (none exist today — 73-callsite refactor
+    deferred). The module-global write is what the trader's bare-name
+    LOAD_GLOBAL reads see."""
+    for k, v in kwargs.items():
+        if k not in _REQUEST_SCOPED_NAMES:
+            log.warning(f"_set_request_context: ignoring unknown var {k}")
+            continue
+        setattr(_request_local, k, v)
+        # Module-global stamp (trader code reads bare names via LOAD_GLOBAL)
+        globals()[k] = v
+
+def _clear_request_context():
+    """Wipe per-thread state. Module globals are NOT cleared — the
+    next _set_request_context call will overwrite them under lock."""
+    for k in _REQUEST_SCOPED_NAMES:
+        if hasattr(_request_local, k):
+            delattr(_request_local, k)
 # 2026-05-03 — DISPATCH_MODE selects how the trader is invoked:
 #   "daemon"       (default) — current single-box behavior. CLI subprocess
 #                  spawned by retail_market_daemon / retail_scheduler. File
@@ -571,8 +634,10 @@ def _apply_customer_settings():
 
         # Per-customer operating mode
         if 'OPERATING_MODE' in settings:
-            global OPERATING_MODE
-            OPERATING_MODE = settings['OPERATING_MODE'].upper()
+            # 2026-05-04 — write thread-local instead of module global so
+            # concurrent customers (multi-worker uvicorn or future single-
+            # process concurrency) don't race on this assignment.
+            _set_request_context(OPERATING_MODE=settings['OPERATING_MODE'].upper())
             print(f"[Controls] Customer {_CUSTOMER_ID[:8]} mode: {OPERATING_MODE}")
 
     except Exception as e:
@@ -5034,8 +5099,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # ── Multi-tenant: load per-customer credentials if --customer-id is given ──
+    # 2026-05-04 — every credential / mode value goes through
+    # _set_request_context (thread-local) instead of module-global
+    # assignment. CLI mode runs single-threaded per subprocess, so
+    # functionally equivalent to the old code; using the same path as
+    # distributed mode keeps both code paths in sync.
     if args.customer_id:
-        _CUSTOMER_ID = args.customer_id
+        _set_request_context(_CUSTOMER_ID=args.customer_id)
         try:
             import auth as _auth
             _ak, _sk = _auth.get_alpaca_credentials(args.customer_id)
@@ -5043,16 +5113,19 @@ if __name__ == '__main__':
                 # Gate 0: no Alpaca key → skip this customer entirely
                 log.info(f"Gate 0 SKIP: customer {args.customer_id[:8]} has no Alpaca key — cannot trade")
                 sys.exit(0)
-            ALPACA_API_KEY = _ak
-            ALPACA_SECRET_KEY  = _sk
-            OPERATING_MODE = _auth.get_operating_mode(args.customer_id)
+            _set_request_context(
+                ALPACA_API_KEY=_ak,
+                ALPACA_SECRET_KEY=_sk,
+                OPERATING_MODE=_auth.get_operating_mode(args.customer_id),
+            )
             _cust_trading_mode = _auth.get_trading_mode(args.customer_id)
             if _cust_trading_mode in ('PAPER', 'LIVE'):
-                TRADING_MODE = _cust_trading_mode
-                if TRADING_MODE == 'LIVE':
-                    ALPACA_BASE_URL = 'https://api.alpaca.markets'
-                else:
-                    ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
+                _base_url = ('https://api.alpaca.markets' if _cust_trading_mode == 'LIVE'
+                             else 'https://paper-api.alpaca.markets')
+                _set_request_context(
+                    TRADING_MODE=_cust_trading_mode,
+                    ALPACA_BASE_URL=_base_url,
+                )
             log.info(f"Multi-tenant mode: customer={args.customer_id} operating={OPERATING_MODE} trading={TRADING_MODE}")
         except SystemExit:
             raise  # let exit(0) from gate above propagate
@@ -5070,7 +5143,7 @@ if __name__ == '__main__':
         if OPERATING_MODE != 'MANAGED':
             log.info(f"--dry-run: overriding OPERATING_MODE {OPERATING_MODE} → MANAGED "
                      f"(trades will queue for approval, no paper orders submitted)")
-        OPERATING_MODE = 'MANAGED'
+        _set_request_context(OPERATING_MODE='MANAGED')
 
     if not ALPACA_API_KEY:
         log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")
