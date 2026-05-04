@@ -328,6 +328,38 @@ def run():
 
     log.info(f"Updated {updated} prices in live_prices table")
 
+    # ── DUAL-WRITE: broadcast prices via MQTT (Tier 4 of distributed-
+    # trader migration). live_prices SQLite table above remains the
+    # source of truth — this is additive for low-latency subscribers
+    # (auditor, future retail nodes, dashboard live-feed). retain=True
+    # so a subscriber connecting mid-day immediately gets the latest
+    # price per ticker without polling. Fire-and-forget (QoS 0); price
+    # updates are time-series — losing one is fine, the next sweep
+    # supersedes it. Best-effort: silent failure if broker is down.
+    try:
+        from mqtt_client import get_publisher
+        _mqtt = get_publisher()
+        if _mqtt is not None:
+            _published = 0
+            for _ticker, _data in prices.items():
+                if _mqtt.publish(
+                    f"process/prices/{_ticker}",
+                    {
+                        "ticker": _ticker,
+                        "price": _data['price'],
+                        "prev_close": _data['prev_close'],
+                        "day_change": _data['day_change'],
+                        "day_change_pct": _data['day_change_pct'],
+                        "volume": _data['volume'],
+                        "ts": ts,
+                    },
+                    qos=0, retain=True,
+                ):
+                    _published += 1
+            log.info(f"Published {_published}/{len(prices)} prices via MQTT")
+    except Exception as _mqtt_e:
+        log.debug(f"MQTT price publish failed (non-fatal): {_mqtt_e}")
+
     # Post a heartbeat so fault detection's GATE1_LIVENESS check can see us.
     # Price poller runs every 60s from the daemon, so the default
     # HEARTBEAT_STALE_MINUTES (45) is comfortable.
@@ -341,4 +373,15 @@ def run():
 
 
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('price_poller', long_running=True)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     run()
