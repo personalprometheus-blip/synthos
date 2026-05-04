@@ -192,3 +192,53 @@ class MqttClient:
             log.warning(f"[MQTT] unexpected disconnect rc={rc}; paho will auto-retry")
         else:
             log.info("[MQTT] disconnected cleanly")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Lazy module-level singleton publisher
+# ─────────────────────────────────────────────────────────────────────────
+# Used by agents that need to publish telemetry topics ALONGSIDE their
+# normal DB writes (regime broadcasts, price updates, etc.) — they call
+# get_publisher() at the dual-write site instead of opening a fresh
+# connection each time. One connection per process, opened on first use.
+#
+# Sentinel values for _PUBLISHER:
+#   None        — never tried; lazy-connect on first call
+#   <client>    — connected, ready to publish
+#   False       — tried and failed; subsequent calls return None silently
+#                 (avoids per-call reconnect storms when broker is down)
+
+_PUBLISHER: object = None
+
+
+def get_publisher(client_id: str | None = None) -> "MqttClient | None":
+    """Return a process-singleton MqttClient connected to the broker.
+    Returns None if the broker is unreachable (silent — caller continues
+    without telemetry; the dual-write SQLite path remains source of truth).
+    Idempotent: subsequent calls reuse the same connection.
+
+    Usage at a dual-write site:
+
+        from mqtt_client import get_publisher
+        m = get_publisher()
+        if m is not None:
+            m.publish('process/regime', {...}, qos=0, retain=True)
+    """
+    global _PUBLISHER
+    if _PUBLISHER is False:
+        # Already tried and failed this process — don't keep retrying
+        return None
+    if _PUBLISHER is not None:
+        return _PUBLISHER  # type: ignore[return-value]
+    cid = client_id or f"synthos-pub-{os.getpid()}"
+    client = MqttClient(client_id=cid)
+    if client.connect():
+        _PUBLISHER = client
+        # atexit so the connection gets a clean DISCONNECT on normal exit
+        # rather than triggering LWT (which is reserved for genuine crashes)
+        import atexit
+        atexit.register(lambda: client.disconnect())
+        return client
+    else:
+        _PUBLISHER = False
+        return None

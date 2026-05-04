@@ -140,3 +140,119 @@ def publish_one_shot(mqtt_client, agent: str, extra: dict | None = None) -> bool
     if extra:
         payload["extra"] = extra
     return mqtt_client.publish(topic, payload, qos=0, retain=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# One-line agent integration — quick_start / quick_stop
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def quick_start(agent_name: str, long_running: bool = True,
+                extra_provider: Callable[[], dict[str, Any]] | None = None,
+                interval_s: int = DEFAULT_INTERVAL_S):
+    """Connect to broker + publish heartbeat with minimum boilerplate.
+
+    For long-running agents (portals, daemons, listeners): pass
+    long_running=True (default) to start a background HeartbeatPublisher
+    that re-publishes every interval_s.
+
+    For subprocess agents (trader, news, sentiment, screener — anything
+    that exits after one cycle): pass long_running=False to send a single
+    heartbeat. The mqtt connection is still returned in case the caller
+    wants to publish more (e.g. price_poller doing a price publish in
+    the same connection).
+
+    Returns (mqtt_client, hb_publisher_or_None). Both may be None if the
+    broker is unreachable — telemetry is strictly additive, so callers
+    just continue without it. Pair with quick_stop() at shutdown.
+
+    Usage:
+
+        # long-running agent
+        from heartbeat import quick_start, quick_stop
+        mqtt, hb = quick_start("portal")
+        try:
+            run_portal()
+        finally:
+            quick_stop(mqtt, hb)
+
+        # subprocess agent
+        mqtt, _ = quick_start("news_agent", long_running=False)
+        try:
+            run_news_cycle()
+        finally:
+            quick_stop(mqtt, None)
+    """
+    try:
+        from mqtt_client import MqttClient
+    except ImportError:
+        log.debug("[HB] mqtt_client unavailable — telemetry disabled")
+        return (None, None)
+
+    will_topic = f"process/heartbeat/{NODE_ID}/{agent_name}"
+    mqtt = MqttClient(
+        client_id=f"{NODE_ID}-{agent_name}-{os.getpid()}",
+        last_will_topic=will_topic,
+        last_will_payload="offline",
+    )
+    if not mqtt.connect():
+        # Broker unreachable. Continue without telemetry.
+        return (None, None)
+
+    if long_running:
+        hb = HeartbeatPublisher(
+            mqtt, agent=agent_name, interval_s=interval_s,
+            extra_provider=extra_provider,
+        )
+        hb.start()
+        return (mqtt, hb)
+    else:
+        publish_one_shot(mqtt, agent_name)
+        return (mqtt, None)
+
+
+def quick_stop(mqtt_client, hb_publisher) -> None:
+    """Companion to quick_start. Idempotent — safe to call even if either
+    handle is None (the broker-unreachable case)."""
+    try:
+        if hb_publisher is not None:
+            hb_publisher.stop()
+    except Exception as e:
+        log.debug(f"[HB] hb stop noise: {e}")
+    try:
+        if mqtt_client is not None:
+            mqtt_client.disconnect()
+    except Exception as e:
+        log.debug(f"[HB] mqtt disconnect noise: {e}")
+
+
+def register_telemetry(agent_name: str, long_running: bool = True,
+                       extra_provider: Callable[[], dict[str, Any]] | None = None,
+                       interval_s: int = DEFAULT_INTERVAL_S):
+    """One-line agent telemetry. Connects at call time and registers an
+    atexit handler that cleans up on normal interpreter shutdown.
+
+    Returns the (mqtt, hb) tuple — most callers can ignore it. Agents
+    that ALSO want to publish other topics (e.g. price_poller publishing
+    quotes, regime_agent broadcasting regime) can use the returned mqtt
+    to share the same connection.
+
+    Usage in any agent:
+
+        from heartbeat import register_telemetry
+        register_telemetry("news_agent", long_running=False)
+
+    or, if the agent wants the connection handle:
+
+        _mqtt, _hb = register_telemetry("price_poller", long_running=True)
+
+    Safe to call from anywhere — if the broker is down, returns
+    (None, None) and the atexit hook is a no-op. Telemetry is strictly
+    additive; agents continue working without it.
+    """
+    import atexit
+    mqtt, hb = quick_start(agent_name, long_running=long_running,
+                           extra_provider=extra_provider,
+                           interval_s=interval_s)
+    atexit.register(lambda: quick_stop(mqtt, hb))
+    return (mqtt, hb)
