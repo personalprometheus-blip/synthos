@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-05-04T01:50:00-04:00",
-    "version": "3.28"
+    "last_updated": "2026-05-04T02:30:00-04:00",
+    "version": "3.29"
   },
   "nodes": [
     {
@@ -213,6 +213,122 @@
       {"time": "Sunday 20:00", "node": "pi5", "event": "retail_scheduler.py --session=prep (Monday pre-market context build)"},
       {"time": "Sunday 00:00", "node": "pi5", "event": "rotate_logs.py — weekly log rotation + archive"}
     ]
+  },
+  "trader_gates": {
+    "_note": "13-gate trader pipeline (gate0 + gate1..gate14, no gate9/12). Daemon and distributed mode both run these gates; distributed runs them in asyncio.to_thread on the trader_server, daemon runs them inline per subprocess. Gate14 was extracted to src/gate14_evaluator.py (2026-05-04) so the dispatcher can run the post-trade kill check on its master-DB outcomes.",
+    "gates": [
+      {"num": 0, "name": "gate0_account_health", "purpose": "Alpaca status + equity reconciliation + orphan/ghost adoption pre-loop", "fail_conditions": ["negative cash", "orphaned positions in DB but not Alpaca", "halt state set"], "data_sources": ["Alpaca"]},
+      {"num": 1, "name": "gate1_system", "purpose": "4-layer halt check + validator verdict gate", "fail_conditions": ["validator NO_GO", "admin halt", "customer halt", "kill_switch file present"], "data_sources": ["customer_settings._VALIDATOR_VERDICT", "customer_settings._VALIDATOR_RESTRICTIONS", "portfolio (recent losses)"]},
+      {"num": 2, "name": "gate2_benchmark", "purpose": "SPY/VTI benchmark trend check", "fail_conditions": ["benchmark down trend"], "data_sources": ["Alpaca bars"]},
+      {"num": 3, "name": "gate3_regime", "purpose": "Macro regime gate (BULL/BEAR/NORMAL + VIX + yield curve)", "fail_conditions": ["risk_off sustained 2+ cycles"], "data_sources": ["Alpaca bars (SPY, TLT)", "signals.db macro_regime_detail"]},
+      {"num": 4, "name": "gate4_eligibility", "purpose": "Per-signal eligibility: freshness, liquidity, dedup, cooling-off", "fail_conditions": ["signal age past tier window", "liquidity below floor", "ticker in cooling_off", "EVENT_RISK calendar HIGH"], "data_sources": ["shared news_flags", "cooling_off table"]},
+      {"num": 5, "name": "gate5_signal_score", "purpose": "Composite score = news + sentiment + momentum + regime nudge", "fail_conditions": ["composite below threshold (0.55 default)"], "data_sources": ["signal-attached scores", "sector_screening"]},
+      {"num": 5.5, "name": "gate5_5_news_veto", "purpose": "Last-mile news veto on negative high-impact headlines", "fail_conditions": ["bearish news flag within 4h"], "data_sources": ["shared news_flags"]},
+      {"num": 6, "name": "gate6_entry", "purpose": "Entry decision: spread check + chase-cap + portfolio exposure", "fail_conditions": ["spread > threshold", "already at peak entry today (chase cap)", "12-cap pre-flight reached"], "data_sources": ["Alpaca quote", "positions"]},
+      {"num": 7, "name": "gate7_sizing", "purpose": "Position sizing: Model B equity share + Model C cash floor", "fail_conditions": ["INSUFFICIENT_CASH_AFTER_MANUAL", "concentration limit breached"], "data_sources": ["customer_settings._ALPACA_EQUITY", "portfolio"]},
+      {"num": 8, "name": "gate8_risk", "purpose": "ATR-scaled stop-loss + trailing setup (server-side)", "fail_conditions": ["ATR data missing"], "data_sources": ["Alpaca bars"]},
+      {"num": 11, "name": "gate11_portfolio", "purpose": "Portfolio controls: 12-cap auto-exit, sector concentration final check", "fail_conditions": ["sector > 40%", "BIL allocation breached"], "data_sources": ["customer_settings._ALPACA_EQUITY", "Alpaca positions"]},
+      {"num": 13, "name": "gate13_stress", "purpose": "Alpaca API stress + macro risk_off cash-floor lift", "fail_conditions": ["Alpaca 5xx >3 consecutive", "VIX-driven sizing override"], "data_sources": ["FRED VIX", "signals.db"]},
+      {"num": 14, "name": "gate14_evaluation", "purpose": "Post-trade strategy kill check (Sharpe < min AND drawdown > max)", "fail_conditions": ["both Sharpe and drawdown breach threshold"], "data_sources": ["last 100 outcomes", "portfolio peak_equity"], "extracted_to": "src/gate14_evaluator.py (2026-05-04, runs on dispatcher in distributed mode)"}
+    ]
+  },
+  "operating_modes": {
+    "_note": "Three independent per-customer modes that compose. Each can be set system-wide via env var (default for unset customers) and overridden per customer in the customer_settings table.",
+    "modes": [
+      {
+        "name": "OPERATING_MODE",
+        "values": ["MANAGED", "AUTOMATIC"],
+        "default": "MANAGED",
+        "scope": "per-customer (override in customer_settings._OPERATING_MODE)",
+        "effect": {
+          "MANAGED": "Trades queue as pending_approvals. Customer must click approve in the retail portal before order goes to Alpaca.",
+          "AUTOMATIC": "Trades execute immediately on VALIDATED signals. AUTONOMOUS_UNLOCK_KEY env var must be set."
+        },
+        "checked_by": "trader (gate6 + execution path)"
+      },
+      {
+        "name": "TRADING_MODE",
+        "values": ["PAPER", "LIVE"],
+        "default": "PAPER",
+        "scope": "per-customer (Alpaca account type — not env-overridable)",
+        "effect": {
+          "PAPER": "Routes to paper-api.alpaca.markets. Simulated, no real money.",
+          "LIVE": "Routes to api.alpaca.markets. Real money. Requires three-gate verification (TRADING_MODE=LIVE + non-paper base_url + .live_trading_enabled stamp file)."
+        },
+        "checked_by": "AlpacaClient (URL construction at trader entry)"
+      },
+      {
+        "name": "DISPATCH_MODE",
+        "values": ["daemon", "distributed"],
+        "default": "daemon",
+        "scope": "per-customer (override in customer_settings._DISPATCH_MODE; system default in env DISPATCH_MODE)",
+        "effect": {
+          "daemon": "Legacy path: retail_market_daemon spawns trader subprocess per customer (parallelism=3).",
+          "distributed": "New path: synthos_dispatcher builds WorkPacket, POSTs to synthos_trader_server which runs gates in asyncio.to_thread and returns delta."
+        },
+        "checked_by": "src/dispatch_mode.py (filter_customers_by_mode in market_daemon + dispatcher)",
+        "migration_tool": "agents/synthos_migration.py (status / enable / disable / reset / enable-all / disable-all)",
+        "added": "Tier 7, 2026-05-04"
+      }
+    ]
+  },
+  "market_hours": {
+    "_note": "All times ET. Holiday awareness is currently a TODO — signals queued on holidays auto-CANCELLED at the per-tier max-age threshold rather than gated up front.",
+    "regular_session": {"open": "09:30", "close": "16:00", "trading_days": "Mon-Fri", "agents_active": ["trade_daemon (continuous 30s)", "market_daemon (intraday 30-min)", "price_poller (24/7)", "dispatcher (when distributed)"]},
+    "pre_market": {"start": "04:00", "end": "09:30", "trading_days": "Mon-Fri", "agents_active": ["scheduler (overnight news)", "market_daemon (09:15 premarket prep)"]},
+    "after_hours": {"start": "16:00", "end": "20:00", "trading_days": "Mon-Fri", "agents_active": ["scheduler (post-close news)", "market_daemon (close session at 16:00)"]},
+    "overnight": {"start": "20:00", "end": "04:00", "trading_days": "every day", "agents_active": ["scheduler (hourly news refresh)", "retail_backup (01:30)", "strongbox (02:00)", "rebuild_template (03:00)"]},
+    "weekend": {"trading_days": "Sat-Sun", "agents_active": ["scheduler (hourly news)", "retail_shutdown (Sat 03:55)", "system reboot (Sat 04:00)", "librarian (Sun)", "scheduler prep (Sun 20:00)"]},
+    "is_market_hours_helper": "src/retail_shared.py:115-122 (delegated to by every agent that needs to gate behavior on session)"
+  },
+  "distributed_trader_tiers": {
+    "_note": "Tracks the 7-tier migration from single-box daemon trading to distributed dispatcher + retail-server architecture. Each tier ship-able and rollback-able independently. As of 2026-05-04: Tiers 1-7 architectural work complete and deployed; Tier 7 migration is operator-driven via synthos_migration.py.",
+    "tiers": [
+      {"tier": 1, "name": "Tier 1 — pre-trip trivial wins", "status": "complete", "shipped": "2026-05-03", "highlights": ["requests.Session() in AlpacaClient (50-100ms saved per call)", "alpaca-trade-api dead-dep removed"]},
+      {"tier": 2, "name": "Tier 2 — DISPATCH_MODE infrastructure", "status": "complete", "shipped": "2026-05-03", "highlights": ["DISPATCH_MODE env var added", "acquire_agent_lock gated on mode"]},
+      {"tier": 3, "name": "Tier 3 — schemas + helpers + gate I/O audit", "status": "complete", "shipped": "2026-05-03", "highlights": ["src/work_packet.py", "src/mqtt_client.py", "src/heartbeat.py", "_ack_signal accumulator", "gate timing instrumentation", "TRADER_GATE_IO_AUDIT.md"]},
+      {"tier": 4, "name": "Tier 4 — MQTT telemetry plane", "status": "complete + live", "shipped": "2026-05-04", "highlights": ["mosquitto on Pi5:1883", "24 agents wired with register_telemetry()", "regime + price dual-write to MQTT", "company_mqtt_listener on pi4b persisting to auditor.db"]},
+      {"tier": 5, "name": "Tier 5 — dispatcher + trader_server skeleton", "status": "complete + live (skeleton execution)", "shipped": "2026-05-04", "highlights": ["agents/synthos_dispatcher.py", "agents/synthos_trader_server.py (FastAPI :8443)", "gate14 extracted to src/gate14_evaluator.py", "old dispatch paths gated when distributed"]},
+      {"tier": 6, "name": "Tier 6 — async + parallel dispatch", "status": "complete (verified 4.9x speedup)", "shipped": "2026-05-04", "highlights": ["server /work runs in asyncio.to_thread", "dispatcher fans 8 concurrent POSTs via ThreadPoolExecutor", "Alpaca quotes pre-fetched batched per cycle", "src/async_alpaca_client.py ready for full async refactor"]},
+      {"tier": 7, "name": "Tier 7 — per-customer migration tooling", "status": "complete (operator-driven cutover)", "shipped": "2026-05-04", "highlights": ["src/dispatch_mode.py per-customer resolver", "agents/synthos_migration.py CLI", "docs/CUTOVER_RUNBOOK.md", "market_daemon + dispatcher both filter by per-customer mode"]}
+    ],
+    "current_state": "All 13 active customers on daemon mode. No customer migrated to distributed yet (operator decision per CUTOVER_RUNBOOK.md). Dispatcher runs idle if no distributed customers — cheap no-op."
+  },
+  "telemetry_agents": {
+    "_note": "Every long-running and subprocess agent now publishes a heartbeat to the MQTT broker on Pi5:1883. Topic shape: process/heartbeat/<node>/<agent>. Long-running agents publish every 30s via background thread + LWT. Subprocess agents publish a single one-shot at startup. company_mqtt_listener on pi4b subscribes to wildcard topics and persists every observation to auditor.db.mqtt_observations.",
+    "long_running": [
+      {"agent": "portal", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "watchdog", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "market_daemon", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "trade_daemon", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "interrogation_listener", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "price_poller", "node": "pi5", "interval_s": 30, "lwt": true},
+      {"agent": "dispatcher", "node": "pi5", "interval_s": 30, "lwt": true, "tier": 5},
+      {"agent": "trader_server", "node": "pi5", "interval_s": 30, "lwt": true, "tier": 5},
+      {"agent": "mqtt_listener", "node": "company", "interval_s": 30, "lwt": true, "tier": 4}
+    ],
+    "one_shot": [
+      {"agent": "trade_logic_agent", "node": "pi5", "fires": "per cycle (30s during market hours)"},
+      {"agent": "news_agent", "node": "pi5", "fires": "per enrichment cycle (~30min)"},
+      {"agent": "sentiment_agent", "node": "pi5", "fires": "per enrichment cycle (~30min)"},
+      {"agent": "sector_screener", "node": "pi5", "fires": "2x daily (premarket + close)"},
+      {"agent": "macro_regime_agent", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "market_state_agent", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "bias_detection_agent", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "fault_detection_agent", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "validator_stack", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "candidate_generator", "node": "pi5", "fires": "per enrichment cycle"},
+      {"agent": "sector_backfill", "node": "pi5", "fires": "manual / on-demand"},
+      {"agent": "daily_master", "node": "pi5", "fires": "16:00 ET (close)"},
+      {"agent": "health_check", "node": "pi5", "fires": "boot only"},
+      {"agent": "dry_run", "node": "pi5", "fires": "manual / test"},
+      {"agent": "backup", "node": "pi5", "fires": "01:30 daily"},
+      {"agent": "boot_sequence", "node": "pi5", "fires": "boot only"},
+      {"agent": "scheduler", "node": "pi5", "fires": "cron (off-hours hourly)"},
+      {"agent": "shutdown", "node": "pi5", "fires": "Saturday 03:55"}
+    ],
+    "broker": {"host": "10.0.0.11", "port": 1883, "auth": "username/password (synthos_broker)", "config": "/etc/mosquitto/conf.d/synthos.conf (in repo at synthos_build/config/mosquitto/synthos.conf)"},
+    "subscriber": {"agent": "company_mqtt_listener", "node": "pi4b", "topics": ["process/heartbeat/+/+", "process/regime", "process/prices/+"], "persistence": "auditor.db mqtt_observations table", "summary_interval_s": 60, "stale_threshold_s": 120}
   },
   "ssh_map": {
     "from_pi4b": [
