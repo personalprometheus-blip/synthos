@@ -238,22 +238,93 @@ def build_work_packet(customer_id: str, cycle: str) -> dict[str, Any] | None:
             else "https://paper-api.alpaca.markets"
         )
 
-        # State snapshot (per-customer DB)
+        # State snapshot (per-customer DB) — all best-effort: missing
+        # tables / methods fall back to empty defaults rather than
+        # blocking the cycle. The trader (in loopback mode) reads from
+        # local DB anyway, so packet completeness is for distributed
+        # cross-machine future + audit visibility today.
         portfolio       = cust_db.get_portfolio() or {}
         positions       = cust_db.get_open_positions() or []
-        cooling_off     = []  # cust_db.get_cooling_off() — not all DBs have this; tolerate absence
         recent_outcomes = cust_db.get_recent_outcomes(limit=100) or []
 
-        # Validator verdict (per-customer settings, but stored in cust_db)
+        # Cooling-off — table may be present (per-customer) or queried
+        # via shared_db.is_cooling_off() per ticker. Try the per-customer
+        # table first.
+        cooling_off: list[dict[str, Any]] = []
+        try:
+            if hasattr(cust_db, "get_cooling_off"):
+                cooling_off = cust_db.get_cooling_off() or []
+        except Exception as e:
+            log.debug(f"[{customer_id[:8]}] cooling_off fetch noise: {e}")
+
+        # Recent bot orders — settlement-lag guard (added 2026-04-28)
+        recent_bot_orders: list[dict[str, Any]] = []
+        try:
+            if hasattr(cust_db, "get_recent_bot_orders"):
+                recent_bot_orders = cust_db.get_recent_bot_orders(limit=50) or []
+        except Exception as e:
+            log.debug(f"[{customer_id[:8]}] recent_bot_orders fetch noise: {e}")
+
+        # Per-customer settings dict — used by gate7/gate11 (sizing) and
+        # any gate that reads custom thresholds. Not all DBs expose a
+        # bulk get; iterate well-known keys defensively.
+        customer_settings: dict[str, Any] = {}
+        for k in (
+            "_ALPACA_EQUITY", "_OPERATING_MODE", "_TRADING_MODE",
+            "trader_variant", "EXPERIMENT_ID", "EXPERIMENT_FREEZE",
+            "_DISPATCH_MODE",
+        ):
+            try:
+                v = cust_db.get_setting(k)
+                if v is not None:
+                    customer_settings[k] = v
+            except Exception:
+                pass
+
+        # Validator verdict + restrictions (per-customer settings)
         validator_verdict = (cust_db.get_setting("_VALIDATOR_VERDICT") or "GO").upper()
+        validator_restrictions_raw = cust_db.get_setting("_VALIDATOR_RESTRICTIONS") or "[]"
+        try:
+            import json as _json
+            validator_restrictions = _json.loads(validator_restrictions_raw)
+            if not isinstance(validator_restrictions, list):
+                validator_restrictions = []
+        except Exception:
+            validator_restrictions = []
 
         # Validated signals from shared DB
         signals = shared_db.get_signals_by_status(["VALIDATED"], limit=50) or []
 
+        # News flags map (per-ticker) for gate4 + gate5_5 — fetch only
+        # for tickers that actually appear in the signals list to keep
+        # the packet small.
+        news_flags: dict[str, list] = {}
+        try:
+            if hasattr(shared_db, "get_fresh_news_flags_for_ticker"):
+                signal_tickers = {s.get("ticker", "").upper() for s in signals}
+                for t in sorted(signal_tickers):
+                    if t:
+                        flags = shared_db.get_fresh_news_flags_for_ticker(t) or []
+                        if flags:
+                            news_flags[t] = flags
+        except Exception as e:
+            log.debug(f"[{customer_id[:8]}] news_flags fetch noise: {e}")
+
         # Market context (shared DB settings)
-        regime           = shared_db.get_setting("_MACRO_REGIME") or "NORMAL"
-        market_state     = shared_db.get_setting("_MARKET_STATE") or "OPEN"
+        regime             = shared_db.get_setting("_MACRO_REGIME") or "NORMAL"
+        market_state       = shared_db.get_setting("_MARKET_STATE") or "OPEN"
         market_state_score = float(shared_db.get_setting("_MARKET_STATE_SCORE") or 0.0)
+        # VIX — best-effort from regime detail blob if present
+        vix: float | None = None
+        try:
+            import json as _json
+            regime_detail_raw = shared_db.get_setting("_MACRO_REGIME_DETAIL") or "{}"
+            regime_detail = _json.loads(regime_detail_raw)
+            vix_raw = regime_detail.get("vix")
+            if vix_raw is not None:
+                vix = float(vix_raw)
+        except Exception:
+            pass
 
         from work_packet import (
             WorkPacket, AlpacaCreds, CustomerStateSnapshot, MarketContext,
@@ -266,23 +337,25 @@ def build_work_packet(customer_id: str, cycle: str) -> dict[str, Any] | None:
                 portfolio=portfolio,
                 positions=positions,
                 cooling_off=cooling_off,
-                recent_bot_orders=[],
-                customer_settings={},
+                recent_bot_orders=recent_bot_orders,
+                customer_settings=customer_settings,
                 operating_mode=operating_mode,
                 trading_mode=trading_mode,
             ),
             signals=signals,
             market_context=MarketContext(
                 regime=regime,
-                vix=None,
+                vix=vix,
                 market_state=market_state,
                 market_state_score=market_state_score,
                 session=cycle,
                 timestamp_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             ),
-            quotes={},  # Tier 6: dispatcher pre-fetches batched Alpaca quotes
+            quotes={},  # Stamped by run_cycle() via prefetch_quotes() after build
             validator_verdict=validator_verdict,
             recent_outcomes=recent_outcomes,
+            validator_restrictions=validator_restrictions,
+            news_flags=news_flags,
         )
 
         # WorkPacket → JSON-serializable dict via dataclass.asdict path
@@ -316,9 +389,29 @@ def dispatch(packet: dict[str, Any]) -> dict[str, Any] | None:
 def apply_delta(customer_id: str, result: dict[str, Any]) -> None:
     """Apply the trader's returned StateDelta to the master DB.
 
-    SKELETON: covers the core fields. Position add/close / cash delta /
-    cooling_off / signal acks are all here. Gate 14 evaluation is run
-    AFTER apply (so the kill-event uses the fresh outcomes).
+    LOOPBACK SEMANTICS (current, retail-N == process node):
+      The trader_server runs on the same Pi5 that hosts the master DBs.
+      During the cycle, the trader writes positions / cash / cooling_off /
+      recent_bot_orders directly to the customer's local signals.db as
+      it always has. So this function does NOT re-apply those fields —
+      doing so would double-write.
+
+      What we DO apply here:
+        - acknowledged_signal_ids: trader accumulated via _ack_signal()
+          (gated to NOT write to shared DB in distributed mode); we
+          flip them VALIDATED → ACTED_ON in shared signals.db now
+        - log_events: any extra events trader returned beyond what it
+          already wrote to local DB (currently empty in loopback)
+        - gate14_evaluation: post-trade kill check, runs against the
+          freshly-updated customer DB outcomes
+
+    REMOTE SEMANTICS (future, retail-2 on separate hardware):
+      When trader_server runs on a different machine without local DB
+      access, the trader cannot write positions/cash/cooling_off itself.
+      The full StateDelta will need to be applied here. That requires
+      either (a) pre-stamping the trader's DB layer with a packet-data
+      mock, or (b) refactoring gates to accept state args. Tier 7+ work
+      tracked in CUTOVER_RUNBOOK.md "Standing up retail-2".
     """
     cid = customer_id[:8]
     try:
