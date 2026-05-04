@@ -207,7 +207,11 @@ class WorkPacketDB:
         # USER override; bot is free to manage all tickers.
         return None
 
-    def get_urgent_flags(self, ticker: str) -> list:
+    def get_urgent_flags(self, ticker: str | None = None) -> list:
+        # Real DB supports both `get_urgent_flags()` (returns all) and
+        # `get_urgent_flags(ticker)` (returns for one ticker). Both call
+        # patterns appear in the trader (line 4255 calls without arg).
+        # No urgent flags in packet currently; return empty.
         return []
 
     def get_halt(self) -> dict | None:
@@ -292,9 +296,11 @@ class WorkPacketDB:
             "details": json.dumps(kwargs, default=str)[:1000],
         })
 
-    def expire_stale_approvals(self) -> int:
+    def expire_stale_approvals(self, *args, **kwargs) -> int:
         # Approval queue lives on process node; retail-side cycle has
         # nothing to expire. Daemon-mode trader handles this on Pi5.
+        # Accept any args (real DB takes max_age_hours kwarg) so trader
+        # can call without crashing.
         return 0
 
     def log_api_call(self, **kwargs) -> None:
@@ -415,6 +421,45 @@ class WorkPacketDB:
                     p[k] = v
                 return True
         return False
+
+    def queue_approval(self, **kwargs) -> None:
+        """MANAGED-mode + overnight queue. Real DB writes to
+        pending_approvals table. In packet mode we accumulate into
+        delta_log_events so the dispatcher's apply_delta records that
+        an approval was queued (the actual approval row would need to
+        live somewhere — for now it lives in the customer's local DB
+        when running loopback, and is ephemeral when running fully
+        remote until queue_approvals storage is added to packet)."""
+        self.delta_log_events.append({
+            "event": "APPROVAL_QUEUED",
+            "agent": "trade_logic_agent",
+            "details": json.dumps(kwargs, default=str)[:1000],
+        })
+
+    def mark_approval_executed(self, signal_id: str, **kwargs) -> None:
+        """Called after a queued approval is acted on. Real DB updates
+        pending_approvals.status. Packet mode logs as event."""
+        self.delta_log_events.append({
+            "event": "APPROVAL_EXECUTED",
+            "agent": "trade_logic_agent",
+            "details": json.dumps({"signal_id": signal_id, **kwargs}, default=str)[:1000],
+        })
+
+    def add_cooling_off(self, ticker: str = None, hours: float = 4, **kwargs) -> None:
+        """Add a cooling-off entry for ticker. Real DB inserts into
+        cooling_off table. Mock accumulates into delta + working state."""
+        from datetime import datetime, timedelta, timezone
+        t = (ticker or kwargs.get("ticker") or "").upper()
+        if not t:
+            return
+        expires = datetime.now(timezone.utc) + timedelta(hours=float(hours or 4))
+        entry = {
+            "ticker": t,
+            "expires_at": expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            **kwargs,
+        }
+        self._cooling_off.append(entry)
+        self.delta_cooling_off_added.append(entry)
 
     # ──────────────────────────────────────────────────────────────────
     # DELTA EXTRACTION — called by trader_server after t.run()
