@@ -2960,47 +2960,48 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
     Update performance metrics. Check kill condition.
     Returns True = continue trading, False = strategy suspended.
     Logic: Doc 3 §14
+
+    2026-05-04 — refactored to delegate the pure compute to
+    src/gate14_evaluator.py. The daemon-mode behavior is bit-for-bit
+    identical to the prior inline implementation: same DB read, same
+    decision log, same kill-event write, same return semantics. The
+    extraction lets the dispatcher (in distributed mode) call the same
+    pure function directly with master-DB-loaded outcomes, without
+    going through this trader-internal wrapper.
     """
+    from gate14_evaluator import evaluate_strategy_kill
+
     outcomes = db.get_recent_outcomes(limit=100)
-    if len(outcomes) < 5:
-        decision_log.gate("14_EVALUATION", True, {"reason": "insufficient trade history"}, "evaluation skipped — need ≥5 trades")
+    verdict = evaluate_strategy_kill(
+        outcomes=outcomes,
+        portfolio=portfolio,
+        min_sharpe=C.EVAL_MIN_SHARPE,
+        max_drawdown=C.EVAL_MAX_DRAWDOWN,
+        window_days=C.PERFORMANCE_WINDOW_DAYS,
+    )
+
+    if verdict['verdict_label'] == 'INSUFFICIENT_DATA':
+        decision_log.gate("14_EVALUATION", True, {"reason": "insufficient trade history"},
+                          "evaluation skipped — need ≥5 trades")
         return True
 
-    window = [o for o in outcomes[-C.PERFORMANCE_WINDOW_DAYS:]]
-    wins   = [o for o in window if o.get("verdict") == "WIN"]
-    losses = [o for o in window if o.get("verdict") == "LOSS"]
-    win_rate  = len(wins) / len(window) if window else 0
-    avg_win   = sum(o.get("pnl_dollar", 0) for o in wins)  / len(wins)   if wins   else 0
-    avg_loss  = sum(o.get("pnl_dollar", 0) for o in losses) / len(losses) if losses else 0
-    expectancy = avg_win * win_rate + avg_loss * (1 - win_rate)
+    m = verdict['metrics']
+    decision_log.gate("14_EVALUATION", verdict['verdict_label'], {
+        "trades_in_window":  m['trades_in_window'],
+        "win_rate":          f"{m['win_rate']*100:.1f}%",
+        "avg_win":           f"${m['avg_win']:.2f}",
+        "avg_loss":          f"${m['avg_loss']:.2f}",
+        "expectancy":        f"${m['expectancy']:.2f}",
+        "rolling_sharpe":    f"{m['rolling_sharpe']:.3f}",
+        "current_drawdown":  f"{m['current_drawdown']*100:.2f}%",
+        "sharpe_threshold":  f"{m['sharpe_threshold']:.2f}",
+        "dd_threshold":      f"{m['dd_threshold']*100:.0f}%",
+        "kill_condition":    str(verdict['kill']),
+    }, "STRATEGY SUSPENDED — kill condition met" if verdict['kill'] else "performance within limits")
 
-    pnl_series = [o.get("pnl_pct", 0) for o in window]
-    mean_ret   = sum(pnl_series) / len(pnl_series) if pnl_series else 0
-    std_ret    = (sum((r - mean_ret)**2 for r in pnl_series) / len(pnl_series))**0.5 if pnl_series else 0
-    sharpe     = (mean_ret / std_ret * (252**0.5)) if std_ret > 0 else 0
-
-    equity = portfolio.get("cash", 0)
-    peak   = portfolio.get("peak_equity") or equity
-    dd     = (peak - equity) / peak if peak > 0 else 0
-
-    kill = sharpe < C.EVAL_MIN_SHARPE and dd > C.EVAL_MAX_DRAWDOWN
-
-    decision_log.gate("14_EVALUATION", "SUSPEND" if kill else "CONTINUE", {
-        "trades_in_window":  len(window),
-        "win_rate":          f"{win_rate*100:.1f}%",
-        "avg_win":           f"${avg_win:.2f}",
-        "avg_loss":          f"${avg_loss:.2f}",
-        "expectancy":        f"${expectancy:.2f}",
-        "rolling_sharpe":    f"{sharpe:.3f}",
-        "current_drawdown":  f"{dd*100:.2f}%",
-        "sharpe_threshold":  f"{C.EVAL_MIN_SHARPE:.2f}",
-        "dd_threshold":      f"{C.EVAL_MAX_DRAWDOWN*100:.0f}%",
-        "kill_condition":    str(kill),
-    }, "STRATEGY SUSPENDED — kill condition met" if kill else "performance within limits")
-
-    if kill:
+    if verdict['kill']:
         db.log_event("STRATEGY_KILL_CONDITION", agent="trade_logic_agent",
-                     details=f"Sharpe={sharpe:.3f} DD={dd*100:.1f}% — suspended pending human review")
+                     details=verdict['reason'])
         log.critical("STRATEGY KILL CONDITION: Sharpe and drawdown both outside limits. Suspending new entries.")
         return False
 

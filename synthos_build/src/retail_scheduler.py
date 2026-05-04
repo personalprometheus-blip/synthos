@@ -329,7 +329,20 @@ def run_session(session: str, dry_run: bool = False) -> bool:
     session_results = {}   # script → {customer_id: outcome}
     session_ok = True
 
+    # 2026-05-04 — Tier 5 of distributed-trader migration: skip the trader
+    # entry in any pipeline when DISPATCH_MODE=distributed. Other pipeline
+    # stages (news, sentiment, validator, etc.) still run normally — they
+    # produce signals on the shared DB that the dispatcher feeds to the
+    # retail trader server via HTTP work packets.
+    _dispatch_mode = os.environ.get('DISPATCH_MODE', 'daemon').lower()
+
     for script, args, timeout in pipeline:
+        if _dispatch_mode == 'distributed' and 'trade_logic_agent' in script:
+            log.info(
+                f"[SCHEDULER] DISPATCH_MODE=distributed — skipping {script} "
+                f"in {session} pipeline (synthos_dispatcher owns trader execution)"
+            )
+            continue
         # Resolve dynamic args (e.g. news agent market vs overnight)
         # Resolve dynamic args based on which agent needs them
         if args is None:
