@@ -414,18 +414,45 @@ if __name__ == "__main__":
     except Exception:
         pass
 
+    # 2026-05-04 — Multi-worker concurrency strategy.
+    #
+    # The trader module has process-level globals that get stamped per
+    # request (ALPACA_API_KEY, _CUSTOMER_ID, etc.). Within a single
+    # process we serialize execution via _TRADER_LOCK to avoid races.
+    # That caps concurrency at one customer at a time per process.
+    #
+    # uvicorn supports running multiple worker processes for the same
+    # app. Each worker is an independent Python process with its own
+    # module globals — so the lock is per-worker, not global. Setting
+    # UVICORN_WORKERS=N gives N customers true concurrent execution
+    # at the cost of N× memory.
+    #
+    # Recommended values:
+    #   - retail-N node (Pi5 8GB, 4 cores): UVICORN_WORKERS=3 (leaves
+    #     1 core for OS + dispatcher round-trips)
+    #   - process node loopback (Pi5 16GB, 4 cores, also runs broker +
+    #     all signal agents): UVICORN_WORKERS=1 or 2 — most cycles only
+    #     touch one customer (Eliana today), so multi-worker is overkill
+    #     and costs memory
+    #   - dev / Mac: 1 (default)
+    #
+    # ALSO — when a worker is multi-process, you can't share Python
+    # state across workers (no shared lock, no shared cache). The
+    # trader doesn't depend on cross-customer in-process state, so
+    # this is fine. The MQTT broker, master DBs, and dispatcher are
+    # all out-of-process anyway.
+    workers = int(os.environ.get("UVICORN_WORKERS", "1"))
+
     log.info(
         f"trader server starting — host={SERVER_HOST} port={SERVER_PORT} "
         f"auth={'on' if DISPATCH_AUTH_TOKEN else 'OFF (dev)'} "
-        f"schema_version={SCHEMA_VERSION}"
+        f"schema_version={SCHEMA_VERSION} workers={workers} "
+        f"trader_db_mode={TRADER_DB_MODE}"
     )
     uvicorn.run(
         "synthos_trader_server:app",
         host=SERVER_HOST,
         port=SERVER_PORT,
         log_level=os.environ.get("UVICORN_LOG_LEVEL", "info"),
-        # Single worker for skeleton — multiple workers would each have
-        # their own AlpacaClient state, which is fine (per-customer keys
-        # are independent), but adds complexity for the first wire-up.
-        workers=1,
+        workers=workers,
     )

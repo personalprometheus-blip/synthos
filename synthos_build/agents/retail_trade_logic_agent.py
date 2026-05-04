@@ -1225,11 +1225,21 @@ def _runtime_watchdog(t0: float, budget_sec: int) -> None:
 # ── ALPACA CLIENT (KEEP — unchanged from v1.x) ────────────────────────────────
 
 class AlpacaClient:
-    def __init__(self):
-        self.base_url = ALPACA_BASE_URL.rstrip('/')
+    def __init__(self, api_key: str | None = None, secret_key: str | None = None,
+                 base_url: str | None = None, data_url: str | None = None):
+        # 2026-05-04 — optional explicit creds for per-request instantiation
+        # (distributed-trader path on a single-process trader_server). If
+        # omitted, falls back to module globals (daemon-mode behavior
+        # unchanged). When trader_server stamps module globals before
+        # calling t.run() and we're inside _TRADER_LOCK, the no-arg form
+        # still works correctly. The args form is the path to lock-free
+        # concurrency: each in-flight request constructs its own client
+        # without racing on the globals.
+        self.base_url = (base_url if base_url is not None else ALPACA_BASE_URL).rstrip('/')
+        self.data_url = (data_url if data_url is not None else ALPACA_DATA_URL).rstrip('/')
         self.headers  = {
-            "APCA-API-KEY-ID":     ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+            "APCA-API-KEY-ID":     api_key    if api_key    is not None else ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": secret_key if secret_key is not None else ALPACA_SECRET_KEY,
             "Content-Type":        "application/json",
         }
         # 2026-05-03 — persistent HTTP session reuses TCP+TLS connection

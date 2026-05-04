@@ -171,7 +171,7 @@ LOG_LEVEL=INFO
 # ── SYSTEMD UNIT ───────────────────────────────────────────────────────────
 
 _TRADER_SERVER_UNIT = """[Unit]
-Description=Synthos Retail Trader Server (FastAPI on :8443)
+Description=Synthos Retail Trader Server (FastAPI on :8443, multi-worker)
 After=network.target
 Documentation=https://github.com/personalprometheus-blip/synthos/blob/main/synthos_build/agents/synthos_trader_server.py
 
@@ -181,6 +181,12 @@ User={user}
 Group={user}
 WorkingDirectory={synthos_home}
 EnvironmentFile={synthos_home}/user/.env
+# Per-customer concurrency: 3 uvicorn workers on a 4-core Pi5 8GB.
+# Each worker is its own Python process with its own _TRADER_LOCK,
+# so 3 customers can process simultaneously. Leaves 1 core for OS +
+# heartbeat publisher + (eventually) the company_mqtt_listener if it
+# co-locates here.
+Environment=UVICORN_WORKERS=3
 ExecStart=/usr/bin/python3 {synthos_home}/agents/synthos_trader_server.py
 Restart=on-failure
 RestartSec=15
