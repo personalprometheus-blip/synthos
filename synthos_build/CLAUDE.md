@@ -35,6 +35,47 @@ See synthos-company/documentation/validation/SYSTEM_VALIDATION_REPORT.md for ful
 - Source code lives in src/, tests in tests/
 - TRADING_MODE must remain PAPER — PAPER→LIVE requires explicit project lead action
 
+## Architecture Doc Maintenance — CRITICAL
+
+`synthos_build/data/system_architecture.json` is the single source of
+truth for what this system is made of. The interactive system map at
+`/system-architecture` on the command portal (pi4b `synthos_monitor`)
+fetches it from GitHub at runtime and renders it. **If the JSON drifts
+from the code, the portal lies.** Keep it in sync in the same commit
+that changes the system.
+
+| Code change | JSON section to update |
+|---|---|
+| Add/rename/remove an agent file | `nodes[].agents[]` for that node |
+| Add a `.db` or substantially change a schema | `nodes[].databases[]` |
+| Add/remove an external service (Alpaca endpoint, broker, etc.) | `nodes[].services[]` |
+| Add/rename/remove a trader gate (`def gate*` in `retail_trade_logic_agent.py`) | `trader_gates.gates[]` |
+| Add/change an operating mode (DISPATCH_MODE / OPERATING_MODE / TRADING_MODE) | `operating_modes.modes[]` |
+| Add/remove a `register_telemetry()` call in any agent | `telemetry_agents.long_running[]` or `.one_shot[]` |
+| Ship a new tier of the distributed-trader migration | `distributed_trader_tiers.tiers[]` + update `current_state` |
+| Change market-hours boundaries or which agents run in a session | `market_hours.<session>` |
+| Add/change a cron entry or systemd timer | `data_flow.daily_timeline` AND `synthos-company/templates/system_map.html M.timeline[]` |
+
+**Always when editing the JSON:**
+- Bump `meta.last_updated` (ISO timestamp) and `meta.version` (semver: minor for additions, patch for fixes)
+- Validate JSON parses before commit:
+  `python3 -c "import json; json.load(open('synthos_build/data/system_architecture.json'))"`
+- A broken JSON breaks the entire portal page — never push unvalidated
+
+**Visual layout coordinates are in the TEMPLATE, not the JSON.** The
+positioning of nodes / agents / DBs on the topology map (`x`, `y`, `w`,
+`h` props) lives in `synthos-company/templates/system_map.html` under
+the `M.nodes[]` / `M.agents[]` / `M.dbs[]` constants. The JSON is the
+inventory; the template is the arrangement. Adding to JSON without
+adding template coordinates means the agent shows nowhere on the map.
+
+**Pipeline & gate cards are EMBEDDED in the template** (`PIPELINE`
+constant in `system_map.html`). Adding a new pipeline-level agent
+(like the Tier 5 dispatcher / trader_server) requires editing the
+template's `PIPELINE` constant AND the JSON's `trader_gates` section.
+The cutover runbook at `synthos_build/docs/CUTOVER_RUNBOOK.md` is the
+operational doc that pulls all of this together for migrations.
+
 ## How To Update Progress
 When a task is complete:
 1. Check it off in PROJECT_STATUS.md (master tracker, this repo)
