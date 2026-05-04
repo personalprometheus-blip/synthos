@@ -113,6 +113,20 @@ ALPACA_BASE_URL   = os.environ.get('ALPACA_BASE_URL', 'https://paper-api.alpaca.
 ALPACA_DATA_URL   = os.environ.get('ALPACA_DATA_URL', 'https://data.alpaca.markets')
 TRADING_MODE      = os.environ.get('TRADING_MODE', 'PAPER')
 OPERATING_MODE    = os.environ.get('OPERATING_MODE', 'MANAGED').upper()
+# 2026-05-03 — DISPATCH_MODE selects how the trader is invoked:
+#   "daemon"       (default) — current single-box behavior. CLI subprocess
+#                  spawned by retail_market_daemon / retail_scheduler. File
+#                  lock acquired. Reads DBs locally.
+#   "distributed"  — work-packet driven. Trader is invoked via HTTP from
+#                  synthos_dispatcher (process node) into synthos_trader_server
+#                  (retail node). All DB I/O moves to dispatcher; trader is
+#                  stateless. File lock skipped (HTTP server provides
+#                  serialization). CLI parsing bypassed; credentials and
+#                  state arrive in the work packet.
+# This is the master toggle for the distributed-trader migration. Default
+# preserves today's behavior; `distributed` is only set on retail nodes
+# running the new HTTP server.
+DISPATCH_MODE     = os.environ.get('DISPATCH_MODE', 'daemon').lower()
 AUTONOMOUS_KEY    = os.environ.get('AUTONOMOUS_UNLOCK_KEY', '')
 RESEND_API_KEY    = os.environ.get('RESEND_API_KEY', '')
 ALERT_FROM        = os.environ.get('ALERT_FROM', '')
@@ -206,6 +220,36 @@ def _shared_db():
     retail_database.get_shared_db() for the architectural rationale."""
     from retail_database import get_shared_db
     return get_shared_db()
+
+
+# ── DISTRIBUTED-MODE ACK ACCUMULATOR ──────────────────────────────────────────
+# 2026-05-03 — In `daemon` mode (single-box, current behavior) the trader
+# writes signal acknowledgments directly to the shared DB after acting on
+# each signal. In `distributed` mode the trader has no local DB, so acks
+# accumulate here and ship back in WorkResult.delta.acknowledged_signal_ids
+# for the dispatcher to commit on the master DB. See:
+#   - docs/TRADER_GATE_IO_AUDIT.md (the 5 call-site catalog)
+#   - src/work_packet.py (StateDelta.acknowledged_signal_ids field)
+# `_PENDING_ACKS` is per-process state — safe because the trader is
+# invoked once per customer cycle (one customer's worth of acks per run).
+_PENDING_ACKS: list = []
+
+def _ack_signal(signal_id: str) -> None:
+    """Mark a signal as acted-on. In daemon mode, writes directly to the
+    shared signals DB (status VALIDATED → ACTED_ON). In distributed mode,
+    appends to _PENDING_ACKS for the dispatcher to apply server-side."""
+    if DISPATCH_MODE == 'distributed':
+        _PENDING_ACKS.append(signal_id)
+    else:
+        _shared_db().acknowledge_signal(signal_id)
+
+
+def _drain_pending_acks() -> list:
+    """Return + clear the accumulated ack list. Called by the HTTP server
+    in distributed mode to populate WorkResult before responding."""
+    drained = list(_PENDING_ACKS)
+    _PENDING_ACKS.clear()
+    return drained
 
 
 def _vix_from_macro_regime():
@@ -1188,6 +1232,14 @@ class AlpacaClient:
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
             "Content-Type":        "application/json",
         }
+        # 2026-05-03 — persistent HTTP session reuses TCP+TLS connection
+        # across calls. Eliminates ~50–100ms TLS handshake per request,
+        # which compounds across 13 gates × N customers per cycle.
+        # Drop-in: `self.session.get/post` has identical signature to
+        # `requests.get/post`. Headers preset here so per-call overrides
+        # are optional (we keep them for clarity at each call site).
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
         self._bar_cache = {}  # (ticker, days) → [bars]
         # Circuit breaker: after ALPACA_CIRCUIT_BREAKER_N consecutive failures
         # we stop calling Alpaca for the rest of this trader run. This cuts
@@ -1246,7 +1298,7 @@ class AlpacaClient:
                 return
             chunk = unique[i:i + CHUNK]
             try:
-                r = requests.get(
+                r = self.session.get(
                     f"{ALPACA_DATA_URL}/v2/stocks/bars",
                     params={
                         "symbols": ",".join(chunk),
@@ -1307,7 +1359,7 @@ class AlpacaClient:
                             # told us nothing about WHY orders were rejected.
         for attempt in range(MAX_RETRIES):
             try:
-                r = getattr(requests, method)(
+                r = getattr(self.session, method)(
                     url, headers=self.headers, timeout=timeouts, **kwargs
                 )
                 status_code = r.status_code
@@ -1414,7 +1466,7 @@ class AlpacaClient:
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
         }
         try:
-            r = requests.get(
+            r = self.session.get(
                 f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/quotes/latest",
                 params={"feed": "iex"},
                 headers=headers, timeout=(3, 10),
@@ -1474,7 +1526,7 @@ class AlpacaClient:
             "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
         }
         try:
-            r = requests.get(
+            r = self.session.get(
                 f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/bars",
                 params={"timeframe": "1Day", "start": start, "end": end,
                         "limit": days + 10, "feed": "iex"},
@@ -1588,7 +1640,7 @@ class AlpacaClient:
             return None
         url = f"{self.base_url}/v2/positions/{ticker}"
         try:
-            r = requests.get(url, headers=self.headers, timeout=(5, 15))
+            r = self.session.get(url, headers=self.headers, timeout=(5, 15))
             try:
                 _shared_db().log_api_call(
                     agent='trade_logic', endpoint=f'/v2/positions/{ticker}',
@@ -2955,6 +3007,78 @@ def gate14_evaluation(db, portfolio: dict, decision_log: TradeDecisionLog) -> bo
     return True
 
 
+# ── GATE TIMING INSTRUMENTATION ───────────────────────────────────────────────
+# 2026-05-03 — Per-gate wall-clock timings for profiling. Reset at the
+# start of each cycle (call _reset_gate_timings() from the cycle entry).
+# Read after the cycle to either log a summary or ship in WorkResult.
+# Zero overhead on the hot path: time.perf_counter() is ~50ns per call.
+#
+# Why an auto-wrap instead of decorator-per-function:
+# - 12 gates would each need a @_timed_gate line; auto-wrap is a single
+#   loop over module attributes and never gets out of sync as new gates
+#   are added.
+# - Auto-wrap runs at import time, BEFORE any gate is invoked from
+#   _run_signal_evaluation, so wrapping is in place for the first cycle.
+import time as _time_mod_for_gate_timing  # alias avoids name shadowing
+_GATE_TIMINGS_MS: dict = {}
+
+def _timed_gate(fn):
+    """Decorator: record wall-clock ms per call into _GATE_TIMINGS_MS.
+    Multiple invocations of the same gate (e.g., once per signal) sum.
+    Counts also tracked so we can compute averages later."""
+    name = fn.__name__
+    def _wrapped(*args, **kwargs):
+        t0 = _time_mod_for_gate_timing.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            elapsed_ms = (_time_mod_for_gate_timing.perf_counter() - t0) * 1000.0
+            entry = _GATE_TIMINGS_MS.setdefault(name, {"total_ms": 0.0, "calls": 0, "max_ms": 0.0})
+            entry["total_ms"] += elapsed_ms
+            entry["calls"]    += 1
+            if elapsed_ms > entry["max_ms"]:
+                entry["max_ms"] = elapsed_ms
+    _wrapped.__name__ = name
+    _wrapped.__doc__  = fn.__doc__
+    _wrapped.__wrapped__ = fn   # so unittest / introspection can unwrap
+    return _wrapped
+
+def _reset_gate_timings() -> None:
+    """Call at start of each trader cycle so timings reflect this run."""
+    _GATE_TIMINGS_MS.clear()
+
+def get_gate_timings_ms() -> dict:
+    """Return a snapshot of accumulated timings. Used by:
+    - daemon mode: log a summary line at end of cycle
+    - distributed mode: ship in WorkResult.gate_timings_ms"""
+    return {
+        name: {
+            "total_ms": round(d["total_ms"], 2),
+            "calls":    d["calls"],
+            "avg_ms":   round(d["total_ms"] / d["calls"], 2) if d["calls"] else 0.0,
+            "max_ms":   round(d["max_ms"], 2),
+        }
+        for name, d in _GATE_TIMINGS_MS.items()
+    }
+
+# Auto-wrap every module-level function whose name starts with "gate"
+# (catches gate1_system, gate2_benchmark, ..., gate14_evaluation,
+# plus any future gateN_ that gets added). Done after all gate defs
+# so they exist; done at import time so the wrap is in place for the
+# first call from _run_signal_evaluation().
+import sys as _sys_for_gate_wrap
+_module_for_gate_wrap = _sys_for_gate_wrap.modules[__name__]
+for _name in list(vars(_module_for_gate_wrap).keys()):
+    if _name.startswith("gate") and callable(getattr(_module_for_gate_wrap, _name)):
+        _fn = getattr(_module_for_gate_wrap, _name)
+        # Skip already-wrapped (idempotent) and non-functions
+        if hasattr(_fn, "__wrapped__"):
+            continue
+        if getattr(_fn, "__module__", None) != __name__:
+            continue
+        setattr(_module_for_gate_wrap, _name, _timed_gate(_fn))
+
+
 # ── MANAGED MODE (trade approval queue) ───────────────────────────────────────
 
 def queue_for_approval(signal, decision_data):
@@ -3537,7 +3661,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                     "session": session,
                 }
                 queue_for_approval(signal, decision_data)
-                _shared_db().acknowledge_signal(signal['id'])
+                _ack_signal(signal['id'])
                 log.info(f"[ROTATION/SUPERVISED] {signal['ticker']} queued for approval "
                          f"(replacing {weakest['ticker']})")
                 rotations += 1
@@ -3579,7 +3703,7 @@ def _rotate_positions(db, shared_db, alpaca, positions, regime, tier,
                         # succeeded, settlement lag window can close.
                         db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
                         _submit_trail_stop_if_whole(alpaca, signal['ticker'], size, trail_amt)
-                        _shared_db().acknowledge_signal(signal['id'])
+                        _ack_signal(signal['id'])
                         log.info(f"[ROTATION] COMPLETE: Sold {weakest['ticker']} → "
                                  f"BUY {size:.4f} {signal['ticker']} @ ${real_entry:.2f}")
                         _cost = round(real_entry * size, 2)
@@ -4414,7 +4538,7 @@ def _run_managed_mode_approvals(db, alpaca, session_log):
                                      entry_thesis=approval.get('headline'))
                     db.mark_order_recorded(ticker, alpaca_order_id=_aoid)
                     _submit_trail_stop_if_whole(alpaca, ticker, shares, trail_amt)
-                    _shared_db().acknowledge_signal(sig_id)
+                    _ack_signal(sig_id)
                     mark_approval_executed(sig_id)
                     log.info(f"[MANAGED] Executed: BUY {shares:.4f} {ticker} @ ${real_entry:.2f}")
                     _cost = round(real_entry * shares, 2)
@@ -4665,7 +4789,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                 # Acknowledge the signal so it leaves the QUEUED pool and is not
                 # re-processed on the next session run. The approval row in
                 # pending_approvals is the source of truth until user decides.
-                _shared_db().acknowledge_signal(signal['id'])
+                _ack_signal(signal['id'])
                 log.info(f"[MANAGED] {signal['ticker']} queued for portal approval")
             else:
                 # AUTOMATIC MODE ⚠️ UNDER REVIEW — live trading not yet authorized
@@ -4694,7 +4818,7 @@ def _run_signal_evaluation(db, alpaca, regime, session_log, now, session):
                     )
                     db.mark_order_recorded(signal['ticker'], alpaca_order_id=_aoid)
                     _submit_trail_stop_if_whole(alpaca, signal['ticker'], size, trail_amt)
-                    _shared_db().acknowledge_signal(signal['id'])
+                    _ack_signal(signal['id'])
                     log.info(f"TRADE EXECUTED: BUY {size:.4f} {signal['ticker']} "
                              f"@ ${real_entry:.2f} | stop ${trail_amt:.2f}")
                     _cost = round(real_entry * size, 2)
@@ -4910,7 +5034,15 @@ if __name__ == '__main__':
         log.error("ALPACA_API_KEY not set — check .env or provide --customer-id with stored credentials")
         sys.exit(1)
 
-    acquire_agent_lock("retail_trade_logic_agent.py")
+    # 2026-05-03 — file lock is only meaningful in `daemon` mode where the
+    # market_daemon may spawn multiple subprocesses on the same host. In
+    # `distributed` mode the trader is invoked by the HTTP server which
+    # already serializes per-customer work via the asyncio event loop and
+    # has no local `data/` dir to write a flock to.
+    _lock_acquired = False
+    if DISPATCH_MODE != 'distributed':
+        acquire_agent_lock("retail_trade_logic_agent.py")
+        _lock_acquired = True
     try:
         run(session=args.session)
     except KeyboardInterrupt:
@@ -4924,4 +5056,5 @@ if __name__ == '__main__':
         # alive until its next wake (up to 15s) and subprocess retirement
         # could stall the dispatch pool.
         _WATCHDOG_STOP.set()
-        release_agent_lock()
+        if _lock_acquired:
+            release_agent_lock()
