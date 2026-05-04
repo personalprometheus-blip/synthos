@@ -662,6 +662,119 @@ CREATE TABLE IF NOT EXISTS customer_settings (
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- ── TICKER_STATE (per-ticker live worldview) ───────────────────────────
+-- Approved 2026-05-04. Spec: docs/TICKER_STATE_ARCHITECTURE.md
+--
+-- Separates per-ticker time-varying enrichment from per-signal event facts.
+-- One row per ticker. Fields owned by named agents (sentiment_agent,
+-- sector_screener, news_agent, price_poller, etc.). Each writer updates
+-- only its owned fields; readers (trader gate 5, validator) get the
+-- latest worldview for the ticker without filtering by signal status.
+--
+-- Lifecycle: APPEAR (first signal/position) → LIVE (continuous updates) →
+-- COLD (no events 90d, is_active=false) → ARCHIVE (cold 180d, moved to
+-- ticker_state_archive). Reborn if ticker reappears.
+CREATE TABLE IF NOT EXISTS ticker_state (
+    ticker                  TEXT PRIMARY KEY,
+
+    -- Lifecycle
+    is_active               INTEGER NOT NULL DEFAULT 1,
+    first_seen_at           TEXT NOT NULL,
+    last_active_at          TEXT NOT NULL,
+
+    -- Static metadata (resolved at first-seen via _resolve_ticker_meta;
+    -- canonical for "current sector for this ticker").
+    sector                  TEXT,
+    company                 TEXT,
+    exchange                TEXT,
+
+    -- Price layer (highest update frequency — owned by retail_price_poller)
+    price                   REAL,
+    price_at                TEXT,
+    vol_bucket              TEXT,
+    atr                     REAL,
+    spy_correlation         REAL,
+
+    -- News layer (event-driven — owned by retail_news_agent)
+    news_score_4h           REAL,
+    news_evaluated_at       TEXT,
+
+    -- Sentiment layer (owned by retail_market_sentiment_agent)
+    sentiment_score         REAL,
+    sentiment_evaluated_at  TEXT,
+    cascade_tier            INTEGER,
+
+    -- Screener layer (owned by retail_sector_screener)
+    screener_score          REAL,
+    screener_evaluated_at   TEXT,
+    momentum_score          REAL,
+    momentum_evaluated_at   TEXT,
+    sector_score            REAL,
+    sector_evaluated_at     TEXT,
+
+    -- Insider layer (owned by future EDGAR daemon; today by sentiment_agent)
+    insider_signal          REAL,
+    insider_evaluated_at    TEXT,
+
+    -- Volume layer (owned by sentiment_agent today; future: price_poller)
+    volume_anomaly          REAL,
+    volume_evaluated_at     TEXT,
+
+    -- Bookkeeping
+    updated_at              TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ticker_state_active
+    ON ticker_state(is_active, last_active_at);
+CREATE INDEX IF NOT EXISTS idx_ticker_state_updated
+    ON ticker_state(updated_at);
+
+-- Cold rows that have aged past the archive threshold land here.
+-- Same shape as ticker_state plus archived_at.
+CREATE TABLE IF NOT EXISTS ticker_state_archive (
+    ticker                  TEXT PRIMARY KEY,
+    is_active               INTEGER NOT NULL DEFAULT 0,
+    first_seen_at           TEXT NOT NULL,
+    last_active_at          TEXT NOT NULL,
+    sector                  TEXT,
+    company                 TEXT,
+    exchange                TEXT,
+    price                   REAL,
+    price_at                TEXT,
+    vol_bucket              TEXT,
+    atr                     REAL,
+    spy_correlation         REAL,
+    news_score_4h           REAL,
+    news_evaluated_at       TEXT,
+    sentiment_score         REAL,
+    sentiment_evaluated_at  TEXT,
+    cascade_tier            INTEGER,
+    screener_score          REAL,
+    screener_evaluated_at   TEXT,
+    momentum_score          REAL,
+    momentum_evaluated_at   TEXT,
+    sector_score            REAL,
+    sector_evaluated_at     TEXT,
+    insider_signal          REAL,
+    insider_evaluated_at    TEXT,
+    volume_anomaly          REAL,
+    volume_evaluated_at     TEXT,
+    updated_at              TEXT NOT NULL,
+    archived_at             TEXT NOT NULL
+);
+
+-- Audit log of rebuild operations (a power tool — recipe migrations,
+-- corruption recovery). Not used in normal runtime.
+CREATE TABLE IF NOT EXISTS ticker_state_rebuild_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker          TEXT,
+    field           TEXT,
+    triggered_by    TEXT NOT NULL,
+    rows_affected   INTEGER,
+    duration_ms     INTEGER,
+    notes           TEXT,
+    ran_at          TEXT NOT NULL
+);
 """
 
 
@@ -1245,6 +1358,54 @@ class DB:
             "WHERE status IN ('RECORDED') AND submitted_at < datetime('now','-30 minutes')",
             "DELETE FROM recent_bot_orders "
             "WHERE status IN ('FAILED','EXPIRED') AND submitted_at < datetime('now','-1 day')",
+
+            # v3.5 — ticker_state architecture refactor (2026-05-04)
+            # Spec: synthos_build/docs/TICKER_STATE_ARCHITECTURE.md
+            # See SCHEMA constant for full table definitions and column rationale.
+            # These migrations are idempotent — apply on every DB open without harm.
+            """CREATE TABLE IF NOT EXISTS ticker_state (
+                ticker TEXT PRIMARY KEY,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                first_seen_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL,
+                sector TEXT, company TEXT, exchange TEXT,
+                price REAL, price_at TEXT, vol_bucket TEXT, atr REAL, spy_correlation REAL,
+                news_score_4h REAL, news_evaluated_at TEXT,
+                sentiment_score REAL, sentiment_evaluated_at TEXT, cascade_tier INTEGER,
+                screener_score REAL, screener_evaluated_at TEXT,
+                momentum_score REAL, momentum_evaluated_at TEXT,
+                sector_score REAL, sector_evaluated_at TEXT,
+                insider_signal REAL, insider_evaluated_at TEXT,
+                volume_anomaly REAL, volume_evaluated_at TEXT,
+                updated_at TEXT NOT NULL)""",
+            "CREATE INDEX IF NOT EXISTS idx_ticker_state_active ON ticker_state(is_active, last_active_at)",
+            "CREATE INDEX IF NOT EXISTS idx_ticker_state_updated ON ticker_state(updated_at)",
+            """CREATE TABLE IF NOT EXISTS ticker_state_archive (
+                ticker TEXT PRIMARY KEY,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL,
+                sector TEXT, company TEXT, exchange TEXT,
+                price REAL, price_at TEXT, vol_bucket TEXT, atr REAL, spy_correlation REAL,
+                news_score_4h REAL, news_evaluated_at TEXT,
+                sentiment_score REAL, sentiment_evaluated_at TEXT, cascade_tier INTEGER,
+                screener_score REAL, screener_evaluated_at TEXT,
+                momentum_score REAL, momentum_evaluated_at TEXT,
+                sector_score REAL, sector_evaluated_at TEXT,
+                insider_signal REAL, insider_evaluated_at TEXT,
+                volume_anomaly REAL, volume_evaluated_at TEXT,
+                updated_at TEXT NOT NULL,
+                archived_at TEXT NOT NULL)""",
+            """CREATE TABLE IF NOT EXISTS ticker_state_rebuild_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT, field TEXT,
+                triggered_by TEXT NOT NULL,
+                rows_affected INTEGER, duration_ms INTEGER, notes TEXT,
+                ran_at TEXT NOT NULL)""",
+
+            # v3.5 — position snapshots for audit trail (Phase 3 will populate)
+            "ALTER TABLE positions ADD COLUMN entry_state_snapshot TEXT",
+            "ALTER TABLE positions ADD COLUMN exit_state_snapshot TEXT",
         ]
 
         c = sqlite3.connect(self.path, timeout=30)
