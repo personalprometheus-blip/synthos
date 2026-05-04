@@ -357,6 +357,20 @@ def run_trade_all_customers(session='open'):
     """
     import subprocess as _sp
 
+    # 2026-05-04 — Tier 5 of distributed-trader migration: in `distributed`
+    # mode the trader is invoked by synthos_dispatcher (HTTP RPC into
+    # synthos_trader_server on retail-N nodes), not by this daemon. The
+    # market_daemon still runs the enrichment pipeline (news, sentiment,
+    # validator, etc.) — only the trader fan-out is suppressed here so we
+    # don't double-fire trades.
+    _dispatch_mode = os.environ.get('DISPATCH_MODE', 'daemon').lower()
+    if _dispatch_mode == 'distributed':
+        log.info(
+            f"[TRADE] DISPATCH_MODE=distributed — skipping daemon trader fan-out "
+            f"for session={session} (synthos_dispatcher owns trader execution)"
+        )
+        return 0, 0
+
     write_agent_running('retail_trade_logic_agent.py', session)
     customers = get_active_customers()
     if not customers:
