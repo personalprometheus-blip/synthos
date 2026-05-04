@@ -1,7 +1,7 @@
 {
   "meta": {
-    "last_updated": "2026-05-02T11:00:00-04:00",
-    "version": "3.26"
+    "last_updated": "2026-05-04T01:30:00-04:00",
+    "version": "3.27"
   },
   "nodes": [
     {
@@ -23,9 +23,10 @@
         {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
         {"name": "company_librarian.py", "desc": "Package audit, CVE scan, all nodes", "how": "cron Sun", "status": "cron"},
         {"name": "company_strongbox.py", "desc": "v2 backup manager — builds company stream, accepts pi5-encrypted customer/retail, uploads all 3 to R2 with post-upload validation, 30-day retention. Manifest schema v1.0.", "how": "cron 2am", "status": "cron"},
-        {"name": "node_heartbeat.py", "desc": "System metrics (CPU / mem / disk / temp) to monitor DB", "how": "cron * * * * * (every minute, runs in venv)", "status": "cron"}
+        {"name": "node_heartbeat.py", "desc": "System metrics (CPU / mem / disk / temp) to monitor DB", "how": "cron * * * * * (every minute, runs in venv)", "status": "cron"},
+        {"name": "company_mqtt_listener.py", "desc": "MQTT telemetry subscriber. Subscribes to process/heartbeat/+/+, process/regime, process/prices/+ on the Pi5 broker (10.0.0.11:1883). Persists every observation in a new mqtt_observations table in auditor.db (topic, last_seen_ts, last_payload, msg_count). Logs minute-window summary + stale-heartbeat alerts (>120s silent = warn). Additive to company_auditor.py SSH log scanner. Tier 4 of distributed-trader migration, live since 2026-05-04.", "how": "systemd (synthos-mqtt-listener.service)", "status": "live"}
       ],
-      "databases": ["company.db", "auditor.db", "login.db", "support.db"],
+      "databases": ["company.db", "auditor.db (now also stores mqtt_observations table)", "login.db", "support.db"],
       "services": ["Cloudflare tunnel", "command.synth-cloud.com"],
       "storage": "microSD (external SSD migration pending — blocked on powered USB hub)"
     },
@@ -70,10 +71,13 @@
         {"name": "retail_restore.py", "desc": "v2 restore tool — pulls from R2 (via-r2 / via-company / file:), validates manifest, restores per contents[]. Used by operator + v2 installer.", "how": "manual / installer", "status": "live"},
         {"name": "retail_shutdown.py", "desc": "Graceful pre-maintenance shutdown", "how": "Sat 3:55", "status": "cron"},
         {"name": "rebuild_default_template.py", "desc": "Nightly customer DB template rebuild", "how": "cron 3am", "status": "cron"},
-        {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"}
+        {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"},
+        {"name": "mosquitto", "desc": "MQTT broker on 0.0.0.0:1883 (LAN-only, password auth /etc/mosquitto/passwd, retained messages on, autosave 30s). Telemetry plane for the distributed-trader migration. Topics: process/heartbeat/<node>/<agent> (every agent's pulse), process/regime (retained), process/prices/<ticker> (retained per-ticker). Tier 4 of distributed-trader migration, live since 2026-05-04.", "how": "systemd (mosquitto.service)", "status": "live"},
+        {"name": "synthos_dispatcher.py", "desc": "Process-node orchestrator for DISPATCH_MODE=distributed. No-op in daemon mode (default). When distributed: wakes every 30s, builds WorkPacket per active customer, POSTs to RETAIL_URL/work, applies returned StateDelta to master DBs, runs gate14 dispatcher-side. Tier 5 SKELETON — sync, single-target retail; async/pipelining is Tier 6.", "how": "systemd planned (synthos-dispatcher.service, only runs if DISPATCH_MODE=distributed)", "status": "skeleton"},
+        {"name": "synthos_trader_server.py", "desc": "FastAPI/uvicorn HTTP server on retail nodes (TRADER_SERVER_PORT, default 8443). Endpoints: /healthz /readyz /version /work. Receives WorkPackets from synthos_dispatcher, runs trader against in-memory packet data, returns WorkResult with StateDelta. Auth via X-Dispatch-Token header. Tier 5 SKELETON — wire validated, full gate execution against packet fields wired in Tier 6.", "how": "systemd planned (synthos-trader-server.service, only on retail-N nodes)", "status": "skeleton"}
       ],
       "databases": ["auth.db", "customers/*/signals.db (tables: signals, positions, trade_windows, news_flags, earnings_cache, macro_events, cooling_off, outcomes, ...)", "live_prices (shared, in owner DB)"],
-      "services": ["Cloudflare tunnel", "portal.synth-cloud.com"],
+      "services": ["Cloudflare tunnel", "portal.synth-cloud.com", "Mosquitto MQTT broker (10.0.0.11:1883, LAN-only)"],
       "storage": "NVMe (Patriot M.2 P300 256GB) — migrated from SD 2026-04-18",
       "tools": ["synthos_build/tools/ (_fleet + 10 diagnostics: customer_audit, trader_audit, validator_investigate, sentiment_smoke, verify_schema, tier_readout, apply_tier_ladder, portal_lint, dead_code, lint, complexity)"]
     },

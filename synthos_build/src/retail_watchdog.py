@@ -172,6 +172,38 @@ WATCHED_AGENTS = [
         "managed": True,
         "env":     {},
     },
+    {
+        # 2026-05-04 — Tier 5 of distributed-trader migration.
+        # Dispatcher orchestrates trader work in DISPATCH_MODE=distributed.
+        # In daemon mode it exits immediately (no-op) so this watcher will
+        # see "not running" but that's expected — only flag missing in
+        # distributed mode. The systemd_service hook handles either case
+        # cleanly: `systemctl is-active synthos-dispatcher` returns
+        # 'inactive' if the unit doesn't exist, which the watchdog tolerates.
+        "name":    "Dispatcher",
+        "alias":   "Distributed Dispatcher",
+        "script":  "synthos_dispatcher.py",
+        "args":    [],
+        "log":     "dispatcher.log",
+        "managed": True,
+        "systemd_service": "synthos-dispatcher",
+        "env":     {},
+    },
+    {
+        # 2026-05-04 — Tier 5 of distributed-trader migration.
+        # FastAPI/uvicorn HTTP server on retail nodes (port 8443). Receives
+        # work packets from synthos_dispatcher. Same daemon/distributed
+        # mode caveat as above — only meaningful when DISPATCH_MODE is
+        # distributed; the watchdog tolerates the unit being inactive.
+        "name":    "TraderServer",
+        "alias":   "Retail Trader Server",
+        "script":  "synthos_trader_server.py",
+        "args":    [],
+        "log":     "trader_server.log",
+        "managed": True,
+        "systemd_service": "synthos-trader-server",
+        "env":     {},
+    },
 ]
 
 IGNORE_LOG_PATTERNS = [
