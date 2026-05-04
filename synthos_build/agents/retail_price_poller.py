@@ -317,6 +317,25 @@ def run():
                     updated_at=excluded.updated_at
             """, (ticker, data['price'], data['prev_close'], data['day_change'],
                   data['day_change_pct'], data['volume'], ts))
+
+            # Phase 2c dual-write to ticker_state — raw SQL, same connection,
+            # same transaction. Maintains the price layer of the new live
+            # worldview alongside the legacy live_prices table. price_at uses
+            # the same ts so subscribers can correlate the two writes.
+            # ticker_state row may not exist yet for this ticker; INSERT or
+            # UPDATE with explicit lifecycle bookkeeping (mirrors the helper
+            # but inline since we don't have access to the DB class here).
+            db.execute("""
+                INSERT INTO ticker_state (ticker, is_active, first_seen_at, last_active_at, price, price_at, updated_at)
+                VALUES (?, 1, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    is_active=1,
+                    last_active_at=excluded.last_active_at,
+                    price=excluded.price,
+                    price_at=excluded.price_at,
+                    updated_at=excluded.updated_at
+            """, (ticker, ts, ts, data['price'], ts, ts))
+
             updated += 1
 
         db.execute("COMMIT")

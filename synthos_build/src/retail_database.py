@@ -2641,6 +2641,31 @@ class DB:
                 )
         return True
 
+    def recompute_news_score_4h(self, ticker):
+        """Compute 4-hour rolling average of news_feed.sentiment_score for
+        ticker and write to ticker_state.news_score_4h. Owner: news_agent
+        (post news_feed insert).
+
+        Uses a narrow window — single aggregate query, no joins. Returns
+        the computed score (or None if there's no recent news for the
+        ticker).
+        """
+        if not ticker:
+            return None
+        ticker = ticker.upper()
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT AVG(sentiment_score) FROM news_feed "
+                "WHERE ticker=? AND created_at > datetime('now','-4 hours') "
+                "AND sentiment_score IS NOT NULL",
+                (ticker,)
+            ).fetchone()
+            score = row[0] if row else None
+        if score is None:
+            return None
+        self.upsert_ticker_state(ticker, news_score_4h=float(score))
+        return float(score)
+
     def archive_cold_tickers(self, cold_days=90, archive_days=180):
         """Two-phase lifecycle housekeeping for ticker_state:
 
@@ -3343,7 +3368,19 @@ class DB:
                     json.dumps(metadata) if metadata else None,
                     source, self.now()
                 ))
-                return True, cur.lastrowid
+                inserted_id = cur.lastrowid
+            # Phase 2b dual-write to ticker_state — refresh the 4-hour news
+            # aggregate for this ticker. Cheap (single SQL aggregate over a
+            # narrow window) and fires only when we just inserted a row that
+            # changes the aggregate. If recompute fails for any reason
+            # (corrupt row, ticker mismatch), fall through silently so we
+            # don't break the news pipeline.
+            try:
+                if ticker:
+                    self.recompute_news_score_4h(ticker)
+            except Exception as _e:
+                log.debug(f"news_score_4h ticker_state dual-write failed for {ticker}: {_e}")
+            return True, inserted_id
         except sqlite3.IntegrityError as _e:
             # Hit the UNIQUE INDEX backstop — the app-level window above
             # missed but the SQLite day-bucket caught it. Return as
