@@ -1245,6 +1245,17 @@ def now_iso() -> str:
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('watchdog', long_running=True)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     parser = argparse.ArgumentParser(
         description="Synthos Watchdog — crash monitoring and auto-restart"
     )

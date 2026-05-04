@@ -534,6 +534,17 @@ class SessionLock:
 # ── ENTRY POINT ────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('scheduler', long_running=False)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     parser = argparse.ArgumentParser(
         description='Synthos Retail Scheduler — executes agent pipelines per session'
     )

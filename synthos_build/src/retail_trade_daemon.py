@@ -236,6 +236,17 @@ def main():
 
 
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('trade_daemon', long_running=True)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     # Crash-retry loop mirrors retail_market_daemon.py pattern. If we
     # crash mid-day the watchdog or cron respawns us.
     retries = 0

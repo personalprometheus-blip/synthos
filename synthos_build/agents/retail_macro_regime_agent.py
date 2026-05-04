@@ -982,6 +982,25 @@ def run():
     db.set_setting('_MACRO_REGIME_DETAIL', json.dumps(regime_detail))
     db.set_setting('_MACRO_REGIME_UPDATED', report.completed_at)
 
+    # ── DUAL-WRITE: broadcast regime via MQTT (Tier 4 of distributed-
+    # trader migration). DB above remains the source of truth — this is
+    # additive for low-latency subscribers (auditor, future retail nodes,
+    # dashboard live-feed). retain=True so a subscriber connecting
+    # mid-day immediately gets the current regime without polling.
+    # Best-effort: silent failure if the broker is unreachable.
+    try:
+        from mqtt_client import get_publisher
+        _mqtt = get_publisher()
+        if _mqtt is not None:
+            _mqtt.publish("process/regime", {
+                "regime": report.regime,
+                "confidence": getattr(report, "confidence", None),
+                "detail": regime_detail,
+                "completed_at": report.completed_at,
+            }, qos=0, retain=True)
+    except Exception as _mqtt_e:
+        log.debug(f"MQTT regime publish failed (non-fatal): {_mqtt_e}")
+
     # ── Stamp all QUEUED signals with the current macro regime ────────
     # Part of the validation chain: signals need this stamp before being
     # promoted to VALIDATED. One bulk UPDATE — constant-time regardless
@@ -1083,6 +1102,17 @@ def run():
 # ══════════════════════════════════════════════════════════════════════════
 
 if __name__ == '__main__':
+    # 2026-05-04 — MQTT heartbeat (Tier 4 of distributed-trader migration).
+    # Publishes to process/heartbeat/<node>/<agent>. No-op if broker is
+    # unreachable; cleanup auto-registered via atexit. Strictly additive
+    # to existing retail_heartbeat.py / node_heartbeat.py mechanisms.
+    try:
+        from heartbeat import register_telemetry as _register_telemetry
+        _register_telemetry('macro_regime_agent', long_running=False)
+    except Exception as _hb_e:
+        # Silent: telemetry must never block an agent from starting.
+        pass
+
     parser = argparse.ArgumentParser(description='Synthos — Macro Regime Agent')
     # Macro regime is system-wide — the scheduler passes --customer-id to
     # every agent uniformly but this one runs once per scheduler tick and
