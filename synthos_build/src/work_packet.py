@@ -35,7 +35,7 @@ import time
 import uuid
 
 
-WORK_PACKET_SCHEMA_VERSION = "1.0.0"
+WORK_PACKET_SCHEMA_VERSION = "1.1.0"   # 2026-05-04: added validator_restrictions + news_flags fields (additive, backward compatible — old clients ignore unknown keys)
 
 
 @dataclass
@@ -92,11 +92,16 @@ class WorkPacket:
     recent_outcomes: list[dict[str, Any]]  # for gate1's recent-loss check
     deadline_ts: str                     # ISO 8601 — trader bails if exceeded
     dispatched_at_ts: str                # for staleness detection by trader
+    # 2026-05-04 — schema 1.1.0 additions (audit fields used by gate1 + gate4 + gate5_5)
+    validator_restrictions: list[str] = field(default_factory=list)
+    news_flags: dict[str, list] = field(default_factory=dict)  # ticker -> list of flag rows
 
     @classmethod
     def new(cls, *, customer_id: str, cycle: str, state_snapshot,
             alpaca_creds, signals, market_context, quotes,
             validator_verdict: str, recent_outcomes: list,
+            validator_restrictions: list | None = None,
+            news_flags: dict | None = None,
             deadline_seconds: int = 240) -> "WorkPacket":
         """Convenience constructor — fills work_id, timestamps, version."""
         now = time.time()
@@ -114,6 +119,8 @@ class WorkPacket:
             recent_outcomes=recent_outcomes,
             deadline_ts=_iso(now + deadline_seconds),
             dispatched_at_ts=_iso(now),
+            validator_restrictions=list(validator_restrictions or []),
+            news_flags=dict(news_flags or {}),
         )
 
     def to_json(self) -> str:

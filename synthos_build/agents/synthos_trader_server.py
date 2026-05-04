@@ -198,72 +198,140 @@ async def work_endpoint(
     return result
 
 
+# 2026-05-04 — Trader execution serialization lock.
+#
+# The trader module has process-global state (ALPACA_API_KEY,
+# ALPACA_SECRET_KEY, ALPACA_BASE_URL, _CUSTOMER_ID, OPERATING_MODE,
+# TRADING_MODE) that we stamp from each work packet's per-customer creds
+# before calling t.run(). If two /work requests run concurrently in
+# different threads, they will RACE on these stamps and trade for the
+# wrong customer with the wrong keys.
+#
+# Until AlpacaClient is refactored to accept per-instance creds (deferred —
+# a Tier 6+ refactor across every call site in the trader), we must
+# serialize execution. This loses cross-customer parallelism within
+# trader_server, but correctness > throughput on day one.
+#
+# The async-at-the-HTTP-boundary work (asyncio.to_thread, Tier 6) is
+# still useful: while one customer's trader holds this lock and waits
+# on Alpaca, the event loop is free to ACCEPT other /work requests +
+# return their deltas as soon as the lock releases. Just no overlap of
+# trader execution itself.
+import threading
+_TRADER_LOCK = threading.Lock()
+
+
 def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
-    """SKELETON execution path — wires the work packet through the trader's
-    in-process functions and harvests the resulting delta.
+    """Execute one work packet end-to-end. WIRED 2026-05-04.
 
-    The current implementation:
-      1. Re-applies packet creds to the trader module globals (so the
-         AlpacaClient picks them up on next instantiation).
-      2. Calls the trader's run() function for the cycle.
-      3. Drains _PENDING_ACKS and _GATE_TIMINGS_MS into the delta.
-      4. Returns the WorkResult shape.
+    Flow (loopback case, retail-N == process node):
+      1. Stamp trader module globals from packet (under _TRADER_LOCK)
+      2. Call trader._apply_customer_settings() to pick up per-customer
+         trading params (the CLI normally does this from auth.db)
+      3. Reset per-cycle accumulators (_PENDING_ACKS, _GATE_TIMINGS_MS)
+      4. Invoke t.run(session=cycle) — trader writes to local DB as usual
+      5. Drain accumulators into result delta
+      6. Return WorkResult
 
-    The full I/O extraction (gates reading from packet fields instead of
-    DB) is task 26 (mock-retail end-to-end test) — that's where the wiring
-    really gets exercised. This skeleton gives the dispatcher something to
-    POST against right now.
+    For the loopback case (retail-N is the process node, all DBs local),
+    the trader writes positions/cash/cooling_off/orders to the customer
+    DB during the cycle. The dispatcher's apply_delta does NOT re-apply
+    those — it only handles fields that the trader couldn't write
+    itself in distributed mode (signal acks via _ack_signal accumulator,
+    gate14 dispatcher-side post-trade).
+
+    When retail-2 hardware exists and trader_server runs on a different
+    machine, this function will need a DB-mock layer that satisfies
+    trader's read calls from packet data and accumulates writes into
+    the delta. That's the Tier 7+ refactor; for today's skeleton+wiring
+    we lean on local DB access.
     """
     import retail_trade_logic_agent as t
 
+    work_id     = packet.get("work_id", "?")
     customer_id = packet.get("customer_id", "")
-    creds = packet.get("alpaca_creds", {}) or {}
-    state = packet.get("state_snapshot", {}) or {}
+    cycle       = packet.get("cycle", "open")
+    creds       = packet.get("alpaca_creds", {}) or {}
+    state       = packet.get("state_snapshot", {}) or {}
 
-    # Stamp the trader module globals — the AlpacaClient will read these
-    # on construction. In the skeleton, this is the simplest credential
-    # injection. A future revision should accept creds as an arg.
-    t.ALPACA_API_KEY    = creds.get("key", "")
-    t.ALPACA_SECRET_KEY = creds.get("secret", "")
-    t.ALPACA_BASE_URL   = creds.get("base_url", "https://paper-api.alpaca.markets")
-    t.ALPACA_DATA_URL   = creds.get("data_url", "https://data.alpaca.markets")
-    t._CUSTOMER_ID      = customer_id
-    t.OPERATING_MODE    = state.get("operating_mode", "MANAGED")
-    t.TRADING_MODE      = state.get("trading_mode", "PAPER")
+    with _TRADER_LOCK:
+        # Stamp trader module globals — AlpacaClient picks these up on
+        # construction. _CUSTOMER_ID drives _db() routing to the right
+        # customer signals.db.
+        t.ALPACA_API_KEY    = creds.get("key", "")
+        t.ALPACA_SECRET_KEY = creds.get("secret", "")
+        t.ALPACA_BASE_URL   = creds.get("base_url", "https://paper-api.alpaca.markets")
+        t.ALPACA_DATA_URL   = creds.get("data_url", "https://data.alpaca.markets")
+        t._CUSTOMER_ID      = customer_id
+        t.OPERATING_MODE    = state.get("operating_mode", "MANAGED")
+        t.TRADING_MODE      = state.get("trading_mode", "PAPER")
 
-    # Reset per-cycle accumulators
-    t._PENDING_ACKS.clear()
-    t._reset_gate_timings()
+        # Apply per-customer trading parameters from customer_settings DB
+        # (the CLI normally calls this after credential load). Best-effort —
+        # function isn't always present in older deploys.
+        try:
+            if hasattr(t, "_apply_customer_settings"):
+                t._apply_customer_settings()
+        except Exception as e:
+            log.warning(f"[{customer_id[:8]}] _apply_customer_settings raised: {e}")
 
-    # SKELETON: actually invoking t.run() right now would call back into
-    # the local DBs (which is what we want for daemon mode but NOT for
-    # distributed mode where state lives in the packet). Until task 26
-    # rewires the gates against packet fields, return an empty delta and
-    # report what we received so the dispatcher → server contract is
-    # provably wired. Real execution arrives with the mock-retail test.
+        # Reset per-cycle accumulators
+        t._PENDING_ACKS.clear()
+        t._reset_gate_timings()
+
+        # ── Invoke the trader ────────────────────────────────────────────
+        # t.run() can sys.exit on certain halt conditions (kill switch,
+        # halt file, validator NO_GO with no positions to close). Catch
+        # SystemExit so the HTTP server doesn't die.
+        run_error: str | None = None
+        try:
+            t.run(session=cycle)
+        except SystemExit as se:
+            # Trader's halt path — log but treat as a clean cycle with no actions
+            log.info(f"[{customer_id[:8]}] trader sys.exit({se.code}) — halt path; treating as clean cycle")
+        except Exception as e:
+            log.error(f"[{customer_id[:8]}] trader crashed: {type(e).__name__}: {e}", exc_info=True)
+            run_error = f"{type(e).__name__}: {e}"
+
+        # ── Drain accumulators ──────────────────────────────────────────
+        # In loopback mode the trader has already written positions /
+        # cash / cooling_off / recent_bot_orders to the local customer
+        # DB. We do NOT include them in the delta to avoid double-apply
+        # by the dispatcher. The fields kept in delta are ONLY what the
+        # trader could not have done itself in distributed mode:
+        #   - acknowledged_signal_ids: routed through _PENDING_ACKS
+        #     because shared signals.db is the dispatcher's single-writer
+        #     domain (avoids cross-process write race once retail-N is
+        #     remote)
+        #   - log_events: trader didn't accumulate these (it writes to
+        #     local db.log_event directly); leave empty for now
+        #   - trade_outcomes_for_gate14: trader's outcomes already
+        #     persisted to local DB; dispatcher reads them fresh when
+        #     it runs its post-trade gate14 check
+        acked_signals = list(t._PENDING_ACKS)
+        gate_timings  = t.get_gate_timings_ms()
+
     delta = {
         "positions_added":         [],
         "positions_closed":        [],
         "cash_delta":              0.0,
         "cooling_off_added":       [],
         "recent_bot_orders_added": [],
-        "acknowledged_signal_ids": list(t._PENDING_ACKS),
+        "acknowledged_signal_ids": acked_signals,
         "log_events":              [],
         "trade_outcomes_for_gate14": [],
     }
+
     return {
-        "work_id": packet.get("work_id", "?"),
-        "customer_id": customer_id,
-        "schema_version": SCHEMA_VERSION,
-        "executed_by": os.environ.get("NODE_ID", "retail-?"),
-        "actions": [],
-        "delta": delta,
-        "alpaca_reconciliation": None,
-        "gate_timings_ms": t.get_gate_timings_ms(),
-        "skeleton_note": (
-            "task 22+23 skeleton: contract wired, full gate execution "
-            "against packet fields is task 26"
-        ),
+        "work_id":               work_id,
+        "customer_id":           customer_id,
+        "schema_version":        SCHEMA_VERSION,
+        "executed_by":           os.environ.get("NODE_ID", "retail-?"),
+        "actions":               [],   # Audit-grade per-order detail is in customer DB
+        "delta":                 delta,
+        "alpaca_reconciliation": None, # Trader read positions from Alpaca during gate0; not re-fetched here
+        "gate_timings_ms":       gate_timings,
+        "error":                 run_error,
     }
 
 
