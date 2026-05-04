@@ -387,31 +387,36 @@ def dispatch(packet: dict[str, Any]) -> dict[str, Any] | None:
 # ── DELTA APPLICATION ─────────────────────────────────────────────────────
 
 def apply_delta(customer_id: str, result: dict[str, Any]) -> None:
-    """Apply the trader's returned StateDelta to the master DB.
+    """Apply the trader's returned StateDelta to the master DBs.
 
-    LOOPBACK SEMANTICS (current, retail-N == process node):
-      The trader_server runs on the same Pi5 that hosts the master DBs.
-      During the cycle, the trader writes positions / cash / cooling_off /
-      recent_bot_orders directly to the customer's local signals.db as
-      it always has. So this function does NOT re-apply those fields —
-      doing so would double-write.
+    DUAL-MODE SEMANTICS (since 2026-05-04, Phase A wiring):
 
-      What we DO apply here:
-        - acknowledged_signal_ids: trader accumulated via _ack_signal()
-          (gated to NOT write to shared DB in distributed mode); we
-          flip them VALIDATED → ACTED_ON in shared signals.db now
-        - log_events: any extra events trader returned beyond what it
-          already wrote to local DB (currently empty in loopback)
-        - gate14_evaluation: post-trade kill check, runs against the
-          freshly-updated customer DB outcomes
+    The trader_server can run in two modes (TRADER_DB_MODE env on the
+    retail node):
 
-    REMOTE SEMANTICS (future, retail-2 on separate hardware):
-      When trader_server runs on a different machine without local DB
-      access, the trader cannot write positions/cash/cooling_off itself.
-      The full StateDelta will need to be applied here. That requires
-      either (a) pre-stamping the trader's DB layer with a packet-data
-      mock, or (b) refactoring gates to accept state args. Tier 7+ work
-      tracked in CUTOVER_RUNBOOK.md "Standing up retail-2".
+    LOOPBACK (TRADER_DB_MODE=local, retail-N == process node):
+      Trader has local DB access. Writes positions / cash / cooling_off /
+      recent_bot_orders directly to the customer signals.db during the
+      cycle. The result.delta returns these as EMPTY ([], 0.0) — apply
+      is a no-op for those fields.
+
+    REMOTE (TRADER_DB_MODE=packet, retail-1 on separate hardware):
+      Trader has no local DB access. Reads come from WorkPacketDB
+      (built from the work packet); writes accumulate into the mock's
+      delta_* fields and ship back here populated. This function
+      writes them to the master DB single-writer.
+
+    Field-by-field application below uses the present-or-empty pattern:
+    if a field is non-empty, apply it; if empty, no-op. That makes the
+    same code path correct for both modes without explicit branching.
+
+    Order matters for atomicity:
+      1. Acknowledge signals first (shared DB, irreversible from
+         trader perspective)
+      2. Apply positions added/closed and cash deltas to customer DB
+      3. Apply cooling_off / recent_bot_orders / setting_changes
+      4. Persist log_events
+      5. Run gate14 (uses fresh outcomes — depends on prior steps)
     """
     cid = customer_id[:8]
     try:
@@ -420,15 +425,79 @@ def apply_delta(customer_id: str, result: dict[str, Any]) -> None:
         shared_db = get_shared_db()
 
         delta = result.get("delta", {}) or {}
+        trader_db_mode = result.get("trader_db_mode", "local")
 
-        # 1. Acknowledge signals — flip VALIDATED → ACTED_ON
+        # 1. Acknowledge signals — flip VALIDATED → ACTED_ON in shared DB
+        # (single-writer pattern; trader can't do this in distributed mode
+        # because shared signals.db is owned by process node)
         for sid in delta.get("acknowledged_signal_ids", []) or []:
             try:
                 shared_db.acknowledge_signal(sid)
             except Exception as e:
                 log.warning(f"[{cid}] ack {sid} failed: {e}")
 
-        # 2. Persist log_events (kill events, etc.) returned by trader
+        # 2. Apply position + cash deltas (REMOTE mode only — these arrive
+        # populated when TRADER_DB_MODE=packet. In LOOPBACK mode the trader
+        # already wrote to local cust_db during the cycle and the lists/
+        # delta are empty — these blocks no-op.)
+        positions_added   = delta.get("positions_added") or []
+        positions_closed  = delta.get("positions_closed") or []
+        cash_delta        = float(delta.get("cash_delta") or 0.0)
+        cooling_off_added = delta.get("cooling_off_added") or []
+        bot_orders_added  = delta.get("recent_bot_orders_added") or []
+        setting_changes   = delta.get("setting_changes") or {}
+
+        if trader_db_mode == "packet":
+            log.info(
+                f"[{cid}] applying remote-mode delta: "
+                f"+{len(positions_added)} pos, -{len(positions_closed)} pos, "
+                f"cash_delta={cash_delta:+.2f}, "
+                f"+{len(cooling_off_added)} cooling, +{len(bot_orders_added)} orders, "
+                f"{len(setting_changes)} settings"
+            )
+
+        for pos in positions_added:
+            try:
+                if hasattr(cust_db, "open_position"):
+                    cust_db.open_position(**{k: v for k, v in pos.items() if k != "partial_close"})
+            except Exception as e:
+                log.warning(f"[{cid}] open_position failed: {e}")
+
+        for pos in positions_closed:
+            try:
+                if hasattr(cust_db, "close_position"):
+                    cust_db.close_position(pos.get("ticker"), **{k: v for k, v in pos.items() if k != "ticker"})
+            except Exception as e:
+                log.warning(f"[{cid}] close_position failed: {e}")
+
+        if cash_delta and trader_db_mode == "packet":
+            try:
+                if hasattr(cust_db, "update_portfolio"):
+                    cust_db.update_portfolio(cash_delta=cash_delta)
+            except Exception as e:
+                log.warning(f"[{cid}] cash update failed: {e}")
+
+        for entry in cooling_off_added:
+            try:
+                if hasattr(cust_db, "add_cooling_off"):
+                    cust_db.add_cooling_off(**entry)
+            except Exception as e:
+                log.warning(f"[{cid}] add_cooling_off failed: {e}")
+
+        for entry in bot_orders_added:
+            try:
+                if hasattr(cust_db, "record_submitted_order"):
+                    cust_db.record_submitted_order(**entry)
+            except Exception as e:
+                log.warning(f"[{cid}] record_submitted_order failed: {e}")
+
+        for k, v in setting_changes.items():
+            try:
+                cust_db.set_setting(k, v)
+            except Exception as e:
+                log.warning(f"[{cid}] set_setting {k} failed: {e}")
+
+        # 3. Persist log_events (kill events, etc.) returned by trader
         for evt in delta.get("log_events", []) or []:
             try:
                 cust_db.log_event(

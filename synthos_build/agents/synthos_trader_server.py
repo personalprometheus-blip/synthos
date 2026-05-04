@@ -73,7 +73,31 @@ log = logging.getLogger("trader_server")
 DISPATCH_AUTH_TOKEN = os.environ.get("DISPATCH_AUTH_TOKEN", "")
 SERVER_HOST         = os.environ.get("TRADER_SERVER_HOST", "0.0.0.0")
 SERVER_PORT         = int(os.environ.get("TRADER_SERVER_PORT", "8443"))
-SCHEMA_VERSION      = "1.0.0"  # mirrors work_packet.WORK_PACKET_SCHEMA_VERSION
+SCHEMA_VERSION      = "1.1.0"  # mirrors work_packet.WORK_PACKET_SCHEMA_VERSION
+
+# 2026-05-04 — Phase A of retail-1-readiness: TRADER_DB_MODE controls
+# whether trader_server runs the trader against real local DBs or
+# against a WorkPacketDB mock.
+#
+#   "local"   (default) — loopback case (retail-N == process node).
+#             Trader uses its normal _db() / _shared_db() handles which
+#             open the local SQLite files. Works because trader_server
+#             runs on Pi5 where all customer DBs live.
+#
+#   "packet"  remote case (retail-1 on separate hardware, post-cutover).
+#             Trader's _db() and _shared_db() are monkey-patched to
+#             return WorkPacketDB instances built from each work packet.
+#             Reads come from packet snapshot; writes accumulate into
+#             delta dicts that we return in WorkResult for the dispatcher
+#             to apply to master DBs single-writer.
+#
+# Set on the retail node's environment (systemd EnvironmentFile or
+# Environment= line). Each request resolves the mode at execution time
+# so the same server binary works in both modes.
+TRADER_DB_MODE = os.environ.get("TRADER_DB_MODE", "local").lower()
+if TRADER_DB_MODE not in ("local", "packet"):
+    log.warning(f"unknown TRADER_DB_MODE={TRADER_DB_MODE!r}; falling back to 'local'")
+    TRADER_DB_MODE = "local"
 
 
 # ── FASTAPI APP ───────────────────────────────────────────────────────────
@@ -279,6 +303,25 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
         t._PENDING_ACKS.clear()
         t._reset_gate_timings()
 
+        # ── DB-mock injection for TRADER_DB_MODE=packet ────────────────
+        # In packet mode, replace the trader's _db() and _shared_db()
+        # with WorkPacketDB instances built from the packet. The
+        # original handles get restored in `finally` so subsequent
+        # requests aren't poisoned.
+        cust_mock_db: "WorkPacketDB | None" = None
+        shared_mock_db: "WorkPacketDB | None" = None
+        original_db_fn = None
+        original_shared_db_fn = None
+        if TRADER_DB_MODE == "packet":
+            from work_packet_db import WorkPacketDB
+            cust_mock_db   = WorkPacketDB(packet, is_shared=False)
+            shared_mock_db = WorkPacketDB(packet, is_shared=True)
+            original_db_fn        = t._db
+            original_shared_db_fn = t._shared_db
+            t._db        = lambda: cust_mock_db
+            t._shared_db = lambda: shared_mock_db
+            log.info(f"[{customer_id[:8]}] using WorkPacketDB (TRADER_DB_MODE=packet)")
+
         # ── Invoke the trader ────────────────────────────────────────────
         # t.run() can sys.exit on certain halt conditions (kill switch,
         # halt file, validator NO_GO with no positions to close). Catch
@@ -287,49 +330,75 @@ def _execute_packet(packet: dict[str, Any]) -> dict[str, Any]:
         try:
             t.run(session=cycle)
         except SystemExit as se:
-            # Trader's halt path — log but treat as a clean cycle with no actions
             log.info(f"[{customer_id[:8]}] trader sys.exit({se.code}) — halt path; treating as clean cycle")
         except Exception as e:
             log.error(f"[{customer_id[:8]}] trader crashed: {type(e).__name__}: {e}", exc_info=True)
             run_error = f"{type(e).__name__}: {e}"
+        finally:
+            # Restore original DB handles regardless of how t.run() exited
+            if TRADER_DB_MODE == "packet":
+                if original_db_fn is not None:
+                    t._db = original_db_fn
+                if original_shared_db_fn is not None:
+                    t._shared_db = original_shared_db_fn
 
         # ── Drain accumulators ──────────────────────────────────────────
-        # In loopback mode the trader has already written positions /
-        # cash / cooling_off / recent_bot_orders to the local customer
-        # DB. We do NOT include them in the delta to avoid double-apply
-        # by the dispatcher. The fields kept in delta are ONLY what the
-        # trader could not have done itself in distributed mode:
-        #   - acknowledged_signal_ids: routed through _PENDING_ACKS
-        #     because shared signals.db is the dispatcher's single-writer
-        #     domain (avoids cross-process write race once retail-N is
-        #     remote)
-        #   - log_events: trader didn't accumulate these (it writes to
-        #     local db.log_event directly); leave empty for now
-        #   - trade_outcomes_for_gate14: trader's outcomes already
-        #     persisted to local DB; dispatcher reads them fresh when
-        #     it runs its post-trade gate14 check
         acked_signals = list(t._PENDING_ACKS)
         gate_timings  = t.get_gate_timings_ms()
 
-    delta = {
-        "positions_added":         [],
-        "positions_closed":        [],
-        "cash_delta":              0.0,
-        "cooling_off_added":       [],
-        "recent_bot_orders_added": [],
-        "acknowledged_signal_ids": acked_signals,
-        "log_events":              [],
-        "trade_outcomes_for_gate14": [],
-    }
+    # ── Build delta ─────────────────────────────────────────────────────
+    if TRADER_DB_MODE == "packet" and cust_mock_db is not None:
+        # In packet mode the trader couldn't write anywhere (no local DB),
+        # so every mutation lives in the mock's delta_* fields. Combine
+        # mocks' deltas with the trader's _PENDING_ACKS list (which is
+        # populated independently via _ack_signal regardless of DB mode).
+        cust_delta   = cust_mock_db.extract_delta()
+        shared_delta = shared_mock_db.extract_delta() if shared_mock_db else {}
+        # Merge: shared-mock acks + cust-mock acks + module-level _PENDING_ACKS
+        # (de-duped). The shared mock catches calls that go through
+        # _shared_db().acknowledge_signal() if any path bypasses _ack_signal.
+        merged_acks = list(dict.fromkeys(
+            (cust_delta.get("acknowledged_signal_ids") or [])
+            + (shared_delta.get("acknowledged_signal_ids") or [])
+            + acked_signals
+        ))
+        delta = {
+            "positions_added":           cust_delta.get("positions_added", []),
+            "positions_closed":          cust_delta.get("positions_closed", []),
+            "cash_delta":                cust_delta.get("cash_delta", 0.0),
+            "cooling_off_added":         cust_delta.get("cooling_off_added", []),
+            "recent_bot_orders_added":   cust_delta.get("recent_bot_orders_added", []),
+            "acknowledged_signal_ids":   merged_acks,
+            "log_events":                cust_delta.get("log_events", []) + shared_delta.get("log_events", []),
+            "trade_outcomes_for_gate14": [],  # built by dispatcher post-trade
+            "setting_changes":           cust_delta.get("setting_changes", {}),
+            "signal_decisions":          cust_delta.get("signal_decisions", []),
+        }
+    else:
+        # Loopback (TRADER_DB_MODE=local): trader wrote positions / cash /
+        # cooling_off / recent_bot_orders directly to the local customer
+        # DB during the cycle. We don't include them in delta — dispatcher
+        # would double-apply.
+        delta = {
+            "positions_added":         [],
+            "positions_closed":        [],
+            "cash_delta":              0.0,
+            "cooling_off_added":       [],
+            "recent_bot_orders_added": [],
+            "acknowledged_signal_ids": acked_signals,
+            "log_events":              [],
+            "trade_outcomes_for_gate14": [],
+        }
 
     return {
         "work_id":               work_id,
         "customer_id":           customer_id,
         "schema_version":        SCHEMA_VERSION,
         "executed_by":           os.environ.get("NODE_ID", "retail-?"),
-        "actions":               [],   # Audit-grade per-order detail is in customer DB
+        "trader_db_mode":        TRADER_DB_MODE,
+        "actions":               [],
         "delta":                 delta,
-        "alpaca_reconciliation": None, # Trader read positions from Alpaca during gate0; not re-fetched here
+        "alpaca_reconciliation": None,
         "gate_timings_ms":       gate_timings,
         "error":                 run_error,
     }
