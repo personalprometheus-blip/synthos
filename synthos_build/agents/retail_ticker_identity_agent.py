@@ -77,7 +77,21 @@ def run(dry_run: bool = False) -> dict:
             continue
 
         if dry_run:
-            log.info(f"  [dry] {ticker}: would fill {sorted(ident.keys())}")
+            # Only show fields that are actually NULL in ticker_state — so
+            # the dry-run output mirrors what the live UPDATE would change.
+            with db.conn() as c:
+                cur = c.execute(
+                    "SELECT sector, company, exchange FROM ticker_state WHERE ticker=?",
+                    (ticker,)
+                ).fetchone()
+            if not cur:
+                continue
+            would_fill = sorted(
+                f for f in ('sector', 'company', 'exchange')
+                if cur[f] is None and ident.get(f)
+            )
+            if would_fill:
+                log.info(f"  [dry] {ticker}: would fill {would_fill}")
             continue
 
         # COALESCE keeps any existing non-NULL value untouched. We only
