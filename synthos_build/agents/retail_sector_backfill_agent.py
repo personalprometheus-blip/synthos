@@ -160,7 +160,7 @@ def _backfill_positions(customer_db, shared_db):
 
 
 def run(dry_run=False, single_ticker=None):
-    acquire_agent_lock('retail_sector_backfill_agent')
+    acquire_agent_lock('retail_sector_backfill_agent.py')
 
     try:
         db = _shared_db()
