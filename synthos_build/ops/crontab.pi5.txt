@@ -10,6 +10,7 @@
 # See synthos_build/ops/systemd/pi5/ for the unit files. Timer-driven:
 #   synthos-market-daemon.timer          fires Mon-Fri 09:10 ET
 #   synthos-trade-daemon.timer           fires Mon-Fri 09:25 ET
+#   synthos-sector-backfill.timer        fires *-*-* 02:15 ET (FMP sector lookups)
 #   synthos-ticker-identity-agent.timer  fires *-*-* 02:30 ET (nightly identity sweep)
 #   synthos-ticker-state-auditor.timer   fires *-*-* 02:35 ET (gap report)
 # systemd handles crash recovery (Restart=on-failure) and boot-time
@@ -19,6 +20,7 @@
 #   sudo cp synthos_build/ops/systemd/pi5/synthos-*.{service,timer} /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now synthos-market-daemon.timer synthos-trade-daemon.timer \
+#                               synthos-sector-backfill.timer \
 #                               synthos-ticker-identity-agent.timer synthos-ticker-state-auditor.timer
 
 # ── OVERNIGHT NEWS — off-hours only (daemon handles 9-4) ──

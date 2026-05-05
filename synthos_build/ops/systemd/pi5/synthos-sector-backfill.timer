@@ -1,0 +1,24 @@
+[Unit]
+Description=Nightly trigger for Synthos Sector Backfill (02:15 ET)
+Requires=synthos-sector-backfill.service
+
+[Timer]
+# Pi5 system clock is America/New_York — 02:15 here = 02:15 ET directly.
+#
+# Slot ordering on pi5 nightly chain:
+#   01:30 backup
+#   02:15 sector backfill        ← THIS  (writes ticker_sectors)
+#   02:30 ticker identity sweep         (reads ticker_sectors → ticker_state)
+#   02:35 ticker_state auditor          (gap report on post-fill state)
+#   03:00 template rebuild
+#
+# Sector backfill is FIRST so its writes are visible to identity sweep
+# 15 min later. With FMP free tier 250 calls/day + REQUEST_CAP_PER_RUN
+# of 150, agent finishes in ~1-2 min on a typical night.
+OnCalendar=*-*-* 02:15:00
+# Catch up on missed runs if pi5 was down at the scheduled time.
+Persistent=true
+Unit=synthos-sector-backfill.service
+
+[Install]
+WantedBy=timers.target

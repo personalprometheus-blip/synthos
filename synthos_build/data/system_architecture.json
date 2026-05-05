@@ -223,9 +223,9 @@
         },
         {
           "name": "retail_sector_backfill_agent.py",
-          "desc": "One-off/periodic backfill for missing sector_screening rows.",
-          "how": "manual / on-demand",
-          "status": "tool"
+          "desc": "Resolves ticker \u2192 sector via cascade: HARDCODED_MAP \u2192 sector_screening \u2192 FMP /profile (rate-limited 250/day, self-throttles to 150/run). Writes ticker_sectors. Upstream feeder for retail_ticker_identity_agent + the validator's sector-concentration logic.",
+          "how": "systemd timer synthos-sector-backfill.timer (02:15 ET nightly)",
+          "status": "live"
         },
         {
           "name": "retail_price_poller.py",

@@ -2466,6 +2466,12 @@ class DB:
         completeness, so the validator never sees an unknown-sector
         signal that would otherwise trigger BLOCK_SECTOR_UNKNOWN.
         """
+        if not self._is_valid_ticker_for_write(ticker):
+            log.warning(
+                f"[SIGNALS] rejected upsert with invalid ticker={ticker!r} "
+                f"source={source!r} headline={(headline or '')[:80]!r}"
+            )
+            return None
         # Deduplication check — same ticker + tx_date = same disclosure
         with self.conn() as c:
             existing = c.execute("""
@@ -2696,7 +2702,11 @@ class DB:
         exchange) from existing reference tables. Failed lookups leave NULL,
         which the nightly retail_ticker_identity_agent sweep picks up later.
         """
-        if not ticker:
+        if not self._is_valid_ticker_for_write(ticker):
+            log.warning(
+                f"[TICKER-STATE] rejected mark_ticker_active(ticker={ticker!r}) — "
+                f"firewall blocks writes for invalid tickers"
+            )
             return False
         ticker = ticker.upper()
         now = self.now()
@@ -3392,6 +3402,30 @@ class DB:
 
     # ── NEWS FEED ──────────────────────────────────────────────────────────
 
+    # Ticker writer firewall: reject literals that are not real symbols.
+    # 2026-05-04 — found 'N/A' propagating through news_feed → signal_decisions
+    # → ticker_state when an upstream feed (CONGRESS source, EDGAR Form 4)
+    # couldn't extract a ticker but still called the writer. Single bad row
+    # at ingestion previously cascaded into 86 downstream rows. 'MACRO' is
+    # the canonical sentinel for ticker-less items (used by retail_news_agent
+    # for Fed/BEA/regulatory headlines) and is allowed.
+    _INVALID_TICKER_LITERALS = frozenset(
+        ['N/A', 'NULL', 'NA', 'NONE', 'NAN', '-', '?', 'UNKNOWN']
+    )
+
+    @classmethod
+    def _is_valid_ticker_for_write(cls, ticker):
+        """Returns True if ticker is acceptable for a database write. Rejects
+        None, empty, and known garbage-string sentinels. Does NOT enforce a
+        symbol regex — the system intentionally allows TSX:X / BRK / single
+        letters; we only firewall obvious data-hygiene defects."""
+        if not isinstance(ticker, str):
+            return False
+        t = ticker.strip().upper()
+        if not t:
+            return False
+        return t not in cls._INVALID_TICKER_LITERALS
+
     def write_news_feed_entry(self, congress_member, ticker, signal_score,
                                sentiment_score, raw_headline, metadata, source,
                                dedup_window_hours: int = 24):
@@ -3414,6 +3448,12 @@ class DB:
         previously had no dedup at all. Centralizing here means every
         caller benefits without each having to repeat the lookup logic.
         """
+        if not self._is_valid_ticker_for_write(ticker):
+            log.warning(
+                f"[NEWS-FEED] rejected write with invalid ticker={ticker!r} "
+                f"source={source!r} headline={(raw_headline or '')[:80]!r}"
+            )
+            return False, None
         existing_id = None
         if dedup_window_hours and dedup_window_hours > 0 and raw_headline:
             try:

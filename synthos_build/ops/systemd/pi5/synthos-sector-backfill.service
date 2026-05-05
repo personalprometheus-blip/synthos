@@ -1,0 +1,31 @@
+[Unit]
+Description=Synthos Sector Backfill (nightly FMP lookups for ticker_sectors)
+# Triggered by synthos-sector-backfill.timer at 02:15 ET, before the
+# ticker identity sweep (02:30). Resolves ticker → sector via:
+#   1. retail_sector_map.HARDCODED_MAP (free, instant)
+#   2. sector_screening table          (existing screener output)
+#   3. FMP /profile?symbol=...          (external API, rate-limited 250/day)
+#
+# Self-throttles to REQUEST_CAP_PER_RUN (150) and stops on 429. The vast
+# majority of universe tickers are covered by the hardcoded map; FMP is
+# only consulted for the long tail. Steady-state expected: <20 FMP
+# calls/day after ~5 days of runs close the initial gap.
+#
+# Rationale for scheduling now: discovery 2026-05-04 — agent was never
+# in cron, so ticker_sectors had only 228 rows for ~1,239 tradable
+# equities. Identity sweep can't fill ticker_state.sector if the
+# upstream cache doesn't have the data.
+After=network.target
+
+[Service]
+Type=oneshot
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build
+ExecStart=/usr/bin/python3 agents/retail_sector_backfill_agent.py
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/sector_backfill.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/sector_backfill.log
+
+[Install]
+# NOTE: do NOT enable this service directly — enable the .timer instead.
+WantedBy=multi-user.target

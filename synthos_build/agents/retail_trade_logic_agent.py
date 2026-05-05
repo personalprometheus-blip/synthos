@@ -4320,8 +4320,10 @@ def _run_market_gates(db, alpaca, positions, session_log):
     _prefetch_tickers.add(C.BENCHMARK_SYMBOL)  # SPY — used in Gates 2,3,5,10,13
     _prefetch_tickers.add('TLT')               # Gate 3 bond proxy
     _prefetch_tickers.add('BIL')               # BIL reserve
+    _required = set(_prefetch_tickers)         # always-fetched, never filtered
     for p in positions:
         _prefetch_tickers.add(p['ticker'])      # All held positions
+        _required.add(p['ticker'])              # we own them — must be tradable
     # Collect signal tickers from shared DB
     try:
         _sig_tickers = _shared_db().get_validated_signals()
@@ -4332,6 +4334,29 @@ def _run_market_gates(db, alpaca, positions, session_log):
         pass
     _prefetch_tickers.discard('')
     _prefetch_tickers.discard(None)
+
+    # Filter out non-equity tickers (crypto, foreign ADR, OTC) that Alpaca's
+    # equity endpoint returns 400 for. tradable_assets is Alpaca's daily-
+    # refreshed us_equity allowlist; if a ticker isn't there, the equity
+    # endpoint won't have data for it. Required tickers (benchmark + reserves
+    # + held positions) bypass the filter — we already use/own them.
+    try:
+        from retail_tradable_cache import is_tradable as _is_tradable
+        _shared = _shared_db()
+        _dropped = []
+        for t in list(_prefetch_tickers):
+            if t in _required:
+                continue
+            if _is_tradable(_shared, t) is not True:
+                _prefetch_tickers.discard(t)
+                _dropped.append(t)
+        if _dropped:
+            sample = sorted(_dropped)[:10]
+            tail = '…' if len(_dropped) > 10 else ''
+            log.info(f"[PREFETCH] dropped {len(_dropped)} non-equity tickers: {sample}{tail}")
+    except Exception as _e:
+        log.debug(f"[PREFETCH] tradable filter failed (passing all through): {_e}")
+
     # Fetch 70 days (covers max lookback: Gate 2 uses 60+, Gate 6 uses 40+)
     alpaca.prefetch_bars(list(_prefetch_tickers), days=70)
 
