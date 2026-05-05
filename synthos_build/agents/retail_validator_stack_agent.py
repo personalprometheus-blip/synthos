@@ -430,16 +430,34 @@ def gate2_bias_guard(report: ValidationReport, cust_db):
         ))
         return
 
-    # Check staleness — stale bias data = pass-through
+    # Check staleness — market-hours-aware (matches gate1/gate3 pattern).
+    # During market hours: stale bias is a real risk (sector concentration
+    # checks aren't running while the trader IS trading) → CAUTION + visible
+    # restriction so the operator knows.
+    # Off-hours: silent pass-through (current behavior) — bias_detection
+    # legitimately stops between market sessions and there's no trading.
+    # Trades still flow because gate2 returns CAUTION not NO_GO; this is
+    # the original "soft fail open" intent, just no longer silent during
+    # the window where it matters.
     scan_ts = scan.get('timestamp', '')
     age = _age_minutes(scan_ts)
-    if age is not None and age > BIAS_SCAN_STALE_MINUTES:
-        log.info(f"  Bias scan stale ({int(age)}m) — pass-through")
-        report.add(GateResult(
-            gate="GATE2_BIAS_GUARD",
-            status=GateStatus.GO,
-            message=f"Bias scan stale ({int(age)}m old) — pass-through"
-        ))
+    threshold = _stale_threshold(BIAS_SCAN_STALE_MINUTES)
+    if age is not None and age > threshold:
+        if _is_market_hours():
+            log.warning(f"  Bias scan stale ({int(age)}m, threshold {threshold}m) — surfacing CAUTION")
+            report.add(GateResult(
+                gate="GATE2_BIAS_GUARD",
+                status=GateStatus.CAUTION,
+                message=f"Bias scan stale ({int(age)}m old, threshold {threshold}m) — sector + concentration checks paused",
+                restrictions=["STALE_BIAS_PASSTHROUGH"]
+            ))
+        else:
+            log.info(f"  Bias scan stale ({int(age)}m) — off-hours pass-through")
+            report.add(GateResult(
+                gate="GATE2_BIAS_GUARD",
+                status=GateStatus.GO,
+                message=f"Bias scan stale ({int(age)}m old) — off-hours pass-through"
+            ))
         return
 
     # Evaluate bias findings. Informational-only codes (data-quality
