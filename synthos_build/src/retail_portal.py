@@ -7052,17 +7052,23 @@ def api_audit():
 
 
 @app.route('/api/ticker-state-audit')
-@admin_required
 def api_ticker_state_audit():
     """Latest ticker_state gap audit from retail_ticker_state_auditor.py.
 
-    Admin-only — exposes per-ticker state and ownership wiring, infrastructure
-    detail not appropriate for the customer UI. Read from shared signals.db
-    setting `_TICKER_STATE_AUDIT_LAST`. Returns the full report dict.
+    Dual auth (matches /api/logs-audit pattern):
+      - Admin session, OR
+      - Bearer MONITOR_TOKEN (for cross-node pull from pi4b synthos_monitor)
 
-    Empty/null payload means the auditor has not run yet — UI should render
-    a 'No data yet' badge rather than failing.
+    Read from shared signals.db setting `_TICKER_STATE_AUDIT_LAST`.
+    Empty/null payload means the auditor has not run yet — caller should
+    render a 'No data yet' state rather than failing.
     """
+    auth_header = request.headers.get('Authorization', '')
+    monitor_token = os.environ.get('MONITOR_TOKEN', '')
+    is_monitor = bool(monitor_token) and auth_header == f'Bearer {monitor_token}'
+    if not is_monitor and not is_admin():
+        return jsonify({'error': 'unauthorized'}), 401
+
     try:
         from retail_database import get_shared_db
         raw = get_shared_db().get_setting('_TICKER_STATE_AUDIT_LAST')
