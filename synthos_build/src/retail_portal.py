@@ -7051,6 +7051,36 @@ def api_audit():
         })
 
 
+@app.route('/api/ticker-state-audit')
+@admin_required
+def api_ticker_state_audit():
+    """Latest ticker_state gap audit from retail_ticker_state_auditor.py.
+
+    Admin-only — exposes per-ticker state and ownership wiring, infrastructure
+    detail not appropriate for the customer UI. Read from shared signals.db
+    setting `_TICKER_STATE_AUDIT_LAST`. Returns the full report dict.
+
+    Empty/null payload means the auditor has not run yet — UI should render
+    a 'No data yet' badge rather than failing.
+    """
+    try:
+        from retail_database import get_shared_db
+        raw = get_shared_db().get_setting('_TICKER_STATE_AUDIT_LAST')
+        if not raw:
+            return jsonify({
+                'ts': None,
+                'active_ticker_count': 0,
+                'total_gaps': 0,
+                'anomaly_count': 0,
+                'by_owner': {}, 'by_field': {},
+                'anomalies': [], 'samples': {},
+                'note': 'No audit run yet — retail_ticker_state_auditor.py has not executed',
+            })
+        return jsonify(json.loads(raw))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/update', methods=['POST'])
 @admin_required
 def api_update():
