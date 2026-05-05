@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
@@ -236,6 +237,39 @@ class EdgarClient:
             offset += len(hits)
         return results
 
+    # Ticker(s) embedded inside display_names — EDGAR returns this format
+    # consistently for 8-K / Form 144 / 13D / 13G hits. Examples:
+    #   'STURM RUGER & CO INC  (RGR)  (CIK 0000095029)'        → ['RGR']
+    #   'Pasithea Therapeutics Corp.  (KTTA, KTTAW)  (CIK …)' → ['KTTA', 'KTTAW']
+    #   'Benchmark 2026-B43 Mortgage Trust  (CIK 0002121298)'  → []
+    # Handles multi-class tickers and skips hits with only a CIK in parens.
+    _TICKER_IN_DISPLAY_RE = re.compile(r'\(([A-Z][A-Z0-9,\s/.-]{0,30})\)')
+
+    @classmethod
+    def _tickers_from_display_names(cls, display_names) -> list[str]:
+        if not display_names:
+            return []
+        names = display_names if isinstance(display_names, list) else [display_names]
+        out: list[str] = []
+        for name in names:
+            if not name:
+                continue
+            for m in cls._TICKER_IN_DISPLAY_RE.finditer(str(name)):
+                token = m.group(1).strip()
+                if token.upper().startswith('CIK '):
+                    continue  # parenthesized CIK, not a ticker
+                # Multi-class: 'KTTA, KTTAW' or 'BRK.A, BRK.B'
+                for sym in re.split(r'[,\s/]+', token):
+                    sym = sym.strip().upper()
+                    if 1 <= len(sym) <= 8 and re.match(r'^[A-Z][A-Z0-9.-]*$', sym):
+                        out.append(sym)
+        # Preserve order, dedup
+        seen = set(); deduped = []
+        for s in out:
+            if s not in seen:
+                seen.add(s); deduped.append(s)
+        return deduped
+
     def _normalize_hit(self, hit: dict) -> Optional[dict]:
         """Pull the bits we care about out of an EDGAR search hit.
         Returns None if the hit is malformed."""
@@ -251,6 +285,15 @@ class EdgarClient:
             cik_path = cik_raw.lstrip("0") or "0"
             url = (f"{EDGAR_ARCHIVES_BASE}/{cik_path}/"
                    f"{acc_path}/{primary_doc}")
+            # Ticker extraction: prefer the dedicated 'tickers' array if
+            # present; fall back to parsing display_names. EDGAR's full-text
+            # search consistently omits 'tickers' for 8-K, Form 144, 13D/13G,
+            # but always embeds them in display_names. Without this fallback
+            # those four sources lose every signal at the empty-tickers
+            # check in their respective fetchers.
+            tickers = src.get("tickers") or []
+            if not tickers:
+                tickers = self._tickers_from_display_names(src.get("display_names"))
             return {
                 "accession":       accession_dashed,
                 "form":             src.get("forms", [""])[0] if isinstance(src.get("forms"), list) else src.get("forms") or "",
@@ -259,7 +302,7 @@ class EdgarClient:
                 "filed_date":      src.get("file_date") or "",
                 "primary_doc":     primary_doc,
                 "primary_doc_url": url,
-                "tickers":         src.get("tickers") or [],
+                "tickers":         tickers,
                 "raw_hit":         hit,
             }
         except Exception as e:

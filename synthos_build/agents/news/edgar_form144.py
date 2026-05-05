@@ -151,40 +151,84 @@ def parse_form144(xml_text: str, ticker_from_hit: str = "",
         log.warning(f"form144 XML parse failed: {e}")
         return []
 
-    # Form 144 nests issuer info under formData; older forms may use
-    # different paths. Try the modern path first.
-    issuer = root.find(".//issuerInfo") or root.find("issuerInfo")
-    issuer_name   = _text(issuer, "issuerName")
-    issuer_ticker = _text(issuer, "issuerTradingSymbol")
+    # Form 144 XML uses a default namespace: xmlns="http://www.sec.gov/edgar/ownership"
+    # (Form 4 doesn't, which is why edgar_form4.py works without ns-aware lookups).
+    # Without namespace handling every .find() returns None and the parser
+    # silently drops every filing. Auto-detect the namespace from the root
+    # element's tag so we don't hard-code a version string the SEC may bump.
+    if root.tag.startswith('{'):
+        ns_uri = root.tag.split('}')[0][1:]
+        ns_map = {'o': ns_uri}
+        def _find(node, path):
+            if node is None:
+                return None
+            return node.find(path.replace('o:', '{' + ns_uri + '}'))
+        # _text uses .find(); rebind it locally to ns-aware version
+        def _t(node, path, default=""):
+            f = _find(node, path)
+            return f.text.strip() if (f is not None and f.text) else default
+        # Modern Form 144 path
+        issuer = _find(root, './/o:issuerInfo')
+        issuer_name   = _t(issuer, 'o:issuerName')
+        issuer_ticker = _t(issuer, 'o:issuerTradingSymbol')
+        sec_path_a    = _find(root, './/o:securitiesInformation')
+        sec_path_b    = _find(root, './/o:securitiesToBeSold')
+        sec           = sec_path_a if sec_path_a is not None else sec_path_b
+    else:
+        # Legacy: no default namespace — keep prior behavior so old captured
+        # XMLs (if any) and tests that build naked elements still parse.
+        ns_uri = None
+        def _t(node, path, default=""):
+            return _text(node, path, default)
+        issuer = root.find(".//issuerInfo") or root.find("issuerInfo")
+        issuer_name   = _t(issuer, "issuerName")
+        issuer_ticker = _t(issuer, "issuerTradingSymbol")
+        sec = root.find(".//securitiesInformation") or root.find(".//securitiesToBeSold")
+
     if not issuer_ticker and ticker_from_hit:
         issuer_ticker = ticker_from_hit
     if not issuer_ticker:
         return []  # No ticker — can't attribute
 
     # Filer information
-    filer_name = (
-        _text(root, ".//filerInfo/filerName")
-        or _text(root, ".//headerData/filerName")
-        or _text(root, ".//filer/name")
-        or "Unknown filer"
-    )
+    if ns_uri:
+        filer_name = (
+            _t(root, ".//o:filerInfo/o:filerName")
+            or _t(root, ".//o:headerData/o:filerName")
+            or _t(root, ".//o:filer/o:name")
+            or "Unknown filer"
+        )
+    else:
+        filer_name = (
+            _text(root, ".//filerInfo/filerName")
+            or _text(root, ".//headerData/filerName")
+            or _text(root, ".//filer/name")
+            or "Unknown filer"
+        )
 
     # Securities-to-be-sold info
-    sec = root.find(".//securitiesInformation") or root.find(".//securitiesToBeSold")
     if sec is None:
         return []
 
-    aggregate_value = _to_float(_text(sec, "aggregateMarketValue"))
+    aggregate_value = _to_float(_t(sec, "aggregateMarketValue" if not ns_uri else "o:aggregateMarketValue"))
     if aggregate_value is None:
         # Fall back to shares × price if present
-        shares = _to_float(_text(sec, "securitiesAmount"))
-        ppx    = _to_float(_text(sec, "approximatePricePerShare"))
+        shares_path = "securitiesAmount" if not ns_uri else "o:securitiesAmount"
+        ppx_path    = "approximatePricePerShare" if not ns_uri else "o:approximatePricePerShare"
+        shares = _to_float(_t(sec, shares_path))
+        ppx    = _to_float(_t(sec, ppx_path))
         if shares is not None and ppx is not None:
             aggregate_value = shares * ppx
     if aggregate_value is None or aggregate_value < MIN_TX_VALUE_USD:
         return []
 
-    relationship_raw = _text(sec, "relationshipToIssuer") or _text(root, ".//relationshipToIssuer")
+    if ns_uri:
+        relationship_raw = (
+            _t(root, './/o:issuerInfo/o:relationshipsToIssuer/o:relationshipToIssuer')
+            or _t(root, './/o:relationshipToIssuer')
+        )
+    else:
+        relationship_raw = _text(sec, "relationshipToIssuer") or _text(root, ".//relationshipToIssuer")
     relationship_norm = _normalize_relationship(relationship_raw)
     # Relationship can contain multiple roles separated by '/' or ',';
     # match if ANY component is in our insider set.
@@ -195,8 +239,10 @@ def parse_form144(xml_text: str, ticker_from_hit: str = "",
         # Not an insider relationship — skip
         return []
 
-    approx_sale = _text(sec, "approximateDateOfSale")
-    securities_class = _text(sec, "securitiesClassTitle") or "Common Stock"
+    approx_sale_path  = "approximateDateOfSale"  if not ns_uri else "o:approximateDateOfSale"
+    sec_class_path    = "securitiesClassTitle"   if not ns_uri else "o:securitiesClassTitle"
+    approx_sale       = _t(sec, approx_sale_path)
+    securities_class  = _t(sec, sec_class_path) or "Common Stock"
 
     role_label = relationship_raw or "Insider"
 

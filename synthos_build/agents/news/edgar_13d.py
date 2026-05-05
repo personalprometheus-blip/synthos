@@ -89,19 +89,20 @@ def fetch_13d_signals(
                  "Populate synthos_build/data/activists.json before enabling.")
         return []
 
-    # EDGAR search supports 'SC 13D' which returns 13D + 13D/A.
-    # Fix D (2026-04-28): some EDGAR query paths return zero for
-    # 'SC 13D' but find results under the bare '13D' form type.  Fall
-    # back if the canonical query is empty.  Either form is benign; the
-    # search-hit normalization downstream is form-string agnostic.
-    hits = client.search_filings(form_type="SC 13D", since_days=since_days,
+    # 2026-05-04: empirical test against efts.sec.gov/LATEST/search-index
+    # showed the canonical form name is 'SCHEDULE 13D' (returns hits) NOT
+    # 'SC 13D' (returns 0). Earlier 'SC 13D' / '13D' fallbacks were both
+    # broken queries — the EDGAR full-text index uses the long-form name.
+    # Try SCHEDULE 13D first (covers 13D + 13D/A combined), then the older
+    # 'SC 13D' query as legacy fallback in case EDGAR ever changes back.
+    hits = client.search_filings(form_type="SCHEDULE 13D", since_days=since_days,
                                  max_results=max_filings)
     if not hits:
-        log.info("13D 'SC 13D' search returned 0 — trying fallback '13D'")
-        hits = client.search_filings(form_type="13D", since_days=since_days,
+        log.info("13D 'SCHEDULE 13D' returned 0 — trying legacy 'SC 13D'")
+        hits = client.search_filings(form_type="SC 13D", since_days=since_days,
                                      max_results=max_filings)
     if not hits:
-        log.info("13D search (both query forms) returned 0 hits")
+        log.info("13D search returned 0 hits across all query forms")
         return []
 
     items_out: list[dict] = []
