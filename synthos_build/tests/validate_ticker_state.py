@@ -206,13 +206,23 @@ conn.commit()
 section('PHASE 3 — Readers + bias serialization fix')
 
 # Trader gate 5 should read ticker_state when present.
-# Smoke-test via known ticker; we don't actually invoke gate 5 here (would
-# require alpaca creds + live signal). Instead verify the lookup function works.
-state = shared.get_ticker_state('AAPL')
-if state:
-    t_pass('AAPL ticker_state reachable for gate 5 read', f'sentiment={state["sentiment_score"]}')
+# Smoke-test the lookup using whichever ticker is most recently active —
+# we don't actually invoke gate 5 here (would require alpaca creds + live
+# signal). Just verifying the read path works against real data.
+recent = conn.execute(
+    "SELECT ticker, sentiment_score, sector FROM ticker_state "
+    "WHERE sentiment_score IS NOT NULL "
+    "ORDER BY updated_at DESC LIMIT 1"
+).fetchone()
+if recent:
+    state = shared.get_ticker_state(recent['ticker'])
+    if state:
+        t_pass('ticker_state read path works against real data',
+               f'{recent["ticker"]}: sentiment={state["sentiment_score"]}, sector={state["sector"]}')
+    else:
+        t_fail('ticker_state read path works', f'{recent["ticker"]} returned None')
 else:
-    t_fail('AAPL ticker_state reachable for gate 5 read', 'AAPL row missing')
+    t_fail('ticker_state read path works', 'no rows have sentiment_score — backfill incomplete?')
 
 # Bias detection: latest scan should now have meta + detail in findings
 import sqlite3
