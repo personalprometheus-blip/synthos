@@ -2238,6 +2238,19 @@ def _gate5_signal_score_v1(signal: dict, positions: list, alpaca,
         decision_log.gate("5_SIGNAL_SCORE", "SKIP", {"reason": "missing ticker in signal"}, "no ticker")
         return 0.0
 
+    # ── Ticker-state lookup (Phase 3 of ticker_state migration, 2026-05-04)
+    # Per-ticker live worldview lives in ticker_state — the trader prefers it
+    # over the per-signal stamps so freshness is correct (sentiment for AAPL
+    # is the same regardless of which signal is being evaluated). Fall back
+    # to per-signal columns if ticker_state has no value yet (e.g., first
+    # cycle after a new ticker appears, before any agent has stamped it).
+    # Spec: synthos_build/docs/TICKER_STATE_ARCHITECTURE.md
+    try:
+        _ts = _shared_db().get_ticker_state(ticker) or {}
+    except Exception as _e:
+        log.debug(f"ticker_state lookup failed for {ticker} in gate 5 v1: {_e}")
+        _ts = {}
+
     # Component scores
     tier_score   = max(0.0, 1.0 - (int(signal.get('source_tier', 2) or 2) - 1) * 0.3)
     pol_weight   = float(signal.get('politician_weight') or 0.5)
@@ -2245,10 +2258,11 @@ def _gate5_signal_score_v1(signal: dict, positions: list, alpaca,
     interr_score = interrogation_to_score(signal.get('interrogation_status', 'UNVALIDATED'))
     conf_score   = confidence_to_score(signal.get('confidence', 'MEDIUM'))
 
-    # Sentiment — prefer the new per-signal sentiment stamp if present,
-    # else fall back to parsing corroboration_note (legacy path).
-    # stamp_signals_sentiment() writes signal.sentiment_score in [0.10, 0.85].
-    stamped_sent = signal.get('sentiment_score')
+    # Sentiment — prefer ticker_state, then per-signal stamp, then legacy
+    # corroboration-note parsing as last resort.
+    stamped_sent = _ts.get('sentiment_score') if _ts else None
+    if stamped_sent is None:
+        stamped_sent = signal.get('sentiment_score')
     if stamped_sent is not None:
         try:
             sentiment_score = max(0.0, min(1.0, float(stamped_sent)))
@@ -2322,16 +2336,12 @@ def _gate5_signal_score_v1(signal: dict, positions: list, alpaca,
     except Exception as _e:
         log.debug(f"Screening lookup failed for {ticker}: {_e}")
 
-    # Per-agent stamp bonus — the screener writes screener_score
-    # (0.0-1.0) to every in-flight signal:
-    #   - Top-N candidates get their actual momentum score
-    #   - Everyone else gets a sector-baseline derived from the sector
-    #     ETF's 5yr return
-    # We convert that score into a centered ±3% Gate 5 nudge so strong
-    # sectors/candidates get a boost and weak ones get a penalty, with
-    # a null-safe fallback to the legacy +0.02 boolean bonus if the
-    # column hasn't been populated yet (first run after migration).
-    scr_score = signal.get('screener_score')
+    # Per-agent stamp bonus — the screener writes screener_score (0.0-1.0).
+    # Phase 3: prefer ticker_state, fall back to per-signal stamp. Use is-None
+    # check (not truthy) because a legitimate score of 0.0 is meaningful.
+    scr_score = _ts.get('screener_score') if _ts else None
+    if scr_score is None:
+        scr_score = signal.get('screener_score')
     screener_stamp_adj = 0.0
     if scr_score is not None:
         try:
@@ -2490,24 +2500,46 @@ def _gate5_signal_score_v2(signal: dict, positions: list, alpaca,
             {"reason": "missing ticker in signal"}, "no ticker")
         return 0.0
 
-    # Pull screener row — combined_score / sentiment_score / momentum_score
-    # all live here. If the ticker isn't in the screener universe
-    # (shouldn't normally happen since candidate_generator emits from
-    # sector_screening) we fall through to a neutral 0.5.
+    # Phase 3 (2026-05-04 ticker_state migration): prefer ticker_state for
+    # the per-ticker live worldview; fall back to sector_screening for any
+    # field not yet populated in ticker_state. Once Phase 4 deprecates the
+    # old per-signal columns, ticker_state is the only read path.
+    try:
+        _ts = _shared_db().get_ticker_state(ticker) or {}
+    except Exception as _e:
+        log.debug(f"ticker_state lookup failed for {ticker} in gate 5 v2: {_e}")
+        _ts = {}
+
+    # sector_screening fallback for fields not yet in ticker_state
     try:
         scr = _shared_db().get_screening_score(ticker) or {}
     except Exception as e:
         log.debug(f"V2 screener lookup failed for {ticker}: {e}")
         scr = {}
-    if not scr:
+
+    # If neither source has data, fall back to neutral 0.5 (preserves v2's
+    # original behavior — was a hard return; now we still have ticker_state
+    # to look at first).
+    if not _ts and not scr:
         decision_log.gate("5_SIGNAL_SCORE_V2", "WARN",
-            {"reason": "ticker not in sector_screening", "ticker": ticker},
-            "no screener row — neutral fallback")
+            {"reason": "ticker not in ticker_state or sector_screening", "ticker": ticker},
+            "no enrichment data — neutral fallback")
         return 0.5
 
-    cs   = float(scr.get('combined_score')   if scr.get('combined_score')   is not None else 0.5)
-    sent = float(scr.get('sentiment_score')  if scr.get('sentiment_score')  is not None else 0.5)
-    mom  = float(scr.get('momentum_score')   if scr.get('momentum_score')   is not None else 0.5)
+    def _pick(field_ts, field_scr=None, default=0.5):
+        """Prefer ticker_state value; fall back to screener; then default."""
+        v = _ts.get(field_ts)
+        if v is not None:
+            return float(v)
+        if field_scr:
+            v = scr.get(field_scr)
+            if v is not None:
+                return float(v)
+        return default
+
+    cs   = _pick('screener_score', 'combined_score')   # ticker_state.screener_score == screener's combined_score
+    sent = _pick('sentiment_score', 'sentiment_score')
+    mom  = _pick('momentum_score', 'momentum_score')
 
     # Signal-quality composite — collapse v1's three trustworthiness
     # axes into one shared 10% slot. Each component is normalized to

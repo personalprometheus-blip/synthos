@@ -1655,6 +1655,28 @@ class DB:
                   f"{ticker} · {shares:.4f} sh @ ${entry_price:.2f}",
                   -cost, new_cash, pos_id, self.now()))
 
+        # Phase 3 (2026-05-04): capture entry_state_snapshot from ticker_state.
+        # JSON blob of the per-ticker live worldview at decision time —
+        # restores the audit trail that was lost when positions.signal_id
+        # ended up NULL on most rows. Best-effort: if ticker_state lookup
+        # fails for any reason, the position is already open + ledgered;
+        # don't roll back over snapshot failure.
+        try:
+            ts_row = self.get_ticker_state(ticker)
+            if ts_row:
+                snapshot = {
+                    'ticker_state': ts_row,
+                    'captured_at': self.now(),
+                    'reason': 'position_open',
+                }
+                with self.conn() as c2:
+                    c2.execute(
+                        "UPDATE positions SET entry_state_snapshot=? WHERE id=?",
+                        (json.dumps(snapshot, default=str), pos_id)
+                    )
+        except Exception as _e:
+            log.debug(f"entry_state_snapshot capture failed for {pos_id}: {_e}")
+
         log.info(f"Opened position: {ticker} {shares:.4f}sh @ ${entry_price:.2f} — cost ${cost:.2f}")
         return pos_id
 
@@ -2095,6 +2117,27 @@ class DB:
                   'EXIT',
                   f"{pos['ticker']} · {exit_reason} · {'+' if pnl_dollar>=0 else ''}{pnl_dollar:.2f}",
                   proceeds, new_cash, pos_id, self.now()))
+
+        # Phase 3 (2026-05-04): capture exit_state_snapshot from ticker_state
+        # at close time. Pairs with entry_state_snapshot for full lifecycle
+        # post-trade analysis ("what was the world like when we entered vs
+        # what was it like when we exited"). Best-effort.
+        try:
+            ts_row = self.get_ticker_state(pos['ticker'])
+            if ts_row:
+                snapshot = {
+                    'ticker_state': ts_row,
+                    'captured_at': self.now(),
+                    'reason': f'position_close:{exit_reason}',
+                }
+                with self.conn() as c2:
+                    c2.execute(
+                        "UPDATE positions SET exit_state_snapshot=? WHERE id=?",
+                        (json.dumps(snapshot, default=str), pos_id)
+                    )
+        except Exception as _e:
+            log.debug(f"exit_state_snapshot capture failed for {pos_id}: {_e}")
+
         log.info(f"Closed position: {pos['ticker']} {verdict} {pnl_pct:+.2f}% (${pnl_dollar:+.2f})")
 
         # Record exit performance for trailing stop optimizer
