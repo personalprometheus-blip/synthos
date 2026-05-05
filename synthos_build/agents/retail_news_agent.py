@@ -1430,12 +1430,45 @@ def gate1_system(item, ctrl, ndl, seen_headlines, state):
         return False
 
     # ── Timestamp / staleness check ────────────────────────────────────────
+    # disc_date can arrive in two formats:
+    #   1. ISO timestamp with time component (Alpaca news: '2026-05-04T16:30:00Z')
+    #   2. Date-only YYYY-MM-DD (EDGAR Form 4 / 8-K / 13D / 13G / 144 —
+    #      SEC search results expose only file_date as a date)
+    #
+    # Bug fixed 2026-05-04: previously strptime parsed date-only as
+    # midnight UTC of that day. A Form 4 dated '2026-05-04' filed at 16:00
+    # ET would compute as 25-26h old at 21:00 ET, getting silently
+    # discarded. Every after-hours scheduler run from 19:00 ET onward lost
+    # the entire afternoon's insider-trade data.
+    #
+    # Fix: when disc_date is date-only, treat it as end-of-day UTC. SEC
+    # accepts filings any time up to 23:59:59 ET, so end-of-day is the
+    # worst-case upper bound on filing time and never under-counts age.
+    # ISO timestamps with explicit time still parse exactly.
     disc_date_str = item.get("disc_date", "")
     news_age_ok   = True
     if disc_date_str:
+        disc_dt = None
+        # Detect date-only ('YYYY-MM-DD' has no T or space-separated time
+        # component) up front. fromisoformat in Python 3.11+ accepts these
+        # and returns midnight — which is the bug we're fixing.
+        _is_date_only = (len(disc_date_str) == 10
+                         and disc_date_str.count('-') == 2
+                         and 'T' not in disc_date_str
+                         and ':' not in disc_date_str)
         try:
-            # disc_date comes from Alpaca's UTC created_at — compare in UTC.
-            disc_dt   = datetime.strptime(disc_date_str, '%Y-%m-%d')
+            if _is_date_only:
+                disc_dt = datetime.strptime(disc_date_str, '%Y-%m-%d').replace(
+                    hour=23, minute=59, second=59
+                )
+            else:
+                disc_dt = datetime.fromisoformat(disc_date_str.replace('Z', '+00:00'))
+                if disc_dt.tzinfo is not None:
+                    disc_dt = disc_dt.astimezone(timezone.utc).replace(tzinfo=None)
+        except ValueError:
+            disc_dt = None
+            news_age_ok = False
+        if disc_dt is not None:
             age_hours = (datetime.now(timezone.utc).replace(tzinfo=None) - disc_dt).total_seconds() / 3600
             if age_hours > ctrl.MAX_NEWS_AGE_HOURS:
                 state.system_status = "timestamp_rejected"
@@ -1444,9 +1477,6 @@ def gate1_system(item, ctrl, ndl, seen_headlines, state):
                           "max": ctrl.MAX_NEWS_AGE_HOURS},
                          "HALT", "article timestamp exceeds MAX_NEWS_AGE_HOURS")
                 return False
-        except ValueError:
-            # Unparseable date — treat as missing (not a hard stop for Tier 1)
-            news_age_ok = False
 
     # ── Duplicate detection ────────────────────────────────────────────────
     full_text = f"{headline} {subhead}"
@@ -3290,6 +3320,13 @@ def _classify_one_item(item, ctrl, regime, db, seen_headlines):
     # ── Write to news_feed (all signals, regardless of routing) ───────
     sector = item.get("sector", "")
     ind_etf, sec_etf = identify_industry_etf(ticker, sector)
+    # EDGAR Form 4 / Form 144 / 13D / 13G ship structured fields in the
+    # source item's metadata (tx_code, tx_value_usd, etc.). Pass them
+    # through to news_feed so downstream aggregations (insider_signal_30d)
+    # can read tx_code + tx_value_usd via json_extract instead of having
+    # to re-parse the headline string. Other sources are no-op (no
+    # source_meta = nothing to merge).
+    _source_meta = item.get("metadata") or {}
     try:
         db.write_news_feed_entry(
             congress_member = congress_member,
@@ -3318,7 +3355,15 @@ def _classify_one_item(item, ctrl, regime, db, seen_headlines):
                 "impact_score":      state.impact_score,
                 "routing":           routing,
                 "persistence_state": state.persistence_state,
-                "image_url":       item.get("image_url", ""),
+                "image_url":         item.get("image_url", ""),
+                # EDGAR structured fields (only present for edgar_* sources)
+                "tx_code":           _source_meta.get("tx_code"),
+                "tx_value_usd":      _source_meta.get("tx_value_usd"),
+                "tx_shares":         _source_meta.get("tx_shares"),
+                "filer_role":        _source_meta.get("filer_role"),
+                "is_director":       _source_meta.get("is_director"),
+                "is_officer":        _source_meta.get("is_officer"),
+                "is_ten_pct":        _source_meta.get("is_ten_pct"),
             },
             source = "CONGRESS" if source_tier == 1 else "RSS",
         )

@@ -2734,6 +2734,50 @@ class DB:
                 )
         return True
 
+    def recompute_insider_signal_30d(self, ticker):
+        """Compute 30-day net insider $ for ticker from edgar_form4 entries
+        in news_feed and write to ticker_state.insider_signal. Owner:
+        retail_news_agent (post news_feed insert for source='edgar_form4').
+
+        Net = sum(tx_value_usd) over 30d, where buys (tx_code='P') count
+        positive and sells (tx_code='S') count negative. Other codes
+        (gifts, exercises) ignored — too noisy. Returns the computed
+        signal (or None if there are no Form 4 entries for ticker).
+        """
+        if not ticker:
+            return None
+        ticker = ticker.upper()
+        # news_feed.source is set to 'CONGRESS'/'RSS' by retail_news_agent
+        # (categorization by tier, not by feed). The actual feed identifier
+        # 'edgar_form4' is preserved inside metadata.source. Filter on
+        # both the metadata.source key and the structured tx fields so we
+        # only sum P/S transactions with a known dollar value.
+        with self.conn() as c:
+            row = c.execute(
+                "SELECT COALESCE(SUM(CASE "
+                "    WHEN json_extract(metadata, '$.tx_code') = 'P' "
+                "      THEN CAST(json_extract(metadata, '$.tx_value_usd') AS REAL) "
+                "    WHEN json_extract(metadata, '$.tx_code') = 'S' "
+                "      THEN -CAST(json_extract(metadata, '$.tx_value_usd') AS REAL) "
+                "    ELSE 0 END), 0) AS net_usd, "
+                "COUNT(*) AS n "
+                "FROM news_feed "
+                "WHERE ticker = ? "
+                "  AND json_extract(metadata, '$.source') = 'edgar_form4' "
+                "  AND created_at > datetime('now','-30 days') "
+                "  AND json_extract(metadata, '$.tx_value_usd') IS NOT NULL",
+                (ticker,)
+            ).fetchone()
+            net_usd = row[0] if row else None
+            n_rows  = row[1] if row else 0
+        if not n_rows:
+            return None
+        try:
+            self.upsert_ticker_state(ticker, insider_signal=float(net_usd))
+        except Exception as _e:
+            log.debug(f"insider_signal ticker_state write failed for {ticker}: {_e}")
+        return float(net_usd)
+
     def recompute_news_score_4h(self, ticker):
         """Compute 4-hour rolling average of news_feed.sentiment_score for
         ticker and write to ticker_state.news_score_4h. Owner: news_agent
@@ -3503,6 +3547,15 @@ class DB:
                     self.recompute_news_score_4h(ticker)
             except Exception as _e:
                 log.debug(f"news_score_4h ticker_state dual-write failed for {ticker}: {_e}")
+            # Insider signal: only recompute when this row is from edgar_form4.
+            # The metadata field keeps the original feed name; news_feed.source
+            # is the tier categorization ('CONGRESS'/'RSS'). Avoids running
+            # the json_extract aggregate for every news_feed insert.
+            try:
+                if ticker and metadata and metadata.get('source') == 'edgar_form4':
+                    self.recompute_insider_signal_30d(ticker)
+            except Exception as _e:
+                log.debug(f"insider_signal ticker_state dual-write failed for {ticker}: {_e}")
             return True, inserted_id
         except sqlite3.IntegrityError as _e:
             # Hit the UNIQUE INDEX backstop — the app-level window above

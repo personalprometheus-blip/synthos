@@ -77,9 +77,14 @@ OWNERSHIP: dict[str, dict] = {
     "sector_score":          {"owner": "retail_sector_screener",         "refresh_policy": "per_run"},
     "sector_evaluated_at":   {"owner": "retail_sector_screener",         "refresh_policy": "per_run"},
 
-    # ── insider (future EDGAR daemon, currently unowned) ─────────────────
-    "insider_signal":        {"owner": "future_edgar_daemon",            "refresh_policy": "per_event"},
-    "insider_evaluated_at":  {"owner": "future_edgar_daemon",            "refresh_policy": "per_event"},
+    # ── insider (computed from edgar_form4 entries in news_feed) ─────────
+    # 30-day net insider $ (buys minus sells, P/S codes only). Owner is
+    # retail_news_agent because the recompute hook fires inside
+    # write_news_feed_entry whenever a Form 4 row is persisted. No
+    # separate daemon — the news agent is already the EDGAR fetcher,
+    # so it owns the field too. Same pattern as price_poller owning price.
+    "insider_signal":        {"owner": "retail_news_agent",              "refresh_policy": "per_event"},
+    "insider_evaluated_at":  {"owner": "retail_news_agent",              "refresh_policy": "per_event"},
 }
 
 
