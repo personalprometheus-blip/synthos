@@ -762,8 +762,15 @@ def _per_customer_summary(report: BiasReport, cid: str) -> dict:
         "critical": crit,
         "warnings": warn,
         "total_checks": len(cust_findings),
+        # 2026-05-04: include detail + meta so validator can extract structured
+        # info (e.g. meta.sector for SECTOR_CRIT findings). Prior shape dropped
+        # both, forcing validator to fall back to 'unknown' default → produced
+        # spurious BLOCK_SECTOR_UNKNOWN restrictions instead of correctly-named
+        # BLOCK_SECTOR_<actual_sector> ones, which throttled the entire signal
+        # funnel for the affected customer.
         "findings": [
-            {"gate": f.gate, "severity": f.severity, "code": f.code, "message": f.message}
+            {"gate": f.gate, "severity": f.severity, "code": f.code,
+             "message": f.message, "detail": f.detail, "meta": f.meta}
             for f in cust_findings
             if f.severity in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
         ],
@@ -891,8 +898,11 @@ def run():
         "critical": report.critical_count,
         "warnings": report.warning_count,
         "total_checks": len(report.findings),
+        # See 2026-05-04 note in _per_customer_summary above for why detail
+        # and meta are included.
         "findings": [
-            {"gate": f.gate, "severity": f.severity, "code": f.code, "message": f.message}
+            {"gate": f.gate, "severity": f.severity, "code": f.code,
+             "message": f.message, "detail": f.detail, "meta": f.meta}
             for f in report.findings
             if f.severity in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
         ]

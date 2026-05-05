@@ -442,9 +442,22 @@ def gate2_bias_guard(report: ValidationReport, cust_db):
 
         if severity == 'CRITICAL':
             has_critical = True
-            # Sector concentration CRITICAL → block new trades in that sector
+            # Sector concentration CRITICAL → block new trades in that sector.
+            # 2026-05-04 fix: prefer meta.sector (the structured field set by
+            # bias-detection's gate1) over the legacy top-level 'sector' field
+            # or the free-text 'detail' string. Prior order silently fell
+            # through to 'unknown' default → produced BLOCK_SECTOR_UNKNOWN
+            # for every sector-concentration CRITICAL, blocking new signals
+            # whose sector resolved to 'unknown' rather than blocking the
+            # actual over-concentrated sector.
             if 'sector' in bias_type.lower() or 'concentration' in bias_type.lower():
-                sector = f.get('sector', f.get('detail', 'unknown'))
+                meta = f.get('meta') or {}
+                sector = (
+                    meta.get('sector')
+                    or f.get('sector')
+                    or f.get('detail')
+                    or 'unknown'
+                )
                 messages.append(f"Sector concentration CRITICAL: {sector}")
                 restrictions.append(f"BLOCK_SECTOR_{sector.upper().replace(' ', '_')}")
             # Overtrading CRITICAL → block all new trades
