@@ -219,6 +219,28 @@ def _is_market_hours():
     return market_open <= now <= market_close
 
 
+def _stale_threshold(base_minutes: int, off_hours_minutes: int = 24 * 60) -> int:
+    """Pick the staleness threshold based on whether the market is open.
+
+    Why this exists: fault_scan / market_state / macro_regime are produced
+    by retail_market_daemon, which runs on a 30-min cadence Mon-Fri 09:15-
+    16:00 ET only. After 16:00 ET the agents intentionally stop. With a
+    fixed 60-120m threshold the validator would flag DEGRADED_STALE_*
+    every weekday evening from ~18:00 ET until next morning's daemon run,
+    even though no trading is happening and nothing is actually broken.
+
+    During market hours: keep the strict threshold (catches real outages
+    fast — a broken agent during the trading session is critical).
+    Outside market hours: relax to 24h (catches 'agent didn't run for a
+    whole market day' but tolerates the expected overnight gap).
+
+    Pre-market 09:15 timer + market open at 09:30 means the threshold
+    flips back to strict right when the daemon should have its first
+    cycle's output ready. If it didn't, the flag fires for real.
+    """
+    return base_minutes if _is_market_hours() else off_hours_minutes
+
+
 def _parse_timestamp(ts_str):
     """Parse a timestamp string into a UTC-aware datetime, or None."""
     if not ts_str:
@@ -301,15 +323,17 @@ def gate1_system_health(report: ValidationReport, master_db, customer_id=None):
         ))
         return
 
-    # Check staleness
+    # Check staleness — threshold is market-hours-aware so off-hours runs
+    # don't flag the agent as stale just because the daemon stopped at 16:00.
     scan_ts = scan.get('timestamp', '')
     age = _age_minutes(scan_ts)
-    if age is not None and age > FAULT_SCAN_STALE_MINUTES:
-        log.warning(f"  Fault scan is {int(age)}m old (threshold: {FAULT_SCAN_STALE_MINUTES}m)")
+    threshold = _stale_threshold(FAULT_SCAN_STALE_MINUTES)
+    if age is not None and age > threshold:
+        log.warning(f"  Fault scan is {int(age)}m old (threshold: {threshold}m)")
         report.add(GateResult(
             gate="GATE1_SYSTEM_HEALTH",
             status=GateStatus.CAUTION,
-            message=f"Fault scan stale ({int(age)}m old, threshold {FAULT_SCAN_STALE_MINUTES}m)",
+            message=f"Fault scan stale ({int(age)}m old, threshold {threshold}m)",
             restrictions=["DEGRADED_STALE_FAULT_SCAN"]
         ))
         return
@@ -539,12 +563,17 @@ def gate3_market_state(report: ValidationReport, master_db):
     # "age unknown, assume fresh" (age=None let the CAUTION branch be
     # skipped). Correct policy: missing timestamp = STALE (we have no
     # evidence the data is fresh).
+    # Threshold is market-hours-aware: strict (60m) during the trading
+    # session, lenient (24h) off-hours. retail_market_daemon stops at
+    # 16:00 ET, so this avoids flagging every evening from ~17:00 to
+    # next morning's 09:15 daemon start.
     state_ts = master_db.get_setting('_MARKET_STATE_UPDATED')
     age = _age_minutes(state_ts)
-    stale = (age is None) or (age > MARKET_STATE_STALE_MINUTES)
+    threshold = _stale_threshold(MARKET_STATE_STALE_MINUTES)
+    stale = (age is None) or (age > threshold)
     if stale:
         reason = (
-            f"{int(age)}m old" if age is not None
+            f"{int(age)}m old (threshold {threshold}m)" if age is not None
             else "_MARKET_STATE_UPDATED setting missing"
         )
         log.warning(f"  Market state stale ({reason}) — CAUTION")
