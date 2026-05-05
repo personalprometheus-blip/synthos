@@ -120,7 +120,7 @@ Security hardening applied directly in code.
 | Hard fail on missing ENCRYPTION_KEY | auth.py | ✅ Done | Raises RuntimeError — prevents operating with no encryption |
 | Auth DB chmod 600 | auth.py | ✅ Done | Prevents other OS users reading the auth database |
 | .env chmod 600 | env_writer.py | ✅ Done | Prevents other OS users reading credentials |
-| Terms of Service gate | retail_portal.py | ⏸ Dormant | Built behind `EARLY_ACCESS_TOS_ENABLED = False` — routes, state model, and modal UI are in place but not active. Enable when TOS copy is finalised and placeholders are filled. |
+| Terms of Service gate | retail_portal.py | ✅ Done | First-login redirect; acceptance filed to customer folder. Note: a separate early-access beta TOS modal exists behind `EARLY_ACCESS_TOS_ENABLED = False` in the same file — that is dormant pending copy review. |
 
 ### 3.1 Suggested Future Hardening
 
