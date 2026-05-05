@@ -49,13 +49,25 @@ def run(dry_run: bool = False) -> dict:
     db = get_shared_db()
 
     with db.conn() as c:
+        # Scope filter: only sweep tickers that are in tradable_assets.
+        # A symbol Alpaca won't trade (crypto, foreign ADR, TSX, OTC) won't
+        # have identity in any of our reference tables, so trying to fill
+        # it just churns. Auditor uses the same scope — keeps the two in
+        # sync on what counts as "in scope".
         gaps = c.execute(
-            "SELECT ticker FROM ticker_state "
-            "WHERE sector IS NULL OR company IS NULL OR exchange IS NULL "
-            "ORDER BY is_active DESC, last_active_at DESC"
+            "SELECT ts.ticker FROM ticker_state ts "
+            "WHERE (ts.sector IS NULL OR ts.company IS NULL OR ts.exchange IS NULL) "
+            "  AND EXISTS (SELECT 1 FROM tradable_assets ta WHERE ta.ticker = ts.ticker) "
+            "ORDER BY ts.is_active DESC, ts.last_active_at DESC"
         ).fetchall()
+        out_of_scope = c.execute(
+            "SELECT COUNT(*) FROM ticker_state ts "
+            "WHERE (ts.sector IS NULL OR ts.company IS NULL OR ts.exchange IS NULL) "
+            "  AND NOT EXISTS (SELECT 1 FROM tradable_assets ta WHERE ta.ticker = ts.ticker)"
+        ).fetchone()[0]
 
-    log.info(f"sweep starting: {len(gaps)} tickers have at least one NULL identity field")
+    log.info(f"sweep starting: {len(gaps)} in-scope tickers have at least one NULL "
+             f"identity field ({out_of_scope} out-of-scope skipped)")
 
     stats = {
         'tickers_scanned':   len(gaps),

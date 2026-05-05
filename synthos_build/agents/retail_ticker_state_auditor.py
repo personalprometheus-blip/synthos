@@ -114,6 +114,7 @@ def audit() -> dict:
         "ts":                  now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "active_ticker_count": 0,
         "inactive_ticker_count": 0,
+        "out_of_scope_count":  0,
         "total_gaps":          0,
         "anomaly_count":       0,
         "by_owner":            {},
@@ -124,16 +125,36 @@ def audit() -> dict:
     }
 
     with shared.conn() as c:
-        # Pull rows that are flagged active OR touched recently. Both
-        # conditions matter: is_active=0 with recent activity may indicate
-        # archive-cycle drift (we want to see those too).
+        # Scope filter: only audit tickers that are in tradable_assets, i.e.
+        # us_equity symbols Alpaca lets us trade. Rows in ticker_state for
+        # crypto (SOLUSD), foreign ADRs (BNPQF), TSX (TSX:WPRT), or OTC
+        # symbols are tracked but un-tradable — flagging NULL fields on
+        # them is noise, not signal. Excluded count is reported separately
+        # so the scope is visible, not silently dropped.
         cutoff = (now.timestamp() - ACTIVE_FILTER_HOURS * 3600)
+        out_of_scope = c.execute(
+            """
+            SELECT COUNT(*) FROM ticker_state ts
+            WHERE (ts.is_active = 1
+                   OR (ts.last_active_at IS NOT NULL
+                       AND CAST(strftime('%s', ts.last_active_at) AS REAL) > ?))
+              AND NOT EXISTS (
+                  SELECT 1 FROM tradable_assets ta WHERE ta.ticker = ts.ticker
+              )
+            """,
+            (cutoff,)
+        ).fetchone()[0]
+        report["out_of_scope_count"] = out_of_scope
+
         rows = c.execute(
             """
-            SELECT * FROM ticker_state
-            WHERE is_active = 1
-               OR (last_active_at IS NOT NULL
-                   AND CAST(strftime('%s', last_active_at) AS REAL) > ?)
+            SELECT ts.* FROM ticker_state ts
+            WHERE (ts.is_active = 1
+                   OR (ts.last_active_at IS NOT NULL
+                       AND CAST(strftime('%s', ts.last_active_at) AS REAL) > ?))
+              AND EXISTS (
+                  SELECT 1 FROM tradable_assets ta WHERE ta.ticker = ts.ticker
+              )
             """,
             (cutoff,)
         ).fetchall()
@@ -236,7 +257,8 @@ def print_summary(report: dict, top: int = 25) -> None:
     """Human-readable summary to stdout for cron logs / live runs."""
     print(f"  ts: {report['ts']}")
     print(f"  active: {report['active_ticker_count']}  "
-          f"inactive-but-recent: {report['inactive_ticker_count']}")
+          f"inactive-but-recent: {report['inactive_ticker_count']}  "
+          f"out-of-scope (skipped): {report.get('out_of_scope_count', 0)}")
     print(f"  total_gaps: {report['total_gaps']}  "
           f"anomalies (HIGH+CRITICAL): {report['anomaly_count']}")
     print()
