@@ -4,31 +4,36 @@
 Synthos
 
 ## What This Project Does
-A distributed algorithmic trading assistant running on Raspberry Pi hardware that monitors U.S. Congressional trading disclosures, scores signals using multi-agent analysis, and executes paper trades via Alpaca. Currently in supervised paper-trading mode only.
-
-## Current Phase
-Phase 3 — System Validation + Normalization Sprint
+A distributed algorithmic trading assistant running on Raspberry Pi hardware. Monitors News Sources, sector momentum, SEC EDGAR trading disclosures, runs multi-agent signal analysis, and executes paper trades via Alpaca. Currently in supervised paper-trading mode only (TRADING_MODE=PAPER).
 
 ## Node Architecture
-- **retail_node** (Pi 5, deployed 2026-04-18, NVMe boot): trading agents, retail_portal, customer signals.db, ingestion pipeline (news/sentiment/screener absorbed from cancelled process_node), MQTT broker, distributed-trader server — lives in this repo (synthos_build/)
-- **company_node** (Pi 4B): operational agents (scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_keepalive) + synthos_monitor.py (dashboard + queue API + heartbeat receiver, port 5050) + company_mqtt_listener.py (subscribes to pi5 broker) — lives in synthos-company/
-- **pi2w_monitor** (Pi Zero 2W): external fallback heartbeat receiver, currently disabled — planned for MQTT subscriber upgrade (see project_pi4b_cleanup_followups memory)
+- **retail_node** (Pi 5, deployed 2026-04-18, NVMe boot): trading agents, retail_portal, customer signals.db, ingestion pipeline (news/sentiment/screener), MQTT broker, distributed-trader server — lives in this repo (synthos_build/)
+- **company_node** (Pi 4B): operational agents (scoop, strongbox, company_sentinel, company_auditor, company_vault, company_archivist, company_fidget, company_librarian) + synthos_monitor.py (dashboard + queue API + heartbeat receiver, port 5050) + company_mqtt_listener.py (subscribes to pi5 broker) — lives in synthos-company/
+- **pi2w_monitor** (Pi Zero 2W): external watchdog — pings pi4b + pi5, escalates alerts through portals then SMS/email on silence. Re-enabled 2026-04-24. Planned for MQTT subscriber upgrade.
+- **pi2w_sentinel** (Pi Zero 2W): display node (DISABLED) — wave animation on TFT display, pending power-source relocation. No ETA.
 - ~~**process_node** (Pi 3)~~: cancelled 2026-04-05 — news/signal ingestion absorbed into retail_node
 
 ## Where To Find Things
-- **Master project status** → PROJECT_STATUS.md (phases, cross-repo blockers, overall progress)
-- **This node's status** → STATUS.md (retail node operational health)
-- **Source code** → src/
-- **Tests** → tests/
-- **All governance, specs, validation, and planning docs** → synthos-company/documentation/
+- **Current phase + cross-repo blockers** → `PROJECT_STATUS.md`
+- **Active tasks + deferred backlog refs** → `TODO.md` (repo root)
+- **This node's operational health** → `STATUS.md`
+- **Live system map (nodes, agents, services, schema)** → `data/system_architecture.json` (v3.30 — single source of truth; portal reads this at runtime)
+- **Live phase + milestone tracker** → `data/project_status.json` (v2.7)
+- **Source code** → `src/`
+- **Tests** → `tests/`
+- **Deferred work with entry conditions** → `docs/backlog.md`
+- **Per-trade decision path** → `docs/trade_lifecycle.md`
+- **Producer→consumer pipeline trace** → `docs/pipeline_audit_2026-04-24.md`
+- **Security roadmap** → `docs/security_review.md`
+- **EDGAR ingestion architecture** → `docs/edgar_ingestion.md`
+- **Dispatch mode guide** → `docs/DISPATCH_MODE_GUIDE.md`
+- **Distributed-trader cutover runbook** → `docs/CUTOVER_RUNBOOK.md`
+- **Governance, specs, validation** → `synthos-company/documentation/` (companion repo)
 
 ## Critical Known Issues (read before touching any code)
 1. Retail license validation — DEFERRED_FROM_CURRENT_BASELINE (SYS-B01/B02 formally closed by deferral). `license_validator.py` is not built; removed from installer requirements; boot has no entitlement gate. This is intentional and documented. Future work tracked in synthos-company/documentation/milestones.md.
-2. Suggestions pipeline — RESOLVED (Steps 1-3): company_vault/company_sentinel/company_archivist/retail_watchdog now write via db_helpers
-3. Post-deploy rollback — RESOLVED (Step 2): watchdog now reads from db_helpers
-4. `watchdog.py` COMPANY_DATA_DIR — RESOLVED (Step 3): now reads from env var
-5. `strongbox.py` — RESOLVED (Step 4): moved to synthos-company/agents/
-See synthos-company/documentation/validation/SYSTEM_VALIDATION_REPORT.md for full blocker list.
+
+See synthos-company/documentation/validation/SYSTEM_VALIDATION_REPORT.md for full blocker history.
 
 ## Conventions
 - Never delete files — move deprecated work to synthos-company/documentation/archive/
@@ -100,6 +105,6 @@ operational doc that pulls all of this together for migrations.
 ## How To Update Progress
 When a task is complete:
 1. Check it off in PROJECT_STATUS.md (master tracker, this repo)
-2. Update Current Phase and Last Updated in STATUS.md (this node)
+2. Update STATUS.md (this node)
 3. Update synthos-company/STATUS.md if company node work was involved
-4. Commit: `git commit -m "progress: [what was completed]"`
+4. Commit using conventional format: `fix(module): description`, `feat(module): description`, `docs: description`

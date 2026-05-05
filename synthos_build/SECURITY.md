@@ -110,7 +110,7 @@ Security hardening applied directly in code.
 |---|---|---|---|
 | Login rate limiting | retail_portal.py | ✅ Done | Max 10 attempts per 300s window per IP |
 | OTP rate limiting | retail_portal.py | ✅ Done | Max 5 attempts per 300s window per IP |
-| Timing-safe token comparison | company_server.py | ✅ Done | `hmac.compare_digest()` — prevents timing side-channel on SECRET_TOKEN |
+| Timing-safe token comparison | synthos_monitor.py | ✅ Done | `hmac.compare_digest()` — prevents timing side-channel on SECRET_TOKEN |
 | Newline injection prevention | retail_portal.py | ✅ Done | Values stripped of `\n`/`\r` before writing to .env |
 | Env key format validation | retail_portal.py | ✅ Done | Only `[A-Z][A-Z0-9_]*` keys accepted in `/api/keys` |
 | File upload restricted to admin | retail_portal.py | ✅ Done | Customers cannot upload files; uploads staged outside live dirs |
@@ -120,7 +120,7 @@ Security hardening applied directly in code.
 | Hard fail on missing ENCRYPTION_KEY | auth.py | ✅ Done | Raises RuntimeError — prevents operating with no encryption |
 | Auth DB chmod 600 | auth.py | ✅ Done | Prevents other OS users reading the auth database |
 | .env chmod 600 | env_writer.py | ✅ Done | Prevents other OS users reading credentials |
-| Terms of Service gate | retail_portal.py | ✅ Done | First-login redirect; acceptance filed to customer folder |
+| Terms of Service gate | retail_portal.py | ✅ Done | First-login redirect; acceptance filed to customer folder. Note: a separate early-access beta TOS modal exists behind `EARLY_ACCESS_TOS_ENABLED = False` in the same file — that is dormant pending copy review. |
 
 ### 3.1 Suggested Future Hardening
 
