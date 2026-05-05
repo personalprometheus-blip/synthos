@@ -2656,10 +2656,46 @@ class DB:
             ).fetchone()
             return dict(row) if row else None
 
+    def resolve_ticker_identity(self, ticker):
+        """Look up sector / company / exchange from existing reference tables
+        (ticker_sectors + tradable_assets). Returns dict of fields that
+        resolved (may be empty). Read-only, no external API calls.
+
+        This is the synchronous primitive used by `mark_ticker_active` for
+        first-fill, and by `retail_ticker_identity_agent` for the nightly
+        sweep that catches anything mark_ticker_active couldn't resolve.
+        """
+        if not ticker:
+            return {}
+        ticker = ticker.upper().strip()
+        out = {}
+        with self.conn() as c:
+            r = c.execute(
+                "SELECT sector FROM ticker_sectors WHERE ticker=?",
+                (ticker,)
+            ).fetchone()
+            if r and r['sector']:
+                out['sector'] = r['sector']
+            r = c.execute(
+                "SELECT name, exchange FROM tradable_assets WHERE ticker=?",
+                (ticker,)
+            ).fetchone()
+            if r:
+                if r['name']:
+                    out['company'] = r['name']
+                if r['exchange']:
+                    out['exchange'] = r['exchange']
+        return out
+
     def mark_ticker_active(self, ticker):
         """Refresh last_active_at without touching enrichment fields.
         Use when a signal arrives or a position opens for ticker.
-        Idempotent — creates the row if it doesn't exist."""
+        Idempotent — creates the row if it doesn't exist.
+
+        On first-INSERT, synchronously resolve identity (sector / company /
+        exchange) from existing reference tables. Failed lookups leave NULL,
+        which the nightly retail_ticker_identity_agent sweep picks up later.
+        """
         if not ticker:
             return False
         ticker = ticker.upper()
@@ -2676,11 +2712,15 @@ class DB:
                     (now, now, ticker)
                 )
             else:
+                ident = self.resolve_ticker_identity(ticker)
                 c.execute(
                     "INSERT INTO ticker_state "
-                    "(ticker, is_active, first_seen_at, last_active_at, updated_at) "
-                    "VALUES (?, 1, ?, ?, ?)",
-                    (ticker, now, now, now)
+                    "(ticker, is_active, first_seen_at, last_active_at, "
+                    " sector, company, exchange, updated_at) "
+                    "VALUES (?, 1, ?, ?, ?, ?, ?, ?)",
+                    (ticker, now, now,
+                     ident.get('sector'), ident.get('company'),
+                     ident.get('exchange'), now)
                 )
         return True
 

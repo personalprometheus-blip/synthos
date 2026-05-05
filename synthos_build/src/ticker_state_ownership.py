@@ -43,9 +43,13 @@ in the same commit as the schema change.
 
 OWNERSHIP: dict[str, dict] = {
     # ── identity (refresh once, never again unless corp action) ──────────
-    "sector":                {"owner": "ticker_identity_first_fill",     "refresh_policy": "once_on_first_seen"},
-    "company":               {"owner": "ticker_identity_first_fill",     "refresh_policy": "once_on_first_seen"},
-    "exchange":              {"owner": "ticker_identity_first_fill",     "refresh_policy": "once_on_first_seen"},
+    # Synchronously filled by retail_database.mark_ticker_active on first
+    # INSERT (read from ticker_sectors + tradable_assets). The named agent
+    # is the nightly sweep that catches tickers whose reference tables
+    # weren't populated at INSERT time.
+    "sector":                {"owner": "retail_ticker_identity_agent",   "refresh_policy": "once_on_first_seen"},
+    "company":               {"owner": "retail_ticker_identity_agent",   "refresh_policy": "once_on_first_seen"},
+    "exchange":              {"owner": "retail_ticker_identity_agent",   "refresh_policy": "once_on_first_seen"},
 
     # ── price / market microstructure (price poller cycle) ───────────────
     "price":                 {"owner": "retail_price_poller",            "refresh_policy": "per_cycle"},
