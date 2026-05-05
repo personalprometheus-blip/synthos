@@ -8,15 +8,18 @@
 
 # ── MARKET DAEMON + TRADE DAEMON — now managed by systemd, not cron ──
 # See synthos_build/ops/systemd/pi5/ for the unit files. Timer-driven:
-#   synthos-market-daemon.timer  fires Mon-Fri 09:10 ET
-#   synthos-trade-daemon.timer   fires Mon-Fri 09:25 ET
+#   synthos-market-daemon.timer          fires Mon-Fri 09:10 ET
+#   synthos-trade-daemon.timer           fires Mon-Fri 09:25 ET
+#   synthos-ticker-identity-agent.timer  fires *-*-* 02:30 ET (nightly identity sweep)
+#   synthos-ticker-state-auditor.timer   fires *-*-* 02:35 ET (gap report)
 # systemd handles crash recovery (Restart=on-failure) and boot-time
-# catch-up (Persistent=true). No cron entry needed for the daemons.
+# catch-up (Persistent=true). No cron entry needed for these.
 #
 # Install on pi5:
-#   sudo cp synthos_build/ops/systemd/pi5/synthos-{market,trade}-daemon.{service,timer} /etc/systemd/system/
+#   sudo cp synthos_build/ops/systemd/pi5/synthos-*.{service,timer} /etc/systemd/system/
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now synthos-market-daemon.timer synthos-trade-daemon.timer
+#   sudo systemctl enable --now synthos-market-daemon.timer synthos-trade-daemon.timer \
+#                               synthos-ticker-identity-agent.timer synthos-ticker-state-auditor.timer
 
 # ── OVERNIGHT NEWS — off-hours only (daemon handles 9-4) ──
 5 0-8,16-23 * * 1-5 /usr/bin/python3 /home/pi516gb/synthos/synthos_build/src/retail_scheduler.py --session overnight >> /home/pi516gb/synthos/synthos_build/logs/scheduler.log 2>&1

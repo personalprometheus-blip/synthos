@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-04T13:30:00-04:00",
+    "last_updated": "2026-05-04",
     "version": "3.30"
   },
   "nodes": [
@@ -13,21 +13,84 @@
       "network": "eth0 static",
       "status": "live",
       "agents": [
-        {"name": "synthos_monitor.py", "desc": "Admin portal + dashboard + /receive_backup endpoint. Originally specced as a sibling to a separate company_server.py on :5010; routes were merged into synthos_monitor and company_server.py was retired 2026-05-04 (archived to documentation/archive/, never deployed).", "how": "systemd (synthos-login-server.service, port 5050)", "status": "live"},
-        {"name": "company_auditor.py", "desc": "Cross-node log scanner (SSH to pi5, pi2w)", "how": "daemon", "status": "live"},
-        {"name": "company_archivist.py", "desc": "DB row archival to compressed JSON", "how": "daemon", "status": "live"},
-        {"name": "company_scoop.py", "desc": "Email queue drain, Resend dispatch. Polls scoop_queue every 30s, dispatches via Resend API to OPERATOR_EMAIL (admin alerts) or per-customer email (customer notifications). 2026-04-28 revived as systemd unit synthos-scoop.service (enabled at boot, Restart=on-failure RestartSec=10) after operator confirmed fall-back path was working but explicit email dispatch was needed for customer actions. Pre-revive cleanup expired 11 stale pending events from the Apr 18-28 dead-daemon window (system was healthy / customers active / blips self-resolved — kept for audit, never emailed). Test email through --test verified end-to-end Resend path. PORTAL_TOKEN intentionally unset for now — only affects the customer in-app notification path, time-critical user flows (signup verify, password reset, email change verify) still go through retail_portal directly via Resend.", "how": "systemd (synthos-scoop.service, polls 30s)", "status": "live"},
-        {"name": "company_sentinel.py", "desc": "Heartbeat receiver, silence alerts", "how": "cron */15 9-16 * * 1-5 (market hours only)", "status": "cron"},
-        {"name": "company_vault.py", "desc": "License keys, compliance, secrets. 2026-04-23 arch-drift fix: actual cron is daily 01:45 with --backup-now flag, not hourly.", "how": "cron 1:45 daily", "status": "cron"},
-        {"name": "company_fidget.py", "desc": "Keep-alive, usage anomaly detection", "how": "cron 8am", "status": "cron"},
-        {"name": "company_librarian.py", "desc": "Package audit, CVE scan, all nodes", "how": "cron Sun", "status": "cron"},
-        {"name": "company_strongbox.py", "desc": "v2 backup manager — builds company stream, accepts pi5-encrypted customer/retail, uploads all 3 to R2 with post-upload validation, 30-day retention. Manifest schema v1.0.", "how": "cron 2am", "status": "cron"},
-        {"name": "node_heartbeat.py", "desc": "System metrics (CPU / mem / disk / temp) to monitor DB", "how": "cron * * * * * (every minute, runs in venv)", "status": "cron"},
-        {"name": "company_mqtt_listener.py", "desc": "MQTT telemetry subscriber. Subscribes to process/heartbeat/+/+, process/regime, process/prices/+ on the Pi5 broker (10.0.0.11:1883). Persists every observation in a new mqtt_observations table in auditor.db (topic, last_seen_ts, last_payload, msg_count). Logs minute-window summary + stale-heartbeat alerts (>120s silent = warn). Additive to company_auditor.py SSH log scanner. Tier 4 of distributed-trader migration, live since 2026-05-04.", "how": "systemd (synthos-mqtt-listener.service)", "status": "live"}
+        {
+          "name": "synthos_monitor.py",
+          "desc": "Admin portal + dashboard + /receive_backup endpoint. Originally specced as a sibling to a separate company_server.py on :5010; routes were merged into synthos_monitor and company_server.py was retired 2026-05-04 (archived to documentation/archive/, never deployed).",
+          "how": "systemd (synthos-login-server.service, port 5050)",
+          "status": "live"
+        },
+        {
+          "name": "company_auditor.py",
+          "desc": "Cross-node log scanner (SSH to pi5, pi2w)",
+          "how": "daemon",
+          "status": "live"
+        },
+        {
+          "name": "company_archivist.py",
+          "desc": "DB row archival to compressed JSON",
+          "how": "daemon",
+          "status": "live"
+        },
+        {
+          "name": "company_scoop.py",
+          "desc": "Email queue drain, Resend dispatch. Polls scoop_queue every 30s, dispatches via Resend API to OPERATOR_EMAIL (admin alerts) or per-customer email (customer notifications). 2026-04-28 revived as systemd unit synthos-scoop.service (enabled at boot, Restart=on-failure RestartSec=10) after operator confirmed fall-back path was working but explicit email dispatch was needed for customer actions. Pre-revive cleanup expired 11 stale pending events from the Apr 18-28 dead-daemon window (system was healthy / customers active / blips self-resolved \u2014 kept for audit, never emailed). Test email through --test verified end-to-end Resend path. PORTAL_TOKEN intentionally unset for now \u2014 only affects the customer in-app notification path, time-critical user flows (signup verify, password reset, email change verify) still go through retail_portal directly via Resend.",
+          "how": "systemd (synthos-scoop.service, polls 30s)",
+          "status": "live"
+        },
+        {
+          "name": "company_sentinel.py",
+          "desc": "Heartbeat receiver, silence alerts",
+          "how": "cron */15 9-16 * * 1-5 (market hours only)",
+          "status": "cron"
+        },
+        {
+          "name": "company_vault.py",
+          "desc": "License keys, compliance, secrets. 2026-04-23 arch-drift fix: actual cron is daily 01:45 with --backup-now flag, not hourly.",
+          "how": "cron 1:45 daily",
+          "status": "cron"
+        },
+        {
+          "name": "company_fidget.py",
+          "desc": "Keep-alive, usage anomaly detection",
+          "how": "cron 8am",
+          "status": "cron"
+        },
+        {
+          "name": "company_librarian.py",
+          "desc": "Package audit, CVE scan, all nodes",
+          "how": "cron Sun",
+          "status": "cron"
+        },
+        {
+          "name": "company_strongbox.py",
+          "desc": "v2 backup manager \u2014 builds company stream, accepts pi5-encrypted customer/retail, uploads all 3 to R2 with post-upload validation, 30-day retention. Manifest schema v1.0.",
+          "how": "cron 2am",
+          "status": "cron"
+        },
+        {
+          "name": "node_heartbeat.py",
+          "desc": "System metrics (CPU / mem / disk / temp) to monitor DB",
+          "how": "cron * * * * * (every minute, runs in venv)",
+          "status": "cron"
+        },
+        {
+          "name": "company_mqtt_listener.py",
+          "desc": "MQTT telemetry subscriber. Subscribes to process/heartbeat/+/+, process/regime, process/prices/+ on the Pi5 broker (10.0.0.11:1883). Persists every observation in a new mqtt_observations table in auditor.db (topic, last_seen_ts, last_payload, msg_count). Logs minute-window summary + stale-heartbeat alerts (>120s silent = warn). Additive to company_auditor.py SSH log scanner. Tier 4 of distributed-trader migration, live since 2026-05-04.",
+          "how": "systemd (synthos-mqtt-listener.service)",
+          "status": "live"
+        }
       ],
-      "databases": ["company.db", "auditor.db (now also stores mqtt_observations table)", "login.db", "support.db"],
-      "services": ["Cloudflare tunnel", "command.synth-cloud.com"],
-      "storage": "microSD (external SSD migration pending — blocked on powered USB hub)"
+      "databases": [
+        "company.db",
+        "auditor.db (now also stores mqtt_observations table)",
+        "login.db",
+        "support.db"
+      ],
+      "services": [
+        "Cloudflare tunnel",
+        "command.synth-cloud.com"
+      ],
+      "storage": "microSD (external SSD migration pending \u2014 blocked on powered USB hub)"
     },
     {
       "id": "pi5",
@@ -38,51 +101,279 @@
       "network": "eth0 static",
       "status": "live",
       "agents": [
-        {"name": "retail_portal.py", "desc": "Customer dashboard + API (gunicorn, port 5001). Phase C D2 refactor extracted 12 helpers from 4 hotspot endpoints (stripe_webhook, _enrich_positions, get_system_status, api_admin_market_activity) dropping line counts 46-87%. 2026-04-23 portal-v2 refactor: all 15 inline HTML constants extracted to src/templates/*.html (base.html + 14 page templates); retail_portal.py shrunk 14,294 → 5,931 lines (58%). New /terms/view public route for prospective users to read ToS before signup. ToS acceptance captured on the signup form itself (required checkbox + audit trail in pending_signups: tos_accepted_at, tos_version, tos_ip, tos_user_agent). Session inactivity timeout configurable via CUSTOMER_SESSION_TIMEOUT_MINUTES env var (0 disables). 2026-04-25 security batch: 2 CRITICALs (admin-override + /api/keys customer→admin escalation) + HIGH-3 /api/audit + Phase 2.5 token-flow (HIGH-1 /reset-password handler missing, MED-1 server-side credential-rotation revocation via _session_revoked_at, MED-2 alert old email on change, MED-3 verify new email two-step flow with pending_email_changes table, MED-4 password min-length 8→12) + MED-7 persistent login rate limiter (login_attempts table, per-account + per-IP defeat IP rotation + portal-restart amnesia) + Phase 4.5 file-upload audit (21/21 customer-side probes correctly 403). All security fixes verified by sandbox-customer probes; test customers deleted on completion.", "how": "systemd (synthos-portal.service)", "status": "live"},
-        {"name": "retail_watchdog.py", "desc": "Crash monitor, auto-restart x3", "how": "systemd (synthos-watchdog.service)", "status": "live"},
-        {"name": "retail_market_daemon.py", "desc": "Enrichment pipeline 9:15-16:00 ET. Pre-market prep at 09:15 (full once-daily pipeline: tradable_refresh, screener, news, sentiment, macro, state, bias, fault, validator, promoter, candidate_gen, earnings_refresh) + selfcheck. Intraday every 30m (skips once-daily agents). Close session at 16:00 runs trader close + exit_backfill + trail_optimizer + sector_screener_pass2 + daily_master. 2026-04-21 fixes: timer 09:10→09:15 (dispatcher alignment), full overnight_cycle, mid-day restart fires enrichment immediately, run_premarket_selfcheck advisory gate. No longer runs trader or price_poller inline — both are standalone systemd units.", "how": "systemd (synthos-market-daemon.timer, Mon-Fri 09:15 ET)", "status": "live"},
-        {"name": "retail_trade_daemon.py", "desc": "Continuous trader 9:30-16:00 ET, 30s cycle, MAX_TRADE_PARALLEL=3 subprocess pool. Same 13-gate logic, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN. Phase C D1 refactor: run() 897→15 lines via 11 named helpers (_run_halt_check, _start_watchdog, _init_clients, _run_gate0_account_health, _run_market_gates, _run_position_management, _run_managed_mode_approvals, _run_signal_evaluation, _run_monthly_tax_sweep, _send_session_summary, _send_daily_report).", "how": "systemd (synthos-trade-daemon.timer, Mon..Fri 09:25 ET — re-enabled 2026-04-20T21:20 EDT after Phase C verification)", "status": "live"},
-        {"name": "retail_scheduler.py", "desc": "Off-hours session orchestrator. Dispatches per-customer subprocesses for enrichment when market_daemon isn't covering the slot.", "how": "cron — overnight :05 hourly weekdays (off-hours only), weekend :05 hourly Sat+Sun, Sunday 20:00 prep session. Uses SessionLock (fcntl flock) to prevent overlap. is_market_hours() now delegates to retail_shared (D6/R10-7).", "status": "cron"},
-        {"name": "retail_interrogation_listener.py", "desc": "UDP cross-validation, port 5556", "how": "boot seq", "status": "live"},
-        {"name": "retail_trade_logic_agent.py", "desc": "13-gate trade execution + screener integration. 2026-04-24 pipeline-audit wiring (Gaps 1-3): Gate 1 now reads _VALIDATOR_VERDICT and halts new entries on NO_GO (existing positions + Gate 10 exits unaffected); Gate 5 composite adds MARKET_STATE_SCORE_WEIGHT*_MARKET_STATE_SCORE as an additive regime nudge (default 0.10, env MARKET_STATE_SCORE_WEIGHT=0 disables); Alpaca.get_order() + module-level _resolve_fill_price() polls /v2/orders/{id} after market-order submit to record real filled_avg_price as entry_price (fallback to candidate['price'] with warning on timeout/reject). Applied at all 3 submit→open_position sites (rotation, managed approvals, automatic). 2026-04-27 decision-log enrichment (visibility-only, zero behavior change): gate5_signal_score now emits a single consolidated decision_log entry per evaluation containing every screener-derived input the gate considered — sector, combined_score, news_signal+score, sentiment_signal+score, momentum_score, ret_3m, congressional_flag, screener_adj, screener_stamp_adj — so an after-the-fact audit of any trade can verify exactly what data the trader saw at decision time.", "how": "subprocess (spawned by synthos-trade-daemon.timer, Mon-Fri 09:25 ET + every 30s during market hours)", "status": "live"},
-        {"name": "retail_news_agent.py", "desc": "22-gate news classification + 2026-04-21 attribution patch — Alpaca ingestion prefilters crypto/untradable (Fix A, enforced day 1), re-ranks multi-symbol articles by headline match (Fix C, ENFORCED 2026-04-25 after 4.5-day shadow review showed 41% no_match noise + 33% wrong-ticker remaps with 13% reaching VALIDATED+ status), drops headline-no-match articles entirely (TICKER_REJECT_ENFORCE, ENFORCED 2026-04-25), populates signals.company from tradable_assets.name. Conflict (multi-stock tie) cases stay in shadow pending separate design pass. Flags remap/conflict/no_match/untradable to signal_attribution_flags for review (90d retention).", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_market_sentiment_agent.py", "desc": "27-gate deterioration detection. Pulse also fulfills sector-screener sentiment requests via _handle_screening_requests — same detect_cascade() per-ticker computation is dual-written to two tables intentionally: (a) sector_screening.sentiment_score for per-ticker screener display + composite-score aggregation (covers every screener candidate), (b) signals.sentiment_score via stamp_signals_sentiment() for per-signal trader Gate-5 consumption (only stamps tickers with an active QUEUED signal). Cardinalities differ; values are always in sync. 2026-04-27 cleanup: dual-write rationale documented inline at the call site.", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_sector_screener.py", "desc": "Sector momentum scoring — 11 S&P SPDR sector ETFs × top-10 holdings each, per-ticker calc_momentum_score (3m return 50% + 20d/50d SMA 30% + 10d/30d volume 20%). Runs 2x/day (pre-market 09:15 + close 16:00) — momentum is a multi-week signal so twice daily captures yesterday's close + today's close, plenty for the slow-moving inputs. Output populates sector_screening table including momentum_score column (2026-04-21+) and ret_3m raw column (2026-04-27+, fed back from calc_momentum_score for portal display). combined_score formula re-weighted 2026-04-27 to news 30% + sentiment 30% + momentum 30% + etf_weight 10% (was 40/40/0/20) — momentum was being computed but not actually included in candidate ranking. 30-hour fault-detection stale threshold tolerates a missed day.", "how": "subprocess (called by market_daemon 2x/day)", "status": "live"},
-        {"name": "retail_candidate_generator.py", "desc": "Phase 3b — emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads sector_screening rows where momentum_score >= MIN_MOMENTUM_SCORE (0.45 as of 2026-04-21). Top-N per sector (3), global cap 30. Trader consumes directly from the VALIDATED signal pool (no longer via trade_windows — see 2026-04-24 window_calculator removal).", "how": "subprocess (called by market_daemon enrichment ticks)", "status": "live"},
-        {"name": "retail_event_calendar.py", "desc": "Phase 5.a — Gate 4 EVENT_RISK calendar. Nasdaq bulk earnings fetch + macro_events table. Called from market_daemon's enrichment tick.", "how": "module (called by market_daemon)", "status": "live"},
-        {"name": "retail_tradable_cache.py", "desc": "Audit Round 5 — Alpaca /v2/assets cache (~11k us_equity symbols). Candidate Generator uses is_tradable() to filter out crypto/delisted/OTC before emission. Refreshed once per trading day in premarket.", "how": "module (refreshed by market_daemon)", "status": "live"},
-        {"name": "retail_daily_master.py", "desc": "Phase 5.c — end-of-day audit rollup. Renders logs/daily_master/YYYY-MM-DD.md with opens/closes/candidates/cooling-off/earnings tables. Fires at market close from run_close_session.", "how": "module (called at 4PM ET by market_daemon)", "status": "live"},
-        {"name": "retail_macro_regime_agent.py", "desc": "Macro regime classifier (BEAR/BULL/NORMAL trend × volatility). Runs in enrichment pipeline.", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_market_state_agent.py", "desc": "Market state detector (open/close/holiday) for session gating. Writes _MARKET_STATE, _MARKET_STATE_SCORE, and _MARKET_STATE_UPDATED (the last one added 2026-04-21 — the validator's staleness check read the key but market_state_agent never wrote it, so every validator run flagged DEGRADED_STALE_MARKET_STATE).", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_bias_detection_agent.py", "desc": "Behavioral-bias detector (sector concentration, loss aversion, disposition effect).", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_fault_detection_agent.py", "desc": "Data freshness + system resources + account health checks.", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_validator_stack_agent.py", "desc": "Final enrichment stamp — promotes QUEUED → VALIDATED when all prior stamps present.", "how": "subprocess (called by market_daemon enrichment cycle, ~30min)", "status": "live"},
-        {"name": "retail_shared.py", "desc": "Phase C D6 — canonical kill_switch_active() / get_active_customers() / is_market_hours() shared by market_daemon, scheduler, portal, trader, dry_run. Replaces 5 near-duplicate local copies. now_et() and fetch_with_retry() intentionally left local (diverged return types / stateful circuit-breaker globals).", "how": "module (import)", "status": "live"},
-        {"name": "retail_sector_backfill_agent.py", "desc": "One-off/periodic backfill for missing sector_screening rows.", "how": "manual / on-demand", "status": "tool"},
-        {"name": "retail_price_poller.py", "desc": "Live-price refresher for the live_prices table — feeds portal + trader's in-band window check. 2026-04-21: moved from inline market_daemon loop call to standalone systemd timer firing every 60s, 24/7. Decoupling ensures prices stay fresh even when market_daemon isn't running (pre-pre-market, post-close, weekends).", "how": "systemd (synthos-price-poller.timer, OnUnitActiveSec=60s, 24/7)", "status": "live"},
-        {"name": "rotate_logs.py", "desc": "Weekly log rotation + 30-day archive cleanup", "how": "cron Sun", "status": "cron"},
-        {"name": "retail_heartbeat.py", "desc": "POST agent status to pi4b monitor (called directly by long-running services, plus hourly cron as a standalone ping)", "how": "cron 21 * * * 1-5 (hourly :21 weekdays) + inline calls from daemons", "status": "cron"},
-        {"name": "node_heartbeat.py", "desc": "System metrics to monitor", "how": "cron 1m", "status": "cron"},
-        {"name": "retail_boot_sequence.py", "desc": "Network wait, integrity check — trade-daemon / market-daemon services After= this one so they wait for a healthy boot before firing", "how": "systemd (synthos-boot-sequence.service, Type=oneshot)", "status": "boot"},
-        {"name": "retail_health_check.py", "desc": "Post-reboot DB + Alpaca verify", "how": "boot only", "status": "boot"},
-        {"name": "retail_patch.py", "desc": "Safe file updater, rollback", "how": "manual", "status": "tool"},
-        {"name": "retail_backup.py", "desc": "v2 nightly backup — 3-stream split (customer + retail), encrypt-on-source with Fernet, manifest.json at tar root, round-trip self-verify, POST .enc to pi4b /receive_backup. See documentation/specs/BACKUP_SYSTEM.md.", "how": "cron 1:30am", "status": "cron"},
-        {"name": "retail_restore.py", "desc": "v2 restore tool — pulls from R2 (via-r2 / via-company / file:), validates manifest, restores per contents[]. Used by operator + v2 installer.", "how": "manual / installer", "status": "live"},
-        {"name": "retail_shutdown.py", "desc": "Graceful pre-maintenance shutdown", "how": "Sat 3:55", "status": "cron"},
-        {"name": "rebuild_default_template.py", "desc": "Nightly customer DB template rebuild", "how": "cron 3am", "status": "cron"},
-        {"name": "customer_health_check.py", "desc": "Called by auditor for customer DB health", "how": "SSH", "status": "cron"},
-        {"name": "mosquitto", "desc": "MQTT broker on 0.0.0.0:1883 (LAN-only, password auth /etc/mosquitto/passwd, retained messages on, autosave 30s). Telemetry plane for the distributed-trader migration. Topics: process/heartbeat/<node>/<agent> (every agent's pulse), process/regime (retained), process/prices/<ticker> (retained per-ticker). Tier 4 of distributed-trader migration, live since 2026-05-04.", "how": "systemd (mosquitto.service)", "status": "live"},
-        {"name": "synthos_dispatcher.py", "desc": "Process-node orchestrator for DISPATCH_MODE=distributed. No-op in daemon mode (default). When distributed: wakes every 30s, builds WorkPacket per active customer, POSTs to RETAIL_URL/work, applies returned StateDelta to master DBs, runs gate14 dispatcher-side. Currently sync, single-target retail; async/pipelining is deferred Tier-6 work.", "how": "systemd (synthos-dispatcher.service, runs when DISPATCH_MODE=distributed; loopback target = pi5 itself until retail-N hardware exists)", "status": "live"},
-        {"name": "synthos_trader_server.py", "desc": "FastAPI/uvicorn HTTP server on retail nodes (TRADER_SERVER_PORT, default 8443). Endpoints: /healthz /readyz /version /work. Receives WorkPackets from synthos_dispatcher, runs trader against in-memory packet data, returns WorkResult with StateDelta. Auth via X-Dispatch-Token header. /work runs trader execution in asyncio.to_thread so multiple concurrent customer requests overlap on the event loop without blocking each other.", "how": "systemd (synthos-trader-server.service on pi5, port 8443; multi-worker via UVICORN_WORKERS=3)", "status": "live"},
-        {"name": "src/async_alpaca_client.py", "desc": "Async-native Alpaca client built on httpx.AsyncClient. Parallel class to the daemon trader's sync AlpacaClient — does NOT replace it. Used (eventually) by trader_server to issue concurrent Alpaca calls within one customer cycle (asyncio.gather over latest-quote fetches and order placements). Tier 6 of distributed-trader migration.", "how": "module (imported by future async trader path)", "status": "ready"},
-        {"name": "src/dispatch_mode.py", "desc": "Per-customer dispatch-mode resolver. Tier 7 — every customer can independently be on 'daemon' (legacy market_daemon fan-out) or 'distributed' (synthos_dispatcher → synthos_trader_server). Both daemon and dispatcher consult resolve_customer_dispatch_mode() per cycle so trades never double-fire. Per-customer setting stored in customer_settings._DISPATCH_MODE; falls back to env DISPATCH_MODE; defaults to 'daemon'.", "how": "module (imported by daemon + dispatcher)", "status": "live"},
-        {"name": "synthos_migration.py", "desc": "Sanctioned CLI for moving customers between daemon and distributed dispatch modes. Subcommands: status, enable, disable, reset, enable-all, disable-all (last two require --confirm). All operations write a DISPATCH_MODE_CHANGE audit row to the customer's events table. The cutover runbook (docs/CUTOVER_RUNBOOK.md) walks through the full one-customer-at-a-time migration procedure.", "how": "manual / cron via runbook", "status": "live"},
-        {"name": "docs/CUTOVER_RUNBOOK.md", "desc": "Operational doc covering pre-flight checks, systemd unit files for trader_server + dispatcher, per-customer migration loop with monitor/rollback steps, daemon-trader decommission procedure, retail-2 stand-up. The single source of truth for executing the distributed-trader migration.", "how": "documentation", "status": "live"}
+        {
+          "name": "retail_portal.py",
+          "desc": "Customer dashboard + API (gunicorn, port 5001). Phase C D2 refactor extracted 12 helpers from 4 hotspot endpoints (stripe_webhook, _enrich_positions, get_system_status, api_admin_market_activity) dropping line counts 46-87%. 2026-04-23 portal-v2 refactor: all 15 inline HTML constants extracted to src/templates/*.html (base.html + 14 page templates); retail_portal.py shrunk 14,294 \u2192 5,931 lines (58%). New /terms/view public route for prospective users to read ToS before signup. ToS acceptance captured on the signup form itself (required checkbox + audit trail in pending_signups: tos_accepted_at, tos_version, tos_ip, tos_user_agent). Session inactivity timeout configurable via CUSTOMER_SESSION_TIMEOUT_MINUTES env var (0 disables). 2026-04-25 security batch: 2 CRITICALs (admin-override + /api/keys customer\u2192admin escalation) + HIGH-3 /api/audit + Phase 2.5 token-flow (HIGH-1 /reset-password handler missing, MED-1 server-side credential-rotation revocation via _session_revoked_at, MED-2 alert old email on change, MED-3 verify new email two-step flow with pending_email_changes table, MED-4 password min-length 8\u219212) + MED-7 persistent login rate limiter (login_attempts table, per-account + per-IP defeat IP rotation + portal-restart amnesia) + Phase 4.5 file-upload audit (21/21 customer-side probes correctly 403). All security fixes verified by sandbox-customer probes; test customers deleted on completion.",
+          "how": "systemd (synthos-portal.service)",
+          "status": "live"
+        },
+        {
+          "name": "retail_watchdog.py",
+          "desc": "Crash monitor, auto-restart x3",
+          "how": "systemd (synthos-watchdog.service)",
+          "status": "live"
+        },
+        {
+          "name": "retail_market_daemon.py",
+          "desc": "Enrichment pipeline 9:15-16:00 ET. Pre-market prep at 09:15 (full once-daily pipeline: tradable_refresh, screener, news, sentiment, macro, state, bias, fault, validator, promoter, candidate_gen, earnings_refresh) + selfcheck. Intraday every 30m (skips once-daily agents). Close session at 16:00 runs trader close + exit_backfill + trail_optimizer + sector_screener_pass2 + daily_master. 2026-04-21 fixes: timer 09:10\u219209:15 (dispatcher alignment), full overnight_cycle, mid-day restart fires enrichment immediately, run_premarket_selfcheck advisory gate. No longer runs trader or price_poller inline \u2014 both are standalone systemd units.",
+          "how": "systemd (synthos-market-daemon.timer, Mon-Fri 09:15 ET)",
+          "status": "live"
+        },
+        {
+          "name": "retail_trade_daemon.py",
+          "desc": "Continuous trader 9:30-16:00 ET, 30s cycle, MAX_TRADE_PARALLEL=3 subprocess pool. Same 13-gate logic, now runs at market speed instead of 30-min cadence. Phase 1 of TRADER_RESTRUCTURE_PLAN. Phase C D1 refactor: run() 897\u219215 lines via 11 named helpers (_run_halt_check, _start_watchdog, _init_clients, _run_gate0_account_health, _run_market_gates, _run_position_management, _run_managed_mode_approvals, _run_signal_evaluation, _run_monthly_tax_sweep, _send_session_summary, _send_daily_report).",
+          "how": "systemd (synthos-trade-daemon.timer, Mon..Fri 09:25 ET \u2014 re-enabled 2026-04-20T21:20 EDT after Phase C verification)",
+          "status": "live"
+        },
+        {
+          "name": "retail_scheduler.py",
+          "desc": "Off-hours session orchestrator. Dispatches per-customer subprocesses for enrichment when market_daemon isn't covering the slot.",
+          "how": "cron \u2014 overnight :05 hourly weekdays (off-hours only), weekend :05 hourly Sat+Sun, Sunday 20:00 prep session. Uses SessionLock (fcntl flock) to prevent overlap. is_market_hours() now delegates to retail_shared (D6/R10-7).",
+          "status": "cron"
+        },
+        {
+          "name": "retail_interrogation_listener.py",
+          "desc": "UDP cross-validation, port 5556",
+          "how": "boot seq",
+          "status": "live"
+        },
+        {
+          "name": "retail_trade_logic_agent.py",
+          "desc": "13-gate trade execution + screener integration. 2026-04-24 pipeline-audit wiring (Gaps 1-3): Gate 1 now reads _VALIDATOR_VERDICT and halts new entries on NO_GO (existing positions + Gate 10 exits unaffected); Gate 5 composite adds MARKET_STATE_SCORE_WEIGHT*_MARKET_STATE_SCORE as an additive regime nudge (default 0.10, env MARKET_STATE_SCORE_WEIGHT=0 disables); Alpaca.get_order() + module-level _resolve_fill_price() polls /v2/orders/{id} after market-order submit to record real filled_avg_price as entry_price (fallback to candidate['price'] with warning on timeout/reject). Applied at all 3 submit\u2192open_position sites (rotation, managed approvals, automatic). 2026-04-27 decision-log enrichment (visibility-only, zero behavior change): gate5_signal_score now emits a single consolidated decision_log entry per evaluation containing every screener-derived input the gate considered \u2014 sector, combined_score, news_signal+score, sentiment_signal+score, momentum_score, ret_3m, congressional_flag, screener_adj, screener_stamp_adj \u2014 so an after-the-fact audit of any trade can verify exactly what data the trader saw at decision time.",
+          "how": "subprocess (spawned by synthos-trade-daemon.timer, Mon-Fri 09:25 ET + every 30s during market hours)",
+          "status": "live"
+        },
+        {
+          "name": "retail_news_agent.py",
+          "desc": "22-gate news classification + 2026-04-21 attribution patch \u2014 Alpaca ingestion prefilters crypto/untradable (Fix A, enforced day 1), re-ranks multi-symbol articles by headline match (Fix C, ENFORCED 2026-04-25 after 4.5-day shadow review showed 41% no_match noise + 33% wrong-ticker remaps with 13% reaching VALIDATED+ status), drops headline-no-match articles entirely (TICKER_REJECT_ENFORCE, ENFORCED 2026-04-25), populates signals.company from tradable_assets.name. Conflict (multi-stock tie) cases stay in shadow pending separate design pass. Flags remap/conflict/no_match/untradable to signal_attribution_flags for review (90d retention).",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_market_sentiment_agent.py",
+          "desc": "27-gate deterioration detection. Pulse also fulfills sector-screener sentiment requests via _handle_screening_requests \u2014 same detect_cascade() per-ticker computation is dual-written to two tables intentionally: (a) sector_screening.sentiment_score for per-ticker screener display + composite-score aggregation (covers every screener candidate), (b) signals.sentiment_score via stamp_signals_sentiment() for per-signal trader Gate-5 consumption (only stamps tickers with an active QUEUED signal). Cardinalities differ; values are always in sync. 2026-04-27 cleanup: dual-write rationale documented inline at the call site.",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_sector_screener.py",
+          "desc": "Sector momentum scoring \u2014 11 S&P SPDR sector ETFs \u00d7 top-10 holdings each, per-ticker calc_momentum_score (3m return 50% + 20d/50d SMA 30% + 10d/30d volume 20%). Runs 2x/day (pre-market 09:15 + close 16:00) \u2014 momentum is a multi-week signal so twice daily captures yesterday's close + today's close, plenty for the slow-moving inputs. Output populates sector_screening table including momentum_score column (2026-04-21+) and ret_3m raw column (2026-04-27+, fed back from calc_momentum_score for portal display). combined_score formula re-weighted 2026-04-27 to news 30% + sentiment 30% + momentum 30% + etf_weight 10% (was 40/40/0/20) \u2014 momentum was being computed but not actually included in candidate ranking. 30-hour fault-detection stale threshold tolerates a missed day.",
+          "how": "subprocess (called by market_daemon 2x/day)",
+          "status": "live"
+        },
+        {
+          "name": "retail_candidate_generator.py",
+          "desc": "Phase 3b \u2014 emits sector-driven candidate signals (source='candidate', status='WATCHING'). Reads sector_screening rows where momentum_score >= MIN_MOMENTUM_SCORE (0.45 as of 2026-04-21). Top-N per sector (3), global cap 30. Trader consumes directly from the VALIDATED signal pool (no longer via trade_windows \u2014 see 2026-04-24 window_calculator removal).",
+          "how": "subprocess (called by market_daemon enrichment ticks)",
+          "status": "live"
+        },
+        {
+          "name": "retail_event_calendar.py",
+          "desc": "Phase 5.a \u2014 Gate 4 EVENT_RISK calendar. Nasdaq bulk earnings fetch + macro_events table. Called from market_daemon's enrichment tick.",
+          "how": "module (called by market_daemon)",
+          "status": "live"
+        },
+        {
+          "name": "retail_tradable_cache.py",
+          "desc": "Audit Round 5 \u2014 Alpaca /v2/assets cache (~11k us_equity symbols). Candidate Generator uses is_tradable() to filter out crypto/delisted/OTC before emission. Refreshed once per trading day in premarket.",
+          "how": "module (refreshed by market_daemon)",
+          "status": "live"
+        },
+        {
+          "name": "retail_daily_master.py",
+          "desc": "Phase 5.c \u2014 end-of-day audit rollup. Renders logs/daily_master/YYYY-MM-DD.md with opens/closes/candidates/cooling-off/earnings tables. Fires at market close from run_close_session.",
+          "how": "module (called at 4PM ET by market_daemon)",
+          "status": "live"
+        },
+        {
+          "name": "retail_macro_regime_agent.py",
+          "desc": "Macro regime classifier (BEAR/BULL/NORMAL trend \u00d7 volatility). Runs in enrichment pipeline.",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_market_state_agent.py",
+          "desc": "Market state detector (open/close/holiday) for session gating. Writes _MARKET_STATE, _MARKET_STATE_SCORE, and _MARKET_STATE_UPDATED (the last one added 2026-04-21 \u2014 the validator's staleness check read the key but market_state_agent never wrote it, so every validator run flagged DEGRADED_STALE_MARKET_STATE).",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_bias_detection_agent.py",
+          "desc": "Behavioral-bias detector (sector concentration, loss aversion, disposition effect).",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_fault_detection_agent.py",
+          "desc": "Data freshness + system resources + account health checks.",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_validator_stack_agent.py",
+          "desc": "Final enrichment stamp \u2014 promotes QUEUED \u2192 VALIDATED when all prior stamps present.",
+          "how": "subprocess (called by market_daemon enrichment cycle, ~30min)",
+          "status": "live"
+        },
+        {
+          "name": "retail_shared.py",
+          "desc": "Phase C D6 \u2014 canonical kill_switch_active() / get_active_customers() / is_market_hours() shared by market_daemon, scheduler, portal, trader, dry_run. Replaces 5 near-duplicate local copies. now_et() and fetch_with_retry() intentionally left local (diverged return types / stateful circuit-breaker globals).",
+          "how": "module (import)",
+          "status": "live"
+        },
+        {
+          "name": "retail_sector_backfill_agent.py",
+          "desc": "One-off/periodic backfill for missing sector_screening rows.",
+          "how": "manual / on-demand",
+          "status": "tool"
+        },
+        {
+          "name": "retail_price_poller.py",
+          "desc": "Live-price refresher for the live_prices table \u2014 feeds portal + trader's in-band window check. 2026-04-21: moved from inline market_daemon loop call to standalone systemd timer firing every 60s, 24/7. Decoupling ensures prices stay fresh even when market_daemon isn't running (pre-pre-market, post-close, weekends).",
+          "how": "systemd (synthos-price-poller.timer, OnUnitActiveSec=60s, 24/7)",
+          "status": "live"
+        },
+        {
+          "name": "rotate_logs.py",
+          "desc": "Weekly log rotation + 30-day archive cleanup",
+          "how": "cron Sun",
+          "status": "cron"
+        },
+        {
+          "name": "retail_heartbeat.py",
+          "desc": "POST agent status to pi4b monitor (called directly by long-running services, plus hourly cron as a standalone ping)",
+          "how": "cron 21 * * * 1-5 (hourly :21 weekdays) + inline calls from daemons",
+          "status": "cron"
+        },
+        {
+          "name": "node_heartbeat.py",
+          "desc": "System metrics to monitor",
+          "how": "cron 1m",
+          "status": "cron"
+        },
+        {
+          "name": "retail_boot_sequence.py",
+          "desc": "Network wait, integrity check \u2014 trade-daemon / market-daemon services After= this one so they wait for a healthy boot before firing",
+          "how": "systemd (synthos-boot-sequence.service, Type=oneshot)",
+          "status": "boot"
+        },
+        {
+          "name": "retail_health_check.py",
+          "desc": "Post-reboot DB + Alpaca verify",
+          "how": "boot only",
+          "status": "boot"
+        },
+        {
+          "name": "retail_patch.py",
+          "desc": "Safe file updater, rollback",
+          "how": "manual",
+          "status": "tool"
+        },
+        {
+          "name": "retail_backup.py",
+          "desc": "v2 nightly backup \u2014 3-stream split (customer + retail), encrypt-on-source with Fernet, manifest.json at tar root, round-trip self-verify, POST .enc to pi4b /receive_backup. See documentation/specs/BACKUP_SYSTEM.md.",
+          "how": "cron 1:30am",
+          "status": "cron"
+        },
+        {
+          "name": "retail_restore.py",
+          "desc": "v2 restore tool \u2014 pulls from R2 (via-r2 / via-company / file:), validates manifest, restores per contents[]. Used by operator + v2 installer.",
+          "how": "manual / installer",
+          "status": "live"
+        },
+        {
+          "name": "retail_shutdown.py",
+          "desc": "Graceful pre-maintenance shutdown",
+          "how": "Sat 3:55",
+          "status": "cron"
+        },
+        {
+          "name": "rebuild_default_template.py",
+          "desc": "Nightly customer DB template rebuild",
+          "how": "cron 3am",
+          "status": "cron"
+        },
+        {
+          "name": "customer_health_check.py",
+          "desc": "Called by auditor for customer DB health",
+          "how": "SSH",
+          "status": "cron"
+        },
+        {
+          "name": "mosquitto",
+          "desc": "MQTT broker on 0.0.0.0:1883 (LAN-only, password auth /etc/mosquitto/passwd, retained messages on, autosave 30s). Telemetry plane for the distributed-trader migration. Topics: process/heartbeat/<node>/<agent> (every agent's pulse), process/regime (retained), process/prices/<ticker> (retained per-ticker). Tier 4 of distributed-trader migration, live since 2026-05-04.",
+          "how": "systemd (mosquitto.service)",
+          "status": "live"
+        },
+        {
+          "name": "synthos_dispatcher.py",
+          "desc": "Process-node orchestrator for DISPATCH_MODE=distributed. No-op in daemon mode (default). When distributed: wakes every 30s, builds WorkPacket per active customer, POSTs to RETAIL_URL/work, applies returned StateDelta to master DBs, runs gate14 dispatcher-side. Currently sync, single-target retail; async/pipelining is deferred Tier-6 work.",
+          "how": "systemd (synthos-dispatcher.service, runs when DISPATCH_MODE=distributed; loopback target = pi5 itself until retail-N hardware exists)",
+          "status": "live"
+        },
+        {
+          "name": "synthos_trader_server.py",
+          "desc": "FastAPI/uvicorn HTTP server on retail nodes (TRADER_SERVER_PORT, default 8443). Endpoints: /healthz /readyz /version /work. Receives WorkPackets from synthos_dispatcher, runs trader against in-memory packet data, returns WorkResult with StateDelta. Auth via X-Dispatch-Token header. /work runs trader execution in asyncio.to_thread so multiple concurrent customer requests overlap on the event loop without blocking each other.",
+          "how": "systemd (synthos-trader-server.service on pi5, port 8443; multi-worker via UVICORN_WORKERS=3)",
+          "status": "live"
+        },
+        {
+          "name": "src/async_alpaca_client.py",
+          "desc": "Async-native Alpaca client built on httpx.AsyncClient. Parallel class to the daemon trader's sync AlpacaClient \u2014 does NOT replace it. Used (eventually) by trader_server to issue concurrent Alpaca calls within one customer cycle (asyncio.gather over latest-quote fetches and order placements). Tier 6 of distributed-trader migration.",
+          "how": "module (imported by future async trader path)",
+          "status": "ready"
+        },
+        {
+          "name": "src/dispatch_mode.py",
+          "desc": "Per-customer dispatch-mode resolver. Tier 7 \u2014 every customer can independently be on 'daemon' (legacy market_daemon fan-out) or 'distributed' (synthos_dispatcher \u2192 synthos_trader_server). Both daemon and dispatcher consult resolve_customer_dispatch_mode() per cycle so trades never double-fire. Per-customer setting stored in customer_settings._DISPATCH_MODE; falls back to env DISPATCH_MODE; defaults to 'daemon'.",
+          "how": "module (imported by daemon + dispatcher)",
+          "status": "live"
+        },
+        {
+          "name": "synthos_migration.py",
+          "desc": "Sanctioned CLI for moving customers between daemon and distributed dispatch modes. Subcommands: status, enable, disable, reset, enable-all, disable-all (last two require --confirm). All operations write a DISPATCH_MODE_CHANGE audit row to the customer's events table. The cutover runbook (docs/CUTOVER_RUNBOOK.md) walks through the full one-customer-at-a-time migration procedure.",
+          "how": "manual / cron via runbook",
+          "status": "live"
+        },
+        {
+          "name": "docs/CUTOVER_RUNBOOK.md",
+          "desc": "Operational doc covering pre-flight checks, systemd unit files for trader_server + dispatcher, per-customer migration loop with monitor/rollback steps, daemon-trader decommission procedure, retail-2 stand-up. The single source of truth for executing the distributed-trader migration.",
+          "how": "documentation",
+          "status": "live"
+        },
+        {
+          "name": "src/ticker_state_ownership.py",
+          "desc": "Single source of truth for ticker_state field-ownership map (mirrors docs/TICKER_STATE_ARCHITECTURE.md). Each owned field maps to {owner, refresh_policy}. Read by retail_ticker_state_auditor; future writers can import to assert ownership.",
+          "how": "library (imported by auditor)",
+          "status": "live"
+        },
+        {
+          "name": "agents/retail_ticker_identity_agent.py",
+          "desc": "Nightly gap-filler for ticker_state.{sector,company,exchange}. Reads ticker_sectors + tradable_assets, fills NULL columns via COALESCE (gap-fill only, never overwrites). Backstop to the synchronous first-fill in retail_database.mark_ticker_active.",
+          "how": "systemd timer synthos-ticker-identity-agent.timer (02:30 ET nightly)",
+          "status": "live"
+        },
+        {
+          "name": "agents/retail_ticker_state_auditor.py",
+          "desc": "Read-only auditor for ticker_state. Identifies NULL fields on active tickers, maps each gap to its owning agent + refresh policy, grades severity. Writes _TICKER_STATE_AUDIT_LAST setting. Surfaced in monitor auditor panel under 'Ticker State' filter.",
+          "how": "systemd timer synthos-ticker-state-auditor.timer (02:35 ET nightly, 5min after identity sweep)",
+          "status": "live"
+        }
       ],
-      "databases": ["auth.db", "customers/*/signals.db (tables: signals, positions, trade_windows, news_flags, earnings_cache, macro_events, cooling_off, outcomes, ...)", "live_prices (shared, in owner DB)"],
-      "services": ["Cloudflare tunnel", "portal.synth-cloud.com", "Mosquitto MQTT broker (10.0.0.11:1883, LAN-only)"],
-      "storage": "NVMe (Patriot M.2 P300 256GB) — migrated from SD 2026-04-18",
-      "tools": ["synthos_build/tools/ (_fleet + 10 diagnostics: customer_audit, trader_audit, validator_investigate, sentiment_smoke, verify_schema, tier_readout, apply_tier_ladder, portal_lint, dead_code, lint, complexity)"]
+      "databases": [
+        "auth.db",
+        "customers/*/signals.db (tables: signals, positions, trade_windows, news_flags, earnings_cache, macro_events, cooling_off, outcomes, ...)",
+        "live_prices (shared, in owner DB)"
+      ],
+      "services": [
+        "Cloudflare tunnel",
+        "portal.synth-cloud.com",
+        "Mosquitto MQTT broker (10.0.0.11:1883, LAN-only)"
+      ],
+      "storage": "NVMe (Patriot M.2 P300 256GB) \u2014 migrated from SD 2026-04-18",
+      "tools": [
+        "synthos_build/tools/ (_fleet + 10 diagnostics: customer_audit, trader_audit, validator_investigate, sentiment_smoke, verify_schema, tier_readout, apply_tier_ladder, portal_lint, dead_code, lint, complexity)"
+      ]
     },
     {
       "id": "pi2w_monitor",
@@ -93,12 +384,22 @@
       "network": "WiFi",
       "status": "live",
       "agents": [
-        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor (http://10.0.0.10:5050)", "how": "cron 1m", "status": "live"},
-        {"name": "node_watchdog.py", "desc": "Pings pi4b + pi5, alerts on silence via 4-tier escalating chain: (1) pi4b command portal /api/enqueue, (2) pi5 retail portal /api/admin/alert, (3) SMS via carrier gateway (if configured), (4) Resend email. Skips nodes in IGNORE_LIST (sentinel). 2026-04-24 re-enabled and refactored.", "how": "cron 1m", "status": "live"}
+        {
+          "name": "node_heartbeat.py",
+          "desc": "System metrics to pi4b monitor (http://10.0.0.10:5050)",
+          "how": "cron 1m",
+          "status": "live"
+        },
+        {
+          "name": "node_watchdog.py",
+          "desc": "Pings pi4b + pi5, alerts on silence via 4-tier escalating chain: (1) pi4b command portal /api/enqueue, (2) pi5 retail portal /api/admin/alert, (3) SMS via carrier gateway (if configured), (4) Resend email. Skips nodes in IGNORE_LIST (sentinel). 2026-04-24 re-enabled and refactored.",
+          "how": "cron 1m",
+          "status": "live"
+        }
       ],
       "databases": [],
       "services": [],
-      "note": "Re-enabled 2026-04-24 after confirmed reachability (3+ days uptime, WiFi stable). Role: external failure detector — last line of defense if pi4b or pi5 go silent. Watchdog alerts cascade through portals FIRST to avoid email-spam, then fall back to SMS/email if portals are unreachable."
+      "note": "Re-enabled 2026-04-24 after confirmed reachability (3+ days uptime, WiFi stable). Role: external failure detector \u2014 last line of defense if pi4b or pi5 go silent. Watchdog alerts cascade through portals FIRST to avoid email-spam, then fall back to SMS/email if portals are unreachable."
     },
     {
       "id": "pi2w_sentinel",
@@ -109,40 +410,51 @@
       "network": "WiFi (SantaMcGuire)",
       "status": "disabled",
       "agents": [
-        {"name": "sentinel_wave.py", "desc": "Live agent sine wave animation on 3.5\" TFT", "how": "systemd", "status": "disabled"},
-        {"name": "node_heartbeat.py", "desc": "System metrics to pi4b monitor", "how": "cron 5m", "status": "disabled"}
+        {
+          "name": "sentinel_wave.py",
+          "desc": "Live agent sine wave animation on 3.5\" TFT",
+          "how": "systemd",
+          "status": "disabled"
+        },
+        {
+          "name": "node_heartbeat.py",
+          "desc": "System metrics to pi4b monitor",
+          "how": "cron 5m",
+          "status": "disabled"
+        }
       ],
       "databases": [],
-      "services": ["Sidecar HTTP on port 5100"],
-      "note": "DISABLED 2026-04-20 — display powered off pending power-source relocation (was USB-powered from operator's main PC, needs standalone supply). No ETA for return. Removed from auditor NODES dict + system_architecture.json status 'disabled'. Restore when hardware comes back."
+      "services": [
+        "Sidecar HTTP on port 5100"
+      ],
+      "note": "DISABLED 2026-04-20 \u2014 display powered off pending power-source relocation (was USB-powered from operator's main PC, needs standalone supply). No ETA for return. Removed from auditor NODES dict + system_architecture.json status 'disabled'. Restore when hardware comes back."
     }
   ],
   "data_flow": {
-    "trading_pipeline": "Market Daemon (9:15-16:00) orchestrates enrichment → candidate_generator emits sector-driven candidates by momentum_score → validator_stack promotes to VALIDATED + writes _VALIDATOR_VERDICT ∈ {GO, CAUTION, NO_GO} and _MARKET_STATE_SCORE (sentiment 40% + news 25% + macro 35%) to customer_settings → trade_daemon (continuous 9:30-16:00, 30s cycles) pulls VALIDATED signals directly + live_prices → 13-gate eval per signal (Gate 1 halts on NO_GO verdict; Gate 5 composite now blends _MARKET_STATE_SCORE as regime nudge; Gate 6 chase caps block peak entries) → BUY / SKIP / WATCH / EXIT → Alpaca market order → _resolve_fill_price polls filled_avg_price → open_position with real entry price.",
-    "shared_data": "price_poller (standalone 24/7 timer, every 60s) → live_prices. News/Sentiment → shared signals pool → all customers see same intel. Sector screener → momentum_score on sector_screening table → candidate_generator filter.",
-    "monitoring": "Auditor → SSH scans pi4b + pi5 → company.db suggestions. Sentinel ← heartbeats → silence alerts → Scoop. Librarian → SSH package audit → CVE alerts. pi2w nodes currently disabled (power-source relocation pending).",
-    "backup_chain": "v2 (2026-05-03): pi5 retail_backup.py (1:30am) builds 3-stream split (customer + retail) → Fernet encrypt-on-source with BACKUP_ENCRYPTION_KEY → manifest.json embedded at tar root → round-trip self-verify → POST .enc to pi4b /receive_backup → ~/.backup_staging/<stream>/<pi_id>/ → strongbox (2am) → adds company stream locally → uploads all 3 streams to Cloudflare R2 at <stream>/<pi_id>/<date>/ → post-upload validation (decrypt, manifest verify, content sha256) → 30-day retention. Restore via retail_restore.py (--source via-r2|via-company|file:) or strongbox.py --restore <stream> <pi_id>. See documentation/specs/BACKUP_SYSTEM.md.",
+    "trading_pipeline": "Market Daemon (9:15-16:00) orchestrates enrichment \u2192 candidate_generator emits sector-driven candidates by momentum_score \u2192 validator_stack promotes to VALIDATED + writes _VALIDATOR_VERDICT \u2208 {GO, CAUTION, NO_GO} and _MARKET_STATE_SCORE (sentiment 40% + news 25% + macro 35%) to customer_settings \u2192 trade_daemon (continuous 9:30-16:00, 30s cycles) pulls VALIDATED signals directly + live_prices \u2192 13-gate eval per signal (Gate 1 halts on NO_GO verdict; Gate 5 composite now blends _MARKET_STATE_SCORE as regime nudge; Gate 6 chase caps block peak entries) \u2192 BUY / SKIP / WATCH / EXIT \u2192 Alpaca market order \u2192 _resolve_fill_price polls filled_avg_price \u2192 open_position with real entry price.",
+    "shared_data": "price_poller (standalone 24/7 timer, every 60s) \u2192 live_prices. News/Sentiment \u2192 shared signals pool \u2192 all customers see same intel. Sector screener \u2192 momentum_score on sector_screening table \u2192 candidate_generator filter.",
+    "monitoring": "Auditor \u2192 SSH scans pi4b + pi5 \u2192 company.db suggestions. Sentinel \u2190 heartbeats \u2192 silence alerts \u2192 Scoop. Librarian \u2192 SSH package audit \u2192 CVE alerts. pi2w nodes currently disabled (power-source relocation pending).",
+    "backup_chain": "v2 (2026-05-03): pi5 retail_backup.py (1:30am) builds 3-stream split (customer + retail) \u2192 Fernet encrypt-on-source with BACKUP_ENCRYPTION_KEY \u2192 manifest.json embedded at tar root \u2192 round-trip self-verify \u2192 POST .enc to pi4b /receive_backup \u2192 ~/.backup_staging/<stream>/<pi_id>/ \u2192 strongbox (2am) \u2192 adds company stream locally \u2192 uploads all 3 streams to Cloudflare R2 at <stream>/<pi_id>/<date>/ \u2192 post-upload validation (decrypt, manifest verify, content sha256) \u2192 30-day retention. Restore via retail_restore.py (--source via-r2|via-company|file:) or strongbox.py --restore <stream> <pi_id>. See documentation/specs/BACKUP_SYSTEM.md.",
     "pipeline_variants": {
       "premarket_prep_09_15": {
         "fires": "weekday at 09:15 ET via synthos-market-daemon.timer",
-        "notes": "Full-pipeline once-daily — INCLUDES tradable_refresh, screener, earnings_refresh. After completion, daemon enters continuous intraday loop until close.",
+        "notes": "Full-pipeline once-daily \u2014 INCLUDES tradable_refresh, screener, earnings_refresh. After completion, daemon enters continuous intraday loop until close.",
         "steps": [
           "run_pre_open_reeval (re-evaluate overnight-queued orders)",
-          "run_tradable_refresh (Alpaca /v2/assets universe, ~11k symbols — once-daily)",
+          "run_tradable_refresh (Alpaca /v2/assets universe, ~11k symbols \u2014 once-daily)",
           "run_news (session='market')",
-          "run_screener (sector momentum — once-daily pass #1)",
+          "run_screener (sector momentum \u2014 once-daily pass #1)",
           "run_sentiment",
           "run_macro_regime",
           "run_market_state",
           "run_bias_detection",
           "run_fault_detection",
           "run_validator_stack",
-          "promote_validated_signals (QUEUED → VALIDATED where all stamps present)",
+          "promote_validated_signals (QUEUED \u2192 VALIDATED where all stamps present)",
           "run_candidate_generator (sector-driven candidates, WATCHING status)",
-          "run_earnings_refresh (Nasdaq earnings calendar — once-daily)",
-          
+          "run_earnings_refresh (Nasdaq earnings calendar \u2014 once-daily)",
           "run_price_poller (initial priming; standalone timer also fires every 60s)",
-          "run_premarket_selfcheck (advisory — validates pipeline artifacts; logs + flags + continues)"
+          "run_premarket_selfcheck (advisory \u2014 validates pipeline artifacts; logs + flags + continues)"
         ]
       },
       "intraday_enrichment_30min": {
@@ -167,13 +479,13 @@
           "run_trade_all_customers (session='close', final dispatch)",
           "run_exit_backfill (post-exit prices for optimizer)",
           "run_trail_optimizer (adaptive exit parameter tuning)",
-          "run_screener (sector momentum — once-daily pass #2, ADDED 2026-04-21)",
+          "run_screener (sector momentum \u2014 once-daily pass #2, ADDED 2026-04-21)",
           "daily_master generate (end-of-day audit markdown)"
         ]
       },
       "overnight_cycle_offhours": {
         "fires": "weekend / post-close weekday when market_daemon is invoked outside trading hours (cron-scheduled hourly for safety; main() picks this path based on clock)",
-        "notes": "One-shot — does not loop. Mirrors full pipeline so weekend runs keep signals warm for Monday's pre-market.",
+        "notes": "One-shot \u2014 does not loop. Mirrors full pipeline so weekend runs keep signals warm for Monday's pre-market.",
         "steps": [
           "run_tradable_refresh",
           "run_news (session='overnight')",
@@ -191,44 +503,278 @@
       }
     },
     "daily_timeline_weekday_et": [
-      {"time": "00:00", "node": "pi4b", "event": "logrotate.timer (approximate — runs daily)"},
-      {"time": "00:05-08:05 (:05 past each hour)", "node": "pi5", "event": "retail_scheduler.py --session=overnight (cron-driven news-agent only refresh)"},
-      {"time": "01:30", "node": "pi5", "event": "retail_backup.py v2 — build customer+retail streams, Fernet encrypt-on-source, manifest.json, round-trip verify, POST .enc to pi4b /receive_backup"},
-      {"time": "02:00", "node": "pi4b", "event": "company_strongbox.py v2 — build company stream + process staged customer/retail, upload all 3 to R2 with post-upload validation, 30-day retention"},
-      {"time": "03:00", "node": "pi5", "event": "rebuild_default_template.py — nightly fresh default customer DB schema"},
-      {"time": "06:00 (approximate)", "node": "pi4b", "event": "morning_report generation (company_auditor rollup)"},
-      {"time": "08:00", "node": "pi4b", "event": "company_fidget.py — daily keep-alive + anomaly detection"},
-      {"time": "09:15", "node": "pi5", "event": "synthos-market-daemon.timer → pre-market prep (full once-daily pipeline)"},
-      {"time": "09:25", "node": "pi5", "event": "synthos-trade-daemon.timer fires; daemon starts and waits for 09:30 open"},
-      {"time": "09:30-16:00", "node": "pi5", "event": "trade_daemon continuous 30s cycles + market_daemon enrichment every 30 min (14 cycles)"},
-      {"time": "16:00", "node": "pi5", "event": "market close — trade_daemon exits cleanly, market_daemon runs close_session (trader-close + exit_backfill + trail_optimizer + sector_screener pass #2 + daily_master)"},
-      {"time": "16:05-23:05 (:05 past each hour)", "node": "pi5", "event": "retail_scheduler.py --session=overnight (cron, off-hours news refresh)"},
-      {"time": "continuous 24/7 (every 60s)", "node": "pi5", "event": "synthos-price-poller.timer → refresh live_prices for portal + trader"},
-      {"time": "continuous (every 1 min)", "node": "pi5, pi4b", "event": "node_heartbeat.py — system metrics to monitor"},
-      {"time": "weekdays :21 hourly", "node": "pi5", "event": "retail_heartbeat.py — agent-status standalone ping"},
-      {"time": "Saturday 03:55", "node": "pi5", "event": "retail_shutdown.py — graceful pre-maintenance shutdown"},
-      {"time": "Saturday 04:00", "node": "pi5, pi4b", "event": "sudo reboot (weekly maintenance)"},
-      {"time": "Sunday 09:00", "node": "pi4b", "event": "company_librarian.py — weekly package audit, CVE scan"},
-      {"time": "Sunday 20:00", "node": "pi5", "event": "retail_scheduler.py --session=prep (Monday pre-market context build)"},
-      {"time": "Sunday 00:00", "node": "pi5", "event": "rotate_logs.py — weekly log rotation + archive"}
+      {
+        "time": "00:00",
+        "node": "pi4b",
+        "event": "logrotate.timer (approximate \u2014 runs daily)"
+      },
+      {
+        "time": "00:05-08:05 (:05 past each hour)",
+        "node": "pi5",
+        "event": "retail_scheduler.py --session=overnight (cron-driven news-agent only refresh)"
+      },
+      {
+        "time": "01:30",
+        "node": "pi5",
+        "event": "retail_backup.py v2 \u2014 build customer+retail streams, Fernet encrypt-on-source, manifest.json, round-trip verify, POST .enc to pi4b /receive_backup"
+      },
+      {
+        "time": "02:00",
+        "node": "pi4b",
+        "event": "company_strongbox.py v2 \u2014 build company stream + process staged customer/retail, upload all 3 to R2 with post-upload validation, 30-day retention"
+      },
+      {
+        "time": "03:00",
+        "node": "pi5",
+        "event": "rebuild_default_template.py \u2014 nightly fresh default customer DB schema"
+      },
+      {
+        "time": "06:00 (approximate)",
+        "node": "pi4b",
+        "event": "morning_report generation (company_auditor rollup)"
+      },
+      {
+        "time": "08:00",
+        "node": "pi4b",
+        "event": "company_fidget.py \u2014 daily keep-alive + anomaly detection"
+      },
+      {
+        "time": "09:15",
+        "node": "pi5",
+        "event": "synthos-market-daemon.timer \u2192 pre-market prep (full once-daily pipeline)"
+      },
+      {
+        "time": "09:25",
+        "node": "pi5",
+        "event": "synthos-trade-daemon.timer fires; daemon starts and waits for 09:30 open"
+      },
+      {
+        "time": "09:30-16:00",
+        "node": "pi5",
+        "event": "trade_daemon continuous 30s cycles + market_daemon enrichment every 30 min (14 cycles)"
+      },
+      {
+        "time": "16:00",
+        "node": "pi5",
+        "event": "market close \u2014 trade_daemon exits cleanly, market_daemon runs close_session (trader-close + exit_backfill + trail_optimizer + sector_screener pass #2 + daily_master)"
+      },
+      {
+        "time": "16:05-23:05 (:05 past each hour)",
+        "node": "pi5",
+        "event": "retail_scheduler.py --session=overnight (cron, off-hours news refresh)"
+      },
+      {
+        "time": "continuous 24/7 (every 60s)",
+        "node": "pi5",
+        "event": "synthos-price-poller.timer \u2192 refresh live_prices for portal + trader"
+      },
+      {
+        "time": "continuous (every 1 min)",
+        "node": "pi5, pi4b",
+        "event": "node_heartbeat.py \u2014 system metrics to monitor"
+      },
+      {
+        "time": "weekdays :21 hourly",
+        "node": "pi5",
+        "event": "retail_heartbeat.py \u2014 agent-status standalone ping"
+      },
+      {
+        "time": "Saturday 03:55",
+        "node": "pi5",
+        "event": "retail_shutdown.py \u2014 graceful pre-maintenance shutdown"
+      },
+      {
+        "time": "Saturday 04:00",
+        "node": "pi5, pi4b",
+        "event": "sudo reboot (weekly maintenance)"
+      },
+      {
+        "time": "Sunday 09:00",
+        "node": "pi4b",
+        "event": "company_librarian.py \u2014 weekly package audit, CVE scan"
+      },
+      {
+        "time": "Sunday 20:00",
+        "node": "pi5",
+        "event": "retail_scheduler.py --session=prep (Monday pre-market context build)"
+      },
+      {
+        "time": "Sunday 00:00",
+        "node": "pi5",
+        "event": "rotate_logs.py \u2014 weekly log rotation + archive"
+      }
     ]
   },
   "trader_gates": {
     "_note": "13-gate trader pipeline (gate0 + gate1..gate14, no gate9/12). Daemon and distributed mode both run these gates; distributed runs them in asyncio.to_thread on the trader_server, daemon runs them inline per subprocess. Gate14 was extracted to src/gate14_evaluator.py (2026-05-04) so the dispatcher can run the post-trade kill check on its master-DB outcomes.",
     "gates": [
-      {"num": 0, "name": "gate0_account_health", "purpose": "Alpaca status + equity reconciliation + orphan/ghost adoption pre-loop", "fail_conditions": ["negative cash", "orphaned positions in DB but not Alpaca", "halt state set"], "data_sources": ["Alpaca"]},
-      {"num": 1, "name": "gate1_system", "purpose": "4-layer halt check + validator verdict gate", "fail_conditions": ["validator NO_GO", "admin halt", "customer halt", "kill_switch file present"], "data_sources": ["customer_settings._VALIDATOR_VERDICT", "customer_settings._VALIDATOR_RESTRICTIONS", "portfolio (recent losses)"]},
-      {"num": 2, "name": "gate2_benchmark", "purpose": "SPY/VTI benchmark trend check", "fail_conditions": ["benchmark down trend"], "data_sources": ["Alpaca bars"]},
-      {"num": 3, "name": "gate3_regime", "purpose": "Macro regime gate (BULL/BEAR/NORMAL + VIX + yield curve)", "fail_conditions": ["risk_off sustained 2+ cycles"], "data_sources": ["Alpaca bars (SPY, TLT)", "signals.db macro_regime_detail"]},
-      {"num": 4, "name": "gate4_eligibility", "purpose": "Per-signal eligibility: freshness, liquidity, dedup, cooling-off", "fail_conditions": ["signal age past tier window", "liquidity below floor", "ticker in cooling_off", "EVENT_RISK calendar HIGH"], "data_sources": ["shared news_flags", "cooling_off table"]},
-      {"num": 5, "name": "gate5_signal_score", "purpose": "Composite score = news + sentiment + momentum + regime nudge", "fail_conditions": ["composite below threshold (0.55 default)"], "data_sources": ["signal-attached scores", "sector_screening"]},
-      {"num": 5.5, "name": "gate5_5_news_veto", "purpose": "Last-mile news veto on negative high-impact headlines", "fail_conditions": ["bearish news flag within 4h"], "data_sources": ["shared news_flags"]},
-      {"num": 6, "name": "gate6_entry", "purpose": "Entry decision: spread check + chase-cap + portfolio exposure", "fail_conditions": ["spread > threshold", "already at peak entry today (chase cap)", "12-cap pre-flight reached"], "data_sources": ["Alpaca quote", "positions"]},
-      {"num": 7, "name": "gate7_sizing", "purpose": "Position sizing: Model B equity share + Model C cash floor", "fail_conditions": ["INSUFFICIENT_CASH_AFTER_MANUAL", "concentration limit breached"], "data_sources": ["customer_settings._ALPACA_EQUITY", "portfolio"]},
-      {"num": 8, "name": "gate8_risk", "purpose": "ATR-scaled stop-loss + trailing setup (server-side)", "fail_conditions": ["ATR data missing"], "data_sources": ["Alpaca bars"]},
-      {"num": 11, "name": "gate11_portfolio", "purpose": "Portfolio controls: 12-cap auto-exit, sector concentration final check", "fail_conditions": ["sector > 40%", "BIL allocation breached"], "data_sources": ["customer_settings._ALPACA_EQUITY", "Alpaca positions"]},
-      {"num": 13, "name": "gate13_stress", "purpose": "Alpaca API stress + macro risk_off cash-floor lift", "fail_conditions": ["Alpaca 5xx >3 consecutive", "VIX-driven sizing override"], "data_sources": ["FRED VIX", "signals.db"]},
-      {"num": 14, "name": "gate14_evaluation", "purpose": "Post-trade strategy kill check (Sharpe < min AND drawdown > max)", "fail_conditions": ["both Sharpe and drawdown breach threshold"], "data_sources": ["last 100 outcomes", "portfolio peak_equity"], "extracted_to": "src/gate14_evaluator.py (2026-05-04, runs on dispatcher in distributed mode)"}
+      {
+        "num": 0,
+        "name": "gate0_account_health",
+        "purpose": "Alpaca status + equity reconciliation + orphan/ghost adoption pre-loop",
+        "fail_conditions": [
+          "negative cash",
+          "orphaned positions in DB but not Alpaca",
+          "halt state set"
+        ],
+        "data_sources": [
+          "Alpaca"
+        ]
+      },
+      {
+        "num": 1,
+        "name": "gate1_system",
+        "purpose": "4-layer halt check + validator verdict gate",
+        "fail_conditions": [
+          "validator NO_GO",
+          "admin halt",
+          "customer halt",
+          "kill_switch file present"
+        ],
+        "data_sources": [
+          "customer_settings._VALIDATOR_VERDICT",
+          "customer_settings._VALIDATOR_RESTRICTIONS",
+          "portfolio (recent losses)"
+        ]
+      },
+      {
+        "num": 2,
+        "name": "gate2_benchmark",
+        "purpose": "SPY/VTI benchmark trend check",
+        "fail_conditions": [
+          "benchmark down trend"
+        ],
+        "data_sources": [
+          "Alpaca bars"
+        ]
+      },
+      {
+        "num": 3,
+        "name": "gate3_regime",
+        "purpose": "Macro regime gate (BULL/BEAR/NORMAL + VIX + yield curve)",
+        "fail_conditions": [
+          "risk_off sustained 2+ cycles"
+        ],
+        "data_sources": [
+          "Alpaca bars (SPY, TLT)",
+          "signals.db macro_regime_detail"
+        ]
+      },
+      {
+        "num": 4,
+        "name": "gate4_eligibility",
+        "purpose": "Per-signal eligibility: freshness, liquidity, dedup, cooling-off",
+        "fail_conditions": [
+          "signal age past tier window",
+          "liquidity below floor",
+          "ticker in cooling_off",
+          "EVENT_RISK calendar HIGH"
+        ],
+        "data_sources": [
+          "shared news_flags",
+          "cooling_off table"
+        ]
+      },
+      {
+        "num": 5,
+        "name": "gate5_signal_score",
+        "purpose": "Composite score = news + sentiment + momentum + regime nudge",
+        "fail_conditions": [
+          "composite below threshold (0.55 default)"
+        ],
+        "data_sources": [
+          "signal-attached scores",
+          "sector_screening"
+        ]
+      },
+      {
+        "num": 5.5,
+        "name": "gate5_5_news_veto",
+        "purpose": "Last-mile news veto on negative high-impact headlines",
+        "fail_conditions": [
+          "bearish news flag within 4h"
+        ],
+        "data_sources": [
+          "shared news_flags"
+        ]
+      },
+      {
+        "num": 6,
+        "name": "gate6_entry",
+        "purpose": "Entry decision: spread check + chase-cap + portfolio exposure",
+        "fail_conditions": [
+          "spread > threshold",
+          "already at peak entry today (chase cap)",
+          "12-cap pre-flight reached"
+        ],
+        "data_sources": [
+          "Alpaca quote",
+          "positions"
+        ]
+      },
+      {
+        "num": 7,
+        "name": "gate7_sizing",
+        "purpose": "Position sizing: Model B equity share + Model C cash floor",
+        "fail_conditions": [
+          "INSUFFICIENT_CASH_AFTER_MANUAL",
+          "concentration limit breached"
+        ],
+        "data_sources": [
+          "customer_settings._ALPACA_EQUITY",
+          "portfolio"
+        ]
+      },
+      {
+        "num": 8,
+        "name": "gate8_risk",
+        "purpose": "ATR-scaled stop-loss + trailing setup (server-side)",
+        "fail_conditions": [
+          "ATR data missing"
+        ],
+        "data_sources": [
+          "Alpaca bars"
+        ]
+      },
+      {
+        "num": 11,
+        "name": "gate11_portfolio",
+        "purpose": "Portfolio controls: 12-cap auto-exit, sector concentration final check",
+        "fail_conditions": [
+          "sector > 40%",
+          "BIL allocation breached"
+        ],
+        "data_sources": [
+          "customer_settings._ALPACA_EQUITY",
+          "Alpaca positions"
+        ]
+      },
+      {
+        "num": 13,
+        "name": "gate13_stress",
+        "purpose": "Alpaca API stress + macro risk_off cash-floor lift",
+        "fail_conditions": [
+          "Alpaca 5xx >3 consecutive",
+          "VIX-driven sizing override"
+        ],
+        "data_sources": [
+          "FRED VIX",
+          "signals.db"
+        ]
+      },
+      {
+        "num": 14,
+        "name": "gate14_evaluation",
+        "purpose": "Post-trade strategy kill check (Sharpe < min AND drawdown > max)",
+        "fail_conditions": [
+          "both Sharpe and drawdown breach threshold"
+        ],
+        "data_sources": [
+          "last 100 outcomes",
+          "portfolio peak_equity"
+        ],
+        "extracted_to": "src/gate14_evaluator.py (2026-05-04, runs on dispatcher in distributed mode)"
+      }
     ]
   },
   "operating_modes": {
@@ -236,7 +782,10 @@
     "modes": [
       {
         "name": "OPERATING_MODE",
-        "values": ["MANAGED", "AUTOMATIC"],
+        "values": [
+          "MANAGED",
+          "AUTOMATIC"
+        ],
         "default": "MANAGED",
         "scope": "per-customer (override in customer_settings._OPERATING_MODE)",
         "effect": {
@@ -247,9 +796,12 @@
       },
       {
         "name": "TRADING_MODE",
-        "values": ["PAPER", "LIVE"],
+        "values": [
+          "PAPER",
+          "LIVE"
+        ],
         "default": "PAPER",
-        "scope": "per-customer (Alpaca account type — not env-overridable)",
+        "scope": "per-customer (Alpaca account type \u2014 not env-overridable)",
         "effect": {
           "PAPER": "Routes to paper-api.alpaca.markets. Simulated, no real money.",
           "LIVE": "Routes to api.alpaca.markets. Real money. Requires three-gate verification (TRADING_MODE=LIVE + non-paper base_url + .live_trading_enabled stamp file)."
@@ -258,7 +810,10 @@
       },
       {
         "name": "DISPATCH_MODE",
-        "values": ["daemon", "distributed"],
+        "values": [
+          "daemon",
+          "distributed"
+        ],
         "default": "daemon",
         "scope": "per-customer (override in customer_settings._DISPATCH_MODE; system default in env DISPATCH_MODE)",
         "effect": {
@@ -272,29 +827,152 @@
     ]
   },
   "market_hours": {
-    "_note": "All times ET. Holiday awareness is currently a TODO — signals queued on holidays auto-CANCELLED at the per-tier max-age threshold rather than gated up front.",
-    "regular_session": {"open": "09:30", "close": "16:00", "trading_days": "Mon-Fri", "agents_active": ["trade_daemon (continuous 30s)", "market_daemon (intraday 30-min)", "price_poller (24/7)", "dispatcher (when distributed)"]},
-    "pre_market": {"start": "04:00", "end": "09:30", "trading_days": "Mon-Fri", "agents_active": ["scheduler (overnight news)", "market_daemon (09:15 premarket prep)"]},
-    "after_hours": {"start": "16:00", "end": "20:00", "trading_days": "Mon-Fri", "agents_active": ["scheduler (post-close news)", "market_daemon (close session at 16:00)"]},
-    "overnight": {"start": "20:00", "end": "04:00", "trading_days": "every day", "agents_active": ["scheduler (hourly news refresh)", "retail_backup (01:30)", "strongbox (02:00)", "rebuild_template (03:00)"]},
-    "weekend": {"trading_days": "Sat-Sun", "agents_active": ["scheduler (hourly news)", "retail_shutdown (Sat 03:55)", "system reboot (Sat 04:00)", "librarian (Sun)", "scheduler prep (Sun 20:00)"]},
+    "_note": "All times ET. Holiday awareness is currently a TODO \u2014 signals queued on holidays auto-CANCELLED at the per-tier max-age threshold rather than gated up front.",
+    "regular_session": {
+      "open": "09:30",
+      "close": "16:00",
+      "trading_days": "Mon-Fri",
+      "agents_active": [
+        "trade_daemon (continuous 30s)",
+        "market_daemon (intraday 30-min)",
+        "price_poller (24/7)",
+        "dispatcher (when distributed)"
+      ]
+    },
+    "pre_market": {
+      "start": "04:00",
+      "end": "09:30",
+      "trading_days": "Mon-Fri",
+      "agents_active": [
+        "scheduler (overnight news)",
+        "market_daemon (09:15 premarket prep)"
+      ]
+    },
+    "after_hours": {
+      "start": "16:00",
+      "end": "20:00",
+      "trading_days": "Mon-Fri",
+      "agents_active": [
+        "scheduler (post-close news)",
+        "market_daemon (close session at 16:00)"
+      ]
+    },
+    "overnight": {
+      "start": "20:00",
+      "end": "04:00",
+      "trading_days": "every day",
+      "agents_active": [
+        "scheduler (hourly news refresh)",
+        "retail_backup (01:30)",
+        "strongbox (02:00)",
+        "rebuild_template (03:00)"
+      ]
+    },
+    "weekend": {
+      "trading_days": "Sat-Sun",
+      "agents_active": [
+        "scheduler (hourly news)",
+        "retail_shutdown (Sat 03:55)",
+        "system reboot (Sat 04:00)",
+        "librarian (Sun)",
+        "scheduler prep (Sun 20:00)"
+      ]
+    },
     "is_market_hours_helper": "src/retail_shared.py:115-122 (delegated to by every agent that needs to gate behavior on session)"
   },
   "distributed_trader_tiers": {
     "_note": "Tracks the 7-tier migration from single-box daemon trading to distributed dispatcher + retail-server architecture. Each tier ship-able and rollback-able independently. As of 2026-05-04: Tiers 1-7 architectural work complete and deployed; Tier 7 migration is operator-driven via synthos_migration.py.",
     "tiers": [
-      {"tier": 1, "name": "Tier 1 — pre-trip trivial wins", "status": "complete", "shipped": "2026-05-03", "highlights": ["requests.Session() in AlpacaClient (50-100ms saved per call)", "alpaca-trade-api dead-dep removed"]},
-      {"tier": 2, "name": "Tier 2 — DISPATCH_MODE infrastructure", "status": "complete", "shipped": "2026-05-03", "highlights": ["DISPATCH_MODE env var added", "acquire_agent_lock gated on mode"]},
-      {"tier": 3, "name": "Tier 3 — schemas + helpers + gate I/O audit", "status": "complete", "shipped": "2026-05-03", "highlights": ["src/work_packet.py", "src/mqtt_client.py", "src/heartbeat.py", "_ack_signal accumulator", "gate timing instrumentation", "TRADER_GATE_IO_AUDIT.md"]},
-      {"tier": 4, "name": "Tier 4 — MQTT telemetry plane", "status": "complete + live", "shipped": "2026-05-04", "highlights": ["mosquitto on Pi5:1883", "24 agents wired with register_telemetry()", "regime + price dual-write to MQTT", "company_mqtt_listener on pi4b persisting to auditor.db"]},
-      {"tier": 5, "name": "Tier 5 — dispatcher + trader_server skeleton", "status": "complete + live (skeleton execution)", "shipped": "2026-05-04", "highlights": ["agents/synthos_dispatcher.py", "agents/synthos_trader_server.py (FastAPI :8443)", "gate14 extracted to src/gate14_evaluator.py", "old dispatch paths gated when distributed"]},
-      {"tier": 6, "name": "Tier 6 — async + parallel dispatch", "status": "complete (verified 4.9x speedup)", "shipped": "2026-05-04", "highlights": ["server /work runs in asyncio.to_thread", "dispatcher fans 8 concurrent POSTs via ThreadPoolExecutor", "Alpaca quotes pre-fetched batched per cycle", "src/async_alpaca_client.py ready for full async refactor"]},
-      {"tier": 7, "name": "Tier 7 — per-customer migration tooling", "status": "complete (operator-driven cutover)", "shipped": "2026-05-04", "highlights": ["src/dispatch_mode.py per-customer resolver", "agents/synthos_migration.py CLI", "docs/CUTOVER_RUNBOOK.md", "market_daemon + dispatcher both filter by per-customer mode"]}
+      {
+        "tier": 1,
+        "name": "Tier 1 \u2014 pre-trip trivial wins",
+        "status": "complete",
+        "shipped": "2026-05-03",
+        "highlights": [
+          "requests.Session() in AlpacaClient (50-100ms saved per call)",
+          "alpaca-trade-api dead-dep removed"
+        ]
+      },
+      {
+        "tier": 2,
+        "name": "Tier 2 \u2014 DISPATCH_MODE infrastructure",
+        "status": "complete",
+        "shipped": "2026-05-03",
+        "highlights": [
+          "DISPATCH_MODE env var added",
+          "acquire_agent_lock gated on mode"
+        ]
+      },
+      {
+        "tier": 3,
+        "name": "Tier 3 \u2014 schemas + helpers + gate I/O audit",
+        "status": "complete",
+        "shipped": "2026-05-03",
+        "highlights": [
+          "src/work_packet.py",
+          "src/mqtt_client.py",
+          "src/heartbeat.py",
+          "_ack_signal accumulator",
+          "gate timing instrumentation",
+          "TRADER_GATE_IO_AUDIT.md"
+        ]
+      },
+      {
+        "tier": 4,
+        "name": "Tier 4 \u2014 MQTT telemetry plane",
+        "status": "complete + live",
+        "shipped": "2026-05-04",
+        "highlights": [
+          "mosquitto on Pi5:1883",
+          "24 agents wired with register_telemetry()",
+          "regime + price dual-write to MQTT",
+          "company_mqtt_listener on pi4b persisting to auditor.db"
+        ]
+      },
+      {
+        "tier": 5,
+        "name": "Tier 5 \u2014 dispatcher + trader_server skeleton",
+        "status": "complete + live (skeleton execution)",
+        "shipped": "2026-05-04",
+        "highlights": [
+          "agents/synthos_dispatcher.py",
+          "agents/synthos_trader_server.py (FastAPI :8443)",
+          "gate14 extracted to src/gate14_evaluator.py",
+          "old dispatch paths gated when distributed"
+        ]
+      },
+      {
+        "tier": 6,
+        "name": "Tier 6 \u2014 async + parallel dispatch",
+        "status": "complete (verified 4.9x speedup)",
+        "shipped": "2026-05-04",
+        "highlights": [
+          "server /work runs in asyncio.to_thread",
+          "dispatcher fans 8 concurrent POSTs via ThreadPoolExecutor",
+          "Alpaca quotes pre-fetched batched per cycle",
+          "src/async_alpaca_client.py ready for full async refactor"
+        ]
+      },
+      {
+        "tier": 7,
+        "name": "Tier 7 \u2014 per-customer migration tooling",
+        "status": "complete (operator-driven cutover)",
+        "shipped": "2026-05-04",
+        "highlights": [
+          "src/dispatch_mode.py per-customer resolver",
+          "agents/synthos_migration.py CLI",
+          "docs/CUTOVER_RUNBOOK.md",
+          "market_daemon + dispatcher both filter by per-customer mode"
+        ]
+      }
     ],
     "current_state": {
       "as_of": "2026-05-04",
       "summary": "2 customers on distributed mode; the rest fall back to env DISPATCH_MODE default (daemon).",
-      "distributed_customer_id_prefixes": ["c5fc97cc", "46b10ff0"],
+      "distributed_customer_id_prefixes": [
+        "c5fc97cc",
+        "46b10ff0"
+      ],
       "first_migrated": "2026-05-04T07:11:08-04:00",
       "rollout_paused": "Operator gating further migrations on v2 customer test compatibility. See project_pi4b_cleanup_followups memory.",
       "refresh_command": "python3 synthos_build/agents/synthos_migration.py status  (run on pi5)",
@@ -304,58 +982,218 @@
   "telemetry_agents": {
     "_note": "Every long-running and subprocess agent now publishes a heartbeat to the MQTT broker on Pi5:1883. Topic shape: process/heartbeat/<node>/<agent>. Long-running agents publish every 30s via background thread + LWT. Subprocess agents publish a single one-shot at startup. company_mqtt_listener on pi4b subscribes to wildcard topics and persists every observation to auditor.db.mqtt_observations.",
     "long_running": [
-      {"agent": "portal", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "watchdog", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "market_daemon", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "trade_daemon", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "interrogation_listener", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "price_poller", "node": "pi5", "interval_s": 30, "lwt": true},
-      {"agent": "dispatcher", "node": "pi5", "interval_s": 30, "lwt": true, "tier": 5},
-      {"agent": "trader_server", "node": "pi5", "interval_s": 30, "lwt": true, "tier": 5},
-      {"agent": "mqtt_listener", "node": "company", "interval_s": 30, "lwt": true, "tier": 4}
+      {
+        "agent": "portal",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "watchdog",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "market_daemon",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "trade_daemon",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "interrogation_listener",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "price_poller",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true
+      },
+      {
+        "agent": "dispatcher",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true,
+        "tier": 5
+      },
+      {
+        "agent": "trader_server",
+        "node": "pi5",
+        "interval_s": 30,
+        "lwt": true,
+        "tier": 5
+      },
+      {
+        "agent": "mqtt_listener",
+        "node": "company",
+        "interval_s": 30,
+        "lwt": true,
+        "tier": 4
+      }
     ],
     "one_shot": [
-      {"agent": "trade_logic_agent", "node": "pi5", "fires": "per cycle (30s during market hours)"},
-      {"agent": "news_agent", "node": "pi5", "fires": "per enrichment cycle (~30min)"},
-      {"agent": "sentiment_agent", "node": "pi5", "fires": "per enrichment cycle (~30min)"},
-      {"agent": "sector_screener", "node": "pi5", "fires": "2x daily (premarket + close)"},
-      {"agent": "macro_regime_agent", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "market_state_agent", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "bias_detection_agent", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "fault_detection_agent", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "validator_stack", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "candidate_generator", "node": "pi5", "fires": "per enrichment cycle"},
-      {"agent": "sector_backfill", "node": "pi5", "fires": "manual / on-demand"},
-      {"agent": "daily_master", "node": "pi5", "fires": "16:00 ET (close)"},
-      {"agent": "health_check", "node": "pi5", "fires": "boot only"},
-      {"agent": "dry_run", "node": "pi5", "fires": "manual / test"},
-      {"agent": "backup", "node": "pi5", "fires": "01:30 daily"},
-      {"agent": "boot_sequence", "node": "pi5", "fires": "boot only"},
-      {"agent": "scheduler", "node": "pi5", "fires": "cron (off-hours hourly)"},
-      {"agent": "shutdown", "node": "pi5", "fires": "Saturday 03:55"}
+      {
+        "agent": "trade_logic_agent",
+        "node": "pi5",
+        "fires": "per cycle (30s during market hours)"
+      },
+      {
+        "agent": "news_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle (~30min)"
+      },
+      {
+        "agent": "sentiment_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle (~30min)"
+      },
+      {
+        "agent": "sector_screener",
+        "node": "pi5",
+        "fires": "2x daily (premarket + close)"
+      },
+      {
+        "agent": "macro_regime_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "market_state_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "bias_detection_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "fault_detection_agent",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "validator_stack",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "candidate_generator",
+        "node": "pi5",
+        "fires": "per enrichment cycle"
+      },
+      {
+        "agent": "sector_backfill",
+        "node": "pi5",
+        "fires": "manual / on-demand"
+      },
+      {
+        "agent": "daily_master",
+        "node": "pi5",
+        "fires": "16:00 ET (close)"
+      },
+      {
+        "agent": "health_check",
+        "node": "pi5",
+        "fires": "boot only"
+      },
+      {
+        "agent": "dry_run",
+        "node": "pi5",
+        "fires": "manual / test"
+      },
+      {
+        "agent": "backup",
+        "node": "pi5",
+        "fires": "01:30 daily"
+      },
+      {
+        "agent": "boot_sequence",
+        "node": "pi5",
+        "fires": "boot only"
+      },
+      {
+        "agent": "scheduler",
+        "node": "pi5",
+        "fires": "cron (off-hours hourly)"
+      },
+      {
+        "agent": "shutdown",
+        "node": "pi5",
+        "fires": "Saturday 03:55"
+      }
     ],
-    "broker": {"host": "10.0.0.11", "port": 1883, "auth": "username/password (synthos_broker)", "config": "/etc/mosquitto/conf.d/synthos.conf (in repo at synthos_build/config/mosquitto/synthos.conf)"},
-    "subscriber": {"agent": "company_mqtt_listener", "node": "pi4b", "topics": ["process/heartbeat/+/+", "process/regime", "process/prices/+"], "persistence": "auditor.db mqtt_observations table", "summary_interval_s": 60, "stale_threshold_s": 120}
+    "broker": {
+      "host": "10.0.0.11",
+      "port": 1883,
+      "auth": "username/password (synthos_broker)",
+      "config": "/etc/mosquitto/conf.d/synthos.conf (in repo at synthos_build/config/mosquitto/synthos.conf)"
+    },
+    "subscriber": {
+      "agent": "company_mqtt_listener",
+      "node": "pi4b",
+      "topics": [
+        "process/heartbeat/+/+",
+        "process/regime",
+        "process/prices/+"
+      ],
+      "persistence": "auditor.db mqtt_observations table",
+      "summary_interval_s": 60,
+      "stale_threshold_s": 120
+    }
   },
   "ssh_map": {
     "from_pi4b": [
-      {"alias": "SentinelRetail", "ip": "10.0.0.11", "user": "pi516gb", "target": "pi5"},
-      {"alias": "pi0-2monitor", "ip": "10.0.0.121", "user": "pi-02w", "target": "pi2w_monitor"},
-      {"alias": "Sentineldisplay", "ip": "10.0.0.87", "user": "pi-02w", "target": "pi2w_sentinel"}
+      {
+        "alias": "SentinelRetail",
+        "ip": "10.0.0.11",
+        "user": "pi516gb",
+        "target": "pi5"
+      },
+      {
+        "alias": "pi0-2monitor",
+        "ip": "10.0.0.121",
+        "user": "pi-02w",
+        "target": "pi2w_monitor"
+      },
+      {
+        "alias": "Sentineldisplay",
+        "ip": "10.0.0.87",
+        "user": "pi-02w",
+        "target": "pi2w_sentinel"
+      }
     ],
     "agents_with_ssh": [
-      {"agent": "Auditor", "targets": "pi5 + pi2w (log scanning, process checks)"},
-      {"agent": "Librarian", "targets": "pi5 + pi2w (package auditing)"},
-      {"agent": "Watchdog (pi2w)", "targets": "pi4b + pi5 + display (ping monitoring)"}
+      {
+        "agent": "Auditor",
+        "targets": "pi5 + pi2w (log scanning, process checks)"
+      },
+      {
+        "agent": "Librarian",
+        "targets": "pi5 + pi2w (package auditing)"
+      },
+      {
+        "agent": "Watchdog (pi2w)",
+        "targets": "pi4b + pi5 + display (ping monitoring)"
+      }
     ]
   },
   "known_issues": [
     "Sentinel display needs reboot for rotation=0 + wave renderer debugging",
-    "Portal Chart.js blocked by Cloudflare tunnel CSP — charts render blank (tracked: backlog PORTAL-CSP-CHARTJS)"
+    "Portal Chart.js blocked by Cloudflare tunnel CSP \u2014 charts render blank (tracked: backlog PORTAL-CSP-CHARTJS)"
   ],
   "resolved": [
-    "Signup auto-approve silently broken by SQLite write-lock deadlock in verify_signup_email — fixed 2026-04-23 (dedented approve_signup call outside the outer _auth_conn() write transaction; previously pending_signups stayed PENDING forever with email_verified=1, quiet failure swallowed in except).",
-    "Backup chain pi5→pi4b working",
+    "Signup auto-approve silently broken by SQLite write-lock deadlock in verify_signup_email \u2014 fixed 2026-04-23 (dedented approve_signup call outside the outer _auth_conn() write transaction; previously pending_signups stayed PENDING forever with email_verified=1, quiet failure swallowed in except).",
+    "Backup chain pi5\u2192pi4b working",
     "Ghost cron entries removed",
     "Write-access protection (company_lock.py)",
     "Auditor cross-node SSH scanning",
@@ -376,10 +1214,10 @@
     "Log rotation system (weekly + 30-day archive)",
     "Security hardening: auth checks on all endpoints",
     "Password eye toggles on all forms",
-    "Pi5 retail stack migrated SD → NVMe (Patriot M.2 P300, 2026-04-18)",
+    "Pi5 retail stack migrated SD \u2192 NVMe (Patriot M.2 P300, 2026-04-18)",
     "Diagnostic tools consolidated into synthos_build/tools/ (_fleet helper + 10 scripts)",
     "Code-health trio added to tools/ (vulture, ruff, radon wrappers)",
-    "Early-access TOS modal + non-restrictive setup overlay — built dormant behind EARLY_ACCESS_TOS_ENABLED=False",
+    "Early-access TOS modal + non-restrictive setup overlay \u2014 built dormant behind EARLY_ACCESS_TOS_ENABLED=False",
     "rotate_logs.py landed in git (was running from cron on pi5 but untracked)",
     "JS init-killer fixed: Jinja substitution inside a // comment produced a literal '<' that aborted dashboard init for all users (commit bba337a)",
     "Phase 3c.a/b: Gate 5 window proximity nudge + trader window consumer (v1 news-triggered entry path removed)",
@@ -387,51 +1225,51 @@
     "Phase 5.a: Gate 4 EVENT_RISK scheduled-event calendar (Nasdaq earnings + macro_events table)",
     "Phase 5.b: cooling_off after stop-out (24h default; Gate 4 sub-gate)",
     "Phase 5.c: daily_master.md end-of-day audit rollup",
-    "Audit Round 1 (2026-04-20): 5 critical bugs fixed — missing time/timezone imports, out-of-scope trade_events, candidate-gen tx_date dedup, Gate 4 ticker dedup (killed AAPL runaway)",
+    "Audit Round 1 (2026-04-20): 5 critical bugs fixed \u2014 missing time/timezone imports, out-of-scope trade_events, candidate-gen tx_date dedup, Gate 4 ticker dedup (killed AAPL runaway)",
     "Audit Round 4 (2026-04-20): macro window anchor pinned (INSERT OR IGNORE) + .known_good/ cleanup (832K snapshot deleted) + portal customer_count template-var fix",
     "Audit Round 5 (2026-04-20): BIL concentration alert (Gate 0 sub-gate + daily notification) + tradable-asset cache (Alpaca /v2/assets filter in Candidate Generator)",
-    "Audit Rounds 6-8 (2026-04-20): 11 small/medium Phase-B follow-ups — tradable_assets in main migrations, three F821 catches on re-sweep, validator missing-timestamp = STALE",
-    "Phase B re-run audit (2026-04-20): 139 → 70 findings across 5 subsystems, 50% reduction after Rounds 6-8 landed",
-    "Audit Round 9 (2026-04-20): transaction safety — reduce_position + update_portfolio now atomic (single with self.conn() block; same pattern close_position got in R7.2); price_poller INSERT loop + DELETE-stale wrapped in explicit BEGIN/COMMIT; cooling_off(ticker, cool_until) composite index; tradable_cache pagination-truncation warn at 1000-multiple boundary; get_api_call_history() rewritten to WHERE timestamp >= ? (was date(timestamp) pattern, R6 fixed sibling); _send_sms / _send_email now check r.ok + log on non-2xx; ATR / volume_avg log reason when empty; gate4/5/5.5/6 guard signal.get('ticker') or '' + portfolio.get('cash', 0)",
-    "Phase C Patch 1 (2026-04-20): D4 datetime.utcnow() → datetime.now(timezone.utc).replace(tzinfo=None) across 26 sites in 10 files (Python 3.12 deprecation); D6 retail_shared.py created — kill_switch_active, get_active_customers, is_market_hours consolidated from 3-5 near-duplicate copies",
-    "Phase C Patch 2 (2026-04-20): D5 portal lint — 14 unused HTML id= attributes removed (zero CSS / JS / addEventListener references); snb-* and tab-* kept (dynamic showTab() string concat)",
-    "Phase C Patch 3 (2026-04-20): D2 portal complexity refactor — 12 private helpers extracted from 4 hotspot endpoints (_verify_stripe_signature + _handle_checkout_completed; _enrich_single_db_position + _extract_orphan_positions; _status_locked_mode + _compute_user_warnings; _parse_db_dt_to_et + _session_bin_index + _resolve_trading_session_date + _build_market_bins + _aggregate_customer_market_activity + _aggregate_user_sessions_historical). Line counts: stripe_webhook 196→84, _enrich_positions 112→14, get_system_status 182→99, api_admin_market_activity 366→165. Zero behavior changes.",
-    "Phase C Patch 4 (2026-04-20): D1 trader run() refactor — 897 lines → 15-line orchestrator via 11 named helpers. Data flow now explicit: db/alpaca/now/session_log created in _init_clients and passed to every downstream helper; positions refreshed at the top of each block; trade_events summed from three helpers. Zero behavior changes verified by dry-run against pi5 paper account.",
-    "Round 10 Patch A (2026-04-20): 4 mechanical fixes — sector_screener datetime.utcfromtimestamp → fromtimestamp(tz=utc) (Phase C D4 only caught utcnow); scheduler is_market_hours now delegates to retail_shared (D6 missed this site, boundary differed by 1s at 16:00); dead BIL rebalance guard removed (second `if buy >= threshold` was unreachable); news_agent fetch_with_retry now resets _fetch_circuit_open on successful fetch (was permanently sticky once tripped)",
+    "Audit Rounds 6-8 (2026-04-20): 11 small/medium Phase-B follow-ups \u2014 tradable_assets in main migrations, three F821 catches on re-sweep, validator missing-timestamp = STALE",
+    "Phase B re-run audit (2026-04-20): 139 \u2192 70 findings across 5 subsystems, 50% reduction after Rounds 6-8 landed",
+    "Audit Round 9 (2026-04-20): transaction safety \u2014 reduce_position + update_portfolio now atomic (single with self.conn() block; same pattern close_position got in R7.2); price_poller INSERT loop + DELETE-stale wrapped in explicit BEGIN/COMMIT; cooling_off(ticker, cool_until) composite index; tradable_cache pagination-truncation warn at 1000-multiple boundary; get_api_call_history() rewritten to WHERE timestamp >= ? (was date(timestamp) pattern, R6 fixed sibling); _send_sms / _send_email now check r.ok + log on non-2xx; ATR / volume_avg log reason when empty; gate4/5/5.5/6 guard signal.get('ticker') or '' + portfolio.get('cash', 0)",
+    "Phase C Patch 1 (2026-04-20): D4 datetime.utcnow() \u2192 datetime.now(timezone.utc).replace(tzinfo=None) across 26 sites in 10 files (Python 3.12 deprecation); D6 retail_shared.py created \u2014 kill_switch_active, get_active_customers, is_market_hours consolidated from 3-5 near-duplicate copies",
+    "Phase C Patch 2 (2026-04-20): D5 portal lint \u2014 14 unused HTML id= attributes removed (zero CSS / JS / addEventListener references); snb-* and tab-* kept (dynamic showTab() string concat)",
+    "Phase C Patch 3 (2026-04-20): D2 portal complexity refactor \u2014 12 private helpers extracted from 4 hotspot endpoints (_verify_stripe_signature + _handle_checkout_completed; _enrich_single_db_position + _extract_orphan_positions; _status_locked_mode + _compute_user_warnings; _parse_db_dt_to_et + _session_bin_index + _resolve_trading_session_date + _build_market_bins + _aggregate_customer_market_activity + _aggregate_user_sessions_historical). Line counts: stripe_webhook 196\u219284, _enrich_positions 112\u219214, get_system_status 182\u219299, api_admin_market_activity 366\u2192165. Zero behavior changes.",
+    "Phase C Patch 4 (2026-04-20): D1 trader run() refactor \u2014 897 lines \u2192 15-line orchestrator via 11 named helpers. Data flow now explicit: db/alpaca/now/session_log created in _init_clients and passed to every downstream helper; positions refreshed at the top of each block; trade_events summed from three helpers. Zero behavior changes verified by dry-run against pi5 paper account.",
+    "Round 10 Patch A (2026-04-20): 4 mechanical fixes \u2014 sector_screener datetime.utcfromtimestamp \u2192 fromtimestamp(tz=utc) (Phase C D4 only caught utcnow); scheduler is_market_hours now delegates to retail_shared (D6 missed this site, boundary differed by 1s at 16:00); dead BIL rebalance guard removed (second `if buy >= threshold` was unreachable); news_agent fetch_with_retry now resets _fetch_circuit_open on successful fetch (was permanently sticky once tripped)",
     "Round 10 Patch B (2026-04-20): open_position() and sweep_monthly_tax() now atomic (portfolio read + writes in one transaction); composite index idx_approvals_status_queued on pending_approvals(status, queued_at)",
     "Round 10 Patch C (2026-04-20): _run_monthly_tax_sweep uses portfolio.get('realized_gains', 0); _status_locked_mode returns user_warnings=[] (missing field would crash JS); two sqlite3 connection leaks in portal wrapped in context managers",
     "Round 10 Patch D (2026-04-20): retail_shared docstring explains why fetch_with_retry stays local; politician-weight bare-excepts downgraded to log.debug; SessionLock + _business_day_offset gain defensive docs (2 false-positive audit findings)",
     "BIL_OVER_ALLOCATED health-check exempts sub-$500 accounts (was firing on $61 test account with $39 in BIL); kept catching real-account defensive-posture ($39,997/$59,995)",
-    "Auditor gains 'disabled' flag for nodes — pi2w_monitor skipped until hardware returns (was 58 NODE_UNREACHABLE hits/day)",
-    "pi4b synthos-company repo cleaned — untracked data/backup_status.json + fidget_latest.json (runtime drift); gitignore broadened for logs/* / *.bak / *.pre_*_bak / data/archives/; 3 stale *.pre_dbleak_bak files deleted (Apr 14); git status now empty",
-    "Enrichment pipeline reconstruction (2026-04-21): discovered market_daemon had been running ONE 54-second overnight cycle each morning then exiting, never entering the intraday loop. Root cause: systemd timer fired at 09:10 but main() dispatcher treated hour==9 AND minute<PREMARKET_START_MIN(15) as 'before pre-market → overnight cycle → exit'. Fix: timer 09:10→09:15 alignment. Symptom: window_calculator never ran intraday, no trade_windows populated, trader had nothing in-band to evaluate. User-caught via 'why aren't 53 VALIDATED signals trading?' question.",
-    "Overnight cycle completion (2026-04-21): run_overnight_cycle() was missing bias_detection, candidate_generator, window_calculator, tradable_refresh, run_screener, earnings_refresh — only ran the validation chain. Monday pre-market had to catch up all once-daily work from scratch. Now mirrors run_premarket_prep.",
+    "Auditor gains 'disabled' flag for nodes \u2014 pi2w_monitor skipped until hardware returns (was 58 NODE_UNREACHABLE hits/day)",
+    "pi4b synthos-company repo cleaned \u2014 untracked data/backup_status.json + fidget_latest.json (runtime drift); gitignore broadened for logs/* / *.bak / *.pre_*_bak / data/archives/; 3 stale *.pre_dbleak_bak files deleted (Apr 14); git status now empty",
+    "Enrichment pipeline reconstruction (2026-04-21): discovered market_daemon had been running ONE 54-second overnight cycle each morning then exiting, never entering the intraday loop. Root cause: systemd timer fired at 09:10 but main() dispatcher treated hour==9 AND minute<PREMARKET_START_MIN(15) as 'before pre-market \u2192 overnight cycle \u2192 exit'. Fix: timer 09:10\u219209:15 alignment. Symptom: window_calculator never ran intraday, no trade_windows populated, trader had nothing in-band to evaluate. User-caught via 'why aren't 53 VALIDATED signals trading?' question.",
+    "Overnight cycle completion (2026-04-21): run_overnight_cycle() was missing bias_detection, candidate_generator, window_calculator, tradable_refresh, run_screener, earnings_refresh \u2014 only ran the validation chain. Monday pre-market had to catch up all once-daily work from scratch. Now mirrors run_premarket_prep.",
     "Standalone 24/7 price_poller (2026-04-21): moved from inline market_daemon loop call to its own synthos-price-poller.{service,timer} unit pair. Fires OnUnitActiveSec=60s regardless of market_daemon state, so live_prices stays fresh pre-pre-market / post-close / weekends.",
     "run_premarket_selfcheck (2026-04-21): advisory readiness gate between pre-market prep and market_loop. Validates 7 categories (tradable_cache fresh, earnings_cache populated, VALIDATED signals exist, trade_windows computed today, live_prices non-empty, portal listening, disk space OK). On failure: log + PREMARKET_SELFCHECK_FAIL event + deduped notification + continue (advisory per user spec).",
     "Mid-day market_daemon restart fires enrichment immediately (2026-04-21): last_enrichment / last_recon initialized to now-interval so the first loop iteration triggers the 30-min cycle instead of waiting 30 min. Matters for restart scenarios (crash recovery, manual restart, operator intervention).",
     "_MARKET_STATE_UPDATED key-name fix (2026-04-21): validator_stack_agent.py:459 read _MARKET_STATE_UPDATED to check staleness but market_state_agent never wrote that key (only _MARKET_STATE + _MARKET_STATE_SCORE). Every validator run flagged DEGRADED_STALE_MARKET_STATE. One-line addition to persist_state() fixes it.",
-    "Candidate filter: combined_score → momentum_score (2026-04-21): sector-driven candidate emission was actually filtering on news+sentiment (combined_score = news*0.4 + sentiment*0.4 + weight*0.2, zero weight on sector momentum). Caught when 11 top sector leaders including TGT 0.94, CAT 0.90, DLR 0.90, AVGO 0.90 weren't being emitted despite strong momentum. Added momentum_score column to sector_screening (persisted by sector_screener's already-computed calc_momentum_score), switched candidate_generator to filter + rank by momentum_score with threshold 0.45. combined_score kept as informational for portal display. Emission at 0.45: ~30 candidates after MAX_PER_SECTOR=3 + MAX_TOTAL=30 caps, all 11 sectors represented, quality distribution (10 at 0.90+, 13 at 0.75-0.89, 6 at 0.60-0.74).",
-    "Sector screener cadence doubled 1×/day → 2×/day (2026-04-21): added run_screener() to run_close_session() so it fires at 16:00 ET in addition to pre-market 09:15. Gives tomorrow's pre-market fresher data (<17h old vs ~24h old) and feeds any overnight_cycle runs tonight. Momentum scoring inputs are slow-moving (3m return, 20d/50d SMAs, volume ratios) so 2×/day is the correct cadence — intraday refreshing produces ~identical scores. Graceful degradation: if close-run fails, pre-market's own 09:15 run brings everything back to current; fault_detection's 30h stale threshold tolerates a missed day.",
-    "News attribution patch (2026-04-21): measured 40.9% of last-14-day Benzinga signals had no ticker/name match in headline (~24/week reaching ACTED_ON with misattributed tickers — e.g. AAL on a Virgin Atlantic article, BAC on Anthropic news). Patch adds three changes at Alpaca ingestion: (A enforced) drop articles whose tagged symbols are all crypto-USD pairs or non-tradable; (C shadow) re-rank multi-symbol articles by headline match — ticker-in-headline +3, name-token +2, alias +2, pick best, flag when != symbols[0]; populates signals.company from tradable_assets.name (previously empty). New signal_attribution_flags table + 90d cleanup. Shadow digest to notifications at close_session. Review scheduled 2026-04-28 to decide on enforcing C + no-match rejection.",
-    "Late-day stop tightening disabled (2026-04-21, env var): LATE_DAY_TIGHTEN_PCT=0.0 set in pi5's live .env + .env.known_good after 8-day stop-loss analysis showed the mechanism (pull trail_stop 25% closer every 30s after 15:00 ET) was converting breakevens/slight-losers into noise-level stop exits rather than protecting real gains. 6 stops fired in the 15 ET window over 8 days averaging ±0.5% P&L with 50/50 gain/loss split vs 90% real-loss stops earlier in the day. Trailing stop still active (ATR_TRAIL_MULTIPLIER=2.0), SPY-correlation widening still active — only the automatic tightening after 15:00 ET is off. Re-evaluate in 2-4 weeks once exit_performance has ≥20 exits for optimizer verdict.",
-    "Portfolio drift fix (2026-04-25, commit 747b089): operator reported portal portfolio_value didn't match Alpaca's equity. Investigation: BIL position had +81.24 share drift in Alpaca vs DB ($7,443 underreport in portal display). Root cause was sync_bil_reserve() submitting BIL trades to Alpaca's notional endpoint without writing to the positions table; Gate 0's reconciliation handled orphans + ghosts but was silent on qty-drift for matched tickers. 3-part fix: (1) new _reconcile_position_qty(db, alpaca_pos) helper detects DB qty != Alpaca qty (1e-6 tolerance) and updates DB to match Alpaca truth, emitting POSITION_RECONCILED event; (2) Gate 0's match-loop and sync_bil_reserve's post-trade path both call the reconciler so drift heals on each cycle; (3) retail_portal._enrich_single_db_position now uses Alpaca's qty + market_value when present, preventing customer-display drift even between trader runs. One-shot reconcile run 2026-04-25 12:31 EDT healed BIL: 108.32→189.56 sh. Drift dropped from $7,443 to $0.24 (rounding artifact). Cash drift unchanged at $0.15 (already in sync). Other 9 tickers verified in sync.",
-    "Security batch + audit follow-through (2026-04-25, 12 commits b3c9824…387ab6f): One full day landing the deferred items from the 2026-04-24 audit plus net-new findings. Customer-side privilege escalations all closed: CRITICAL-1 /api/admin-override POST (any customer could flip TRADING_MODE=LIVE) + CRITICAL-2 /api/keys POST (any customer could rewrite global .env including LIVE_TRADING_ENABLED, MONITOR_TOKEN, ANTHROPIC_API_KEY, RESEND_API_KEY, all Stripe keys) — both required is_admin() in auth gate. HIGH-3 /api/audit promoted to @admin_required. HIGH-1 /reset-password/<token> handler ADDED (forgot-password was a broken end-to-end feature: emails generated reset URLs but no handler existed, customers got 404). Server-side credential-rotation revocation via _session_revoked_at map + session['logged_in_at'] stamp (other tabs/devices force-logged-out on next request after password reset/change; current session preserved by re-stamp). Two-step verify-new-email flow via pending_email_changes table + /verify-email-change/<token> route + email alert to old address on change initiation. Password min-length standardized 8→12 to match setup-account (OWASP 2023). Persistent login rate limit via login_attempts table — per-account 10 fails/15min defeats IP rotation, per-IP 20 fails/5min defeats credential stuffing, every attempt records email_hash+IP+UA+success, auto-prune to 7 days at write time. Pre-launch deferred: HIGH-4 LAN-bind architectural fix (runbook ready at docs/runbook_lan_bind_fix.md, requires DNS reconfig + tunnel reconfig before bind change), MEDIUM-6 sudo narrowing (operational risk seen in past attempts — non-interactive SSH can't prompt for passwords). Bonus fixes: chmod 700 data/customers/, chmod 600 data/system_architecture.json. Bug fix: auth.py:282-283 had malformed migration entries for state/zip_code columns (col_def contained the literal ALTER TABLE SQL instead of the type) — silently produced invalid SQL caught by OperationalError handler; columns existed in live DB through a different path; broken lines were dead code for ~12 days. Attribution patch enforcement (TICKER_REMAP + TICKER_REJECT flipped True after 4.5-day shadow review). News-agent shadow data: 41% no_match noise, 33% wrong-ticker remaps, 13% of remaps reaching VALIDATED+ status. File-upload Phase 4.5 audit: 21/21 customer-side probes correctly 403, 5 admin-side findings documented (MEDIUM-A argv-injection on git add, MEDIUM-B newline-in-commit-msg, MEDIUM-C functional bug — sync_to_github operates on wrong dir so portal silently fails to push uploads to GitHub, LOW-D no MAX_CONTENT_LENGTH, LOW-E retail_portal.py upload triggers os.execv restart). Smoke verifications: token-flow 14/14 + rate-limit 10/10 + migration 5/5 + file-upload 21/21 = 50/50 across all probes. Test customers created and deleted with snapshot verification on each run. Full audit reports: docs/security_audit_2026-04-24.md, docs/security_review.md, docs/phase_2.5_token_flow_audit.md, docs/phase_4.5_file_upload_audit.md, docs/attribution_review_2026-04-25.md, docs/runbook_lan_bind_fix.md.",
-    "Pipeline audit 2026-04-24 (commits a325d99 docs + 0c38c98 feat): full producer→consumer trace of every signal/state/flag in the trading stack surfaced 5 gaps between sentiment-chain outputs and trader decisions. Option A (engineering-only, no paid feeds) closed 3 of 5: (1) Gate 1 now consumes _VALIDATOR_VERDICT — validator's 5-gate pre-trade health check (fault/bias/market-state/macro) actually gates new entries now, NO_GO halts, CAUTION logs+proceeds, missing verdict=GO (graceful degrade); (2) Gate 5 composite adds _MARKET_STATE_SCORE as additive nudge scaled by MARKET_STATE_SCORE_WEIGHT (default 0.10, env-configurable) — sentiment→market_state→trader chain now routes the 40/25/35 composite into live scoring instead of dead-ending at the validator; (3) Alpaca.get_order() + _resolve_fill_price() helper poll /v2/orders/{id} for real filled_avg_price and record that as entry_price instead of stale candidate['price'] daily-close, closing the slippage-gap fiction every downstream P&L calc was measured against. Deferred: Gap 4 (document urgent_flags vs news_flags separation rationale) and Gap 5 (decide sentiment agent's 27-gate scope: strip unused vs expand consumers) — both post-travel. Full audit doc: synthos_build/docs/pipeline_audit_2026-04-24.md.",
-    "arch.json drift audit (2026-04-23): operational ground-truth pull across pi4b+pi5 surfaced arch.json v3.9 claims that no longer matched reality. Fixed: (1) company_scoop.py listed as 'daemon live' but actually not running — process absent, no systemd unit, cron comment says 'replaces cron-based company_scoop.py' (replacement daemon never started, scoop.log empty since 2026-04-18). Status changed to 'broken' with decision needed: revive-as-service or formally retire. (2) company_vault.py listed as 'cron 1h' but actual cron is daily 01:45 --backup-now. (3) 9 pi5 agents (trade_logic, news, sentiment, window_calculator, macro_regime, market_state, bias/fault/validator detection) previously labeled 'daemon' or 'daemon subprocess' — all are in fact subprocesses spawned per enrichment cycle by market_daemon (or trade_daemon for trade_logic), never standalone long-running processes. Relabeled to 'subprocess (called by market_daemon enrichment cycle, ~30min)'. Additional stale operational items flagged for separate cleanup commit: synthos-login.service unit file (disabled), /home/pi/synthos_build/ (empty skeleton), /home/pi/synthos-process/ (dead cancelled-node repo), synthos-portal.service.bak.20260418_081448 (stale backup in /etc/systemd/system/ on pi5).",
-    "Critical: 4-day trader halt loop diagnosed + fixed (2026-04-28): operator reported 'screener signals in the 80s but nothing has traded all day.' Diagnosis revealed a self-reinforcing loop that had been silently halting every Gate 1 evaluation since 2026-04-24. Chain: (a) Phase C trader refactor on 2026-04-20 split run() into helpers; gate1 halts now sys.exit'd from _init_clients BEFORE the orchestrator could call _send_session_summary (which writes heartbeat + AGENT_COMPLETE). (b) Pipeline-audit Gap 1 on 2026-04-24 wired Gate 1 to consume _VALIDATOR_VERDICT and halt new entries on NO_GO — the upgrade that made the missing heartbeat actually matter. (c) 2026-04-27 architectural change moved fault_detection's _master_db() from owner-customer-DB to the new shared user/signals.db, but the trader has ALWAYS written its heartbeat and AGENT_COMPLETE per-customer (one row per customer DB). After 2026-04-27, gate1_agent_liveness + gate7_schedule_compliance queried the shared DB and always found zero trader activity → STALE_HEARTBEAT_TRADE_LOGIC + NO_RUN_TRADE_LOGIC fired CRITICAL → validator emitted NO_GO + [NO_NEW_POSITIONS, SYSTEM_CRITICAL] → trader's Gate 1 halted → trader sys.exit'd → no fresh AGENT_COMPLETE → next fault scan saw stale state → loop reinforced. Trader couldn't recover on its own. Symptom: 113 VALIDATED signals + 33 EVALUATED today but only 1 ACTED_ON. Worse, gate10 stop-loss exits also blocked since Gate 1 halts the entire cycle. Two-part fix: (1) trade_logic_agent now writes log_heartbeat('OK_HALTED') + log_event('AGENT_COMPLETE', details='halted_at_gate1') BEFORE sys.exit on gate1 halt — fault detector sees the trader ran even when halted. (2) fault_detection_agent now aggregates heartbeats and AGENT_COMPLETE for per-customer agents (currently just trade_logic_agent) across ALL active customer DBs via new _scan_per_customer_for_event helper. PER_CUSTOMER_AGENTS frozenset gates the special-case path; system-wide agents (news/sentiment/screener/price_poller/interrogation) keep the existing shared-DB query. Verification post-fix: fault scan flipped from 2 critical to 0 critical (trader '78 run(s) today'); validator verdict NO_GO → CAUTION; within 90 seconds 3 new positions opened (CLF×2 + OPEN) and 8 pent-up stop-loss exits fired (4 AVGO + 4 AMD, the largest +$652.88 on master). The fact that stop-losses fired immediately confirms Gate 1 halt was blocking ALL trade activity, not just new entries. Gate 4 LIQUIDITY skips for low-volume tickers (GLXY, TXN, BE) confirm the post-Gate-1 path is now exercised normally.",
-    "Trader Alpaca-quotes 404 fix + auditor auto-resolve (2026-04-28): operator reported '40+ auditor issues being reported' and (incorrectly) 'auditor cannot connect to retail pi'. Auditor was actually connected fine (Remote scan pi5: 30 logs every 5 min throughout the day). Real diagnosis: (1) trader.get_latest_quote() routed through self._request which prepends self.base_url=paper-api.alpaca.markets; that's the trading-API host, not market-data. /v2/stocks/<T>/quotes/latest doesn't exist there → 404. Got caught when 6 customers logged ERRORs across NVDA/MU/SCHD/PCG on 09:30 ET. Fix: get_latest_quote now mirrors get_bars — direct requests.get against ALPACA_DATA_URL with circuit-breaker integration + log_api_call telemetry + (3,10) timeouts + iex feed param. Pre-fix the call ALWAYS returned (None,None,None) so quote-driven gates (Gate 5 spread, Gate 6 chase cap, mid-cycle stop tightening) were silently degrading through stale candidate['price'] / live_prices fallbacks. Trades didn't crash, just ran on cache instead of the actual tape. (2) Auditor never auto-cleared resolved conditions — transient NEGATIVE_CASH blip from a settlement-lag race self-corrected in minutes but the flag sat indefinitely. Fixed via new _auto_resolve_stale_issues sweep on company_auditor with two policies: customer_db::* conditions cleared (last_seen older than current scan_start = condition no longer fires → resolve, catches NEGATIVE_CASH directly) + generic 24h log-scan stale rule (anything not firing for 24h → resolve, fresh occurrences re-INSERT via the existing dedup WHERE-resolved=0 clause). Auditor restart immediately auto-resolved 27 stale issues (Apr 22-25-27); manual one-shot bulk-ack cleared the remaining 14 (today's trader 404 cluster + correlated noise). 41 → 0 open issues. Cosmetic log-line follow-up: 'Scan found N new issue(s)' was being inflated by the auto_resolved count; fixed to compute total_new before attaching auto_resolved.",
-    "Phase H agent-status persona reversion + detail drawer (2026-04-27): operator feedback that the 'Synthos is sweeping the wire · the Fed is watching closely again' persona strip was useless obfuscation — random flavor told the user nothing about which agent was running. Plus the 6-metric grid (signals queued / decisions / market / SPY / validator / last decision) was poorly placed at the bottom of the panel. Two changes: (1) Lexicon stripped of all flavor lines arrays + sticky-rotation logic; replaced with a factual map of raw_filename → display_name + one-line blurb. Coverage expanded from 4 agents → 10 (added macro_regime, market_state, bias/fault/validator detection, candidate_gen). interpret_agent_status() / interpret_event_label() replaced by get_agent_display_info(). /api/agent-pulse now returns running.display_name + running.blurb + running.agent_raw, events bumped 6 → 20 with display_name + details on each, NEW agent_summary[] per-agent today rollup (cycle count + last_ts + last_details, merged from both customer and shared DBs since enrichment-chain agents log to shared). (2) Frontend persona strip replaced with factual '{Trade Logic} · {blurb} · {12s}' format; 6-metric inline grid removed from the panel; entire Agent Status card now clickable to open a new slide-out agent drawer with four sections — currently running (name + blurb + age + session) / today's counters (the 6 metrics relocated and given proper 3×2 tile layout) / per-agent status (cycles / ago / last detail per agent that ran today) / recent activity (last 20 events as a monospace timeline). Drawer re-renders in place when /api/agent-pulse polls every 10s so it shows live data while open.",
-    "Phase G pill-usage telemetry (2026-04-27): closes the loop on the Phase E+F pill experiment. New pill_interactions table on shared user/signals.db (id PK, customer_id, pill_type, pill_label, ticker, drawer_kind, action, page, created_at) with three indexes (type+ts, customer+ts, ts) and a 30-day retention sweep. Two endpoints: POST /api/pill-interaction (login_required, customer-side, best-effort logger with bounded field lengths and swallowed errors) and GET /api/admin/pill-usage (Bearer MONITOR_TOKEN, returns four rollups for the cmd portal panel — by_pill_type, by_drawer, by_customer top-50, totals). Frontend wiring: data-pill='<token>' attribute added to every drawer pill (stage-* / corr-* / fresh-*) and every screener hero pill (spill-news / spill-sent / spill-mom / spill-rank). Single document-level click listener using event delegation catches any [data-pill] click — fires fire-and-forget POST with type / label / ticker (walked from data-ticker-logo ancestor) / drawer_kind (matched from drawer DOM root) / page. Capture phase + keepalive:true so handlers that stopPropagation or fast page navs don't lose the event. Cmd portal /pill-usage page on synthos-company (linked in both nav menus) renders 1d/7d/30d/90d window switcher + 4 totals tiles + ranked-by-clicks pill table with proportional bar viz + drawer rollup + customer top-50. Drives the 'ship a generous pill set, prune by usage' plan: ~2 weeks of data → drop the bottom-3 pill categories. Bonus: caught + fixed missing /customer-activity link in cmd portal's main hmenu (the subpage menu had it but the dashboard menu didn't). Bonus 2: had to add /api/admin/pill-usage to the retail portal's monitor-callable allowlist in before_request — same pattern as /api/admin/activity-report.",
-    "Phase E + F portal UX pass (2026-04-27): pills layer landed across drawers and screener. Phase E: drawer-pills bar at top of all four detail drawers (Position / History / Approval / Planning). Three pill categories: pipeline stage (HOLDING / QUEUED / WATCHING / VALIDATED / TRACKED / CLOSED — picks one per drawer kind), multi-signal corroboration (ALL BULLISH / ALL BEARISH / DIVERGENT — fires only when news+sentiment+momentum scores all present, thresholds 0.55 bull / 0.45 bear), freshness (FRESH / AGING / STALE — read off existing staleness field). Single stateless renderDrawerPills(data, kind) helper, four <div id='X-pills'> slots in drawer template, four 1-line opener calls. Pure visibility-only — no API/schema changes. Phase F: hero pills on screener list — gold .spill class (7px, gold gradient, smaller than intel hero-badge) inline with column headers tagging the row that wins each metric (TOP NEWS / TOP SENT / TOP MOM / RANK #1). Computed once per render via _idxOfMax across visible candidates. Intentionally narrower than the full pill catalogue from the design discussion: skip per-component direction pills (↑ Strong / ↓ Weak) and data-quality flags (MISSING SENT) for now — ship the three stage/corroboration/freshness pill categories, observe via Phase G telemetry, expand based on what users actually look at. 'I own elsewhere' customer-marker pill is paired with bot Gate 4.5 logic (deferred until back from travel; see backlog).",
-    "Phase A + B portal UX pass (2026-04-27): two adjacent commits addressing operator complaints about ticker identity legibility. Phase A: company name now appears on all six list-view ticker surfaces (dashboard open-positions row, approval queue card, planning queue/intel rows, history row, intel charm cards) — pure additive template change, guarded by `(x.company && x.company !== x.ticker)` so older signals or MACRO sentinels with NULL company render exactly as before. Drawer headers (Position/History/Approval/Planning) already showed company name as the title since Phase 7L (2026-04-25); Phase A closes the gap on the list views. Phase B: per-ticker company logos overlay every initials block. New ticker_logos table on shared user/signals.db (ticker PK, domain, logo_png BLOB, status). One-shot tools/populate_logos.py reads data/ticker_domains.csv (~150 hand-curated mappings covering screener universe + politically-traded names), seeds PENDING rows, then drains via Google's s2/favicons endpoint (originally Clearbit but logo.clearbit.com was sunset post-HubSpot acquisition — DNS no longer resolves). Bytes stored in DB so we have no live external dependency. /api/ticker-logo/<ticker> serves cached PNG with Cache-Control: public, max-age=604800, immutable. Frontend: data-ticker-logo attribute on every icon render site + mountTickerLogos() lazy-loads <img class='ticker-logo-overlay'> via onload/onerror; 404 silently removes the img and initials remain visible (zero regression on negative path). 146 of 151 seed tickers populated successfully (180KB total cache). Quality is uneven across favicons (16-128px depending on what each site exposes) but recognizable at our 32-42px display size. Provider can be swapped later via populate_logos --refresh-failed without portal-side code changes.",
-    "Pi4b auditor deep-dive — 16 unresolved findings driven to 0 (2026-05-02): operator session went through every remaining auditor.db finding after yesterday's noise-floor work cleared the bottom 88%. 13 of the 16 were stale (pre-fix occurrences from yesterday's d88a744d 401 storm + duplicate-column-name + Resend latin-1 + ACCESS_REQUEST_SUBMITTED requeue, all resolved by yesterday's commits and now bulk-marked resolved on auditor.db). 3 were genuinely new bugs found today: (1) `exit_performance.exit_timestamp` NOT NULL constraint failed — schema declares the column NOT NULL but the INSERT statement at retail_database.record_exit_performance was missing it; the close transaction rolled back every time a position closed (2 hits on 2026-05-01 09:51 ET, customers 30eff008 + f313a3d9). Fix: included exit_timestamp in the INSERT (same value as created_at, both refer to the same close event). (2) Cascading SERVICE_DOWN findings when SSH itself failed — company_auditor.check_remote_health iterates per-process and per-service via _ssh_run; when SSH timed out, every check returned ok=False and emitted its own SERVICE_DOWN/PROCESS_DOWN finding even though the actual issue was just that the node was unreachable. Fix: pre-flight `ssh host true` ping at the top of check_remote_health; if the ping fails (with the new 2-retry policy), early-return empty issues[] — scan_remote_logs's NODE_UNREACHABLE finding is the single source of truth for connectivity. (3) Boot-window race producing spurious NODE_UNREACHABLE — auditor's 5-min cron ran at 04:00:30 ET while pi5 was still booting (boot completed 04:01:33), single SSH attempt timed out. Fix: _ssh_run gains 2-retry policy with 3s delay between attempts (worst-case +6s on failure paths only). All 16 stale findings resolved on auditor.db; auditor service restarted clean. Commits 3b3c447 (synthos), 32924af (synthos-company).",
-    "Pi5 audit-page deeper triage — 422 root cause + boot timing + ghost noise (2026-05-02 morning): day-2 of the audit-page deep-dive surfaced three real bugs once yesterday's noise floor was cleared. (1) The 422 storm on POST /v2/orders had 23 hits across 6 customers, all on the immediate-after-buy trailing_stop submission. Pattern analysis showed every failing buy was a fractional position (0.014 NVDA, 20.2402 UBER, 116.6294 BMNR, 0.7011 SPY, 6.5663 PTON, …) — Alpaca paper API rejects trailing_stop orders on fractional positions, a documented limitation. Fix: new _submit_trail_stop_if_whole() helper checks abs(qty - round(qty)) < 1e-9 before submitting; if fractional, log INFO + skip. gate10's internal trail-stop ratchet already manages exits for fractional positions, so the Alpaca-side stop was a belt-and-suspenders net that didn't work for fractional anyway. Helper replaces 3 identical sites (rotation entry, managed approval exec, signal-evaluation entry). Bonus: AlpacaClient._request now captures the response body (first 500 chars) on 4xx errors and includes it in the failure log line — generic 'Client Error: Unprocessable Entity' was opaque, going forward any 422/400/403/409 shows Alpaca's actual rejection reason inline. Also short-circuits the retry loop on 422 (same as 401). (2) Boot Watchdog/Portal 'inactive' false-positive returned despite Round 4 fix — today's 04:01 boot.log showed both services hitting the 15s settle window timeout. The fix code was correct; the timeout was too short for pi5's cold-boot path (network + DB init + WAL recovery genuinely takes 30-60s). Bumped to 120s — boot is one-shot, the wait is bounded. (3) GHOST positions at 04:00 boot health-check — owner DB lists positions in tickers no longer in Alpaca; trader's gate0 reconciliation auto-cleans these on the next market-open cycle but the 04:00 ET boot health-check runs ~5h before market opens. Demoted ERROR→WARNING and intentionally skip the issues[] append so the boot health pass isn't marked failed on a self-resolving condition. Commit d5e7246.",
-    "Request Access public flow + portal-dispatch auth + cleanup batch (2026-05-01 PM): user-requested public-facing path for prospective users without an invite code, plus 5 smaller items the operator queued. Schema migration on auth.db.pending_signups (lazy ALTER): request_type ('subscribe' default | 'request_access'), why_interested TEXT, how_heard TEXT. Backwards-compatible — existing rows get request_type='subscribe' implicitly. New auth.create_access_request() helper writes request_access rows with empty password_hash + no ToS (ToS is in-app post-login per operator decision); approve_signup() now branches on request_type — request_access creates customer record with email_verified=0 + empty password so login is blocked until /setup-account completes; returns needs_setup=True so caller routes to setup-account email instead of standard approval email. New public route /request-access (GET form + POST submit) with per-IP rate limit (3/hour, in-memory _request_access_rate_log) + honeypot 'website' field that bots fill but humans don't + how_heard whitelist + duplicate-email leak suppression. Cross-node admin notification: pi5 POSTs to pi4b /api/enqueue with ACCESS_REQUEST_SUBMITTED event; scoop dispatches admin email via Resend on next 30s poll, surfacing it as '[Synthos] New access request - {name}'. New template request_access.html matched to signup.html visual; landing.html 'Don't have an account?' link repointed from /signup (was a wall for uninvited users) to /request-access; login.html gained a 'Request access' link below 'Forgot password?'. synthos_monitor.py approvals UI updated: Type pill (purple Request / teal Signup) + inline why_interested + how_heard detail card for request_access rows; verified-email pill suppressed for request_access since verification happens AFTER admin approve. Companion fixes shipped same deploy: A — /api/notifications/{send,broadcast} on retail_portal now accept admin session OR X-Service-Token (matching MONITOR_TOKEN); set PORTAL_TOKEN=$MONITOR_TOKEN in pi4b company.env, restart scoop; scoop startup log now shows 'auth=service-token' confirming the path is live. F — write_news_flag() now SELECT-then-INSERT when source_signal_id is non-null so the same article hitting both signal-write and display-write paths produces one news_flags row instead of two. G — TICKER_ALIASES grown 32 → 43 entries based on observed pi5 signal_attribution_flags reject patterns: TSLA gets musk + cybertruck + model variants; AMZN gets aws + bezos + jassy; AAPL gets tim cook + iphone; NVDA gets jensen huang + cuda; new tickers IHRT/SNDK/FIVN/VEEV (from wrong_ticker remap log) + COF/AXP/UBER/SLB/APD/NEM/NEE (from no_match log). H — get_watching_signals() removed from retail_database.py; was the legacy news_feed reader that surfaced 1100+ MACRO sentinels and unresolved tickers; Phase 7k repointed all production callers to get_signals_by_status() in 2026-04-25; validate_02.py was the only remaining caller and was updated. I — check_email.html rebuilt with inline SVG envelope + SYNTHOS visual language (replaces inconsistent emoji + generic dark-card theme). Three hot-fixes caught in smoke testing: (1) /request-access was 302-redirecting to /login because the route wasn't in retail_portal's public_routes allowlist; (2) cross-node POST returned 401 because synthos_monitor's _token_authorized() reads X-Token header not Authorization: Bearer; (3) em-dash in subject broke Resend's Idempotency-Key header (latin-1 only) — fixed at the call site (ASCII dash) and defensively in scoop's send_via_resend (idem_key.encode('ascii', errors='replace').decode('ascii')). Triple-check: GET /request-access returns 200 with form HTML; POST creates pending_signups row with correct request_type; cross-node enqueue lands in scoop_queue; Resend delivers admin email; auth.approve_signup creates customer with email_verified=0 + empty password_hash + needs_setup=True; smoke artifacts cleaned. Commits 760f979 + fe23e1b + 984fdfc + 9cb8e42 (synthos), 0d60da7 + 6a940c3 (synthos-company).",
-    "Scoop notification pipeline rebuilt (2026-05-01): user noticed scoop service was 'active' but silent for 3 days post-revival. Investigation found three structural bugs preventing every admin alert from reaching email since at least 2026-04-28. Bug 1 (schema mismatch): strongbox._alert_scoop wrote {delivered:false} to scoop_trigger.json but scoop's drain looked for {status:pending|retry}; sentinel/vault used the right schema, strongbox didn't, and strongbox events never drained. Bug 2 (one-shot drain): drain_legacy_trigger_file set _legacy_drained=True after first call so anything written after scoop boot was silently lost; combined with all three writers using only the trigger file (never scoop_queue directly), this is why scoop_queue had ZERO new events in 3 days. Bug 3 (dead-end portal auth): dispatch_portal_notification posted X-Service-Token to /api/notifications/send but that endpoint requires admin SESSION auth and ignores the header — setting PORTAL_TOKEN would have been a no-op. Fix: new agents/_shared_scoop.py module with single enqueue_scoop_event() helper that writes directly to scoop_queue with UPPERCASE 'PENDING' status; event_type → priority map (P0 emergency / P1 important / P2 transactional / P3 background); defensive fallback to trigger file on DB failure. strongbox._alert_scoop and sentinel._trigger_scoop both refactored to call the shared helper. vault._trigger_scoop deleted (zero call sites — dead code). scoop.drain_legacy_trigger_file rewritten as re-pollable (every cycle, not one-shot), accepts both delivered:false AND status:pending|retry schemas, archives processed entries to data/scoop_trigger_processed/<UTC>.json instead of leaving stuck in active file. dispatch_portal_notification + dispatch_broadcast short-circuit when PORTAL_TOKEN missing (still missing — adding service-token auth to retail_portal /api/notifications/{send,broadcast} is queued separately for after-hours work in synthos repo). scoop now logs portal-disabled state ONCE at startup instead of warning per event. db_get_next_event uses (status or '').upper() for case-insensitive RETRY check, matching db_helpers' lowercase writes. Triple-check: import sanity (5 modules clean), live writer smokes (strongbox + sentinel each produced a scoop_queue row with correct priority/audience/source/subject), end-to-end dispatch (3 real emails delivered to operator), legacy drain (delivered:false entry migrated and archived), existing tooling unchanged (--status, --test, /api/queue admin endpoints). Commit 5e8cb78 synthos-company.",
-    "EDGAR ingestion enabled on pi5 (2026-05-01): the news-agent EDGAR feature flags (added 2026-04-27, all default OFF) flipped on after pre-flight verification. SEC_EDGAR_UA_NAME='Synthos / Patrick McGuire' + SEC_EDGAR_UA_EMAIL=Personal_prometheus@icloud.com set in pi5 user/.env (SEC requires identifying user-agent on every EDGAR fetch); EDGAR_ALL_ENABLED=true umbrella flips on Form 4 + 8-K + 13D + Form 144 + 13G + cross-source dedup. EDGAR_8K_BODY_FETCH=false (still off — doubles HTTP volume per filing, will enable after 1-2 day soak on synthetic headlines). Live verification: 10-filing Form 4 probe returned 1 actionable signal (CFO buy on GEHC, $201K) — UA accepted, helper module returns correct shape. activists.json (was empty) seeded with 12 entries: 8 tier-1 (Pershing Square / Icahn / ValueAct / Starboard / Third Point / Trian / JANA / Elliott) + 4 tier-2 (Engine / Engaged / Cevian / Land & Buildings); 11 marked PENDING_OPERATOR_VERIFICATION pending edgar.sec.gov spot-check (failure mode is silent miss, not false positive — wrong CIK just means we miss those filings). Commit 8d633f7 synthos.",
-    "System architecture pipeline page deferred-data-sources panel (2026-05-01): user noticed the paid-tier deferred items (StockTwits / X / Reddit social, NYSE TIQ A/D feed, options chain VVIX, ICE BofA credit spreads, FMP /etf-holdings) weren't visible on the /system-architecture pipeline page. Added new 'deferred' gate flag (purple ⏸, distinct from amber ⚠ scaffolding): deferred = gate exists as weak proxy, full implementation blocked on paid feed; scaffold = logic stubbed in existing gate. News G12/G14/G15 marked deferred (multi-source confirmation feed / social firehose / analyst consensus aren't licensed); G14 added to display since it was missing. Sentiment G5/G7/G8/G10/G16 marked deferred with specific feed gaps (G8 + G10 + G16 added to display). New 'Deferred Data Sources' panel below pipeline grid: 4-column summary covering News (3 SKIP gates), Sentiment (6 paid-feed gaps), Sector Screener (FMP), and formally-deferred future phases (license validator SYS-B01/B02, Patch D-full schema split, Phase 7e bucket, Congressional weighting). Each deferred gate's tooltip + detail panel show what proxy is in place / what's blocked / unblock condition. Bias-gate scaffolding flags REMOVED — re-read code, all 6 gates are fully implemented; the TOO_FEW_TRADES/CLOSED early-returns are sample-size guards (≥10 closed for behavioral, ≥3 for recency), not stubs. Macro Regime gate names corrected (page had wrong order: G1 was actually VIX not Yield curve, G2 was Yield curve not Dollar, G3 was Breadth not Commodities, G4 was Sector rotation not Credit spreads — all fully implemented, no scaffolding). Sentiment G15 + Screener G1 scaffold flags removed too. Sector Screener restyled into ingest column matching other agent cards with 'PRE-COMPUTED · 06:45 ET' pill above. Element-display click handler bug fixed — pipeline tab now matches topology tab parity. Commits 82bd0ed + 8424c98 + 5f4a119 + f26f3a0 synthos-company.",
-    "Stale branch + server cleanup (2026-05-01): synthos local branches 41 → 3 (kept main + claude/bold-hypatia worktree + patch/2026-04-24 intentionally retained for C8 news-agent gate-pipeline-refactor baseline harness). synthos-company 10 → 1. Origin remotes also swept on both repos. TRADER_RESTRUCTURE_PLAN.md spec from abandoned patch/logic-review-2026-04-20 branch preserved at documentation/archive/specs/ before deletion. Server cleanup: removed pi4b/etc/systemd/system/synthos-login.service (disabled/inactive, superseded by synthos-login-server which is the command portal); removed empty /home/pi/synthos_build/ skeleton from 2026-04-08; removed /home/pi/synthos-process/ (cancelled process_node project, code lives in its own GitHub repo so local clone deletion loses nothing); removed pi5 /etc/systemd/system/synthos-portal.service.bak.20260418_081448; archived synthos-company/login_server/ → documentation/archive/login_server/ (auth-only Flask app superseded by synthos_monitor command portal).",
-    "11-Agent audit pass complete (2026-04-28 → 2026-05-01): every agent in the pipeline (Trader, News, Sentiment, Screener, Fault, Bias, Macro Regime, Market State, Validator) reviewed against current code. Round 9 cross-customer fault-leakage hot fix (commit 7d1dd04) added a `_finding_applies_to_customer()` helper to the validator — codes whose last token is 8 hex chars are treated as customer-scoped and only count against the matching short_id; everything else is treated as system-wide. Customer 9889c8c8 was being NO_GO'd because customer d88a744d's Alpaca returned 401; that leakage path is now closed. VIX migrated from Yahoo to FRED VIXCLS (commit 32a7d19) with a graceful ATR-fallback when FRED is stale — same `_vix_from_macro_regime` helper now used by trader, news, and sentiment. Per-customer code suffix convention `_<short_id>` adopted on validator (VALIDATOR_NO_GO_<sid>), bias (with INFORMATIONAL_BIAS_CODE_PREFIXES tuple + _is_informational_bias_code() prefix-match helper for legacy non-suffixed codes), and screener admin alerts. admin_alert dedup unified through `retail_shared.emit_admin_alert()` (12-hour dedup window). Macro regime stale-window guard added before market_state synthesis. Sentiment Stage-4 G24 now requires 2-cycle persistence before commit. Trader G13 stress-overrides activated; G5.5 news-veto wired. System-architecture pipeline page rewritten at the same time: PIPELINE constant in templates/system_map.html now matches code reality (Fault 4→8 gates, Market State 5→4, Trader 14→13), each gate annotated with foreign data sources (FRED, Alpaca, Yahoo Finance, News APIs) and scaffolding flag where logic is deferred (Bias G2/G3/G5/G6, Macro G4, Sentiment G15, Screener G1). New click handlers on .pipe-gate / .pipe-agent elements open the same detail panel topology already had — fixing the long-standing bug where pipeline-page elements weren't clickable. Sector Screener pulled out of the disconnected pre-computed banner and now renders through the same `agentCard` path as other ingest agents, sitting in the ingest column with a small 'PRE-COMPUTED · 06:45 ET' pill above it. New `showPipeAgentDetail` / `showPipeGateDetail` JS helpers prefer topology's richer agent entry when available, otherwise synthesize from PIPELINE.",
-    "Trader-visibility audit + screener composite repair (2026-04-27): user asked to verify the trader actually consumes everything that's been wired into the screener/sentiment/news chain. Audit surfaced two defects + one visibility gap. (1) sector_screener.combined_score formula was 40% news + 40% sentiment + 0% momentum + 20% ETF weight — momentum was computed per ticker but never reached the ranking the candidate generator filtered on, so a high-momentum/low-news ticker like CAT could be invisible in 'Top by composite' even though it surfaced in 'Top by momentum'. Re-weighted to 30/30/30/10 so all three inputs contribute equally. (2) sector_screening table persisted momentum_score but not the raw 3-month return that drove it; portal screener page had no way to show 'past few months performance' for each candidate. Added ret_3m column via lazy ALTER, calc_momentum_score now returns (score, ret_3m, reasoning), run_single threads ret_3m into the candidate dict, write_screening_run persists it. Portal MOMENTUM column now shows ret_3m headline + composite bar; planning drawer shows the same. (3) Decision-log enrichment in trader Gate 5 (visibility-only, zero behavior change): gate5_signal_score now captures the screener row once and emits a single consolidated decision_log entry containing every screener-derived input considered — sector, combined_score, news_signal+score, sentiment_signal+score, momentum_score, ret_3m, congressional_flag, screener_adj, screener_stamp_adj. After-the-fact trade audit can now verify exactly what the trader saw at decision time. (4) Documented intentional sentiment dual-write in retail_market_sentiment_agent.py around stamp_signals_sentiment() — same detect_cascade() output lands in sector_screening.sentiment_score (per-ticker screener display) AND signals.sentiment_score (per-signal trader Gate-5 consumption). Cardinalities differ; values always in sync. Files touched: retail_sector_screener.py, retail_database.py, retail_trade_logic_agent.py, retail_market_sentiment_agent.py, src/templates/portal.html. Earlier same day (2026-04-27): MRVL trail-stop -491% display bug (drop *100 in render path), settlement-lag race in Gate 0 orphan adoption (5-min recently-closed window), rotation-at-loss reversed to winners-only per user directive, BIL excluded from Gate 10 (sync_bil_reserve owns its lifecycle), CBOE put_call_ratio caching + None-safe formatting (had been pinning every screener-sentiment fulfilment to score=0.5 since CBOE Cloudflare block), customer-activity report engine on cmd portal at /customer-activity, P&L report polish (total-from-zero, sign rendering, long-term, cross-account)."
+    "Candidate filter: combined_score \u2192 momentum_score (2026-04-21): sector-driven candidate emission was actually filtering on news+sentiment (combined_score = news*0.4 + sentiment*0.4 + weight*0.2, zero weight on sector momentum). Caught when 11 top sector leaders including TGT 0.94, CAT 0.90, DLR 0.90, AVGO 0.90 weren't being emitted despite strong momentum. Added momentum_score column to sector_screening (persisted by sector_screener's already-computed calc_momentum_score), switched candidate_generator to filter + rank by momentum_score with threshold 0.45. combined_score kept as informational for portal display. Emission at 0.45: ~30 candidates after MAX_PER_SECTOR=3 + MAX_TOTAL=30 caps, all 11 sectors represented, quality distribution (10 at 0.90+, 13 at 0.75-0.89, 6 at 0.60-0.74).",
+    "Sector screener cadence doubled 1\u00d7/day \u2192 2\u00d7/day (2026-04-21): added run_screener() to run_close_session() so it fires at 16:00 ET in addition to pre-market 09:15. Gives tomorrow's pre-market fresher data (<17h old vs ~24h old) and feeds any overnight_cycle runs tonight. Momentum scoring inputs are slow-moving (3m return, 20d/50d SMAs, volume ratios) so 2\u00d7/day is the correct cadence \u2014 intraday refreshing produces ~identical scores. Graceful degradation: if close-run fails, pre-market's own 09:15 run brings everything back to current; fault_detection's 30h stale threshold tolerates a missed day.",
+    "News attribution patch (2026-04-21): measured 40.9% of last-14-day Benzinga signals had no ticker/name match in headline (~24/week reaching ACTED_ON with misattributed tickers \u2014 e.g. AAL on a Virgin Atlantic article, BAC on Anthropic news). Patch adds three changes at Alpaca ingestion: (A enforced) drop articles whose tagged symbols are all crypto-USD pairs or non-tradable; (C shadow) re-rank multi-symbol articles by headline match \u2014 ticker-in-headline +3, name-token +2, alias +2, pick best, flag when != symbols[0]; populates signals.company from tradable_assets.name (previously empty). New signal_attribution_flags table + 90d cleanup. Shadow digest to notifications at close_session. Review scheduled 2026-04-28 to decide on enforcing C + no-match rejection.",
+    "Late-day stop tightening disabled (2026-04-21, env var): LATE_DAY_TIGHTEN_PCT=0.0 set in pi5's live .env + .env.known_good after 8-day stop-loss analysis showed the mechanism (pull trail_stop 25% closer every 30s after 15:00 ET) was converting breakevens/slight-losers into noise-level stop exits rather than protecting real gains. 6 stops fired in the 15 ET window over 8 days averaging \u00b10.5% P&L with 50/50 gain/loss split vs 90% real-loss stops earlier in the day. Trailing stop still active (ATR_TRAIL_MULTIPLIER=2.0), SPY-correlation widening still active \u2014 only the automatic tightening after 15:00 ET is off. Re-evaluate in 2-4 weeks once exit_performance has \u226520 exits for optimizer verdict.",
+    "Portfolio drift fix (2026-04-25, commit 747b089): operator reported portal portfolio_value didn't match Alpaca's equity. Investigation: BIL position had +81.24 share drift in Alpaca vs DB ($7,443 underreport in portal display). Root cause was sync_bil_reserve() submitting BIL trades to Alpaca's notional endpoint without writing to the positions table; Gate 0's reconciliation handled orphans + ghosts but was silent on qty-drift for matched tickers. 3-part fix: (1) new _reconcile_position_qty(db, alpaca_pos) helper detects DB qty != Alpaca qty (1e-6 tolerance) and updates DB to match Alpaca truth, emitting POSITION_RECONCILED event; (2) Gate 0's match-loop and sync_bil_reserve's post-trade path both call the reconciler so drift heals on each cycle; (3) retail_portal._enrich_single_db_position now uses Alpaca's qty + market_value when present, preventing customer-display drift even between trader runs. One-shot reconcile run 2026-04-25 12:31 EDT healed BIL: 108.32\u2192189.56 sh. Drift dropped from $7,443 to $0.24 (rounding artifact). Cash drift unchanged at $0.15 (already in sync). Other 9 tickers verified in sync.",
+    "Security batch + audit follow-through (2026-04-25, 12 commits b3c9824\u2026387ab6f): One full day landing the deferred items from the 2026-04-24 audit plus net-new findings. Customer-side privilege escalations all closed: CRITICAL-1 /api/admin-override POST (any customer could flip TRADING_MODE=LIVE) + CRITICAL-2 /api/keys POST (any customer could rewrite global .env including LIVE_TRADING_ENABLED, MONITOR_TOKEN, ANTHROPIC_API_KEY, RESEND_API_KEY, all Stripe keys) \u2014 both required is_admin() in auth gate. HIGH-3 /api/audit promoted to @admin_required. HIGH-1 /reset-password/<token> handler ADDED (forgot-password was a broken end-to-end feature: emails generated reset URLs but no handler existed, customers got 404). Server-side credential-rotation revocation via _session_revoked_at map + session['logged_in_at'] stamp (other tabs/devices force-logged-out on next request after password reset/change; current session preserved by re-stamp). Two-step verify-new-email flow via pending_email_changes table + /verify-email-change/<token> route + email alert to old address on change initiation. Password min-length standardized 8\u219212 to match setup-account (OWASP 2023). Persistent login rate limit via login_attempts table \u2014 per-account 10 fails/15min defeats IP rotation, per-IP 20 fails/5min defeats credential stuffing, every attempt records email_hash+IP+UA+success, auto-prune to 7 days at write time. Pre-launch deferred: HIGH-4 LAN-bind architectural fix (runbook ready at docs/runbook_lan_bind_fix.md, requires DNS reconfig + tunnel reconfig before bind change), MEDIUM-6 sudo narrowing (operational risk seen in past attempts \u2014 non-interactive SSH can't prompt for passwords). Bonus fixes: chmod 700 data/customers/, chmod 600 data/system_architecture.json. Bug fix: auth.py:282-283 had malformed migration entries for state/zip_code columns (col_def contained the literal ALTER TABLE SQL instead of the type) \u2014 silently produced invalid SQL caught by OperationalError handler; columns existed in live DB through a different path; broken lines were dead code for ~12 days. Attribution patch enforcement (TICKER_REMAP + TICKER_REJECT flipped True after 4.5-day shadow review). News-agent shadow data: 41% no_match noise, 33% wrong-ticker remaps, 13% of remaps reaching VALIDATED+ status. File-upload Phase 4.5 audit: 21/21 customer-side probes correctly 403, 5 admin-side findings documented (MEDIUM-A argv-injection on git add, MEDIUM-B newline-in-commit-msg, MEDIUM-C functional bug \u2014 sync_to_github operates on wrong dir so portal silently fails to push uploads to GitHub, LOW-D no MAX_CONTENT_LENGTH, LOW-E retail_portal.py upload triggers os.execv restart). Smoke verifications: token-flow 14/14 + rate-limit 10/10 + migration 5/5 + file-upload 21/21 = 50/50 across all probes. Test customers created and deleted with snapshot verification on each run. Full audit reports: docs/security_audit_2026-04-24.md, docs/security_review.md, docs/phase_2.5_token_flow_audit.md, docs/phase_4.5_file_upload_audit.md, docs/attribution_review_2026-04-25.md, docs/runbook_lan_bind_fix.md.",
+    "Pipeline audit 2026-04-24 (commits a325d99 docs + 0c38c98 feat): full producer\u2192consumer trace of every signal/state/flag in the trading stack surfaced 5 gaps between sentiment-chain outputs and trader decisions. Option A (engineering-only, no paid feeds) closed 3 of 5: (1) Gate 1 now consumes _VALIDATOR_VERDICT \u2014 validator's 5-gate pre-trade health check (fault/bias/market-state/macro) actually gates new entries now, NO_GO halts, CAUTION logs+proceeds, missing verdict=GO (graceful degrade); (2) Gate 5 composite adds _MARKET_STATE_SCORE as additive nudge scaled by MARKET_STATE_SCORE_WEIGHT (default 0.10, env-configurable) \u2014 sentiment\u2192market_state\u2192trader chain now routes the 40/25/35 composite into live scoring instead of dead-ending at the validator; (3) Alpaca.get_order() + _resolve_fill_price() helper poll /v2/orders/{id} for real filled_avg_price and record that as entry_price instead of stale candidate['price'] daily-close, closing the slippage-gap fiction every downstream P&L calc was measured against. Deferred: Gap 4 (document urgent_flags vs news_flags separation rationale) and Gap 5 (decide sentiment agent's 27-gate scope: strip unused vs expand consumers) \u2014 both post-travel. Full audit doc: synthos_build/docs/pipeline_audit_2026-04-24.md.",
+    "arch.json drift audit (2026-04-23): operational ground-truth pull across pi4b+pi5 surfaced arch.json v3.9 claims that no longer matched reality. Fixed: (1) company_scoop.py listed as 'daemon live' but actually not running \u2014 process absent, no systemd unit, cron comment says 'replaces cron-based company_scoop.py' (replacement daemon never started, scoop.log empty since 2026-04-18). Status changed to 'broken' with decision needed: revive-as-service or formally retire. (2) company_vault.py listed as 'cron 1h' but actual cron is daily 01:45 --backup-now. (3) 9 pi5 agents (trade_logic, news, sentiment, window_calculator, macro_regime, market_state, bias/fault/validator detection) previously labeled 'daemon' or 'daemon subprocess' \u2014 all are in fact subprocesses spawned per enrichment cycle by market_daemon (or trade_daemon for trade_logic), never standalone long-running processes. Relabeled to 'subprocess (called by market_daemon enrichment cycle, ~30min)'. Additional stale operational items flagged for separate cleanup commit: synthos-login.service unit file (disabled), /home/pi/synthos_build/ (empty skeleton), /home/pi/synthos-process/ (dead cancelled-node repo), synthos-portal.service.bak.20260418_081448 (stale backup in /etc/systemd/system/ on pi5).",
+    "Critical: 4-day trader halt loop diagnosed + fixed (2026-04-28): operator reported 'screener signals in the 80s but nothing has traded all day.' Diagnosis revealed a self-reinforcing loop that had been silently halting every Gate 1 evaluation since 2026-04-24. Chain: (a) Phase C trader refactor on 2026-04-20 split run() into helpers; gate1 halts now sys.exit'd from _init_clients BEFORE the orchestrator could call _send_session_summary (which writes heartbeat + AGENT_COMPLETE). (b) Pipeline-audit Gap 1 on 2026-04-24 wired Gate 1 to consume _VALIDATOR_VERDICT and halt new entries on NO_GO \u2014 the upgrade that made the missing heartbeat actually matter. (c) 2026-04-27 architectural change moved fault_detection's _master_db() from owner-customer-DB to the new shared user/signals.db, but the trader has ALWAYS written its heartbeat and AGENT_COMPLETE per-customer (one row per customer DB). After 2026-04-27, gate1_agent_liveness + gate7_schedule_compliance queried the shared DB and always found zero trader activity \u2192 STALE_HEARTBEAT_TRADE_LOGIC + NO_RUN_TRADE_LOGIC fired CRITICAL \u2192 validator emitted NO_GO + [NO_NEW_POSITIONS, SYSTEM_CRITICAL] \u2192 trader's Gate 1 halted \u2192 trader sys.exit'd \u2192 no fresh AGENT_COMPLETE \u2192 next fault scan saw stale state \u2192 loop reinforced. Trader couldn't recover on its own. Symptom: 113 VALIDATED signals + 33 EVALUATED today but only 1 ACTED_ON. Worse, gate10 stop-loss exits also blocked since Gate 1 halts the entire cycle. Two-part fix: (1) trade_logic_agent now writes log_heartbeat('OK_HALTED') + log_event('AGENT_COMPLETE', details='halted_at_gate1') BEFORE sys.exit on gate1 halt \u2014 fault detector sees the trader ran even when halted. (2) fault_detection_agent now aggregates heartbeats and AGENT_COMPLETE for per-customer agents (currently just trade_logic_agent) across ALL active customer DBs via new _scan_per_customer_for_event helper. PER_CUSTOMER_AGENTS frozenset gates the special-case path; system-wide agents (news/sentiment/screener/price_poller/interrogation) keep the existing shared-DB query. Verification post-fix: fault scan flipped from 2 critical to 0 critical (trader '78 run(s) today'); validator verdict NO_GO \u2192 CAUTION; within 90 seconds 3 new positions opened (CLF\u00d72 + OPEN) and 8 pent-up stop-loss exits fired (4 AVGO + 4 AMD, the largest +$652.88 on master). The fact that stop-losses fired immediately confirms Gate 1 halt was blocking ALL trade activity, not just new entries. Gate 4 LIQUIDITY skips for low-volume tickers (GLXY, TXN, BE) confirm the post-Gate-1 path is now exercised normally.",
+    "Trader Alpaca-quotes 404 fix + auditor auto-resolve (2026-04-28): operator reported '40+ auditor issues being reported' and (incorrectly) 'auditor cannot connect to retail pi'. Auditor was actually connected fine (Remote scan pi5: 30 logs every 5 min throughout the day). Real diagnosis: (1) trader.get_latest_quote() routed through self._request which prepends self.base_url=paper-api.alpaca.markets; that's the trading-API host, not market-data. /v2/stocks/<T>/quotes/latest doesn't exist there \u2192 404. Got caught when 6 customers logged ERRORs across NVDA/MU/SCHD/PCG on 09:30 ET. Fix: get_latest_quote now mirrors get_bars \u2014 direct requests.get against ALPACA_DATA_URL with circuit-breaker integration + log_api_call telemetry + (3,10) timeouts + iex feed param. Pre-fix the call ALWAYS returned (None,None,None) so quote-driven gates (Gate 5 spread, Gate 6 chase cap, mid-cycle stop tightening) were silently degrading through stale candidate['price'] / live_prices fallbacks. Trades didn't crash, just ran on cache instead of the actual tape. (2) Auditor never auto-cleared resolved conditions \u2014 transient NEGATIVE_CASH blip from a settlement-lag race self-corrected in minutes but the flag sat indefinitely. Fixed via new _auto_resolve_stale_issues sweep on company_auditor with two policies: customer_db::* conditions cleared (last_seen older than current scan_start = condition no longer fires \u2192 resolve, catches NEGATIVE_CASH directly) + generic 24h log-scan stale rule (anything not firing for 24h \u2192 resolve, fresh occurrences re-INSERT via the existing dedup WHERE-resolved=0 clause). Auditor restart immediately auto-resolved 27 stale issues (Apr 22-25-27); manual one-shot bulk-ack cleared the remaining 14 (today's trader 404 cluster + correlated noise). 41 \u2192 0 open issues. Cosmetic log-line follow-up: 'Scan found N new issue(s)' was being inflated by the auto_resolved count; fixed to compute total_new before attaching auto_resolved.",
+    "Phase H agent-status persona reversion + detail drawer (2026-04-27): operator feedback that the 'Synthos is sweeping the wire \u00b7 the Fed is watching closely again' persona strip was useless obfuscation \u2014 random flavor told the user nothing about which agent was running. Plus the 6-metric grid (signals queued / decisions / market / SPY / validator / last decision) was poorly placed at the bottom of the panel. Two changes: (1) Lexicon stripped of all flavor lines arrays + sticky-rotation logic; replaced with a factual map of raw_filename \u2192 display_name + one-line blurb. Coverage expanded from 4 agents \u2192 10 (added macro_regime, market_state, bias/fault/validator detection, candidate_gen). interpret_agent_status() / interpret_event_label() replaced by get_agent_display_info(). /api/agent-pulse now returns running.display_name + running.blurb + running.agent_raw, events bumped 6 \u2192 20 with display_name + details on each, NEW agent_summary[] per-agent today rollup (cycle count + last_ts + last_details, merged from both customer and shared DBs since enrichment-chain agents log to shared). (2) Frontend persona strip replaced with factual '{Trade Logic} \u00b7 {blurb} \u00b7 {12s}' format; 6-metric inline grid removed from the panel; entire Agent Status card now clickable to open a new slide-out agent drawer with four sections \u2014 currently running (name + blurb + age + session) / today's counters (the 6 metrics relocated and given proper 3\u00d72 tile layout) / per-agent status (cycles / ago / last detail per agent that ran today) / recent activity (last 20 events as a monospace timeline). Drawer re-renders in place when /api/agent-pulse polls every 10s so it shows live data while open.",
+    "Phase G pill-usage telemetry (2026-04-27): closes the loop on the Phase E+F pill experiment. New pill_interactions table on shared user/signals.db (id PK, customer_id, pill_type, pill_label, ticker, drawer_kind, action, page, created_at) with three indexes (type+ts, customer+ts, ts) and a 30-day retention sweep. Two endpoints: POST /api/pill-interaction (login_required, customer-side, best-effort logger with bounded field lengths and swallowed errors) and GET /api/admin/pill-usage (Bearer MONITOR_TOKEN, returns four rollups for the cmd portal panel \u2014 by_pill_type, by_drawer, by_customer top-50, totals). Frontend wiring: data-pill='<token>' attribute added to every drawer pill (stage-* / corr-* / fresh-*) and every screener hero pill (spill-news / spill-sent / spill-mom / spill-rank). Single document-level click listener using event delegation catches any [data-pill] click \u2014 fires fire-and-forget POST with type / label / ticker (walked from data-ticker-logo ancestor) / drawer_kind (matched from drawer DOM root) / page. Capture phase + keepalive:true so handlers that stopPropagation or fast page navs don't lose the event. Cmd portal /pill-usage page on synthos-company (linked in both nav menus) renders 1d/7d/30d/90d window switcher + 4 totals tiles + ranked-by-clicks pill table with proportional bar viz + drawer rollup + customer top-50. Drives the 'ship a generous pill set, prune by usage' plan: ~2 weeks of data \u2192 drop the bottom-3 pill categories. Bonus: caught + fixed missing /customer-activity link in cmd portal's main hmenu (the subpage menu had it but the dashboard menu didn't). Bonus 2: had to add /api/admin/pill-usage to the retail portal's monitor-callable allowlist in before_request \u2014 same pattern as /api/admin/activity-report.",
+    "Phase E + F portal UX pass (2026-04-27): pills layer landed across drawers and screener. Phase E: drawer-pills bar at top of all four detail drawers (Position / History / Approval / Planning). Three pill categories: pipeline stage (HOLDING / QUEUED / WATCHING / VALIDATED / TRACKED / CLOSED \u2014 picks one per drawer kind), multi-signal corroboration (ALL BULLISH / ALL BEARISH / DIVERGENT \u2014 fires only when news+sentiment+momentum scores all present, thresholds 0.55 bull / 0.45 bear), freshness (FRESH / AGING / STALE \u2014 read off existing staleness field). Single stateless renderDrawerPills(data, kind) helper, four <div id='X-pills'> slots in drawer template, four 1-line opener calls. Pure visibility-only \u2014 no API/schema changes. Phase F: hero pills on screener list \u2014 gold .spill class (7px, gold gradient, smaller than intel hero-badge) inline with column headers tagging the row that wins each metric (TOP NEWS / TOP SENT / TOP MOM / RANK #1). Computed once per render via _idxOfMax across visible candidates. Intentionally narrower than the full pill catalogue from the design discussion: skip per-component direction pills (\u2191 Strong / \u2193 Weak) and data-quality flags (MISSING SENT) for now \u2014 ship the three stage/corroboration/freshness pill categories, observe via Phase G telemetry, expand based on what users actually look at. 'I own elsewhere' customer-marker pill is paired with bot Gate 4.5 logic (deferred until back from travel; see backlog).",
+    "Phase A + B portal UX pass (2026-04-27): two adjacent commits addressing operator complaints about ticker identity legibility. Phase A: company name now appears on all six list-view ticker surfaces (dashboard open-positions row, approval queue card, planning queue/intel rows, history row, intel charm cards) \u2014 pure additive template change, guarded by `(x.company && x.company !== x.ticker)` so older signals or MACRO sentinels with NULL company render exactly as before. Drawer headers (Position/History/Approval/Planning) already showed company name as the title since Phase 7L (2026-04-25); Phase A closes the gap on the list views. Phase B: per-ticker company logos overlay every initials block. New ticker_logos table on shared user/signals.db (ticker PK, domain, logo_png BLOB, status). One-shot tools/populate_logos.py reads data/ticker_domains.csv (~150 hand-curated mappings covering screener universe + politically-traded names), seeds PENDING rows, then drains via Google's s2/favicons endpoint (originally Clearbit but logo.clearbit.com was sunset post-HubSpot acquisition \u2014 DNS no longer resolves). Bytes stored in DB so we have no live external dependency. /api/ticker-logo/<ticker> serves cached PNG with Cache-Control: public, max-age=604800, immutable. Frontend: data-ticker-logo attribute on every icon render site + mountTickerLogos() lazy-loads <img class='ticker-logo-overlay'> via onload/onerror; 404 silently removes the img and initials remain visible (zero regression on negative path). 146 of 151 seed tickers populated successfully (180KB total cache). Quality is uneven across favicons (16-128px depending on what each site exposes) but recognizable at our 32-42px display size. Provider can be swapped later via populate_logos --refresh-failed without portal-side code changes.",
+    "Pi4b auditor deep-dive \u2014 16 unresolved findings driven to 0 (2026-05-02): operator session went through every remaining auditor.db finding after yesterday's noise-floor work cleared the bottom 88%. 13 of the 16 were stale (pre-fix occurrences from yesterday's d88a744d 401 storm + duplicate-column-name + Resend latin-1 + ACCESS_REQUEST_SUBMITTED requeue, all resolved by yesterday's commits and now bulk-marked resolved on auditor.db). 3 were genuinely new bugs found today: (1) `exit_performance.exit_timestamp` NOT NULL constraint failed \u2014 schema declares the column NOT NULL but the INSERT statement at retail_database.record_exit_performance was missing it; the close transaction rolled back every time a position closed (2 hits on 2026-05-01 09:51 ET, customers 30eff008 + f313a3d9). Fix: included exit_timestamp in the INSERT (same value as created_at, both refer to the same close event). (2) Cascading SERVICE_DOWN findings when SSH itself failed \u2014 company_auditor.check_remote_health iterates per-process and per-service via _ssh_run; when SSH timed out, every check returned ok=False and emitted its own SERVICE_DOWN/PROCESS_DOWN finding even though the actual issue was just that the node was unreachable. Fix: pre-flight `ssh host true` ping at the top of check_remote_health; if the ping fails (with the new 2-retry policy), early-return empty issues[] \u2014 scan_remote_logs's NODE_UNREACHABLE finding is the single source of truth for connectivity. (3) Boot-window race producing spurious NODE_UNREACHABLE \u2014 auditor's 5-min cron ran at 04:00:30 ET while pi5 was still booting (boot completed 04:01:33), single SSH attempt timed out. Fix: _ssh_run gains 2-retry policy with 3s delay between attempts (worst-case +6s on failure paths only). All 16 stale findings resolved on auditor.db; auditor service restarted clean. Commits 3b3c447 (synthos), 32924af (synthos-company).",
+    "Pi5 audit-page deeper triage \u2014 422 root cause + boot timing + ghost noise (2026-05-02 morning): day-2 of the audit-page deep-dive surfaced three real bugs once yesterday's noise floor was cleared. (1) The 422 storm on POST /v2/orders had 23 hits across 6 customers, all on the immediate-after-buy trailing_stop submission. Pattern analysis showed every failing buy was a fractional position (0.014 NVDA, 20.2402 UBER, 116.6294 BMNR, 0.7011 SPY, 6.5663 PTON, \u2026) \u2014 Alpaca paper API rejects trailing_stop orders on fractional positions, a documented limitation. Fix: new _submit_trail_stop_if_whole() helper checks abs(qty - round(qty)) < 1e-9 before submitting; if fractional, log INFO + skip. gate10's internal trail-stop ratchet already manages exits for fractional positions, so the Alpaca-side stop was a belt-and-suspenders net that didn't work for fractional anyway. Helper replaces 3 identical sites (rotation entry, managed approval exec, signal-evaluation entry). Bonus: AlpacaClient._request now captures the response body (first 500 chars) on 4xx errors and includes it in the failure log line \u2014 generic 'Client Error: Unprocessable Entity' was opaque, going forward any 422/400/403/409 shows Alpaca's actual rejection reason inline. Also short-circuits the retry loop on 422 (same as 401). (2) Boot Watchdog/Portal 'inactive' false-positive returned despite Round 4 fix \u2014 today's 04:01 boot.log showed both services hitting the 15s settle window timeout. The fix code was correct; the timeout was too short for pi5's cold-boot path (network + DB init + WAL recovery genuinely takes 30-60s). Bumped to 120s \u2014 boot is one-shot, the wait is bounded. (3) GHOST positions at 04:00 boot health-check \u2014 owner DB lists positions in tickers no longer in Alpaca; trader's gate0 reconciliation auto-cleans these on the next market-open cycle but the 04:00 ET boot health-check runs ~5h before market opens. Demoted ERROR\u2192WARNING and intentionally skip the issues[] append so the boot health pass isn't marked failed on a self-resolving condition. Commit d5e7246.",
+    "Request Access public flow + portal-dispatch auth + cleanup batch (2026-05-01 PM): user-requested public-facing path for prospective users without an invite code, plus 5 smaller items the operator queued. Schema migration on auth.db.pending_signups (lazy ALTER): request_type ('subscribe' default | 'request_access'), why_interested TEXT, how_heard TEXT. Backwards-compatible \u2014 existing rows get request_type='subscribe' implicitly. New auth.create_access_request() helper writes request_access rows with empty password_hash + no ToS (ToS is in-app post-login per operator decision); approve_signup() now branches on request_type \u2014 request_access creates customer record with email_verified=0 + empty password so login is blocked until /setup-account completes; returns needs_setup=True so caller routes to setup-account email instead of standard approval email. New public route /request-access (GET form + POST submit) with per-IP rate limit (3/hour, in-memory _request_access_rate_log) + honeypot 'website' field that bots fill but humans don't + how_heard whitelist + duplicate-email leak suppression. Cross-node admin notification: pi5 POSTs to pi4b /api/enqueue with ACCESS_REQUEST_SUBMITTED event; scoop dispatches admin email via Resend on next 30s poll, surfacing it as '[Synthos] New access request - {name}'. New template request_access.html matched to signup.html visual; landing.html 'Don't have an account?' link repointed from /signup (was a wall for uninvited users) to /request-access; login.html gained a 'Request access' link below 'Forgot password?'. synthos_monitor.py approvals UI updated: Type pill (purple Request / teal Signup) + inline why_interested + how_heard detail card for request_access rows; verified-email pill suppressed for request_access since verification happens AFTER admin approve. Companion fixes shipped same deploy: A \u2014 /api/notifications/{send,broadcast} on retail_portal now accept admin session OR X-Service-Token (matching MONITOR_TOKEN); set PORTAL_TOKEN=$MONITOR_TOKEN in pi4b company.env, restart scoop; scoop startup log now shows 'auth=service-token' confirming the path is live. F \u2014 write_news_flag() now SELECT-then-INSERT when source_signal_id is non-null so the same article hitting both signal-write and display-write paths produces one news_flags row instead of two. G \u2014 TICKER_ALIASES grown 32 \u2192 43 entries based on observed pi5 signal_attribution_flags reject patterns: TSLA gets musk + cybertruck + model variants; AMZN gets aws + bezos + jassy; AAPL gets tim cook + iphone; NVDA gets jensen huang + cuda; new tickers IHRT/SNDK/FIVN/VEEV (from wrong_ticker remap log) + COF/AXP/UBER/SLB/APD/NEM/NEE (from no_match log). H \u2014 get_watching_signals() removed from retail_database.py; was the legacy news_feed reader that surfaced 1100+ MACRO sentinels and unresolved tickers; Phase 7k repointed all production callers to get_signals_by_status() in 2026-04-25; validate_02.py was the only remaining caller and was updated. I \u2014 check_email.html rebuilt with inline SVG envelope + SYNTHOS visual language (replaces inconsistent emoji + generic dark-card theme). Three hot-fixes caught in smoke testing: (1) /request-access was 302-redirecting to /login because the route wasn't in retail_portal's public_routes allowlist; (2) cross-node POST returned 401 because synthos_monitor's _token_authorized() reads X-Token header not Authorization: Bearer; (3) em-dash in subject broke Resend's Idempotency-Key header (latin-1 only) \u2014 fixed at the call site (ASCII dash) and defensively in scoop's send_via_resend (idem_key.encode('ascii', errors='replace').decode('ascii')). Triple-check: GET /request-access returns 200 with form HTML; POST creates pending_signups row with correct request_type; cross-node enqueue lands in scoop_queue; Resend delivers admin email; auth.approve_signup creates customer with email_verified=0 + empty password_hash + needs_setup=True; smoke artifacts cleaned. Commits 760f979 + fe23e1b + 984fdfc + 9cb8e42 (synthos), 0d60da7 + 6a940c3 (synthos-company).",
+    "Scoop notification pipeline rebuilt (2026-05-01): user noticed scoop service was 'active' but silent for 3 days post-revival. Investigation found three structural bugs preventing every admin alert from reaching email since at least 2026-04-28. Bug 1 (schema mismatch): strongbox._alert_scoop wrote {delivered:false} to scoop_trigger.json but scoop's drain looked for {status:pending|retry}; sentinel/vault used the right schema, strongbox didn't, and strongbox events never drained. Bug 2 (one-shot drain): drain_legacy_trigger_file set _legacy_drained=True after first call so anything written after scoop boot was silently lost; combined with all three writers using only the trigger file (never scoop_queue directly), this is why scoop_queue had ZERO new events in 3 days. Bug 3 (dead-end portal auth): dispatch_portal_notification posted X-Service-Token to /api/notifications/send but that endpoint requires admin SESSION auth and ignores the header \u2014 setting PORTAL_TOKEN would have been a no-op. Fix: new agents/_shared_scoop.py module with single enqueue_scoop_event() helper that writes directly to scoop_queue with UPPERCASE 'PENDING' status; event_type \u2192 priority map (P0 emergency / P1 important / P2 transactional / P3 background); defensive fallback to trigger file on DB failure. strongbox._alert_scoop and sentinel._trigger_scoop both refactored to call the shared helper. vault._trigger_scoop deleted (zero call sites \u2014 dead code). scoop.drain_legacy_trigger_file rewritten as re-pollable (every cycle, not one-shot), accepts both delivered:false AND status:pending|retry schemas, archives processed entries to data/scoop_trigger_processed/<UTC>.json instead of leaving stuck in active file. dispatch_portal_notification + dispatch_broadcast short-circuit when PORTAL_TOKEN missing (still missing \u2014 adding service-token auth to retail_portal /api/notifications/{send,broadcast} is queued separately for after-hours work in synthos repo). scoop now logs portal-disabled state ONCE at startup instead of warning per event. db_get_next_event uses (status or '').upper() for case-insensitive RETRY check, matching db_helpers' lowercase writes. Triple-check: import sanity (5 modules clean), live writer smokes (strongbox + sentinel each produced a scoop_queue row with correct priority/audience/source/subject), end-to-end dispatch (3 real emails delivered to operator), legacy drain (delivered:false entry migrated and archived), existing tooling unchanged (--status, --test, /api/queue admin endpoints). Commit 5e8cb78 synthos-company.",
+    "EDGAR ingestion enabled on pi5 (2026-05-01): the news-agent EDGAR feature flags (added 2026-04-27, all default OFF) flipped on after pre-flight verification. SEC_EDGAR_UA_NAME='Synthos / Patrick McGuire' + SEC_EDGAR_UA_EMAIL=Personal_prometheus@icloud.com set in pi5 user/.env (SEC requires identifying user-agent on every EDGAR fetch); EDGAR_ALL_ENABLED=true umbrella flips on Form 4 + 8-K + 13D + Form 144 + 13G + cross-source dedup. EDGAR_8K_BODY_FETCH=false (still off \u2014 doubles HTTP volume per filing, will enable after 1-2 day soak on synthetic headlines). Live verification: 10-filing Form 4 probe returned 1 actionable signal (CFO buy on GEHC, $201K) \u2014 UA accepted, helper module returns correct shape. activists.json (was empty) seeded with 12 entries: 8 tier-1 (Pershing Square / Icahn / ValueAct / Starboard / Third Point / Trian / JANA / Elliott) + 4 tier-2 (Engine / Engaged / Cevian / Land & Buildings); 11 marked PENDING_OPERATOR_VERIFICATION pending edgar.sec.gov spot-check (failure mode is silent miss, not false positive \u2014 wrong CIK just means we miss those filings). Commit 8d633f7 synthos.",
+    "System architecture pipeline page deferred-data-sources panel (2026-05-01): user noticed the paid-tier deferred items (StockTwits / X / Reddit social, NYSE TIQ A/D feed, options chain VVIX, ICE BofA credit spreads, FMP /etf-holdings) weren't visible on the /system-architecture pipeline page. Added new 'deferred' gate flag (purple \u23f8, distinct from amber \u26a0 scaffolding): deferred = gate exists as weak proxy, full implementation blocked on paid feed; scaffold = logic stubbed in existing gate. News G12/G14/G15 marked deferred (multi-source confirmation feed / social firehose / analyst consensus aren't licensed); G14 added to display since it was missing. Sentiment G5/G7/G8/G10/G16 marked deferred with specific feed gaps (G8 + G10 + G16 added to display). New 'Deferred Data Sources' panel below pipeline grid: 4-column summary covering News (3 SKIP gates), Sentiment (6 paid-feed gaps), Sector Screener (FMP), and formally-deferred future phases (license validator SYS-B01/B02, Patch D-full schema split, Phase 7e bucket, Congressional weighting). Each deferred gate's tooltip + detail panel show what proxy is in place / what's blocked / unblock condition. Bias-gate scaffolding flags REMOVED \u2014 re-read code, all 6 gates are fully implemented; the TOO_FEW_TRADES/CLOSED early-returns are sample-size guards (\u226510 closed for behavioral, \u22653 for recency), not stubs. Macro Regime gate names corrected (page had wrong order: G1 was actually VIX not Yield curve, G2 was Yield curve not Dollar, G3 was Breadth not Commodities, G4 was Sector rotation not Credit spreads \u2014 all fully implemented, no scaffolding). Sentiment G15 + Screener G1 scaffold flags removed too. Sector Screener restyled into ingest column matching other agent cards with 'PRE-COMPUTED \u00b7 06:45 ET' pill above. Element-display click handler bug fixed \u2014 pipeline tab now matches topology tab parity. Commits 82bd0ed + 8424c98 + 5f4a119 + f26f3a0 synthos-company.",
+    "Stale branch + server cleanup (2026-05-01): synthos local branches 41 \u2192 3 (kept main + claude/bold-hypatia worktree + patch/2026-04-24 intentionally retained for C8 news-agent gate-pipeline-refactor baseline harness). synthos-company 10 \u2192 1. Origin remotes also swept on both repos. TRADER_RESTRUCTURE_PLAN.md spec from abandoned patch/logic-review-2026-04-20 branch preserved at documentation/archive/specs/ before deletion. Server cleanup: removed pi4b/etc/systemd/system/synthos-login.service (disabled/inactive, superseded by synthos-login-server which is the command portal); removed empty /home/pi/synthos_build/ skeleton from 2026-04-08; removed /home/pi/synthos-process/ (cancelled process_node project, code lives in its own GitHub repo so local clone deletion loses nothing); removed pi5 /etc/systemd/system/synthos-portal.service.bak.20260418_081448; archived synthos-company/login_server/ \u2192 documentation/archive/login_server/ (auth-only Flask app superseded by synthos_monitor command portal).",
+    "11-Agent audit pass complete (2026-04-28 \u2192 2026-05-01): every agent in the pipeline (Trader, News, Sentiment, Screener, Fault, Bias, Macro Regime, Market State, Validator) reviewed against current code. Round 9 cross-customer fault-leakage hot fix (commit 7d1dd04) added a `_finding_applies_to_customer()` helper to the validator \u2014 codes whose last token is 8 hex chars are treated as customer-scoped and only count against the matching short_id; everything else is treated as system-wide. Customer 9889c8c8 was being NO_GO'd because customer d88a744d's Alpaca returned 401; that leakage path is now closed. VIX migrated from Yahoo to FRED VIXCLS (commit 32a7d19) with a graceful ATR-fallback when FRED is stale \u2014 same `_vix_from_macro_regime` helper now used by trader, news, and sentiment. Per-customer code suffix convention `_<short_id>` adopted on validator (VALIDATOR_NO_GO_<sid>), bias (with INFORMATIONAL_BIAS_CODE_PREFIXES tuple + _is_informational_bias_code() prefix-match helper for legacy non-suffixed codes), and screener admin alerts. admin_alert dedup unified through `retail_shared.emit_admin_alert()` (12-hour dedup window). Macro regime stale-window guard added before market_state synthesis. Sentiment Stage-4 G24 now requires 2-cycle persistence before commit. Trader G13 stress-overrides activated; G5.5 news-veto wired. System-architecture pipeline page rewritten at the same time: PIPELINE constant in templates/system_map.html now matches code reality (Fault 4\u21928 gates, Market State 5\u21924, Trader 14\u219213), each gate annotated with foreign data sources (FRED, Alpaca, Yahoo Finance, News APIs) and scaffolding flag where logic is deferred (Bias G2/G3/G5/G6, Macro G4, Sentiment G15, Screener G1). New click handlers on .pipe-gate / .pipe-agent elements open the same detail panel topology already had \u2014 fixing the long-standing bug where pipeline-page elements weren't clickable. Sector Screener pulled out of the disconnected pre-computed banner and now renders through the same `agentCard` path as other ingest agents, sitting in the ingest column with a small 'PRE-COMPUTED \u00b7 06:45 ET' pill above it. New `showPipeAgentDetail` / `showPipeGateDetail` JS helpers prefer topology's richer agent entry when available, otherwise synthesize from PIPELINE.",
+    "Trader-visibility audit + screener composite repair (2026-04-27): user asked to verify the trader actually consumes everything that's been wired into the screener/sentiment/news chain. Audit surfaced two defects + one visibility gap. (1) sector_screener.combined_score formula was 40% news + 40% sentiment + 0% momentum + 20% ETF weight \u2014 momentum was computed per ticker but never reached the ranking the candidate generator filtered on, so a high-momentum/low-news ticker like CAT could be invisible in 'Top by composite' even though it surfaced in 'Top by momentum'. Re-weighted to 30/30/30/10 so all three inputs contribute equally. (2) sector_screening table persisted momentum_score but not the raw 3-month return that drove it; portal screener page had no way to show 'past few months performance' for each candidate. Added ret_3m column via lazy ALTER, calc_momentum_score now returns (score, ret_3m, reasoning), run_single threads ret_3m into the candidate dict, write_screening_run persists it. Portal MOMENTUM column now shows ret_3m headline + composite bar; planning drawer shows the same. (3) Decision-log enrichment in trader Gate 5 (visibility-only, zero behavior change): gate5_signal_score now captures the screener row once and emits a single consolidated decision_log entry containing every screener-derived input considered \u2014 sector, combined_score, news_signal+score, sentiment_signal+score, momentum_score, ret_3m, congressional_flag, screener_adj, screener_stamp_adj. After-the-fact trade audit can now verify exactly what the trader saw at decision time. (4) Documented intentional sentiment dual-write in retail_market_sentiment_agent.py around stamp_signals_sentiment() \u2014 same detect_cascade() output lands in sector_screening.sentiment_score (per-ticker screener display) AND signals.sentiment_score (per-signal trader Gate-5 consumption). Cardinalities differ; values always in sync. Files touched: retail_sector_screener.py, retail_database.py, retail_trade_logic_agent.py, retail_market_sentiment_agent.py, src/templates/portal.html. Earlier same day (2026-04-27): MRVL trail-stop -491% display bug (drop *100 in render path), settlement-lag race in Gate 0 orphan adoption (5-min recently-closed window), rotation-at-loss reversed to winners-only per user directive, BIL excluded from Gate 10 (sync_bil_reserve owns its lifecycle), CBOE put_call_ratio caching + None-safe formatting (had been pinning every screener-sentiment fulfilment to score=0.5 since CBOE Cloudflare block), customer-activity report engine on cmd portal at /customer-activity, P&L report polish (total-from-zero, sign rendering, long-term, cross-account)."
   ]
 }
