@@ -1,0 +1,25 @@
+[Unit]
+Description=Synthos Ticker Identity Sweep (nightly gap-filler for ticker_state.{sector,company,exchange})
+# Triggered by synthos-ticker-identity-agent.timer at 02:30 ET nightly.
+# Reads ticker_sectors + tradable_assets, fills NULL identity fields in
+# ticker_state via COALESCE (gap-fill only, never overwrites). Runs in
+# seconds — pure DB pass, no external API calls.
+#
+# This is the async backstop. The synchronous first-fill happens inside
+# retail_database.mark_ticker_active when a new ticker first appears.
+# Any tickers whose reference tables weren't populated yet at that moment
+# get caught here on the next nightly pass.
+After=network.target
+
+[Service]
+Type=oneshot
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build
+ExecStart=/usr/bin/python3 agents/retail_ticker_identity_agent.py
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/ticker_identity_agent.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/ticker_identity_agent.log
+
+[Install]
+# NOTE: do NOT enable this service directly — enable the .timer instead.
+WantedBy=multi-user.target

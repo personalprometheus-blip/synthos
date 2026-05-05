@@ -1,0 +1,22 @@
+[Unit]
+Description=Synthos Ticker State Auditor (read-only nightly gap report)
+# Triggered by synthos-ticker-state-auditor.timer at 02:35 ET, 5min after
+# the identity sweep so the report reflects post-fill state.
+#
+# Read-only: never writes to ticker_state. Outputs structured findings
+# to shared signals.db customer_settings under '_TICKER_STATE_AUDIT_LAST'.
+# Surfaced in the monitor auditor panel under the "Ticker State" filter.
+After=network.target synthos-ticker-identity-agent.service
+
+[Service]
+Type=oneshot
+User=pi516gb
+Group=pi516gb
+WorkingDirectory=/home/pi516gb/synthos/synthos_build
+ExecStart=/usr/bin/python3 agents/retail_ticker_state_auditor.py --quiet
+StandardOutput=append:/home/pi516gb/synthos/synthos_build/logs/ticker_state_auditor.log
+StandardError=append:/home/pi516gb/synthos/synthos_build/logs/ticker_state_auditor.log
+
+[Install]
+# NOTE: do NOT enable this service directly — enable the .timer instead.
+WantedBy=multi-user.target

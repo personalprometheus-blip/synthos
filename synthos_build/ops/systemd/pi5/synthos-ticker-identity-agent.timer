@@ -1,0 +1,18 @@
+[Unit]
+Description=Nightly trigger for Synthos Ticker Identity Sweep (02:30 ET)
+Requires=synthos-ticker-identity-agent.service
+
+[Timer]
+# Pi5 system clock is America/New_York — 02:30 here = 02:30 ET directly.
+#
+# Slot chosen to land between nightly backup (01:30) and template
+# rebuild (03:00). Sweep itself runs ~10s; wide buffer either side.
+# Auditor (synthos-ticker-state-auditor.timer) fires 5min later so its
+# report reflects the post-fill state.
+OnCalendar=*-*-* 02:30:00
+# Catch up on missed runs if pi5 was down at the scheduled time.
+Persistent=true
+Unit=synthos-ticker-identity-agent.service
+
+[Install]
+WantedBy=timers.target

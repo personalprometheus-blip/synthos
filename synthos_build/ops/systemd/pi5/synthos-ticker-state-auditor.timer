@@ -1,0 +1,17 @@
+[Unit]
+Description=Nightly trigger for Synthos Ticker State Auditor (02:35 ET)
+Requires=synthos-ticker-state-auditor.service
+
+[Timer]
+# Pi5 system clock is America/New_York — 02:35 here = 02:35 ET directly.
+#
+# Fires 5 minutes after the identity sweep (02:30) so the audit reflects
+# the post-fill state. The identity agent runs in ~10s, so 5min is
+# plenty of buffer.
+OnCalendar=*-*-* 02:35:00
+# Catch up on missed runs if pi5 was down at the scheduled time.
+Persistent=true
+Unit=synthos-ticker-state-auditor.service
+
+[Install]
+WantedBy=timers.target
