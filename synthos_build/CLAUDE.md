@@ -4,7 +4,7 @@
 Synthos
 
 ## What This Project Does
-A distributed algorithmic trading assistant running on Raspberry Pi hardware that monitors U.S. Congressional trading disclosures, scores signals using multi-agent analysis, and executes paper trades via Alpaca. Currently in supervised paper-trading mode only.
+A distributed algorithmic trading assistant running on Raspberry Pi hardware. Monitors News Sources, sector momentum, SEC EDGAR trading disclosures, runs multi-agent signal analysis, and executes paper trades via Alpaca. Currently in supervised paper-trading mode only (TRADING_MODE=PAPER).
 
 ## Current Phase
 Phase 3 — System Validation + Normalization Sprint
